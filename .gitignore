@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# Node
+frontend/node_modules/
+frontend/build/
+frontend/.eslintcache
+
+# Frontend bundle assembled by release CI — never commit
+src/avar2_studio/static/
+
+# Tool scratch
+.avar2-studio/
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+/tmp/preview-server.log

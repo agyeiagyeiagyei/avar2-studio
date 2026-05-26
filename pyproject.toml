@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "avar2-studio"
+version = "0.1.0.dev0"
+description = "Visual authoring and preview tool for avar2 variable fonts"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Agyei Archer", email = "hello@agyei.design" },
+]
+keywords = ["variable-fonts", "avar2", "glyphs", "fontc", "type-design"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Editors",
+    "Topic :: Text Processing :: Fonts",
+]
+dependencies = [
+    "flask>=3.0",
+    "flask-cors>=4.0",
+    "glyphsLib>=6.4",
+    "fontTools>=4.50",
+    "watchdog>=4.0",
+    "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
+    "gftools>=0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+avar2-studio = "avar2_studio.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/agyeiagyeiagyei/avar2-studio"
+Issues = "https://github.com/agyeiagyeiagyei/avar2-studio/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avar2_studio"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/avar2_studio/static" = "avar2_studio/static"
