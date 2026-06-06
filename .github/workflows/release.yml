@@ -1,0 +1,85 @@
+name: Release
+
+# Build a wheel + sdist containing the React bundle and attach them to
+# a GitHub Release whenever a tag matching ``v*`` is pushed. Also
+# runnable manually (workflow_dispatch) — in that mode the workflow
+# uploads the artifacts to the run page so you can verify the build
+# without cutting a release.
+#
+# Version source: hatchling reads pyproject.toml's ``project.version``.
+# Bump that version *before* you push the tag, otherwise the wheel
+# will not match the tag name.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle frontend into the Python package
+        run: |
+          # The hatchling force-include in pyproject.toml copies
+          # src/avar2_studio/static/ into the wheel as
+          # avar2_studio/static/. Drop the .gitkeep placeholder and
+          # rsync in the actual build output.
+          rm -f src/avar2_studio/static/.gitkeep
+          mkdir -p src/avar2_studio/static
+          rsync -a frontend/build/ src/avar2_studio/static/
+          ls -la src/avar2_studio/static/ | head -20
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: List built artifacts
+        run: ls -la dist/
+
+      - name: Upload artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
