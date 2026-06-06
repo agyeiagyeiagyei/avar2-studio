@@ -875,68 +875,71 @@ def get_text_width():
                     except:
                         pass
         
-        # Get cmap to map Unicode to glyph names
-        cmap = instance_font.getBestCmap()
-        if not cmap:
-            return jsonify({"error": "No cmap found in font"}), 500
-        
-        # Get hmtx table for advance widths
-        if 'hmtx' not in instance_font:
-            return jsonify({"error": "No hmtx table in font"}), 500
-        
-        hmtx = instance_font['hmtx']
+        # Shape the text with uharfbuzz against the instantiated font.
+        # This applies kerning (GPOS) and substitutions (GSUB) the same way
+        # a browser shaper does, so the displayed Width matches the laid-out
+        # width — not just the sum of raw hmtx advances. The per-glyph
+        # breakdown also falls out of the same shape() call, which is what
+        # the grade-master delta view needs.
+        import uharfbuzz as hb
+        from io import BytesIO
+
+        font_buffer = BytesIO()
+        instance_font.save(font_buffer)
+        font_bytes = font_buffer.getvalue()
+
+        hb_face = hb.Face(font_bytes)
+        hb_font = hb.Font(hb_face)
+        hb_font.scale = (upm, upm)  # advances in font units, not 26.6 fixed-point
+
+        hb_buf = hb.Buffer()
+        hb_buf.add_str(text)
+        hb_buf.guess_segment_properties()
+        hb.shape(hb_font, hb_buf)
+
+        infos = hb_buf.glyph_infos
+        positions = hb_buf.glyph_positions
         glyph_order = instance_font.getGlyphOrder()
-        
-        # Measure each character in the text
+
         total_width_font_units = 0.0
-        
-        for char in text:
-            unicode_code = ord(char)
-            
-            # Get glyph name from cmap
-            if unicode_code not in cmap:
-                continue
-            
-            glyph_name = cmap[unicode_code]
-            
-            # Get advance width from hmtx
-            if isinstance(hmtx.metrics, dict):
-                if glyph_name not in hmtx.metrics:
-                    continue
-                metric = hmtx.metrics[glyph_name]
-            else:
-                # It's a list, need glyph ID
-                try:
-                    glyph_id = glyph_order.index(glyph_name)
-                except ValueError:
-                    continue
-                if glyph_id >= len(hmtx.metrics):
-                    continue
-                metric = hmtx.metrics[glyph_id]
-            
-            # Handle both tuple and single value cases
-            if isinstance(metric, tuple):
-                advance_width, lsb = metric
-            else:
-                advance_width = metric
-                lsb = 0
-            
-            advance_width = float(advance_width)
-            total_width_font_units += advance_width
-        
-        # Convert to pixels (assuming 16px = 1rem, which is browser default)
+        per_glyph = []
+        for i, (info, pos) in enumerate(zip(infos, positions)):
+            advance = float(pos.x_advance)
+            total_width_font_units += advance
+
+            gid = info.codepoint  # post-shaping this is the glyph id
+            glyph_name = glyph_order[gid] if 0 <= gid < len(glyph_order) else f"gid{gid}"
+
+            # In uharfbuzz, ``cluster`` is the input-string index this glyph
+            # came from. Ligatures collapse multiple input chars into one
+            # cluster; decompositions split one input char into many. For
+            # Latin without GSUB it's 1:1.
+            cluster = info.cluster
+            next_cluster = infos[i + 1].cluster if i + 1 < len(infos) else len(text)
+            input_text = text[cluster:next_cluster]
+
+            per_glyph.append({
+                "glyph_id": gid,
+                "glyph_name": glyph_name,
+                "cluster": cluster,
+                "text": input_text,
+                "advance_font_units": advance,
+            })
+
+        # Convert to pixels (assuming 16px = 1rem, the browser default)
         pixels_per_rem = 16.0
         font_size_pixels = font_size_rem * pixels_per_rem
         width_pixels = (total_width_font_units / upm) * font_size_pixels
         width_em = total_width_font_units / upm
-        
+
         return jsonify({
             "width_pixels": width_pixels,
             "width_font_units": total_width_font_units,
             "width_em": width_em,
             "upm": upm,
             "font_size_rem": font_size_rem,
-            "font_size_pixels": font_size_pixels
+            "font_size_pixels": font_size_pixels,
+            "per_glyph": per_glyph,
         })
     
     except Exception as e:
