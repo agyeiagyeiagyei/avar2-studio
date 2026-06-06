@@ -702,6 +702,7 @@ def trigger_build():
     *some* font to show.
     """
     global VARIABLE_FONT_PATH, LAST_BUILD_TIME, BUILDING, USE_FONTC
+    global LAST_BUILD_STATUS, LAST_BUILD_ERROR
 
     if BUILDING:
         print("Build already in progress, skipping...", file=sys.stderr)
@@ -724,6 +725,11 @@ def trigger_build():
         print(f"Building font from {GLYPHS_PATH}...", file=sys.stderr)
         VARIABLE_FONT_PATH = build_variable_font(GLYPHS_PATH, BUILD_DIR, use_fontc=USE_FONTC)
         LAST_BUILD_TIME = time.time()
+        # The fallback succeeded — a working font is being served, so the
+        # stale-banner state from the avar2 failure has to be cleared,
+        # otherwise the UI keeps showing "Build failed" indefinitely.
+        LAST_BUILD_STATUS = "ok"
+        LAST_BUILD_ERROR = None
         print(f"Font built successfully: {VARIABLE_FONT_PATH}", file=sys.stderr)
         return True
     except Exception as e:
