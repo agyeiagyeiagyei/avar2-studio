@@ -30,7 +30,7 @@ except ImportError:
     print("Warning: PyYAML not found. Install with: pip install pyyaml", file=sys.stderr)
     yaml = None
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
@@ -53,8 +53,61 @@ except ImportError:
     print("Error: glyphsLib not found. Install with: pip install glyphsLib", file=sys.stderr)
     sys.exit(1)
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
+app = Flask(__name__, static_folder=None)
+# ``static_folder=None`` disables Flask's default ``/static/<path>``
+# handler. Without that, Flask's auto-registered ``static`` endpoint
+# shadows our custom ``/static/<path>`` route below and the CRA
+# bundle's JS/CSS would 404.
+CORS(app)  # Enable CORS for React frontend (used during dev when the
+           # React dev server runs on a separate port from the API)
+
+# Directory of the bundled React build that gets shipped inside the
+# wheel (populated by the Release CI). Routes below serve it under
+# the same origin as the API so the installed package is a single
+# self-contained command — no separate ``serve``/``npm start`` step.
+_BUNDLE_DIR = Path(__file__).parent / "static"
+
+
+@app.route('/')
+def _serve_ui_index():
+    index_html = _BUNDLE_DIR / "index.html"
+    if not index_html.exists():
+        return (
+            "<h1>Frontend bundle not present</h1>"
+            "<p>This install of avar2-studio is missing the React bundle. "
+            "Run <code>avar2-studio doctor</code> for setup help, or build "
+            "the frontend yourself (<code>cd frontend &amp;&amp; npm ci &amp;&amp; "
+            "npm run build</code>) if you cloned from source.</p>",
+            503,
+        )
+    return send_file(str(index_html))
+
+
+@app.route('/static/<path:filename>')
+def _serve_ui_static_asset(filename):
+    """CRA-built JS/CSS/images live under ``static/static/``."""
+    return send_from_directory(str(_BUNDLE_DIR / "static"), filename)
+
+
+@app.route('/asset-manifest.json')
+def _serve_ui_asset_manifest():
+    return send_from_directory(str(_BUNDLE_DIR), "asset-manifest.json")
+
+
+@app.route('/manifest.json')
+def _serve_ui_manifest():
+    target = _BUNDLE_DIR / "manifest.json"
+    if not target.exists():
+        return jsonify({}), 404
+    return send_from_directory(str(_BUNDLE_DIR), "manifest.json")
+
+
+@app.route('/favicon.ico')
+def _serve_ui_favicon():
+    target = _BUNDLE_DIR / "favicon.ico"
+    if not target.exists():
+        return ('', 204)  # silent: no favicon in the bundle is fine
+    return send_from_directory(str(_BUNDLE_DIR), "favicon.ico")
 
 # Global state
 GLYPHS_PATH: Optional[Path] = None
