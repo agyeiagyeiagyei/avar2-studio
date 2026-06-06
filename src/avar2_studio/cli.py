@@ -1,15 +1,46 @@
 """Console entry point for avar2-studio.
 
-For Phase 1 (lift-and-shift) this is a thin wrapper around the original
-server's ``main()`` so the existing argparse contract still works. Phase 2
-will reshape the CLI to accept a positional ``.glyphs`` path and own its
-own argument parsing.
+Dispatches between:
+
+  - ``avar2-studio doctor``  → environment check (no Glyphs file required)
+  - ``avar2-studio /path/to/MyFont.glyphs [server args…]``  → run the server
+
+Everything that isn't a known subcommand is forwarded to ``server.main()``
+so the existing argparse contract continues to work.
 """
 
-from . import server
+from __future__ import annotations
+
+import sys
+
+
+_HELP = """\
+Usage:
+  avar2-studio /path/to/MyFont.glyphs [options]
+  avar2-studio doctor
+  avar2-studio --help
+
+Subcommands:
+  doctor   Run environment checks (fontc, gftools, frontend bundle, …)
+
+Run ``avar2-studio /path/to/MyFont.glyphs --help`` to see server options.
+"""
 
 
 def main() -> None:
+    argv = sys.argv[1:]
+
+    if argv and argv[0] == "doctor":
+        from . import doctor
+        doctor.main()
+        return
+
+    if argv and argv[0] in ("-h", "--help") and len(argv) == 1:
+        print(_HELP)
+        return
+
+    # Default: dispatch to the server's main(). It reads sys.argv itself.
+    from . import server
     server.main()
 
 
