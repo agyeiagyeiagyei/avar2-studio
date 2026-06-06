@@ -15,37 +15,36 @@ approximations of what the shipped font will do.
 
 ## Status
 
-**Pre-release (v0.1.0.dev0).** Extracted from the
+**Pre-release.** Latest tag: `v0.1.0.dev1`. Extracted from the
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project
 through three phases of work: lift-and-shift, genericization, and
-single-build-path consolidation. Verified end-to-end on Crispy and
-on a second font (Jaro, single-axis).
+single-build-path consolidation. Verified end-to-end on Crispy and on
+a second font (Jaro, single-axis). Not yet on PyPI.
 
-Not yet on PyPI. **Install from source** until v0.1.0 ships — see
-below.
+## Install
 
-## Install (from source)
-
-This is the path that works today. PyPI install will be added when
-v0.1.0 is tagged.
-
-You need `fontc` and `gftools` on `PATH`. The Python side is just a
-normal pip install.
+You need `fontc` on `PATH` (a Rust binary, not on PyPI). Everything
+else is in the wheel.
 
 ```bash
-# 1. fontc — Rust binary, not on PyPI
-brew install fontc           # or: cargo install fontc
+brew install fontc                            # or: cargo install fontc
+pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev1-py3-none-any.whl
+avar2-studio /path/to/MyFont.glyphs
+```
 
-# 2. avar2-studio itself
+Run `avar2-studio doctor` to confirm your environment is OK.
+
+## Install from source (for development)
+
+If you want to hack on avar2-studio itself, install editable from a
+clone and build the frontend locally:
+
+```bash
 git clone https://github.com/agyeiagyeiagyei/avar2-studio
 cd avar2-studio
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-
-# 3. Build the frontend bundle that the server will serve
 cd frontend && npm ci && npm run build && cd ..
-
-# 4. Run it on a .glyphs file
 avar2-studio /path/to/MyFont.glyphs
 ```
 
@@ -94,10 +93,12 @@ Open `http://localhost:3000` in a browser.
 
 ## Roadmap
 
-- [ ] `avar2-studio doctor` subcommand for environment checks
-- [ ] Release CI: build the React bundle, assemble the wheel, publish to PyPI
-- [ ] v0.1.0 release
+- [x] `avar2-studio doctor` subcommand for environment checks
+- [x] Release CI: tag push builds the React bundle, assembles the wheel, attaches it to a GitHub Release
+- [ ] PyPI publish (replace the release URL above with `pipx install avar2-studio`)
+- [ ] v0.1.0 release (current pre-releases are `v0.1.0.devN`)
 - [ ] SPAC axis support (deferred from v0.1 — needs spacing recalibration logic ported from Crispy's build pipeline)
+- [ ] Grade-master comparison panel (parked on the `grade-comparison` branch; uses uharfbuzz per-glyph advances)
 
 ## License
 
