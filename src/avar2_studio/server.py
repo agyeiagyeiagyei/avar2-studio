@@ -3564,7 +3564,17 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
         config_to_update = preview_config_path
 
         workdir = _get_preview_dir()
-        from .build import config_generator
+        try:
+            from .build import config_generator
+        except ImportError as e:
+            # Should never happen in a normal install — fall through to
+            # the caller's plain-VF fallback instead of letting the
+            # ImportError escape and break the whole startup build.
+            return _record_build_failure({
+                "success": False,
+                "error": "avar2 config_generator module not importable",
+                "details": str(e),
+            })
         try:
             config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False)
         except Exception as e:
