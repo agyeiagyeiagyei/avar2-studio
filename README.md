@@ -2,29 +2,55 @@
 
 Visual authoring and preview tool for avar2 variable fonts.
 
-`avar2-studio` is a desktop tool for type designers who work in parametric
-designspaces (XOPQ / YOPQ / XTRA, ROND, etc.) and want to expose familiar
-traditional axes (wght, wdth, opsz) to end users through an avar2 mapping.
+`avar2-studio` is a desktop tool for type designers who work in
+parametric designspaces (XOPQ / YOPQ / XTRA, ROND, GRAD, etc.) and
+want to expose familiar traditional axes (`wght`, `wdth`, `opsz`,
+`cntr`, `ital`) to end users through an avar2 mapping.
 
-Point it at a `.glyphs` file and it opens a browser-based editor for tuning
-parametric instances and authoring traditional→parametric mappings, with the
-preview rendering the actual built avar2 font (no approximations).
+Point it at a `.glyphs` file and it opens a browser-based editor for
+tuning parametric instances and authoring traditional→parametric
+mappings. The preview renders the **actual built avar2 font** — the
+browser applies the real avar2 table — so there are no JS-side
+approximations of what the shipped font will do.
 
 ## Status
 
-Early development — extracted from the
-[Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project. v0.1 in
-progress; see [CHANGELOG](CHANGELOG.md) when one exists.
+**Pre-release (v0.1.0.dev0).** Extracted from the
+[Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project
+through three phases of work: lift-and-shift, genericization, and
+single-build-path consolidation. Verified end-to-end on Crispy and
+on a second font (Jaro, single-axis).
 
-## Install
+Not yet on PyPI. **Install from source** until v0.1.0 ships — see
+below.
+
+## Install (from source)
+
+This is the path that works today. PyPI install will be added when
+v0.1.0 is tagged.
+
+You need `fontc` and `gftools` on `PATH`. The Python side is just a
+normal pip install.
 
 ```bash
-brew install fontc                # or: cargo install fontc
-pipx install avar2-studio
+# 1. fontc — Rust binary, not on PyPI
+brew install fontc           # or: cargo install fontc
+
+# 2. avar2-studio itself
+git clone https://github.com/agyeiagyeiagyei/avar2-studio
+cd avar2-studio
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 3. Build the frontend bundle that the server will serve
+cd frontend && npm ci && npm run build && cd ..
+
+# 4. Run it on a .glyphs file
+avar2-studio /path/to/MyFont.glyphs
 ```
 
-`fontc` is required and must be on `PATH`. Run `avar2-studio doctor` (coming in
-v0.1) to verify your environment.
+The server prints a URL (default `http://localhost:5001`). Open it in
+a browser.
 
 ## Usage
 
@@ -32,27 +58,46 @@ v0.1) to verify your environment.
 avar2-studio /path/to/MyFont.glyphs
 ```
 
-The tool creates a sibling `.avar2-studio/` directory next to your `.glyphs`
-file for its working state, and a sibling `MyFont-avar.csv` for the avar2
-mappings. Commit the CSV; gitignore the `.avar2-studio/` directory.
+The tool sets up a sibling working directory next to your `.glyphs`
+file:
 
-Open the printed URL (default `http://localhost:5001`) in a browser.
-
-## Development
-
-```bash
-git clone https://github.com/agyeiagyeiagyei/avar2-studio
-cd avar2-studio
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cd frontend && npm ci && npm run build && cd ..
-avar2-studio /path/to/MyFont.glyphs
+```
+~/work/MyFont/
+├── MyFont.glyphs           # your source (read, and written back when you save edits)
+├── MyFont-avar.csv         # the authored avar2 mappings — commit this
+└── .avar2-studio/          # tool-managed: config, axis metadata, build output — gitignore this
+    ├── config.yaml
+    ├── axis-metadata.json
+    └── build/
+        └── MyFont[XOPQ,XTRA,YOPQ].ttf
 ```
 
-For frontend hot-reload during development, run the React dev server in one
-terminal (`cd frontend && npm start`) and the backend in another
-(`avar2-studio /path/to/MyFont.glyphs`). The React dev server proxies API
-requests to the backend.
+`MyFont-avar.csv` is the designer's authored artifact and should be
+committed alongside the `.glyphs` file. `.avar2-studio/` is
+tool-managed and should be added to your project's `.gitignore`.
+
+## Frontend hot-reload (optional)
+
+If you're iterating on the frontend, the React dev server has hot
+reload. Run the backend and the React dev server in separate
+terminals:
+
+```bash
+# Terminal 1: backend (API on :5001)
+avar2-studio /path/to/MyFont.glyphs
+
+# Terminal 2: React dev server (UI on :3000, proxies API to :5001)
+cd frontend && npm start
+```
+
+Open `http://localhost:3000` in a browser.
+
+## Roadmap
+
+- [ ] `avar2-studio doctor` subcommand for environment checks
+- [ ] Release CI: build the React bundle, assemble the wheel, publish to PyPI
+- [ ] v0.1.0 release
+- [ ] SPAC axis support (deferred from v0.1 — needs spacing recalibration logic ported from Crispy's build pipeline)
 
 ## License
 
