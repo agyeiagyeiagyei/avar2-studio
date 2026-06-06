@@ -15,7 +15,7 @@ approximations of what the shipped font will do.
 
 ## Status
 
-**Pre-release.** Latest tag: `v0.1.0.dev3`. Extracted from the
+**Pre-release.** Latest tag: `v0.1.0.dev4`. Extracted from the
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project
 through three phases of work: lift-and-shift, genericization, and
 single-build-path consolidation. Verified end-to-end on Crispy and on
@@ -23,16 +23,14 @@ a second font (Jaro, single-axis). Not yet on PyPI.
 
 ## Install
 
-You need `fontc` on `PATH` (a Rust binary, not on PyPI). Everything
-else is in the wheel.
-
 ```bash
-brew install fontc                            # or: cargo install fontc
-pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev3-py3-none-any.whl
+pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev4-py3-none-any.whl
 avar2-studio /path/to/MyFont.glyphs
 ```
 
-Run `avar2-studio doctor` to confirm your environment is OK.
+All dependencies — including `fontc` (the Rust font compiler, via
+its PyPI package) and `gftools` — are in the wheel's deps. Run
+`avar2-studio doctor` to confirm your environment is OK.
 
 ## Install from source (for development)
 

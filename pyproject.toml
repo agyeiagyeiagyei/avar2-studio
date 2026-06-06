@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "avar2-studio"
-version = "0.1.0.dev3"
+version = "0.1.0.dev4"
 description = "Visual authoring and preview tool for avar2 variable fonts"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,7 @@ dependencies = [
     "flask-cors>=4.0",
     "glyphsLib>=6.4",
     "fontTools>=4.50",
+    "fontc>=0.6",
     "uharfbuzz>=0.39",
     "watchdog>=4.0",
     "pyyaml>=6.0",
