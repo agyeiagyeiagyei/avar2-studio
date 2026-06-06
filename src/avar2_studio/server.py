@@ -3730,6 +3730,13 @@ def main():
         action="store_true",
         help="Disable fontc and use fontmake only"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run Flask in debug mode (auto-reload on source change). "
+             "Off by default because the reloader can kill in-flight "
+             "gftools subprocesses."
+    )
     
     args = parser.parse_args()
 
@@ -3918,8 +3925,14 @@ def main():
         
         start_periodic_checker()
     
+    # Debug mode is off by default. Flask's reloader watches files and
+    # restarts the process on change — fine during dev, but it can kill
+    # a running gftools subprocess (the avar2 build's intermediate files
+    # touch the watched tree). Re-enable with --debug or AVAR2_STUDIO_DEBUG=1
+    # if you're hacking on the server.
+    debug = args.debug or os.environ.get("AVAR2_STUDIO_DEBUG", "").lower() in ("1", "true", "yes")
     try:
-        app.run(host=args.host, port=args.port, debug=True)
+        app.run(host=args.host, port=args.port, debug=debug)
     finally:
         if OBSERVER:
             OBSERVER.stop()
