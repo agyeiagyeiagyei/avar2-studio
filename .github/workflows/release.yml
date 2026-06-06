@@ -70,8 +70,15 @@ jobs:
           rsync -a frontend/build/ src/avar2_studio/static/
           ls -la src/avar2_studio/static/ | head -20
 
-      - name: Build wheel + sdist
-        run: python -m build
+      - name: Build wheel
+        # --wheel skips the sdist-then-wheel round-trip ``python -m build``
+        # does by default. We have to skip it because the React bundle in
+        # src/avar2_studio/static/ is gitignored, so the intermediate sdist
+        # doesn't include it, and the wheel build from the unpacked sdist
+        # then fails with "Forced include not found". Building the wheel
+        # directly from the source tree picks up the populated static dir
+        # that the previous step rsync'd in.
+        run: python -m build --wheel
 
       - name: List built artifacts
         run: ls -la dist/
@@ -90,4 +97,3 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/*.whl
-            dist/*.tar.gz
