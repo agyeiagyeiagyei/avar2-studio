@@ -61,6 +61,15 @@ function App() {
   // Loading state for advance width recalculation
   const [advanceWidthLoading, setAdvanceWidthLoading] = useState(false);
 
+  // Grade-master comparison: a pinned base instance with its captured
+  // coordinates, plus per-glyph advance arrays for both the base and the
+  // current candidate (the currently-selected/edited instance). The arrays
+  // come from /api/text-width's per_glyph response and feed the
+  // GradeComparison sidebar panel.
+  const [gradeBaseSnapshot, setGradeBaseSnapshot] = useState(null);
+  const [gradeBasePerGlyph, setGradeBasePerGlyph] = useState(null);
+  const [gradeCandidatePerGlyph, setGradeCandidatePerGlyph] = useState(null);
+
   // Load initial data
   useEffect(() => {
     loadData();
@@ -939,6 +948,68 @@ function App() {
       }, 500);
     }
   }, [sampleText]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Grade-master comparison wiring ----
+
+  const handlePinGradeBase = useCallback(() => {
+    if (!selectedInstance) return;
+    setGradeBaseSnapshot({
+      name: selectedInstance.name,
+      coordinates: { ...editingCoordinates },
+    });
+  }, [selectedInstance, editingCoordinates]);
+
+  const handleUnpinGradeBase = useCallback(() => {
+    setGradeBaseSnapshot(null);
+    setGradeBasePerGlyph(null);
+    setGradeCandidatePerGlyph(null);
+  }, []);
+
+  // Fetch the base's per-glyph advances whenever the pinned base or
+  // sample text changes. Base coords are frozen at pin time, so this
+  // doesn't refire while the user is editing.
+  useEffect(() => {
+    if (!gradeBaseSnapshot) {
+      setGradeBasePerGlyph(null);
+      return;
+    }
+    let cancelled = false;
+    api.getTextWidth(sampleText, gradeBaseSnapshot.coordinates, fontSize)
+      .then((result) => {
+        if (!cancelled) setGradeBasePerGlyph(result.per_glyph || []);
+      })
+      .catch((err) => {
+        console.debug('Grade base per-glyph fetch failed:', err);
+        if (!cancelled) setGradeBasePerGlyph(null);
+      });
+    return () => { cancelled = true; };
+  }, [gradeBaseSnapshot, sampleText, fontSize]);
+
+  // Fetch the candidate's per-glyph advances whenever the selected
+  // instance, its editing coords, or sample text change. Debounced so
+  // slider drags don't fire a request per pixel.
+  useEffect(() => {
+    if (!gradeBaseSnapshot || !selectedInstance) {
+      setGradeCandidatePerGlyph(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      api.getTextWidth(sampleText, editingCoordinates, fontSize)
+        .then((result) => {
+          if (!cancelled) setGradeCandidatePerGlyph(result.per_glyph || []);
+        })
+        .catch((err) => {
+          console.debug('Grade candidate per-glyph fetch failed:', err);
+          if (!cancelled) setGradeCandidatePerGlyph(null);
+        });
+    }, 200); // debounce slider drags
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradeBaseSnapshot, selectedInstance?.name, editingCoordinates, sampleText, fontSize]);
 
   const handleSelectInstance = useCallback((instance) => {
     // If clicking the same instance, don't reset coordinates
@@ -2001,6 +2072,11 @@ function App() {
             getInstanceSyncStatus={getInstanceSyncStatus}
             instances={instances}
             building={building}
+            gradeBaseSnapshot={gradeBaseSnapshot}
+            gradeBasePerGlyph={gradeBasePerGlyph}
+            gradeCandidatePerGlyph={gradeCandidatePerGlyph}
+            onPinGradeBase={handlePinGradeBase}
+            onUnpinGradeBase={handleUnpinGradeBase}
           />
           <InstanceRows
             instances={instances}

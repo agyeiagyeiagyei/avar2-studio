@@ -1,0 +1,184 @@
+.grade-comparison {
+  padding: 1rem;
+  border-top: 1px solid #e5e5e5;
+}
+
+.grade-comparison h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  font-weight: 600;
+}
+
+.grade-empty p {
+  margin: 0 0 0.7rem;
+  color: #555;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.btn-pin-base {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: #f6f6f6;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: #222;
+  transition: background 0.1s;
+}
+
+.btn-pin-base:hover:not(:disabled) {
+  background: #ececec;
+}
+
+.btn-pin-base:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.grade-meta {
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.grade-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.grade-meta-label {
+  color: #888;
+  width: 3rem;
+  flex-shrink: 0;
+}
+
+.grade-meta-name {
+  font-weight: 500;
+  flex: 1;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grade-empty-inline {
+  color: #999;
+  font-style: italic;
+  font-weight: normal;
+}
+
+.grade-unpin-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #999;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+
+.grade-unpin-button:hover {
+  color: #444;
+  background: #eee;
+}
+
+.grade-hint,
+.grade-loading {
+  font-size: 0.8rem;
+  color: #888;
+  text-align: center;
+  padding: 0.75rem 0;
+}
+
+.grade-table {
+  width: 100%;
+  font-size: 0.78rem;
+  border-collapse: collapse;
+  margin-top: 0.4rem;
+}
+
+.grade-table th,
+.grade-table td {
+  padding: 0.22rem 0.35rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.grade-table th {
+  font-weight: 600;
+  color: #666;
+  border-bottom: 1px solid #ccc;
+  text-align: left;
+}
+
+.grade-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.grade-table .glyph-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  color: #222;
+}
+
+.grade-delta.pos {
+  color: #c0392b;
+}
+
+.grade-delta.neg {
+  color: #2364c2;
+}
+
+.grade-delta.zero {
+  color: #999;
+}
+
+.grade-delta-warn td {
+  background: #fffaf0;
+}
+
+.grade-stats {
+  margin-top: 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  background: #f6f6f6;
+  border-radius: 4px;
+}
+
+.grade-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  align-items: flex-start;
+}
+
+.grade-stat-label {
+  font-size: 0.7rem;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.grade-stat-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #222;
+}
+
+.grade-stat-value.pos {
+  color: #c0392b;
+}
+
+.grade-stat-value.neg {
+  color: #2364c2;
+}

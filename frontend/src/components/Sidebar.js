@@ -5,9 +5,10 @@ import SpacAxisControl from './SpacAxisControl';
 import DuplicateModal from './DuplicateModal';
 import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
+import GradeComparison from './GradeComparison';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onUpdateAllInstances, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, spacMode, spacAxisExists, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onUpdateAllInstances, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, spacMode, spacAxisExists, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, gradeBaseSnapshot, gradeBasePerGlyph, gradeCandidatePerGlyph, onPinGradeBase, onUnpinGradeBase }) {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
   const [showEditAxisModal, setShowEditAxisModal] = useState(false);
@@ -425,6 +426,17 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         );
       })()}
       
+      {onPinGradeBase && (
+        <GradeComparison
+          baseSnapshot={gradeBaseSnapshot}
+          basePerGlyph={gradeBasePerGlyph}
+          candidateName={selectedInstance?.name || null}
+          candidatePerGlyph={gradeCandidatePerGlyph}
+          onPinBase={onPinGradeBase}
+          onUnpinBase={onUnpinGradeBase}
+        />
+      )}
+
       {onUpdateAllInstances && (() => {
         // Check if any instances have unsaved changes
         const hasUnsavedChanges = instances && getInstanceSyncStatus
