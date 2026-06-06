@@ -813,11 +813,12 @@ def get_text_width():
         except json.JSONDecodeError:
             return jsonify({"error": "Invalid coordinates JSON"}), 400
         
-        # Get font path (prefer SPAC font if available)
-        spac_font_path = _ensure_spac_font_exists()
-        if spac_font_path and spac_font_path.exists():
-            font_path = spac_font_path
-        elif VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
+        # Measure against whatever the avar2 build produced (the same font
+        # the preview is rendering). SPAC-axis lookup used to run here as a
+        # preferred path, but SPAC is deferred to v2 — falling back to
+        # VARIABLE_FONT_PATH keeps the measurement consistent with the
+        # preview and avoids regenerating UFOs every time the user types.
+        if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
             font_path = VARIABLE_FONT_PATH
         else:
             return jsonify({"error": "Variable font not built yet."}), 404
