@@ -47,6 +47,14 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          # GitHub Actions sets CI=true automatically, which makes
+          # create-react-app's `npm run build` treat ESLint warnings
+          # as errors. There's a backlog of legacy unused-var and
+          # exhaustive-deps warnings inherited from the Crispy port
+          # that we'll clean up separately; until then, build without
+          # the warnings-are-errors mode.
+          CI: false
         run: |
           npm ci
           npm run build
