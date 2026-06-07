@@ -53,6 +53,9 @@ except ImportError:
     print("Error: glyphsLib not found. Install with: pip install glyphsLib", file=sys.stderr)
     sys.exit(1)
 
+from . import source_font as _source_font
+from .source_font import UnsupportedSourceFormat
+
 app = Flask(__name__, static_folder=None)
 # ``static_folder=None`` disables Flask's default ``/static/<path>``
 # handler. Without that, Flask's auto-registered ``static`` endpoint
@@ -110,7 +113,8 @@ def _serve_ui_favicon():
     return send_from_directory(str(_BUNDLE_DIR), "favicon.ico")
 
 # Global state
-GLYPHS_PATH: Optional[Path] = None
+GLYPHS_PATH: Optional[Path] = None  # The source file (.glyphs OR .designspace). Name kept for git history; SOURCE_FORMAT tracks which.
+SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
 BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
 LAST_BUILD_TIME: Optional[float] = None
@@ -285,91 +289,33 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
 
 
 def get_instances_from_glyphs(glyphs_path: Path) -> List[Dict]:
-    """
-    Read instances from Glyphs file with their axis coordinates.
-    
-    Returns list of instance dicts with:
-    - name: instance name
-    - coordinates: dict of axis tag -> value (from instance.axes)
+    """Read source-defined instances from the source file (any supported format).
+
+    Returns a list of ``{name, coordinates}`` dicts. Each instance also gets
+    an ``origin: "source"`` tag — studio-only instances are computed by the
+    caller via the CSV.
     """
     try:
-        font = load(str(glyphs_path))
-        instances = []
-        axes = font.axes
-        
-        for instance in font.instances:
-            name = instance.name or "Unnamed"
-            
-            # Get coordinates from instance.axes (direct axis values)
-            coordinates = {}
-            if hasattr(instance, 'axes') and instance.axes:
-                for i, axis in enumerate(axes):
-                    if i < len(instance.axes):
-                        tag = axis.axisTag
-                        value = float(instance.axes[i])
-                        coordinates[tag] = value
-            
-            instances.append({
-                "name": name,
-                "coordinates": coordinates
-            })
-        
+        font, _fmt = _source_font.load_source(glyphs_path)
+        instances = _source_font.get_source_instances(font)
+        for entry in instances:
+            entry["origin"] = "source"
         return instances
-    
     except Exception as e:
-        print(f"Error reading Glyphs file: {e}", file=sys.stderr)
+        print(f"Error reading source file: {e}", file=sys.stderr)
         raise
 
 
 def get_axes_from_glyphs(glyphs_path: Path) -> List[Dict]:
-    """
-    Extract axes from Glyphs file.
-    Calculates min/max from master axes values.
-    
-    Returns list of axis dicts with:
-    - tag: axis tag
-    - name: axis name
-    - min: minimum value (from masters)
-    - max: maximum value (from masters)
-    - default: default value (typically min or calculated)
+    """Read axes from the source file (any supported format).
+
+    Returns a list of ``{tag, name, min, max, default}`` dicts.
     """
     try:
-        font = load(str(glyphs_path))
-        axes = font.axes
-        
-        if not axes:
-            return []
-        
-        # Calculate min/max from masters
-        axis_ranges = {ax.axisTag: {'min': float('inf'), 'max': float('-inf')} for ax in axes}
-        
-        for master in font.masters:
-            if hasattr(master, 'axes') and master.axes:
-                for i, axis in enumerate(axes):
-                    if i < len(master.axes):
-                        tag = axis.axisTag
-                        value = float(master.axes[i])
-                        axis_ranges[tag]['min'] = min(axis_ranges[tag]['min'], value)
-                        axis_ranges[tag]['max'] = max(axis_ranges[tag]['max'], value)
-        
-        # Build axis list
-        result = []
-        for axis in axes:
-            tag = axis.axisTag
-            ranges = axis_ranges[tag]
-            
-            result.append({
-                "tag": tag,
-                "name": axis.name,
-                "min": ranges['min'] if ranges['min'] != float('inf') else 0.0,
-                "max": ranges['max'] if ranges['max'] != float('-inf') else 1000.0,
-                "default": ranges['min'] if ranges['min'] != float('inf') else 0.0
-            })
-        
-        return result
-    
+        font, _fmt = _source_font.load_source(glyphs_path)
+        return _source_font.get_axes(font)
     except Exception as e:
-        print(f"Error reading axes from Glyphs file: {e}", file=sys.stderr)
+        print(f"Error reading axes from source file: {e}", file=sys.stderr)
         raise
 
 
@@ -504,164 +450,69 @@ def get_axes_from_built_font(font_path: Path) -> List[Dict]:
     return axes
 
 
+def _source_is_glyphs(glyphs_path: Path) -> bool:
+    return glyphs_path.suffix.lower() == ".glyphs"
+
+
 def create_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates: Dict[str, float], insert_after_instance_name: Optional[str] = None) -> bool:
-    """
-    Create a new instance in Glyphs file with specified name and coordinates.
-    
-    Args:
-        glyphs_path: Path to the Glyphs file
-        instance_name: Name for the new instance
-        coordinates: Dictionary of axis tag -> value coordinates
-        insert_after_instance_name: Optional name of instance to insert after.
-                                    If None, appends to end of list.
-    
-    Returns True if creation was successful, False otherwise.
-    Raises ValueError if instance name already exists.
+    """Add an instance directly to the source file.
+
+    Note: the UI's Create/Duplicate flow does NOT call this anymore — those
+    paths now write to the CSV only and surface the instance as
+    ``origin: studio``. This helper survives as the implementation behind
+    ``POST /api/instance/<name>/add-to-source``, which promotes a
+    studio-only instance into the source's instance list.
     """
     try:
-        font = load(str(glyphs_path))
-        axes = font.axes
-        
-        # Check if instance name already exists
-        for inst in font.instances:
-            if inst.name == instance_name:
-                raise ValueError(f"Instance '{instance_name}' already exists")
-        
-        # Create new instance
-        from glyphsLib.classes import GSInstance
-        new_instance = GSInstance()
-        new_instance.name = instance_name
-        
-        # Set instance.axes to match font.axes order
-        new_axes = []
-        for i, axis in enumerate(axes):
-            tag = axis.axisTag
-            if tag in coordinates:
-                new_axes.append(coordinates[tag])
-            else:
-                # Default to 0 if coordinate not provided
-                new_axes.append(0.0)
-        
-        new_instance.axes = new_axes
-        
-        # Insert instance at the correct position
-        if insert_after_instance_name:
-            # Find the index of the instance to insert after
-            insert_index = None
-            for i, inst in enumerate(font.instances):
-                if inst.name == insert_after_instance_name:
-                    insert_index = i + 1
-                    break
-            
-            if insert_index is not None:
-                # Insert after the found instance
-                font.instances.insert(insert_index, new_instance)
-            else:
-                # Instance not found, append to end
-                font.instances.append(new_instance)
-        else:
-            # No insert position specified, append to end
-            font.instances.append(new_instance)
-        
-        # Save the font
-        font.save(str(glyphs_path))
-        
-        # Force Glyphs.app to reload the document (save unsaved changes, close, reopen)
-        # Pass font object so we can re-save after Glyphs.app saves
-        _force_reload_glyphs_document(glyphs_path, font_object=font)
-        
+        font, _fmt = _source_font.load_source(glyphs_path)
+        ok = _source_font.add_instance_to_source(
+            font, glyphs_path, instance_name, coordinates, insert_after_instance_name
+        )
+        if not ok:
+            raise ValueError(f"Instance '{instance_name}' already exists")
+        if _source_is_glyphs(glyphs_path):
+            _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
-    
     except ValueError:
-        # Re-raise ValueError (duplicate name)
         raise
     except Exception as e:
-        print(f"Error creating instance in Glyphs file: {e}", file=sys.stderr)
+        print(f"Error creating instance in source file: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return False
 
 
 def rename_instance_in_glyphs(glyphs_path: Path, old_name: str, new_name: str) -> bool:
-    """
-    Rename an instance in Glyphs file.
-    
-    Returns True if rename was successful, False otherwise.
-    Raises ValueError if new name already exists.
-    """
+    """Rename a source-defined instance."""
     try:
-        font = load(str(glyphs_path))
-        
-        # Check if new name already exists
-        for inst in font.instances:
-            if inst.name == new_name:
-                raise ValueError(f"Instance '{new_name}' already exists")
-        
-        # Find the instance by old name
-        instance = None
-        for inst in font.instances:
-            if inst.name == old_name:
-                instance = inst
-                break
-        
-        if not instance:
+        font, _fmt = _source_font.load_source(glyphs_path)
+        ok = _source_font.rename_source_instance(font, glyphs_path, old_name, new_name)
+        if not ok:
             return False
-        
-        # Rename the instance
-        instance.name = new_name
-        
-        # Save the font
-        font.save(str(glyphs_path))
-        
-        # Force Glyphs.app to reload the document (save unsaved changes, close, reopen)
-        # Pass font object so we can re-save after Glyphs.app saves
-        _force_reload_glyphs_document(glyphs_path, font_object=font)
-        
+        if _source_is_glyphs(glyphs_path):
+            _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
-    
     except ValueError:
-        # Re-raise ValueError (duplicate name)
         raise
     except Exception as e:
-        print(f"Error renaming instance in Glyphs file: {e}", file=sys.stderr)
+        print(f"Error renaming instance in source file: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return False
 
 
 def delete_instance_in_glyphs(glyphs_path: Path, instance_name: str) -> bool:
-    """
-    Delete an instance from Glyphs file.
-    
-    Returns True if deletion was successful, False otherwise.
-    """
+    """Delete a source-defined instance."""
     try:
-        font = load(str(glyphs_path))
-        
-        # Find the instance by name
-        instance_to_delete = None
-        for inst in font.instances:
-            if inst.name == instance_name:
-                instance_to_delete = inst
-                break
-        
-        if not instance_to_delete:
+        font, _fmt = _source_font.load_source(glyphs_path)
+        ok = _source_font.delete_source_instance(font, glyphs_path, instance_name)
+        if not ok:
             return False
-        
-        # Remove the instance from the list
-        font.instances.remove(instance_to_delete)
-        
-        # Save the font
-        font.save(str(glyphs_path))
-        
-        # Force Glyphs.app to reload the document (save unsaved changes, close, reopen)
-        # Pass font object so we can re-save after Glyphs.app saves
-        _force_reload_glyphs_document(glyphs_path, font_object=font)
-        
+        if _source_is_glyphs(glyphs_path):
+            _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
-    
     except Exception as e:
-        print(f"Error deleting instance from Glyphs file: {e}", file=sys.stderr)
+        print(f"Error deleting instance from source file: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return False
@@ -675,46 +526,17 @@ def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates
     Returns True if update was successful, False otherwise.
     """
     try:
-        font = load(str(glyphs_path))
-        axes = font.axes
-        
-        # Find the instance by name
-        instance = None
-        for inst in font.instances:
-            if inst.name == instance_name:
-                instance = inst
-                break
-        
-        if not instance:
+        font, _fmt = _source_font.load_source(glyphs_path)
+        ok = _source_font.update_source_instance_coords(
+            font, glyphs_path, instance_name, coordinates
+        )
+        if not ok:
             return False
-        
-        # Update instance.axes with new coordinates
-        # instance.axes is a list matching the order of font.axes
-        new_axes = []
-        for i, axis in enumerate(axes):
-            tag = axis.axisTag
-            if tag in coordinates:
-                new_axes.append(coordinates[tag])
-            elif hasattr(instance, 'axes') and instance.axes and i < len(instance.axes):
-                # Keep existing value if not specified
-                new_axes.append(instance.axes[i])
-            else:
-                # Default to 0 if no existing value
-                new_axes.append(0.0)
-        
-        instance.axes = new_axes
-        
-        # Save the font
-        font.save(str(glyphs_path))
-        
-        # Force Glyphs.app to reload the document (save unsaved changes, close, reopen)
-        # Pass font object so we can re-save after Glyphs.app saves
-        _force_reload_glyphs_document(glyphs_path, font_object=font)
-        
+        if _source_is_glyphs(glyphs_path):
+            _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
-    
     except Exception as e:
-        print(f"Error updating Glyphs file: {e}", file=sys.stderr)
+        print(f"Error updating source file: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return False
@@ -722,9 +544,49 @@ def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates
 
 @app.route('/api/instances', methods=['GET'])
 def get_instances():
-    """Get all instances from the Glyphs file with their coordinates."""
+    """Return source-defined + studio-only instances with origin tags.
+
+    - ``origin: "source"`` — instance is declared inside the .glyphs /
+      .designspace file. Edits write back to that file.
+    - ``origin: "studio"`` — instance lives only in the sibling CSV.
+      Edits write to the CSV; the source is untouched until the user
+      explicitly calls ``POST /api/instance/<name>/add-to-source``.
+    """
     try:
         instances = get_instances_from_glyphs(GLYPHS_PATH)
+        source_names = {entry["name"] for entry in instances}
+
+        # Pull studio-only rows: any CSV row whose Instance Name isn't in
+        # the source file. We don't include their coordinates here — the
+        # frontend already fetches CSV data through other endpoints and
+        # the row's coordinates aren't strictly needed for instance
+        # listing. (If the UI later wants them, we can add parametric
+        # values from the CSV here.)
+        csv_path = _get_preview_csv_path()
+        if csv_path and csv_path.exists():
+            try:
+                with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        name = (row.get("Instance Name") or "").strip()
+                        if not name or name in source_names:
+                            continue
+                        coordinates = {}
+                        for key, value in row.items():
+                            if not key or key == "Instance Name":
+                                continue
+                            try:
+                                coordinates[key] = float(value)
+                            except (TypeError, ValueError):
+                                continue
+                        instances.append({
+                            "name": name,
+                            "coordinates": coordinates,
+                            "origin": "studio",
+                        })
+            except Exception as e:
+                print(f"Warning: Could not read studio-only rows from CSV: {e}", file=sys.stderr)
+
         return jsonify({"instances": instances})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1045,141 +907,139 @@ def get_preview_font():
 
 @app.route('/api/instance', methods=['POST'])
 def create_instance():
-    """Create a new instance in the Glyphs file."""
+    """Create a new studio-only instance.
+
+    Two-tier model: created instances are written only to the sibling CSV
+    with ``origin: studio``. The source file (.glyphs / .designspace) is
+    NOT mutated until the user explicitly promotes via
+    ``POST /api/instance/<name>/add-to-source``. This keeps the source
+    instance list from getting bloated by exploratory grid points.
+    """
     data = request.get_json()
     if not data or 'name' not in data or 'coordinates' not in data:
         return jsonify({"error": "Missing 'name' or 'coordinates' in request body"}), 400
-    
+
     instance_name = data['name'].strip()
     if not instance_name:
         return jsonify({"error": "Instance name cannot be empty"}), 400
-    
+
     coordinates = data['coordinates']
-    
-    # Validate coordinates are numeric
     try:
         coordinates = {k: float(v) for k, v in coordinates.items()}
     except (ValueError, TypeError):
         return jsonify({"error": "Coordinates must be numeric"}), 400
-    
-    # Explicitly exclude SPAC from coordinates (SPAC is only stored in preview CSV, not Glyphs file)
+
     coordinates = {k: v for k, v in coordinates.items() if k.upper() != 'SPAC'}
-    
-    # Optional: insert after a specific instance
+
     insert_after = data.get('insert_after', None)
     if insert_after:
         insert_after = insert_after.strip()
-    
+
+    # Refuse to create if the name already exists either in the source or in the CSV.
     try:
-        success = create_instance_in_glyphs(GLYPHS_PATH, instance_name, coordinates, insert_after_instance_name=insert_after)
-        
-        if success:
-            # Add new instance to preview CSV if it exists
-            csv_path = _get_preview_csv_path()
-            if csv_path and csv_path.exists():
-                try:
-                    # Read existing CSV
-                    rows = []
-                    fieldnames = []
-                    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-                        reader = csv.DictReader(f)
-                        fieldnames = list(reader.fieldnames) if reader.fieldnames else []
-                        for row in reader:
-                            rows.append(row)
-                    
-                    # Ensure SPAC column exists
-                    if "SPAC" not in fieldnames:
-                        fieldnames.append("SPAC")
-                        for row in rows:
-                            if "SPAC" not in row:
-                                row["SPAC"] = "0"
-                    
-                    # Get parametric axis values from coordinates
-                    new_row = {"Instance Name": instance_name}
-                    # Get parametric axes from Glyphs file to know which columns to populate
-                    if GLYPHS_PATH and GLYPHS_PATH.exists():
-                        try:
-                            font = load(str(GLYPHS_PATH))
-                            for axis in font.axes:
-                                if hasattr(axis, 'axisTag'):
-                                    tag = axis.axisTag.upper()
-                                    # Use coordinate if provided, otherwise 0
-                                    new_row[tag] = str(coordinates.get(axis.axisTag, coordinates.get(tag, 0)))
-                        except Exception as e:
-                            print(f"Warning: Could not read axes from Glyphs file: {e}", file=sys.stderr)
-                    
-                    # Initialize SPAC to 0
-                    new_row["SPAC"] = "0"
-                    
-                    # Ensure all fieldnames are present in new_row
-                    for field in fieldnames:
-                        if field not in new_row:
-                            new_row[field] = "0"
-                    
-                    # Add new instance row
-                    rows.append(new_row)
-                    
-                    # Write updated CSV
-                    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        writer.writerows(rows)
-                    
-                    # Update modification time cache to prevent false "external edit" detection
-                    _update_csv_modification_time(csv_path)
-                    
-                    print(f"Added instance '{instance_name}' to preview CSV", file=sys.stderr)
-                except Exception as e:
-                    print(f"Warning: Could not add instance to preview CSV: {e}", file=sys.stderr)
-                    import traceback
-                    traceback.print_exc()
-            
-            # Trigger rebuild in background thread (same pattern as update_instance and rename_instance)
-            # This avoids blocking the response and file locking issues
-            def rebuild_in_background():
-                global BUILDING
-                if BUILDING:
-                    print("Build already in progress, skipping rebuild after instance creation...", file=sys.stderr)
-                    return
-                
-                spac_font_dir = _get_spac_font_dir()
-                if spac_font_dir:
-                    spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-                    if spac_font_path.exists():
-                        # SPAC font exists - regenerate it using add-spac-axis-ufo.py
-                        print(f"Instance created, regenerating SPAC font...", file=sys.stderr)
-                        BUILDING = True
-                        try:
-                            if _regenerate_spac_font():
-                                # SPAC regeneration succeeded
-                                BUILDING = False
-                            else:
-                                # Fallback to regular build if regeneration fails
-                                print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
-                                BUILDING = False  # Reset before trigger_build (which sets it)
-                                trigger_build()
-                        except Exception as e:
-                            print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
-                            BUILDING = False
-                    else:
-                        # No SPAC font - rebuild regular font
-                        print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
-                        trigger_build()
-                else:
-                    # No SPAC font directory - rebuild regular font
-                    print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
-                    trigger_build()
-            
-            # Start rebuild in background thread (small delay to ensure file save completes)
-            rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-            rebuild_thread.start()
-            
-            return jsonify({"success": True, "message": f"Created instance '{instance_name}' in Glyphs file"})
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        existing_source_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
+    except Exception:
+        existing_source_names = set()
+    if instance_name in existing_source_names:
+        return jsonify({"error": f"Instance '{instance_name}' already exists in the source file"}), 400
+
+    csv_path = _get_preview_csv_path()
+    if not csv_path or not csv_path.exists():
+        return jsonify({"error": "Preview CSV not initialized — cannot create studio-only instance"}), 500
+
+    try:
+        rows: List[Dict] = []
+        fieldnames: List[str] = []
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames) if reader.fieldnames else []
+            for row in reader:
+                rows.append(row)
+
+        for row in rows:
+            if (row.get("Instance Name") or "").strip() == instance_name:
+                return jsonify({"error": f"Instance '{instance_name}' already exists"}), 400
+
+        if "SPAC" not in fieldnames:
+            fieldnames.append("SPAC")
+            for row in rows:
+                row.setdefault("SPAC", "0")
+
+        new_row: Dict[str, str] = {"Instance Name": instance_name}
+        for axis in _source_font.get_axes(font):
+            tag = axis["tag"]
+            upper = tag.upper()
+            new_row[upper] = str(coordinates.get(tag, coordinates.get(upper, 0)))
+        new_row["SPAC"] = "0"
+        for field in fieldnames:
+            new_row.setdefault(field, "0")
+
+        if insert_after:
+            insert_index = None
+            for i, row in enumerate(rows):
+                if (row.get("Instance Name") or "").strip() == insert_after:
+                    insert_index = i + 1
+                    break
+            if insert_index is None:
+                rows.append(new_row)
+            else:
+                rows.insert(insert_index, new_row)
         else:
-            return jsonify({"error": f"Failed to create instance '{instance_name}'"}), 500
-    except ValueError as e:
-        # Duplicate name error
-        return jsonify({"error": str(e)}), 400
+            rows.append(new_row)
+
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        _update_csv_modification_time(csv_path)
+        print(f"Created studio-only instance '{instance_name}' in CSV", file=sys.stderr)
+        success = True
+    except Exception as e:
+        print(f"Error creating studio-only instance in CSV: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to create instance: {e}"}), 500
+
+    # Trigger rebuild in background so the avar2 build picks up the new
+    # studio-only row. Same SPAC-aware path as the update flow.
+    def rebuild_in_background():
+        global BUILDING
+        if BUILDING:
+            print("Build already in progress, skipping rebuild after instance creation...", file=sys.stderr)
+            return
+
+        spac_font_dir = _get_spac_font_dir()
+        if spac_font_dir:
+            spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
+            if spac_font_path.exists():
+                print(f"Instance created, regenerating SPAC font...", file=sys.stderr)
+                BUILDING = True
+                try:
+                    if _regenerate_spac_font():
+                        BUILDING = False
+                    else:
+                        print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
+                        BUILDING = False
+                        trigger_build()
+                except Exception as e:
+                    print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
+                    BUILDING = False
+            else:
+                print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
+                trigger_build()
+        else:
+            print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
+            trigger_build()
+
+    rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
+    rebuild_thread.start()
+
+    return jsonify({
+        "success": True,
+        "message": f"Created studio-only instance '{instance_name}'",
+        "origin": "studio",
+    })
 
 
 @app.route('/api/instance/<instance_name>', methods=['PUT'])
@@ -1203,71 +1063,74 @@ def update_instance(instance_name: str):
     
     # Extract SPAC value (CSV-only)
     spac_value = coordinates.get('SPAC')
-    
-    # Filter to only parametric axes that exist in Glyphs file (XTRA, XOPQ, YOPQ)
-    # SPAC is CSV-only, traditional axes (WGHT, WDTH, OPSZ) are not in Glyphs file
-    font = load(str(GLYPHS_PATH))
-    glyphs_axis_tags = {axis.axisTag for axis in font.axes}
-    
-    # Only include coordinates for axes that exist in Glyphs file (exclude SPAC)
+
+    # Determine origin: source-defined instances exist in font.instances /
+    # <instance>; everything else is studio-only (CSV-only).
+    font, _fmt = _source_font.load_source(GLYPHS_PATH)
+    source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
+    is_source_instance = instance_name in source_instance_names
+    source_axis_tags = {axis["tag"] for axis in _source_font.get_axes(font)}
+
+    # Only include coordinates for axes that exist in the source (exclude SPAC).
     glyphs_coordinates = {
         tag: value for tag, value in coordinates.items()
-        if tag in glyphs_axis_tags and tag != 'SPAC'
+        if tag in source_axis_tags and tag != 'SPAC'
     }
-    
-    # Remove from editing set since we're saving
+
     global EDITING_INSTANCES
     EDITING_INSTANCES.discard(instance_name)
-    
-    # Update Glyphs file only if there are parametric coordinates to update
+
+    # Write back to the source file ONLY for source-defined instances.
+    # Studio-only instances live in the CSV exclusively — their parametric
+    # coords get persisted in the CSV update below the SPAC block.
     glyphs_updated = False
-    if glyphs_coordinates:
+    if is_source_instance and glyphs_coordinates:
         glyphs_updated = update_instance_in_glyphs(GLYPHS_PATH, instance_name, glyphs_coordinates)
         if not glyphs_updated:
-            return jsonify({"error": f"Failed to update instance '{instance_name}' in Glyphs file"}), 500
+            return jsonify({"error": f"Failed to update instance '{instance_name}' in source file"}), 500
     
-    # Save SPAC value to CSV if provided
-    if spac_value is not None:
+    # CSV writeback. SPAC always goes here (CSV-only axis). Parametric
+    # coords also go here when the instance is studio-only (no source row).
+    csv_writeback_needed = (spac_value is not None) or (not is_source_instance and glyphs_coordinates)
+    if csv_writeback_needed:
         csv_path = _get_preview_csv_path()
         if csv_path and csv_path.exists():
             try:
                 import csv
-                # Read CSV
                 rows = []
                 with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
                     reader = csv.DictReader(f)
                     fieldnames = list(reader.fieldnames) if reader.fieldnames else []
                     rows = list(reader)
-                
-                # Ensure SPAC column exists
+
                 if "SPAC" not in fieldnames:
                     fieldnames.append("SPAC")
-                
-                # Update SPAC value for this instance
-                # Handle duplicates by updating ALL matching rows
+
                 instance_updated = False
                 updated_count = 0
                 for row in rows:
                     if row.get("Instance Name", "").strip() == instance_name:
-                        row["SPAC"] = str(spac_value)
+                        if spac_value is not None:
+                            row["SPAC"] = str(spac_value)
+                        if not is_source_instance:
+                            for tag, value in glyphs_coordinates.items():
+                                row[tag.upper()] = str(value)
                         instance_updated = True
                         updated_count += 1
-                        # Don't break - update all duplicates
-                
+
                 if instance_updated:
                     if updated_count > 1:
                         print(f"Warning: Found {updated_count} duplicate rows for '{instance_name}', updated all", file=sys.stderr)
-                    # Write updated CSV
                     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
                     _update_csv_modification_time(csv_path)
-                    print(f"Updated SPAC value for '{instance_name}' in CSV: {spac_value}", file=sys.stderr)
+                    print(f"Updated CSV row for '{instance_name}'", file=sys.stderr)
                 else:
                     print(f"Error: Instance '{instance_name}' not found in CSV", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Could not update SPAC value in CSV: {e}", file=sys.stderr)
+                print(f"Warning: Could not update CSV: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc(file=sys.stderr)
     
@@ -1359,10 +1222,18 @@ def rename_instance(instance_name: str):
     
     if new_name == instance_name:
         return jsonify({"error": "New name is the same as current name"}), 400
-    
+
     try:
-        success = rename_instance_in_glyphs(GLYPHS_PATH, instance_name, new_name)
-        
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
+        is_source_instance = instance_name in source_instance_names
+
+        if is_source_instance:
+            success = rename_instance_in_glyphs(GLYPHS_PATH, instance_name, new_name)
+        else:
+            # Studio-only: rename happens in CSV only, below.
+            success = True
+
         if success:
             # Update preview CSV if it exists
             csv_path = _get_preview_csv_path()
@@ -1445,13 +1316,84 @@ def rename_instance(instance_name: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/instance/<instance_name>/add-to-source', methods=['POST'])
+def add_instance_to_source(instance_name: str):
+    """Promote a studio-only instance into the source file's instance list.
+
+    Reads the instance's parametric coordinates from its CSV row and
+    appends a matching <instance> / GSInstance to the source. After this
+    succeeds, the next ``GET /api/instances`` returns the instance with
+    ``origin: source`` and the UI's studio-only badge disappears.
+    """
+    try:
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
+        if instance_name in source_instance_names:
+            return jsonify({"error": f"Instance '{instance_name}' is already in the source file"}), 400
+
+        # Pull the studio-only row from the CSV to get its coordinates.
+        csv_path = _get_preview_csv_path()
+        if not csv_path or not csv_path.exists():
+            return jsonify({"error": "Preview CSV not available"}), 500
+
+        coords: Dict[str, float] = {}
+        found = False
+        source_axis_tags = {axis["tag"] for axis in _source_font.get_axes(font)}
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if (row.get("Instance Name") or "").strip() != instance_name:
+                    continue
+                found = True
+                # CSV columns are upper-case axis tags (XOPQ/YOPQ/XTRA/…)
+                # whereas the source uses the original tag case.
+                for key, value in row.items():
+                    if not key or key == "Instance Name" or key.upper() == "SPAC":
+                        continue
+                    tag_candidates = [key, key.upper(), key.lower()]
+                    matched_tag = next((t for t in tag_candidates if t in source_axis_tags), None)
+                    if matched_tag is None:
+                        continue
+                    try:
+                        coords[matched_tag] = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                break
+
+        if not found:
+            return jsonify({"error": f"Instance '{instance_name}' not found in CSV"}), 404
+
+        ok = _source_font.add_instance_to_source(font, GLYPHS_PATH, instance_name, coords)
+        if not ok:
+            return jsonify({"error": f"Failed to add '{instance_name}' to source file"}), 500
+
+        # For .glyphs sources, also poke Glyphs.app to reload the document.
+        if _source_is_glyphs(GLYPHS_PATH):
+            _force_reload_glyphs_document(GLYPHS_PATH, font_object=font)
+
+        return jsonify({
+            "success": True,
+            "message": f"Added '{instance_name}' to source file",
+            "origin": "source",
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 def get_font_family_name(glyphs_path: Path) -> Optional[str]:
-    """Get font family name from Glyphs file."""
+    """Return the font family name (source file stem in both formats).
+
+    Locked convention: file stem, not source-declared family. Keeps the
+    avar2 build, sibling CSV, and built-font filename in lockstep
+    regardless of what's inside the source.
+    """
     try:
         if not glyphs_path or not glyphs_path.exists():
             return None
-        font = load(str(glyphs_path))
-        return font.familyName
+        font, _fmt = _source_font.load_source(glyphs_path)
+        return _source_font.get_family_name(font, glyphs_path)
     except Exception as e:
         print(f"Error getting font family name: {e}", file=sys.stderr)
         return None
@@ -1515,6 +1457,7 @@ def health():
         return jsonify({
             "status": "ok",
             "glyphs_path": str(GLYPHS_PATH) if GLYPHS_PATH else None,
+            "source_format": SOURCE_FORMAT,
             "font_built": VARIABLE_FONT_PATH.exists() if VARIABLE_FONT_PATH else False,
             "family_name": family_name,
             "vf_family_id": f"{family_name}-VF" if family_name else None,
@@ -1618,15 +1561,10 @@ def _get_preview_csv_path() -> Optional[Path]:
     if not GLYPHS_PATH:
         return None
 
-    # Extract family name from Glyphs file
-    try:
-        font = load(str(GLYPHS_PATH))
-        family_name = font.familyName or "Font"
-    except Exception:
-        # Fallback: use Glyphs filename without extension
-        family_name = GLYPHS_PATH.stem
-
-    # CSV is a sibling to the .glyphs file (designer commits it).
+    # Locked convention: family name is the source file's stem in both
+    # .glyphs and .designspace flows, so the CSV name is deterministic
+    # without loading the source.
+    family_name = GLYPHS_PATH.stem
     csv_path = GLYPHS_PATH.parent / f"{family_name}-avar.csv"
     PREVIEW_CSV_PATH = csv_path
     return csv_path
@@ -1941,54 +1879,38 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
     
     try:
         import csv
-        font = load(str(GLYPHS_PATH))
-        
-        # Get parametric axes from Glyphs file
-        parametric_axes = []
-        for axis in font.axes:
-            if hasattr(axis, 'axisTag'):
-                parametric_axes.append(axis.axisTag.upper())
-        
-        # Get instances from Glyphs file
-        instances = []
-        for instance in font.instances:
-            if not instance.name:
-                continue
-            
-            row = {"Instance Name": instance.name}
-            
-            # Get parametric axis values from instance
-            if hasattr(instance, 'axes') and instance.axes:
-                for i, axis in enumerate(font.axes):
-                    if i < len(instance.axes):
-                        tag = axis.axisTag.upper()
-                        value = float(instance.axes[i])
-                        row[tag] = value
-            
-            instances.append(row)
-        
-        # Write CSV (include SPAC column)
-        if instances:
-            fieldnames = ["Instance Name"] + parametric_axes + ["SPAC"]
-            with csv_path.open("w", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in instances:
-                    # Ensure all parametric axes are present (fill missing with 0)
-                    for axis in parametric_axes:
-                        if axis not in row:
-                            row[axis] = 0
-                    # Initialize SPAC to 0
-                    row["SPAC"] = 0
-                    writer.writerow(row)
-            
-            print(f"Initialized preview CSV: {csv_path}", file=sys.stderr)
-            return csv_path
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        # Treat the source's SPAC axis (if present) as the CSV's dedicated
+        # SPAC column rather than a duplicate parametric column.
+        parametric_axes = [
+            axis["tag"].upper()
+            for axis in _source_font.get_axes(font)
+            if axis["tag"].upper() != "SPAC"
+        ]
+        source_instances = _source_font.get_source_instances(font)
+
+        # Always create the CSV with the header so studio-only instance
+        # creation works against an empty designspace (zero source instances).
+        fieldnames = ["Instance Name"] + parametric_axes + ["SPAC"]
+        with csv_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for entry in source_instances:
+                row = {"Instance Name": entry["name"]}
+                for tag, value in entry["coordinates"].items():
+                    row[tag.upper()] = value
+                for axis in parametric_axes:
+                    row.setdefault(axis, 0)
+                row["SPAC"] = 0
+                writer.writerow(row)
+
+        print(f"Initialized preview CSV: {csv_path}", file=sys.stderr)
+        return csv_path
     except Exception as e:
         print(f"Error initializing preview CSV: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-    
+
     return None
 
 
@@ -2011,41 +1933,27 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
     
     try:
         import yaml
-        font = load(str(GLYPHS_PATH))
-        
-        # Get family name
-        family_name = font.familyName or GLYPHS_PATH.stem
-        
-        # Get fvarInstances from Glyphs file
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+
+        # Locked convention: family name from source file stem.
+        family_name = _source_font.get_family_name(font, GLYPHS_PATH)
+
+        axes = _source_font.get_axes(font)
+        source_instances = _source_font.get_source_instances(font)
+
         fvar_instances = []
-        for instance in font.instances:
-            if not instance.name:
-                continue
-            
-            coords = {}
-            if hasattr(instance, 'axes') and instance.axes:
-                for i, axis in enumerate(font.axes):
-                    if i < len(instance.axes):
-                        tag = axis.axisTag.lower()
-                        value = float(instance.axes[i])
-                        coords[tag] = value
-            
+        for entry in source_instances:
+            coords = {tag.lower(): float(value) for tag, value in entry["coordinates"].items()}
             if coords:
                 fvar_instances.append({
-                    "name": instance.name,
-                    "coordinates": coords
+                    "name": entry["name"],
+                    "coordinates": coords,
                 })
-        
-        # Build config structure. Font filename encodes axis tags exactly as
-        # gftools-builder will produce them — preserve the case from the
-        # .glyphs file (lowercase for registered axes like ``opsz``, uppercase
-        # for custom/parametric like ``XTRA``). SPAC is not auto-added in v1
-        # (SPAC support is deferred to a future release).
-        parametric_tags = sorted(
-            axis.axisTag
-            for axis in font.axes
-            if hasattr(axis, "axisTag") and axis.axisTag
-        )
+
+        # Built-font filename encodes axis tags exactly as gftools-builder
+        # will produce them — preserve case (lowercase for registered axes,
+        # uppercase for custom/parametric).
+        parametric_tags = sorted(axis["tag"] for axis in axes if axis.get("tag"))
         if parametric_tags:
             font_filename = f"{family_name}[{','.join(parametric_tags)}].ttf"
         else:
@@ -2140,37 +2048,33 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
         print(f"Error loading axis metadata: {e}", file=sys.stderr)
         metadata = {}
     
-    # Get parametric axes from Glyphs file and add to metadata if missing
+    # Get parametric axes from the source file and add to metadata if missing.
     if GLYPHS_PATH and GLYPHS_PATH.exists():
         try:
-            font = load(str(GLYPHS_PATH))
+            font, _fmt = _source_font.load_source(GLYPHS_PATH)
             metadata_updated = False
-            
-            for axis in font.axes:
-                if hasattr(axis, 'axisTag'):
-                    axis_tag_upper = axis.axisTag.upper()
-                    axis_name = getattr(axis, 'name', axis_tag_upper) if hasattr(axis, 'name') else axis_tag_upper
-                    
-                    # If this parametric axis is not in metadata, add it
-                    if axis_tag_upper not in metadata:
-                        metadata[axis_tag_upper] = {
-                            "display_name": axis_name,
-                            "registered_tag": axis.axisTag.lower(),
-                            "min": -1000,
-                            "max": 1000,
-                            "is_parametric": True  # Mark as parametric (from Glyphs file)
-                        }
+
+            for axis in _source_font.get_axes(font):
+                axis_tag = axis["tag"]
+                axis_tag_upper = axis_tag.upper()
+                axis_name = axis.get("name") or axis_tag_upper
+
+                if axis_tag_upper not in metadata:
+                    metadata[axis_tag_upper] = {
+                        "display_name": axis_name,
+                        "registered_tag": axis_tag.lower(),
+                        "min": -1000,
+                        "max": 1000,
+                        "is_parametric": True,
+                    }
+                    metadata_updated = True
+                else:
+                    if "is_parametric" not in metadata[axis_tag_upper]:
+                        metadata[axis_tag_upper]["is_parametric"] = True
                         metadata_updated = True
-                    else:
-                        # Ensure existing entries are marked correctly
-                        if "is_parametric" not in metadata[axis_tag_upper]:
-                            metadata[axis_tag_upper]["is_parametric"] = True
-                            metadata_updated = True
-                        # Update display name from Glyphs if not user-modified
-                        # (preserve user edits, but initialize from Glyphs)
-                        if metadata[axis_tag_upper].get("display_name") == axis_tag_upper:
-                            metadata[axis_tag_upper]["display_name"] = axis_name
-                            metadata_updated = True
+                    if metadata[axis_tag_upper].get("display_name") == axis_tag_upper:
+                        metadata[axis_tag_upper]["display_name"] = axis_name
+                        metadata_updated = True
             
             # Save updated metadata if we added any parametric axes
             if metadata_updated:
@@ -2230,20 +2134,19 @@ def _validate_axis_tag(tag: str) -> tuple[bool, Optional[str]]:
 
 
 def _get_glyphs_axis_tags() -> set:
-    """Get set of axis tags from Glyphs file (source of truth for parametric axes)."""
+    """Get set of axis tags from the source file (source of truth for parametric axes).
+
+    Name kept as ``_get_glyphs_axis_tags`` for git-blame stability; works on
+    both .glyphs and .designspace via the source_font dispatcher.
+    """
     if not GLYPHS_PATH or not GLYPHS_PATH.exists():
         return set()
-    
+
     try:
-        font = load(str(GLYPHS_PATH))
-        axis_tags = set()
-        # Get axis tags directly from font.axes
-        for axis in font.axes:
-            if hasattr(axis, 'axisTag'):
-                axis_tags.add(axis.axisTag.lower())
-        return axis_tags
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        return {axis["tag"].lower() for axis in _source_font.get_axes(font)}
     except Exception as e:
-        print(f"Error reading axes from Glyphs file: {e}", file=sys.stderr)
+        print(f"Error reading axes from source file: {e}", file=sys.stderr)
         return set()
 
 
@@ -2406,41 +2309,23 @@ def get_avar2_axes():
         # Load metadata
         metadata = _load_axis_metadata()
         
-        # Get parametric axes from Glyphs file and populate metadata
+        # Get parametric axes from the source file and populate metadata.
         glyphs_axes_info = {}
         if GLYPHS_PATH and GLYPHS_PATH.exists():
             try:
-                font = load(str(GLYPHS_PATH))
-                # Calculate min/max from masters
-                axis_ranges = {}
-                for axis in font.axes:
-                    if hasattr(axis, 'axisTag'):
-                        tag = axis.axisTag
-                        axis_ranges[tag] = {'min': float('inf'), 'max': float('-inf')}
-                
-                for master in font.masters:
-                    if hasattr(master, 'axes') and master.axes:
-                        for i, axis in enumerate(font.axes):
-                            if i < len(master.axes):
-                                tag = axis.axisTag
-                                value = float(master.axes[i])
-                                axis_ranges[tag]['min'] = min(axis_ranges[tag]['min'], value)
-                                axis_ranges[tag]['max'] = max(axis_ranges[tag]['max'], value)
-                
-                # Build axes info with min/max from masters
-                for axis in font.axes:
-                    if hasattr(axis, 'axisTag'):
-                        tag = axis.axisTag.upper()
-                        ranges = axis_ranges[axis.axisTag]
-                        glyphs_axes_info[tag] = {
-                            "display_name": axis.name if hasattr(axis, 'name') and axis.name else tag,
-                            "registered_tag": axis.axisTag.lower(),
-                            "is_parametric": True,
-                            "min": ranges['min'] if ranges['min'] != float('inf') else 0.0,
-                            "max": ranges['max'] if ranges['max'] != float('-inf') else 1000.0
-                        }
+                font, _fmt = _source_font.load_source(GLYPHS_PATH)
+                for axis in _source_font.get_axes(font):
+                    tag = axis["tag"]
+                    tag_upper = tag.upper()
+                    glyphs_axes_info[tag_upper] = {
+                        "display_name": axis.get("name") or tag_upper,
+                        "registered_tag": tag.lower(),
+                        "is_parametric": True,
+                        "min": float(axis["min"]),
+                        "max": float(axis["max"]),
+                    }
             except Exception as e:
-                print(f"Warning: Could not read axes from Glyphs file: {e}", file=sys.stderr)
+                print(f"Warning: Could not read axes from source file: {e}", file=sys.stderr)
         
         # Build axes with metadata
         # If axis doesn't exist in metadata, create default entry and save it
@@ -3684,22 +3569,22 @@ def get_avar2_font():
 
 
 def main():
-    global GLYPHS_PATH, BUILD_DIR, CSV_PATH
-    
-    parser = argparse.ArgumentParser(description="Glyphs preview server")
+    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH
+
+    parser = argparse.ArgumentParser(description="avar2-studio server")
     parser.add_argument(
         "glyphs",
         type=Path,
         nargs="?",
         default=None,
-        help="Path to the .glyphs file (positional)."
+        help="Path to the source file (.glyphs or .designspace), positional."
     )
     parser.add_argument(
         "--glyphs",
         dest="glyphs_flag",
         type=Path,
         default=None,
-        help="Path to the .glyphs file (alternative to the positional form)."
+        help="Path to the source file (alternative to the positional form)."
     )
     parser.add_argument(
         "--build-dir",
@@ -3744,12 +3629,26 @@ def main():
     glyphs_arg = args.glyphs or args.glyphs_flag
     if not glyphs_arg:
         parser.error(
-            "missing path to .glyphs file. "
-            "Usage: avar2-studio /path/to/MyFont.glyphs"
+            "missing path to source file. "
+            "Usage: avar2-studio /path/to/MyFont.glyphs  (or .designspace)"
         )
     GLYPHS_PATH = glyphs_arg.resolve()
     if not GLYPHS_PATH.exists():
-        print(f"Error: Glyphs file not found: {GLYPHS_PATH}", file=sys.stderr)
+        print(f"Error: source file not found: {GLYPHS_PATH}", file=sys.stderr)
+        sys.exit(1)
+
+    suffix = GLYPHS_PATH.suffix.lower()
+    if suffix == ".ufo":
+        print(
+            "Error: avar2-studio requires a .designspace, not an individual UFO master. "
+            "Point it at the sibling .designspace file.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        SOURCE_FORMAT = _source_font.detect_format(GLYPHS_PATH)
+    except UnsupportedSourceFormat as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     # Build dir defaults to the per-project workdir (.avar2-studio/build/),

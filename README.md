@@ -7,25 +7,27 @@ parametric designspaces (XOPQ / YOPQ / XTRA, ROND, GRAD, etc.) and
 want to expose familiar traditional axes (`wght`, `wdth`, `opsz`,
 `cntr`, `ital`) to end users through an avar2 mapping.
 
-Point it at a `.glyphs` file and it opens a browser-based editor for
-tuning parametric instances and authoring traditional→parametric
-mappings. The preview renders the **actual built avar2 font** — the
-browser applies the real avar2 table — so there are no JS-side
-approximations of what the shipped font will do.
+Point it at a `.glyphs` file or a `.designspace` and it opens a
+browser-based editor for tuning parametric instances and authoring
+traditional→parametric mappings. The preview renders the **actual built
+avar2 font** — the browser applies the real avar2 table — so there are
+no JS-side approximations of what the shipped font will do.
 
 ## Status
 
-**Pre-release.** Latest tag: `v0.1.0.dev4`. Extracted from the
+**Pre-release.** Latest tag: `v0.1.0.dev6`. Extracted from the
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project
 through three phases of work: lift-and-shift, genericization, and
-single-build-path consolidation. Verified end-to-end on Crispy and on
-a second font (Jaro, single-axis). Not yet on PyPI.
+single-build-path consolidation. v0.1.0.dev6 adds `.designspace`
+support alongside `.glyphs`, plus a two-tier instance model that
+keeps exploratory grid points out of the designer's source file.
+Not yet on PyPI.
 
 ## Install
 
 ```bash
-pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev4-py3-none-any.whl
-avar2-studio /path/to/MyFont.glyphs
+pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev6-py3-none-any.whl
+avar2-studio /path/to/MyFont.glyphs       # or /path/to/MyFont.designspace
 ```
 
 All dependencies — including `fontc` (the Rust font compiler, via

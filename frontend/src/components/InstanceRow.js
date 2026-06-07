@@ -3,7 +3,8 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, spacMode, spacAxisExists, syncStatus = 'green', onRename, onUpdateInstance, calculateAdvanceWidth, spacValues, advanceWidthLoading, currentAdvanceWidth }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, spacMode, spacAxisExists, syncStatus = 'green', onRename, onUpdateInstance, onAddToSource, calculateAdvanceWidth, spacValues, advanceWidthLoading, currentAdvanceWidth }) {
+  const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
   const [targetInstance, setTargetInstance] = useState(null);
@@ -102,7 +103,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               autoFocus
             />
           ) : (
-            <h3 
+            <h3
               className="instance-name clickable"
               onClick={(e) => {
                 e.stopPropagation();
@@ -114,6 +115,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               title={isSelected && onRename ? "Click to edit name" : ""}
             >
               {instance.name}
+              {isStudioOnly && (
+                <span className="studio-only-badge" title="Studio-only instance — lives in the CSV; not in the source file. Click 'Add to source' to promote it.">
+                  studio-only
+                </span>
+              )}
             </h3>
           )}
         </div>
@@ -151,6 +157,21 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               style={{ visibility: isSelected ? 'visible' : 'hidden' }}
             >
               🗑️
+            </button>
+          )}
+          {isStudioOnly && onAddToSource && (
+            <button
+              className="add-to-source-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isSelected) {
+                  onAddToSource(instance.name);
+                }
+              }}
+              title="Add this studio-only instance to the source file's instance list"
+              style={{ visibility: isSelected ? 'visible' : 'hidden' }}
+            >
+              ＋src
             </button>
           )}
           <div className="instance-coordinates">
