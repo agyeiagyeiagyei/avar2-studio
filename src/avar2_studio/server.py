@@ -54,6 +54,7 @@ except ImportError:
     sys.exit(1)
 
 from . import source_font as _source_font
+from . import csv_io as _csv_io
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -1134,25 +1135,13 @@ def update_instance(instance_name: str):
                 import traceback
                 traceback.print_exc(file=sys.stderr)
     
-    # Sync CSV to update with new Glyphs coordinates (but skip this instance if still editing)
+    # Sync CSV to pick up source-file coord changes (skip the in-flight
+    # edit; that row was already updated above).
     csv_path = _get_avar2_csv_path()
     if csv_path and csv_path.exists():
         try:
-            import subprocess
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).parent / "sync-glyphs-to-avar2.py"),
-                    "--glyphs", str(GLYPHS_PATH),
-                    "--csv", str(csv_path),
-                    "--once"
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.returncode == 0:
-                print(f"CSV synced after instance update", file=sys.stderr)
+            if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name}):
+                print("CSV synced after instance update", file=sys.stderr)
         except Exception as e:
             print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
     
@@ -1760,19 +1749,10 @@ def _check_preview_csv_sync_status() -> Dict[str, any]:
                 "csv_instances": []
             }
         
-        # Read instances from Glyphs file
-        # Import sync script functions using importlib (handles hyphenated module names)
-        import importlib.util
-        sync_script_path = Path(__file__).parent / "sync-glyphs-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("sync_glyphs_to_avar2", sync_script_path)
-        sync_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(sync_module)
-        
-        glyphs_instances_dict = sync_module.get_glyphs_instances(GLYPHS_PATH)
+        glyphs_instances_dict = _csv_io.get_glyphs_instances(GLYPHS_PATH)
         glyphs_instances = set(glyphs_instances_dict.keys())
-        
-        # Read instances from CSV
-        csv_rows, fieldnames = sync_module.read_csv_mappings(csv_path)
+
+        csv_rows, fieldnames = _csv_io.read_csv_mappings(csv_path)
         instance_name_col = "Instance Name"
         if instance_name_col not in fieldnames:
             return {
@@ -2153,15 +2133,10 @@ def _get_glyphs_axis_tags() -> set:
 def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, float], csv_path: Path) -> bool:
     """Add a missing instance to CSV with blank traditional axis values."""
     import csv
-    import importlib.util
     try:
         # Use normalized read function
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        rows, fieldnames, in_cols, out_cols, _ = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         if not fieldnames:
             return False
@@ -2219,17 +2194,12 @@ def get_avar2_instances():
             }), 404
         
         # Import matching function
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
         # Get Glyphs instances
-        glyphs_instances = match_module.get_glyphs_instances(GLYPHS_PATH)
+        glyphs_instances = _csv_io.get_glyphs_instances(GLYPHS_PATH)
         
         # Get matches
-        matches = match_module.match_instances(GLYPHS_PATH, csv_path)
+        matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
         
         # Add missing instances to CSV
         added_count = 0
@@ -2242,7 +2212,7 @@ def get_avar2_instances():
         
         # If we added instances, reload matches
         if added_count > 0:
-            matches = match_module.match_instances(GLYPHS_PATH, csv_path)
+            matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
         
         return jsonify({
             "instances": matches,
@@ -2265,13 +2235,8 @@ def get_avar2_mappings():
                 "error": "avar2-mappings.csv not found"
             }), 404
         
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        rows, fieldnames, in_cols, out_cols, _ = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         return jsonify({
             "mappings": rows,
@@ -2295,16 +2260,11 @@ def get_avar2_axes():
                 "error": "avar2-mappings.csv not found"
             }), 404
         
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        _, _, in_cols, out_cols, _ = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         # Normalize traditional axis names
-        traditional_axes = [match_module._normalize_in_axis_name(col) for col in in_cols]
+        traditional_axes = [_csv_io.normalize_in_axis_name(col) for col in in_cols]
         
         # Load metadata
         metadata = _load_axis_metadata()
@@ -2370,7 +2330,7 @@ def get_avar2_axes():
             else:
                 # Parametric axis not found in Glyphs (shouldn't happen, but handle gracefully)
                 if col_upper not in metadata:
-                    normalized_tag = match_module._normalize_in_axis_name(col)
+                    normalized_tag = _csv_io.normalize_in_axis_name(col)
                     metadata[col_upper] = {
                         "display_name": col,
                         "registered_tag": normalized_tag,
@@ -2397,7 +2357,7 @@ def get_avar2_axes():
         for col in in_cols:
             if col not in metadata:
                 # Create default entry for traditional axis (not in Glyphs file)
-                normalized_tag = match_module._normalize_in_axis_name(col)
+                normalized_tag = _csv_io.normalize_in_axis_name(col)
                 # Use proper display name if available, otherwise use column name
                 default_display_name = default_display_names.get(normalized_tag.lower(), col)
                 metadata[col] = {
@@ -2412,13 +2372,13 @@ def get_avar2_axes():
                 # Ensure is_parametric flag exists for existing entries
                 if "is_parametric" not in metadata[col]:
                     # Check if it's actually parametric (exists in Glyphs)
-                    normalized_tag = match_module._normalize_in_axis_name(col)
+                    normalized_tag = _csv_io.normalize_in_axis_name(col)
                     glyphs_axis_tags = _get_glyphs_axis_tags()
                     metadata[col]["is_parametric"] = normalized_tag in glyphs_axis_tags
                     metadata_updated = True
                 
                 # Update display_name if it's still the column name (tag) - migrate to proper display name
-                normalized_tag = match_module._normalize_in_axis_name(col)
+                normalized_tag = _csv_io.normalize_in_axis_name(col)
                 if metadata[col].get("display_name") == col and normalized_tag.lower() in default_display_names:
                     metadata[col]["display_name"] = default_display_names[normalized_tag.lower()]
                     metadata_updated = True
@@ -2582,47 +2542,24 @@ def unregister_editing_instance(instance_name: str):
 
 @app.route('/api/avar2/sync-csv', methods=['POST'])
 def sync_csv():
-    """Update CSV parametric values to match Glyphs file."""
+    """Update CSV parametric values to match source file."""
     try:
         csv_path = _get_avar2_csv_path()
         if not csv_path or not csv_path.exists():
-            return jsonify({
-                "error": "avar2-mappings.csv not found"
-            }), 404
-        
-        # Use existing sync script via subprocess, skipping editing instances
-        import subprocess
-        import json as json_module
-        
-        # Pass editing instances via environment variable (since subprocess doesn't support sets)
-        env = os.environ.copy()
-        if EDITING_INSTANCES:
-            env['SKIP_INSTANCES'] = json_module.dumps(list(EDITING_INSTANCES))
-        
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(Path(__file__).parent / "sync-glyphs-to-avar2.py"),
-                "--glyphs", str(GLYPHS_PATH),
-                "--csv", str(csv_path),
-                "--once"
-            ],
-            capture_output=True,
-            text=True,
-            env=env
+            return jsonify({"error": "avar2-mappings.csv not found"}), 404
+
+        ok = _csv_io.update_csv_from_glyphs(
+            GLYPHS_PATH,
+            csv_path,
+            skip_instances=set(EDITING_INSTANCES),
         )
-        
-        if result.returncode != 0:
-            return jsonify({
-                "error": "Failed to sync CSV",
-                "details": result.stderr
-            }), 500
-        
+        if not ok:
+            return jsonify({"error": "Failed to sync CSV"}), 500
+
         return jsonify({
             "success": True,
             "csv_path": str(csv_path),
-            "output": result.stdout,
-            "skipped_instances": list(EDITING_INSTANCES)
+            "skipped_instances": list(EDITING_INSTANCES),
         })
     except Exception as e:
         import traceback
@@ -2685,13 +2622,8 @@ def add_avar2_axis():
                 return jsonify({"error": f"Registered tag '{registered_tag}' already used by axis '{existing_axis}'"}), 400
         
         # Read CSV using normalized function
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        rows, fieldnames, _, _, fieldname_mapping = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        rows, fieldnames, _, _, fieldname_mapping = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         # Normalize axis_name to uppercase for consistency
         axis_name_normalized = axis_name.upper()
@@ -2757,13 +2689,8 @@ def update_avar2_axis(axis_name: str):
             }), 409
         
         # Check if this axis exists in Glyphs file (parametric axis) - cannot edit
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        _, _, in_cols, out_cols, _ = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         # Normalize axis_name to uppercase for lookup
         axis_name_normalized = axis_name.upper()
@@ -2837,7 +2764,7 @@ def update_avar2_axis(axis_name: str):
             # Create metadata entry if it doesn't exist
             metadata[axis_name_normalized] = {
                 "display_name": axis_name_normalized,
-                "registered_tag": match_module._normalize_in_axis_name(axis_name_normalized),
+                "registered_tag": _csv_io.normalize_in_axis_name(axis_name_normalized),
                 "min": -1000,
                 "max": 1000
             }
@@ -2927,13 +2854,8 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
                 }), 400
         
         # Read CSV using normalized function
-        import importlib.util
-        match_script = Path(__file__).parent / "match-instances-to-avar2.py"
-        spec = importlib.util.spec_from_file_location("match_instances_to_avar2", match_script)
-        match_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(match_module)
         
-        rows, fieldnames, _, _, _ = match_module.read_csv_mappings(csv_path, GLYPHS_PATH)
+        rows, fieldnames, _, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         if axis_name_normalized not in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' not found in CSV"}), 404
@@ -3710,42 +3632,27 @@ def main():
     
     # Set up real-time file watching using watchdog
     def sync_csv_with_glyphs():
-        """Sync CSV with Glyphs file, skipping instances being edited."""
+        """Sync CSV with the source file, skipping instances being edited."""
         global EDITING_INSTANCES
-        
+
         csv_path = _get_avar2_csv_path()
         if not csv_path or not csv_path.exists():
             return
-        
+
         try:
-            # Use subprocess to call sync script (cleaner than importing)
-            import subprocess
-            import json as json_module
-            
-            # Pass editing instances via environment variable
-            env = os.environ.copy()
-            if EDITING_INSTANCES:
-                env['SKIP_INSTANCES'] = json_module.dumps(list(EDITING_INSTANCES))
-            
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).parent / "sync-glyphs-to-avar2.py"),
-                    "--glyphs", str(GLYPHS_PATH),
-                    "--csv", str(csv_path),
-                    "--once"
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                env=env
+            ok = _csv_io.update_csv_from_glyphs(
+                GLYPHS_PATH,
+                csv_path,
+                skip_instances=set(EDITING_INSTANCES),
             )
-            
-            if result.returncode == 0:
-                skipped_msg = f" (skipped {len(EDITING_INSTANCES)} editing instances)" if EDITING_INSTANCES else ""
-                print(f"CSV synced with Glyphs file{skipped_msg}", file=sys.stderr)
+            if ok:
+                skipped_msg = (
+                    f" (skipped {len(EDITING_INSTANCES)} editing instances)"
+                    if EDITING_INSTANCES else ""
+                )
+                print(f"CSV synced with source file{skipped_msg}", file=sys.stderr)
             else:
-                print(f"Warning: CSV sync had issues: {result.stderr[:200]}", file=sys.stderr)
+                print("Warning: CSV sync returned no-op", file=sys.stderr)
         except Exception as e:
             print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
     
