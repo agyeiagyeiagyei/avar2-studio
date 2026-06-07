@@ -2,20 +2,25 @@
 
 A small, self-contained demo source for avar2-studio derived from
 [googlefonts/roboto-delta](https://github.com/googlefonts/roboto-delta).
-Three parametric axes, one (empty) traditional axis, no source-defined
-instances — ready to author an avar2 mapping against.
+Three parametric axes (`XOPQ`, `YOPQ`, `XTRA`), one (empty)
+traditional axis (`wght`), no source-defined instances — ready to
+author an avar2 mapping against.
 
 ```bash
 avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
 ```
+
+Pairs with [`crispy-mini`](../crispy-mini/) to demonstrate two
+different parametric authoring approaches with the same axis surface —
+see that fixture's README for the comparison.
 
 ## Why this exists
 
 Roboto Delta is the canonical real-world parametric font. The upstream
 variable font is **shipped without an avar2 layer** — designers see
 `wght`, `wdth`, `opsz` sliders in their type tester, but those sliders
-have no master data driving them; the parametric axes (XOUC, YOUC, …)
-do. avar2-studio's job is to fill that gap: define traditional →
+have no master data driving them; the parametric axes (`XOUC`, `YOUC`,
+…) do. avar2-studio's job is to fill that gap: define traditional →
 parametric mappings via a CSV the build pipeline uses to write an avar2
 table.
 
@@ -23,6 +28,24 @@ This fixture is the smallest meaningful slice of Roboto Delta that
 demonstrates the workflow end-to-end. It's a good place to try
 avar2-studio without needing Glyphs.app or the full ~hundreds-of-MB
 Roboto Delta repo.
+
+## A note on the axis tags
+
+The upstream Roboto Delta source uses **case-split** parametric axes:
+`XOUC` (uppercase thick), `XOLC` (lowercase thick), `XOFI` (figures
+thick), and similarly for thin strokes (`YOUC`/`YOLC`/`YOFI`) and
+counter widths (`XTUC`/`XTLC`/`XTFI`). The unified `XOPQ`/`YOPQ`/`XTRA`
+tags are declared in fvar but have **zero master coverage** in the
+upstream sources — moving them does nothing.
+
+For this demo we ship only the uppercase masters and **relabel them as
+`XOPQ`/`YOPQ`/`XTRA`** in the designspace so the comparison with
+`crispy-mini` (which uses real `XOPQ`/`YOPQ`/`XTRA` axes affecting all
+glyphs) lines up cleanly. The relabel is honest: at this fixture's
+scope (uppercase + lowercase + digits), the underlying masters only
+deform uppercase shapes — so a slider labeled `XOPQ` in this demo will
+only thicken caps, while the same slider on `crispy-mini` thickens
+everything. That's exactly the tradeoff the pair is meant to surface.
 
 ## What's inside
 
@@ -42,12 +65,12 @@ subset.py                              # How the UFOs were trimmed
 
 ### Axes
 
-| Tag | Name | Range | Default | Notes |
+| Tag (this demo) | Tag (upstream) | Range | Default | Notes |
 |---|---|---|---|---|
-| `wght` | Weight | 100–900 | 400 | No master coverage. Drives parametric axes via avar2. |
-| `XOUC` | Uppercase Thick Stroke | 2–310 | 96 | Two corner masters. |
-| `YOUC` | Uppercase Thin Stroke | 2–280 | 79 | Two corner masters. |
-| `XTUC` | Uppercase Counter Width | 244–741 | 463 | Two corner masters. |
+| `wght` | `wght` | 100–900 | 400 | No master coverage. Drives parametric axes via avar2. |
+| `XOPQ` | `XOUC` | 2–310 | 96 | Thick stroke (uppercase masters only). |
+| `YOPQ` | `YOUC` | 2–280 | 79 | Thin stroke (uppercase masters only). |
+| `XTRA` | `XTUC` | 244–741 | 463 | Counter width (uppercase masters only). |
 
 `wght` is declared with no underlying master deltas. Moving it does
 nothing **until** you author an avar2 mapping that translates
@@ -78,7 +101,7 @@ for figures.)
 4. Add `wght` values in the CSV (manually for now, or via a CSV editor):
 
    ```
-   Instance Name,WGHT,XOUC,YOUC,XTUC,SPAC
+   Instance Name,WGHT,XOPQ,YOPQ,XTRA,SPAC
    Thin,100,30,30,463,0
    Regular,400,96,79,463,0
    Bold,700,220,160,463,0

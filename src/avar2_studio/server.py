@@ -967,14 +967,23 @@ def create_instance():
             for row in rows:
                 row.setdefault("SPAC", "0")
 
+        # Fall back to each axis's declared default when the caller didn't
+        # supply a value, NOT to 0. wght=0 is outside the [100, 900] axis
+        # range and would silently corrupt the row; defaulting to the
+        # source's own declared default value keeps the row valid.
+        source_axes = _source_font.get_axes(font)
+        axis_defaults = {axis["tag"].upper(): axis["default"] for axis in source_axes}
         new_row: Dict[str, str] = {"Instance Name": instance_name}
-        for axis in _source_font.get_axes(font):
+        for axis in source_axes:
             tag = axis["tag"]
             upper = tag.upper()
-            new_row[upper] = str(coordinates.get(tag, coordinates.get(upper, 0)))
-        new_row["SPAC"] = "0"
+            value = coordinates.get(tag, coordinates.get(upper, axis["default"]))
+            new_row[upper] = str(value)
+        # SPAC defaults to the source's own SPAC axis default when SPAC is
+        # declared; otherwise 0 (CSV-only axis with no upstream default).
+        new_row.setdefault("SPAC", str(axis_defaults.get("SPAC", 0)))
         for field in fieldnames:
-            new_row.setdefault(field, "0")
+            new_row.setdefault(field, str(axis_defaults.get(field.upper(), 0)))
 
         if insert_after:
             insert_index = None

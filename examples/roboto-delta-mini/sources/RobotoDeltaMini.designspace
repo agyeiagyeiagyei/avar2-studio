@@ -1,76 +1,76 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <designspace format="5.0">
   <axes>
-    <axis tag="wght" name="Weight" minimum="100" maximum="900" default="400"/>
-    <axis tag="XOUC" name="Uppercase Thick Stroke" minimum="2" maximum="310" default="96"/>
-    <axis tag="YOUC" name="Uppercase Thin Stroke" minimum="2" maximum="280" default="79"/>
-    <axis tag="XTUC" name="Uppercase Counter Width" minimum="244" maximum="741" default="463"/>
+    <axis tag="wght" name="wght" minimum="100" maximum="900" default="400"/>
+    <axis tag="XOPQ" name="XOPQ" minimum="2" maximum="310" default="96"/>
+    <axis tag="YOPQ" name="YOPQ" minimum="2" maximum="280" default="79"/>
+    <axis tag="XTRA" name="XTRA" minimum="244" maximum="741" default="463"/>
   </axes>
   <sources>
     <source filename="RobotoDeltaMini-Default.ufo" familyname="Roboto Delta Mini" stylename="Default">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XOUC2.ufo" familyname="Roboto Delta Mini" stylename="XOUC2">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="2"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="2"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XOUC310.ufo" familyname="Roboto Delta Mini" stylename="XOUC310">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="310"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="310"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-YOUC2.ufo" familyname="Roboto Delta Mini" stylename="YOUC2">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="2"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="2"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-YOUC280.ufo" familyname="Roboto Delta Mini" stylename="YOUC280">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="280"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="280"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XTUC244.ufo" familyname="Roboto Delta Mini" stylename="XTUC244">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="244"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="244"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XTUC741.ufo" familyname="Roboto Delta Mini" stylename="XTUC741">
       <location>
-        <dimension name="Weight" xvalue="400"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="741"/>
+        <dimension name="wght" xvalue="400"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="741"/>
       </location>
     </source>
   </sources>
   <instances>
     <instance name="Regular" familyname="Roboto Delta Mini" stylename="Regular">
       <location>
-        <dimension name="Weight" xvalue="0"/>
-        <dimension name="Uppercase Thick Stroke" xvalue="96"/>
-        <dimension name="Uppercase Thin Stroke" xvalue="79"/>
-        <dimension name="Uppercase Counter Width" xvalue="463"/>
+        <dimension name="wght" xvalue="0"/>
+        <dimension name="XOPQ" xvalue="96"/>
+        <dimension name="YOPQ" xvalue="79"/>
+        <dimension name="XTRA" xvalue="463"/>
       </location>
     </instance>
   </instances>
