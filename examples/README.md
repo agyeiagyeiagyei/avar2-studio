@@ -8,27 +8,38 @@ avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
 avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
 ```
 
-Both fixtures expose the same three parametric axes — `XOPQ` (thick
-stroke), `YOPQ` (thin stroke), `XTRA` (counter width) — and an empty
-traditional `wght` axis that an avar2 mapping in the studio's CSV
-brings to life. They're calibrated to demonstrate two different
-real-world parametric authoring approaches:
+The two fixtures pair to show the **two main parametric-axis layouts**
+real-world variable fonts use, with avar2-studio working on top of
+both:
 
 | | [crispy-mini](./crispy-mini/) | [roboto-delta-mini](./roboto-delta-mini/) |
 |---|---|---|
 | Source format | `.glyphs` | `.designspace` + UFOs |
-| Author intent | Even tone across cases | Case-aware optical tuning |
-| Slider effect | All glyphs respond | Only uppercase responds (in this fixture) |
+| Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOUC`, `YOUC`, `XTUC` (uppercase-scoped) |
+| Author intent | "One stroke axis describes the whole font" | "Caps and lowercase need independent optical tuning" |
+| Slider effect | Every glyph responds | Only uppercase responds |
 | Pre-defined instances | 29 (`Thin Condensed`, …, `Black`) | 0 |
 | Glyph count | 64 (A–Z, a–z, 0–9, space + auto `.notdef`) | 64 (same) |
 
-Both pair to the same destination: a variable font with an avar2 table
-mapping a user-facing `wght` slider to a coherent point in parametric
-space. They differ in their starting assumption about whether one
-parametric "thick stroke" axis is enough or whether caps and lowercase
-need to be tuned independently. The bigger Roboto Delta source ships
-both (`XOUC`/`XOLC`/`XOFI` for thick stroke, etc.); this mini fixture
-exposes only the uppercase set so the comparison is direct.
+**Crispy's even-tone design** lets one set of axes (`XOPQ` / `YOPQ` /
+`XTRA`) describe the whole font — uppercase and lowercase share the
+same stroke contrast and counter proportions, so a single thick-stroke
+slider does the right thing everywhere.
+
+**Roboto Delta's broader brief** — readable at 8 pt through display
+sizes — needs case-specific tuning. Caps and lowercase reach optimal
+contrast at different stroke values, so the source ships nine
+case-scoped parametric axes (three for caps: `XOUC` / `YOUC` / `XTUC`;
+three for lowercase: `XOLC` / `YOLC` / `XTLC`; three for figures:
+`XOFI` / `YOFI` / `XTFI`). This mini fixture ships only the uppercase
+trio; that's why lowercase letters appear in the preview but don't move
+when you scrub the sliders.
+
+avar2-studio handles both layouts identically: each fixture has an
+empty traditional `wght` axis the studio's CSV brings to life, the
+output VF gets an avar2 table mapping `wght` to a coherent parametric
+location, and the same UI affordances (create studio-only instance,
+add to source, edit coords) apply.
 
 See each fixture's README for axes table, glyph coverage, how it was
 made, and a sample CSV mapping for authoring.

@@ -12,20 +12,24 @@ avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
 
 ## Why this exists alongside `roboto-delta-mini`
 
-These two fixtures pair to demonstrate the two main parametric-font
-authoring approaches avar2-studio supports:
+These two fixtures pair to demonstrate the two main parametric-axis
+layouts real-world variable fonts use:
 
 | | `crispy-mini` | `roboto-delta-mini` |
 |---|---|---|
 | Source format | `.glyphs` | `.designspace` + UFOs |
-| Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOPQ`, `YOPQ`, `XTRA` (relabeled from `XOUC`/`YOUC`/`XTUC` — see roboto-delta-mini/README) |
-| Glyph scope | Affects all glyphs (caps + lowercase + digits) | Affects uppercase only — lowercase is rendered from the default master |
+| Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOUC`, `YOUC`, `XTUC` (uppercase-scoped) |
+| Glyph scope | Affects every glyph (caps + lowercase + digits) | Only uppercase glyphs respond; lowercase renders from the default master |
 | Starting instances | 29 source-defined (`Thin Condensed`, `Regular`, `Bold`, …) | 0 |
 | Designer intent | "Even tone — one stroke axis describes the whole font" | "Case-aware — caps need different optical tuning than lowercase" |
 
-Both fixtures end up at the same destination — a variable font with an
-avar2 table mapping a single `wght` slider to a coherent parametric
-location — but they get there from different starting points.
+Crispy's even-tone design means one set of parametric axes covers the
+whole font; Roboto Delta's broader optical-size brief forced a
+case-split layout (the upstream ships uppercase + lowercase + figures
+axes separately — this fixture only ships the uppercase trio). Both
+fixtures end up at the same destination through avar2-studio: a VF with
+an avar2 table mapping a user-facing `wght` slider to a coherent
+parametric location.
 
 ## Axes
 
