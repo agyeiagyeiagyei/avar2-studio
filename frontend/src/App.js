@@ -1778,6 +1778,20 @@ function App() {
     setShowDeleteModal(true);
   }, []);
 
+  const handleAddInstanceToSource = useCallback(async (instanceName) => {
+    try {
+      setError(null);
+      await api.addInstanceToSource(instanceName);
+      // Refresh the instance list so the badge disappears and the
+      // origin flips from "studio" to "source".
+      const refreshed = await api.getInstances();
+      setInstances(refreshed.instances || []);
+    } catch (err) {
+      console.error('Failed to add instance to source:', err);
+      setError(err.message || 'Failed to add instance to source');
+    }
+  }, []);
+
   const handleConfirmDelete = useCallback(async (deleteFromGlyphs) => {
     if (!instanceToDelete) return;
 
@@ -2021,6 +2035,7 @@ function App() {
             onMoveInstance={handleMoveInstance}
             onRenameInstance={handleRenameInstance}
             onUpdateInstance={handleUpdateInstance}
+            onAddToSource={handleAddInstanceToSource}
             calculateAdvanceWidth={calculateAdvanceWidth}
             spacValues={spacValues}
             advanceWidthLoading={advanceWidthLoading}

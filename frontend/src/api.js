@@ -188,6 +188,21 @@ export const api = {
     return parseJSON(response);
   },
 
+  async addInstanceToSource(instanceName) {
+    const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}/add-to-source`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      try {
+        const error = await parseJSON(response);
+        throw new Error(error.error || 'Add to source failed');
+      } catch (e) {
+        throw new Error(`Add to source failed: ${response.status} ${response.statusText}`);
+      }
+    }
+    return parseJSON(response);
+  },
+
   async getAvar2Instances() {
     const response = await fetch(`${API_BASE}/avar2/instances`);
     if (!response.ok) {
