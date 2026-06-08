@@ -309,33 +309,39 @@
   align-self: flex-start;
 }
 
-.studio-only-badge {
+/* Origin badge — sits adjacent to the sync-status dot. Only the
+   source-defined variant is rendered today; studio-only rows show
+   no badge (absence == studio). Amber is intentionally NOT used
+   here — that hue is reserved for the sync-status dot's
+   "edited / needs update" state and for a future "stale relative
+   to source" badge. Keeping the palettes separated stops the two
+   signals from colliding visually. */
+.origin-badge {
   display: inline-block;
-  margin-left: 0.5rem;
-  padding: 0.1rem 0.45rem;
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b3d00;
-  background: #fff3cd;
-  border: 1px solid #ffe69c;
+  padding: 0.1rem 0.4rem;
+  margin-right: 0.4rem;
   border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   vertical-align: middle;
+  cursor: help;
+  flex-shrink: 0;
+  line-height: 1.2;
+  border: 1px solid transparent;
 }
 
-.add-to-source-btn {
-  background: none;
-  border: 1px solid #6b3d00;
-  color: #6b3d00;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.2rem 0.5rem;
-  border-radius: 3px;
-  cursor: pointer;
-  margin-left: 0.25rem;
+.origin-badge-source {
+  background: #e7f1ff;
+  color: #0b4a8f;
+  border-color: #b6d4fe;
 }
 
-.add-to-source-btn:hover {
-  background: #fff3cd;
+.instance-row-content .instance-coordinates {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #eee;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
 }

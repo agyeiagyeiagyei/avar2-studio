@@ -595,14 +595,17 @@ def get_instances():
 
 @app.route('/api/axes', methods=['GET'])
 def get_axes():
-    """Get axes from the Glyphs file (or built font if available)."""
+    """Get axes from the source file.
+
+    Always reads from the source rather than the built font: the source
+    carries semantic information the built font drops (notably
+    ``has_master_coverage`` — true iff at least one master sits at a
+    non-default position for the axis). The built-font path
+    (``get_axes_from_built_font``) is kept around for verification but
+    isn't the API path anymore.
+    """
     try:
-        # Try to get from built font first (more accurate), fallback to Glyphs file
-        if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
-            axes = get_axes_from_built_font(VARIABLE_FONT_PATH)
-        else:
-            axes = get_axes_from_glyphs(GLYPHS_PATH)
-        
+        axes = get_axes_from_glyphs(GLYPHS_PATH)
         return jsonify({"axes": axes})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -962,26 +965,33 @@ def create_instance():
             if (row.get("Instance Name") or "").strip() == instance_name:
                 return jsonify({"error": f"Instance '{instance_name}' already exists"}), 400
 
-        if "SPAC" not in fieldnames:
-            fieldnames.append("SPAC")
-            for row in rows:
-                row.setdefault("SPAC", "0")
-
         # Fall back to each axis's declared default when the caller didn't
         # supply a value, NOT to 0. wght=0 is outside the [100, 900] axis
         # range and would silently corrupt the row; defaulting to the
         # source's own declared default value keeps the row valid.
         source_axes = _source_font.get_axes(font)
         axis_defaults = {axis["tag"].upper(): axis["default"] for axis in source_axes}
+
+        # Evolve the CSV schema: if the source declares an axis the CSV
+        # header doesn't list yet, append it. This handles the case where
+        # an existing CSV was bootstrapped before the source gained more
+        # axes. Without this, DictWriter rejects rows that carry the new
+        # fields. SPAC is no longer special-cased — it's deferred.
+        for axis in source_axes:
+            upper = axis["tag"].upper()
+            if upper == "INSTANCE NAME":
+                continue
+            if upper not in fieldnames:
+                fieldnames.append(upper)
+                for row in rows:
+                    row.setdefault(upper, str(axis["default"]))
+
         new_row: Dict[str, str] = {"Instance Name": instance_name}
         for axis in source_axes:
             tag = axis["tag"]
             upper = tag.upper()
             value = coordinates.get(tag, coordinates.get(upper, axis["default"]))
             new_row[upper] = str(value)
-        # SPAC defaults to the source's own SPAC axis default when SPAC is
-        # declared; otherwise 0 (CSV-only axis with no upstream default).
-        new_row.setdefault("SPAC", str(axis_defaults.get("SPAC", 0)))
         for field in fieldnames:
             new_row.setdefault(field, str(axis_defaults.get(field.upper(), 0)))
 
@@ -1054,54 +1064,58 @@ def create_instance():
 
 @app.route('/api/instance/<instance_name>', methods=['PUT'])
 def update_instance(instance_name: str):
-    """Update instance coordinates in the Glyphs file and CSV.
-    
-    Writes parametric coordinates (XTRA, XOPQ, YOPQ) to Glyphs file.
-    Saves SPAC value to CSV (SPAC is CSV-only, not in Glyphs file).
+    """Update instance coordinates.
+
+    Default behavior writes to both the CSV and the source file (for
+    source-defined instances). Pass ``?csv_only=true`` (or set
+    ``csv_only`` in the body) to skip the source writeback — the
+    flyout's two-action UI uses this for the "Update in avar2-studio"
+    path so source instances can be edited without touching .glyphs /
+    .designspace.
     """
     data = request.get_json()
     if not data or 'coordinates' not in data:
         return jsonify({"error": "Missing 'coordinates' in request body"}), 400
-    
+
     coordinates = data['coordinates']
-    
-    # Validate coordinates are numeric
     try:
         coordinates = {k: float(v) for k, v in coordinates.items()}
     except (ValueError, TypeError):
         return jsonify({"error": "Coordinates must be numeric"}), 400
-    
-    # Extract SPAC value (CSV-only)
-    spac_value = coordinates.get('SPAC')
 
-    # Determine origin: source-defined instances exist in font.instances /
-    # <instance>; everything else is studio-only (CSV-only).
+    # SPAC support is deferred; if the caller sent one we silently drop it.
+    coordinates.pop('SPAC', None)
+
+    csv_only_flag = (
+        request.args.get('csv_only', '').lower() in ('1', 'true', 'yes')
+        or bool(data.get('csv_only'))
+    )
+
     font, _fmt = _source_font.load_source(GLYPHS_PATH)
     source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
     is_source_instance = instance_name in source_instance_names
     source_axis_tags = {axis["tag"] for axis in _source_font.get_axes(font)}
 
-    # Only include coordinates for axes that exist in the source (exclude SPAC).
     glyphs_coordinates = {
         tag: value for tag, value in coordinates.items()
-        if tag in source_axis_tags and tag != 'SPAC'
+        if tag in source_axis_tags
     }
 
     global EDITING_INSTANCES
     EDITING_INSTANCES.discard(instance_name)
 
-    # Write back to the source file ONLY for source-defined instances.
-    # Studio-only instances live in the CSV exclusively — their parametric
-    # coords get persisted in the CSV update below the SPAC block.
+    # Source writeback is skipped if the caller asked for CSV-only.
     glyphs_updated = False
-    if is_source_instance and glyphs_coordinates:
+    if not csv_only_flag and is_source_instance and glyphs_coordinates:
         glyphs_updated = update_instance_in_glyphs(GLYPHS_PATH, instance_name, glyphs_coordinates)
         if not glyphs_updated:
             return jsonify({"error": f"Failed to update instance '{instance_name}' in source file"}), 500
-    
-    # CSV writeback. SPAC always goes here (CSV-only axis). Parametric
-    # coords also go here when the instance is studio-only (no source row).
-    csv_writeback_needed = (spac_value is not None) or (not is_source_instance and glyphs_coordinates)
+
+    # CSV writeback fires whenever there are coords to record. For
+    # studio-only instances this is the only persistence path; for
+    # source instances it keeps the avar2 mapping CSV row in lockstep
+    # with the source's <location>.
+    csv_writeback_needed = bool(glyphs_coordinates)
     if csv_writeback_needed:
         csv_path = _get_preview_csv_path()
         if csv_path and csv_path.exists():
@@ -1113,16 +1127,19 @@ def update_instance(instance_name: str):
                     fieldnames = list(reader.fieldnames) if reader.fieldnames else []
                     rows = list(reader)
 
-                if "SPAC" not in fieldnames:
-                    fieldnames.append("SPAC")
-
+                # Update the row in the CSV when:
+                #   - the instance is studio-only (CSV is the source of truth), OR
+                #   - csv_only_flag is set (caller wants studio-only behavior
+                #     for a source instance — e.g. the flyout's "Update in
+                #     avar2-studio" path).
+                # For a source instance with csv_only_flag=false, the
+                # bottom-of-function sync from source → CSV handles it.
+                should_write_csv_row = csv_only_flag or (not is_source_instance)
                 instance_updated = False
                 updated_count = 0
                 for row in rows:
                     if row.get("Instance Name", "").strip() == instance_name:
-                        if spac_value is not None:
-                            row["SPAC"] = str(spac_value)
-                        if not is_source_instance:
+                        if should_write_csv_row:
                             for tag, value in glyphs_coordinates.items():
                                 row[tag.upper()] = str(value)
                         instance_updated = True
@@ -1145,14 +1162,17 @@ def update_instance(instance_name: str):
                 traceback.print_exc(file=sys.stderr)
     
     # Sync CSV to pick up source-file coord changes (skip the in-flight
-    # edit; that row was already updated above).
-    csv_path = _get_avar2_csv_path()
-    if csv_path and csv_path.exists():
-        try:
-            if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name}):
-                print("CSV synced after instance update", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
+    # edit; that row was already updated above). Skip the sync entirely
+    # for csv-only edits — we just wrote the user's edit to CSV and
+    # don't want to overwrite it with the source's unchanged values.
+    if not csv_only_flag:
+        csv_path = _get_avar2_csv_path()
+        if csv_path and csv_path.exists():
+            try:
+                if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name}):
+                    print("CSV synced after instance update", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
     
     # Trigger immediate rebuild after updating instance
     # If SPAC font exists, regenerate it (designspace-based), otherwise rebuild regular font
@@ -1197,13 +1217,13 @@ def update_instance(instance_name: str):
     
     message_parts = []
     if glyphs_updated:
-        message_parts.append(f"Updated instance '{instance_name}' in Glyphs file")
-    if spac_value is not None:
-        message_parts.append(f"Updated SPAC value to {spac_value} in CSV")
-    
+        message_parts.append(f"Updated instance '{instance_name}' in source file")
+    if csv_writeback_needed:
+        message_parts.append(f"Updated CSV row for '{instance_name}'")
+
     return jsonify({
         "success": True,
-        "message": "; ".join(message_parts) if message_parts else f"Updated instance '{instance_name}'"
+        "message": "; ".join(message_parts) if message_parts else f"Updated instance '{instance_name}'",
     })
 
 
@@ -1809,58 +1829,25 @@ def _check_preview_csv_sync_status() -> Dict[str, any]:
 
 
 def _ensure_spac_column_in_csv(csv_path: Path) -> bool:
+    """SPAC support is deferred — see ``add-spac-axis-ufo.py`` removal
+    notes. This shim survives as a no-op so the few call sites in
+    server.py keep working without an SPAC column being auto-added.
     """
-    Ensure SPAC column exists in CSV, adding it if missing (initialize to 0).
-    Returns True if column was added or already exists, False on error.
-    """
-    if not csv_path.exists():
-        return False
-    
-    try:
-        import csv
-        # Read CSV
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
-        
-        # Check if SPAC column exists
-        if "SPAC" in fieldnames:
-            return True  # Already exists
-        
-        # Add SPAC column
-        fieldnames.append("SPAC")
-        for row in rows:
-            row["SPAC"] = "0"
-        
-        # Write updated CSV
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        
-        _update_csv_modification_time(csv_path)
-        print(f"Added SPAC column to preview CSV: {csv_path}", file=sys.stderr)
-        return True
-    except Exception as e:
-        print(f"Warning: Could not add SPAC column to CSV: {e}", file=sys.stderr)
-        return False
+    return False
 
 
 def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
-    """
-    Initialize preview CSV from Glyphs file.
-    Creates CSV with Instance Name and parametric axes (XTRA, XOPQ, YOPQ) from Glyphs instances.
-    Only creates if CSV doesn't exist.
-    Also ensures SPAC column exists (initialized to 0).
+    """Initialize preview CSV from the source file.
+
+    Creates a CSV with ``Instance Name`` and one column per source axis.
+    SPAC is deferred from v1 — no SPAC column is added on bootstrap.
     """
     csv_path = _get_preview_csv_path()
     if not csv_path:
         return None
-    
-    # If CSV exists, ensure SPAC column is present
+
+    # If CSV exists, leave it alone.
     if csv_path.exists():
-        _ensure_spac_column_in_csv(csv_path)
         return csv_path
     
     if not GLYPHS_PATH or not GLYPHS_PATH.exists():
@@ -1869,18 +1856,17 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
     try:
         import csv
         font, _fmt = _source_font.load_source(GLYPHS_PATH)
-        # Treat the source's SPAC axis (if present) as the CSV's dedicated
-        # SPAC column rather than a duplicate parametric column.
+        # All source axes get a column. SPAC support is deferred — even
+        # if the source declares a SPAC axis it's treated as just
+        # another parametric column with no special handling.
         parametric_axes = [
-            axis["tag"].upper()
-            for axis in _source_font.get_axes(font)
-            if axis["tag"].upper() != "SPAC"
+            axis["tag"].upper() for axis in _source_font.get_axes(font)
         ]
         source_instances = _source_font.get_source_instances(font)
 
         # Always create the CSV with the header so studio-only instance
         # creation works against an empty designspace (zero source instances).
-        fieldnames = ["Instance Name"] + parametric_axes + ["SPAC"]
+        fieldnames = ["Instance Name"] + parametric_axes
         with csv_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -1890,7 +1876,6 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
                     row[tag.upper()] = value
                 for axis in parametric_axes:
                     row.setdefault(axis, 0)
-                row["SPAC"] = 0
                 writer.writerow(row)
 
         print(f"Initialized preview CSV: {csv_path}", file=sys.stderr)
@@ -2047,6 +2032,11 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
                 axis_tag = axis["tag"]
                 axis_tag_upper = axis_tag.upper()
                 axis_name = axis.get("name") or axis_tag_upper
+                # An axis declared in the source is only truly "parametric"
+                # if it has master coverage. Empty axes (declared but with
+                # min==max or no master deltas) are avar2 mapping inputs —
+                # they should remain editable in the AVAR2 MAPPINGS UI.
+                is_parametric = axis.get("has_master_coverage", True)
 
                 if axis_tag_upper not in metadata:
                     metadata[axis_tag_upper] = {
@@ -2054,12 +2044,14 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
                         "registered_tag": axis_tag.lower(),
                         "min": -1000,
                         "max": 1000,
-                        "is_parametric": True,
+                        "is_parametric": is_parametric,
                     }
                     metadata_updated = True
                 else:
-                    if "is_parametric" not in metadata[axis_tag_upper]:
-                        metadata[axis_tag_upper]["is_parametric"] = True
+                    # Always re-sync the parametric flag — coverage can
+                    # change as masters are added/removed.
+                    if metadata[axis_tag_upper].get("is_parametric") != is_parametric:
+                        metadata[axis_tag_upper]["is_parametric"] = is_parametric
                         metadata_updated = True
                     if metadata[axis_tag_upper].get("display_name") == axis_tag_upper:
                         metadata[axis_tag_upper]["display_name"] = axis_name
@@ -2289,7 +2281,10 @@ def get_avar2_axes():
                     glyphs_axes_info[tag_upper] = {
                         "display_name": axis.get("name") or tag_upper,
                         "registered_tag": tag.lower(),
-                        "is_parametric": True,
+                        # Only axes with master coverage are truly
+                        # parametric. Empty axes (declared in source but
+                        # no master deltas) are user-editable avar2 inputs.
+                        "is_parametric": axis.get("has_master_coverage", True),
                         "min": float(axis["min"]),
                         "max": float(axis["max"]),
                     }
@@ -2311,15 +2306,15 @@ def get_avar2_axes():
                     metadata[col_upper] = {
                         "display_name": glyphs_info["display_name"],
                         "registered_tag": glyphs_info["registered_tag"],
-                        "is_parametric": True,
+                        "is_parametric": glyphs_info.get("is_parametric", True),
                         "min": glyphs_info.get("min", 0.0),
                         "max": glyphs_info.get("max", 1000.0)
                     }
                     metadata_updated = True
                 else:
-                    # Update existing entry to mark as parametric and sync from Glyphs
-                    if metadata[col_upper].get("is_parametric") != True:
-                        metadata[col_upper]["is_parametric"] = True
+                    desired_parametric = glyphs_info.get("is_parametric", True)
+                    if metadata[col_upper].get("is_parametric") != desired_parametric:
+                        metadata[col_upper]["is_parametric"] = desired_parametric
                         metadata_updated = True
                     # Always update display_name, registered_tag, min, and max from Glyphs (source of truth)
                     if metadata[col_upper].get("display_name") != glyphs_info["display_name"]:
@@ -2447,25 +2442,36 @@ def register_editing_instance(instance_name: str):
 
 @app.route('/api/instance/<instance_name>', methods=['DELETE'])
 def delete_instance(instance_name: str):
-    """Delete an instance from the Glyphs file and CSV.
-    
-    Deletes from Glyphs file first, then removes from CSV.
-    Triggers rebuild after deletion.
+    """Delete an instance.
+
+    Default behavior removes the instance from both the source file
+    (.glyphs / .designspace) and the sibling CSV. Pass
+    ``?csv_only=true`` to skip the source-file delete — use that for
+    studio-only rows (which don't exist in the source) and for "unmap"
+    operations on source-defined rows that should stay in the source
+    but lose their avar2 mapping row.
     """
-    # Check if Glyphs file has unsaved changes
-    if _check_glyphs_file_unsaved_changes(GLYPHS_PATH):
+    csv_only_flag = request.args.get('csv_only', '').lower() in ('1', 'true', 'yes')
+
+    # For source-file writeback we still require the Glyphs file not be
+    # holding unsaved edits in the Glyphs.app process. CSV-only deletes
+    # don't touch the source, so the check doesn't apply.
+    if not csv_only_flag and _check_glyphs_file_unsaved_changes(GLYPHS_PATH):
         return jsonify({"error": "Glyphs file has unsaved changes. Please save the file first."}), 409
-    
+
     try:
-        # Delete from Glyphs file first
-        glyphs_deleted = delete_instance_in_glyphs(GLYPHS_PATH, instance_name)
-        if not glyphs_deleted:
-            return jsonify({"error": f"Failed to delete instance '{instance_name}' from Glyphs file"}), 500
-        
-        # Remove from editing set since we're deleting
         global EDITING_INSTANCES
         EDITING_INSTANCES.discard(instance_name)
-        
+
+        # Source-file delete only fires when the caller actually wants
+        # one. For studio-only rows the source never had the instance,
+        # so source-delete would fail; csv_only_flag is the explicit
+        # signal that the caller knows the row is CSV-only.
+        if not csv_only_flag:
+            glyphs_deleted = delete_instance_in_glyphs(GLYPHS_PATH, instance_name)
+            if not glyphs_deleted:
+                return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
+
         # Delete from preview CSV if it exists
         csv_path = _get_preview_csv_path()
         if csv_path and csv_path.exists():
@@ -2535,7 +2541,12 @@ def delete_instance(instance_name: str):
         rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
         rebuild_thread.start()
         
-        return jsonify({"success": True, "message": f"Deleted instance '{instance_name}' from Glyphs file and CSV"})
+        msg = (
+            f"Deleted instance '{instance_name}' from CSV (source untouched)"
+            if csv_only_flag
+            else f"Deleted instance '{instance_name}' from source file and CSV"
+        )
+        return jsonify({"success": True, "message": msg})
     except Exception as e:
         import traceback
         traceback.print_exc()

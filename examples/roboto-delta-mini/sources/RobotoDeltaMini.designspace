@@ -1,67 +1,278 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <designspace format="5.0">
   <axes>
-    <axis tag="wght" name="Weight" minimum="100" maximum="900" default="400"/>
     <axis tag="XOUC" name="XOUC" minimum="2" maximum="310" default="96"/>
     <axis tag="YOUC" name="YOUC" minimum="2" maximum="280" default="79"/>
     <axis tag="XTUC" name="XTUC" minimum="244" maximum="741" default="463"/>
+    <axis tag="XOLC" name="XOLC" minimum="2" maximum="310" default="96"/>
+    <axis tag="YOLC" name="YOLC" minimum="2" maximum="280" default="79"/>
+    <axis tag="XTLC" name="XTLC" minimum="244" maximum="741" default="463"/>
+    <axis tag="XOFI" name="XOFI" minimum="2" maximum="310" default="96"/>
+    <axis tag="YOFI" name="YOFI" minimum="2" maximum="280" default="79"/>
+    <axis tag="XTFI" name="XTFI" minimum="244" maximum="741" default="463"/>
   </axes>
   <sources>
     <source filename="RobotoDeltaMini-Default.ufo" familyname="Roboto Delta Mini" stylename="Default">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="96"/>
         <dimension name="YOUC" xvalue="79"/>
         <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XOUC2.ufo" familyname="Roboto Delta Mini" stylename="XOUC2">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="2"/>
         <dimension name="YOUC" xvalue="79"/>
         <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XOUC310.ufo" familyname="Roboto Delta Mini" stylename="XOUC310">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="310"/>
         <dimension name="YOUC" xvalue="79"/>
         <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-YOUC2.ufo" familyname="Roboto Delta Mini" stylename="YOUC2">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="96"/>
         <dimension name="YOUC" xvalue="2"/>
         <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-YOUC280.ufo" familyname="Roboto Delta Mini" stylename="YOUC280">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="96"/>
         <dimension name="YOUC" xvalue="280"/>
         <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XTUC244.ufo" familyname="Roboto Delta Mini" stylename="XTUC244">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="96"/>
         <dimension name="YOUC" xvalue="79"/>
         <dimension name="XTUC" xvalue="244"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
       </location>
     </source>
     <source filename="RobotoDeltaMini-XTUC741.ufo" familyname="Roboto Delta Mini" stylename="XTUC741">
       <location>
-        <dimension name="Weight" xvalue="400"/>
         <dimension name="XOUC" xvalue="96"/>
         <dimension name="YOUC" xvalue="79"/>
         <dimension name="XTUC" xvalue="741"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XOLC2.ufo" familyname="Roboto Delta Mini" stylename="XOLC2">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="2"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XOLC310.ufo" familyname="Roboto Delta Mini" stylename="XOLC310">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="310"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-YOLC2.ufo" familyname="Roboto Delta Mini" stylename="YOLC2">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="2"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-YOLC280.ufo" familyname="Roboto Delta Mini" stylename="YOLC280">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="280"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XTLC244.ufo" familyname="Roboto Delta Mini" stylename="XTLC244">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="244"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XTLC741.ufo" familyname="Roboto Delta Mini" stylename="XTLC741">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="741"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XOFI2.ufo" familyname="Roboto Delta Mini" stylename="XOFI2">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="2"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XOFI310.ufo" familyname="Roboto Delta Mini" stylename="XOFI310">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="310"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-YOFI2.ufo" familyname="Roboto Delta Mini" stylename="YOFI2">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="2"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-YOFI280.ufo" familyname="Roboto Delta Mini" stylename="YOFI280">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="280"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XTFI244.ufo" familyname="Roboto Delta Mini" stylename="XTFI244">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="244"/>
+      </location>
+    </source>
+    <source filename="RobotoDeltaMini-XTFI741.ufo" familyname="Roboto Delta Mini" stylename="XTFI741">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="741"/>
       </location>
     </source>
   </sources>
+  <instances>
+    <instance name="Default" familyname="Roboto Delta Mini" stylename="Default">
+      <location>
+        <dimension name="XOUC" xvalue="96"/>
+        <dimension name="YOUC" xvalue="79"/>
+        <dimension name="XTUC" xvalue="463"/>
+        <dimension name="XOLC" xvalue="96"/>
+        <dimension name="YOLC" xvalue="79"/>
+        <dimension name="XTLC" xvalue="463"/>
+        <dimension name="XOFI" xvalue="96"/>
+        <dimension name="YOFI" xvalue="79"/>
+        <dimension name="XTFI" xvalue="463"/>
+      </location>
+    </instance>
+  </instances>
 </designspace>

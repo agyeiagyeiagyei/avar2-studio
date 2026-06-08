@@ -140,12 +140,20 @@ def read_csv_mappings_with_axes(
                 f"CSV must include '{name_col}' column. Found: {normalized_fieldnames}"
             )
 
+        # Classify each CSV column as parametric (out) or traditional (in).
+        # An axis is *parametric* iff it's declared in the source AND has
+        # master coverage. Source axes WITHOUT master coverage are still
+        # avar2 mapping inputs — they only exist to be routed via the
+        # avar2 table — so they go in in_cols and surface in the
+        # AVAR2 MAPPINGS UI section.
         parametric_axis_tags: set = set()
         if source_path and source_path.exists():
             try:
                 font, _fmt = source_font.load_source(source_path)
                 parametric_axis_tags = {
-                    axis["tag"].upper() for axis in source_font.get_axes(font)
+                    axis["tag"].upper()
+                    for axis in source_font.get_axes(font)
+                    if axis.get("has_master_coverage", True)
                 }
             except Exception as e:
                 print(
@@ -208,8 +216,12 @@ def update_csv_from_glyphs(
         for coords in glyphs_instances.values():
             all_axes.update(coords.keys())
 
-        csv_axes = set(fieldnames) - {name_col}
-        new_axes = all_axes - csv_axes
+        # Case-insensitive compare: bootstrap writes uppercase columns
+        # (WGHT) while source axis tags are usually lowercase (wght).
+        # Without the casefold, the sync would append wght alongside
+        # WGHT and the CSV ends up with two columns for the same axis.
+        csv_axes_ci = {c.upper(): c for c in fieldnames if c != name_col}
+        new_axes = {a for a in all_axes if a.upper() not in csv_axes_ci}
 
         if new_axes:
             print(
@@ -217,11 +229,18 @@ def update_csv_from_glyphs(
                 file=sys.stderr,
             )
             fieldnames = list(fieldnames) + sorted(new_axes)
+            # Refresh the CI map so subsequent lookups find the freshly
+            # appended columns too.
+            for col in sorted(new_axes):
+                csv_axes_ci[col.upper()] = col
             for row in csv_rows:
                 for axis in new_axes:
                     row[axis] = ""
 
-        existing_axes = all_axes & csv_axes
+        # All axes that resolve to a CSV column (any case) — used for the
+        # write loop below so we update WGHT-column for an axis tagged
+        # wght instead of creating a parallel wght column.
+        existing_axes = {a for a in all_axes if a.upper() in csv_axes_ci}
         if existing_axes:
             print(
                 f"Syncing existing axes from source file: {sorted(existing_axes)}",
@@ -253,12 +272,18 @@ def update_csv_from_glyphs(
             if instance_name in glyphs_coords:
                 coords = glyphs_coords[instance_name]
                 for axis in all_axes:
-                    if axis in fieldnames and axis in coords:
-                        old_value = row.get(axis, "")
-                        new_value = str(coords[axis])
-                        if old_value != new_value:
-                            row[axis] = new_value
-                            updated_count += 1
+                    if axis not in coords:
+                        continue
+                    # Resolve to whatever case the CSV column has — keeps
+                    # WGHT and wght from coexisting in the same file.
+                    col = csv_axes_ci.get(axis.upper())
+                    if not col:
+                        continue
+                    old_value = row.get(col, "")
+                    new_value = str(coords[axis])
+                    if old_value != new_value:
+                        row[col] = new_value
+                        updated_count += 1
                 updated_rows.append(row)
                 glyphs_instance_names.discard(instance_name)
             else:

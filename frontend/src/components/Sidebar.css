@@ -215,36 +215,46 @@
   border-top: none;
 }
 
+/* Same visual treatment as ``.axis-group-heading`` (Core / parametric
+   axes header) so the two sidebar sections read as siblings. */
 .avar2-section-title {
-  font-size: 0.6375rem;
-  font-family: monospace;
-  font-weight: 500;
-  margin-bottom: 1rem;
-  color: #666;
+  font-size: 0.7rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
+  color: #555;
+  margin: 0 0 0.6rem 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #eee;
 }
 
 .traditional-axes-list {
+  /* 3-column grid of compact cells. Each cell stacks the axis label
+     above its value so we fit three axes (wght / wdth / opsz, or
+     wght / SPAC / a third) per row without truncating the inputs. */
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem 0.5rem;
 }
 
+/* Stack: label on top, value (or input) on the bottom — same as the
+   font-size cell above. */
 .traditional-axis-item {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 0.2rem;
 }
 
 .traditional-axis-tag {
   font-family: monospace;
-  font-size: 0.6375rem;
+  font-size: 0.65rem;
+  font-weight: 600;
   color: #666;
-  background-color: #f0f0f0;
-  padding: 0.2rem 0.4rem;
-  border-radius: 3px;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  text-align: left;
 }
 
 .traditional-axis-tag.clickable {
@@ -257,16 +267,19 @@
 }
 
 .traditional-axis-value {
-  font-size: 0.6375rem;
+  font-size: 0.78rem;
   font-family: monospace;
   font-weight: 600;
   color: #333;
+  text-align: left;
 }
 
 .traditional-axis-value.clickable {
   cursor: pointer;
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
+  background: #f5f5f5;
+  border: 1px solid #e5e5e5;
   transition: background-color 0.2s;
 }
 
@@ -287,7 +300,7 @@
 }
 
 .traditional-axis-value-input {
-  font-size: 0.6375rem;
+  font-size: 0.75rem;
   font-family: monospace;
   font-weight: 600;
   color: #333;
@@ -297,6 +310,8 @@
   width: 100%;
   box-sizing: border-box;
   background-color: white;
+  /* The cell is ~80-90px wide in the 3-col layout, which fits 5-6
+     digits comfortably. No need to float the input outside the cell. */
 }
 
 .traditional-axis-value-input:focus {
@@ -328,9 +343,7 @@
 }
 
 .avar2-add-axis-section {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #e0e0e0;
+  margin-top: 0.8rem;
 }
 
 .btn-add-axis {
@@ -522,4 +535,140 @@
 .btn-apply-spac-inline:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.axis-group {
+  margin-bottom: 1rem;
+}
+
+.axis-group-heading {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #555;
+  margin: 0 0 0.6rem 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.axis-group-avar2 .axis-group-heading {
+  color: #6b3d00;
+}
+
+.axis-group-heading-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #6b3d00;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 50%;
+  cursor: help;
+  text-transform: none;
+}
+
+.axis-entry-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #eee;
+}
+
+.axis-entry-btn {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  color: #444;
+  cursor: pointer;
+}
+
+.axis-entry-btn:hover {
+  background: #f3f3f3;
+  border-color: #999;
+}
+
+.new-instance-button-section {
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #eee;
+}
+
+.btn-new-instance {
+  width: 100%;
+  padding: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #fff;
+  color: #2c5aa0;
+  border: 1px solid #c8d4eb;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-new-instance:hover {
+  background: #eef3fb;
+  border-color: #2c5aa0;
+}
+
+.avar2-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 0.6rem 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #eee;
+  gap: 0.5rem;
+}
+
+/* Heading inside the new header strip overrides the standalone style. */
+.avar2-section-header .avar2-section-title {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.btn-add-axis-inline {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c8d4eb;
+  background: #fff;
+  color: #2c5aa0;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-add-axis-inline:hover {
+  background: #eef3fb;
+  border-color: #2c5aa0;
+}
+
+.avar2-empty-hint {
+  font-size: 0.7rem;
+  color: #777;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.traditional-axis-value-placeholder {
+  color: #bbb;
+  font-style: normal;
+  background: transparent;
+  border: 1px dashed #ddd;
+  text-align: center;
+  cursor: default;
 }

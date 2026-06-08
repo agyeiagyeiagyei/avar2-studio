@@ -107,3 +107,29 @@
   border-color: #0056b3;
   box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
+
+.axis-control-empty .axis-name,
+.axis-control-empty .axis-tag {
+  color: #999;
+}
+
+.axis-control-empty .axis-slider {
+  cursor: not-allowed;
+}
+
+.axis-control-empty .axis-current,
+.axis-control-empty .axis-min,
+.axis-control-empty .axis-max {
+  color: #aaa;
+}
+
+.axis-empty-prompt {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+  color: #6b3d00;
+  background: #fff8e1;
+  border: 1px solid #ffe69c;
+  border-radius: 3px;
+  line-height: 1.35;
+}

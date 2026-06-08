@@ -2,9 +2,12 @@
  * API client for Glyphs Preview Server
  */
 
-// Use full backend URL in production, or proxy path in development
-const API_BASE = process.env.REACT_APP_API_URL || 
-  (process.env.NODE_ENV === 'production' ? 'http://localhost:5001/api' : '/api');
+// Always hit the same origin the React bundle was served from — the
+// Flask backend serves both the UI and the API on whatever --port the
+// user picked. The old production branch hardcoded localhost:5001 and
+// broke any non-default port. REACT_APP_API_URL still wins so the
+// dev-server-on-3000 + backend-on-5001 split workflow keeps working.
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
 // Helper to parse JSON response with error handling
 async function parseJSON(response) {
@@ -93,7 +96,7 @@ export const api = {
     return parseJSON(response);
   },
 
-  async buildAvar2Font(traditionalAxes, avar2Axes, includeSpac) {
+  async buildAvar2Font(traditionalAxes, avar2Axes) {
     const response = await fetch(`${API_BASE}/build-avar2`, {
       method: 'POST',
       headers: {
@@ -102,7 +105,6 @@ export const api = {
       body: JSON.stringify({
         traditional_axes: traditionalAxes,
         avar2_axes: avar2Axes,
-        include_spac: includeSpac,
       }),
     });
     if (!response.ok) {
@@ -135,8 +137,13 @@ export const api = {
     return parseJSON(response);
   },
 
-  async updateInstance(instanceName, coordinates) {
-    const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}`, {
+  async updateInstance(instanceName, coordinates, options = {}) {
+    // ``options.csvOnly`` adds ``?csv_only=true`` so the server skips
+    // the source-file writeback. The flyout uses this for the "Update
+    // in avar2-studio" action: tweak the CSV row (and the avar2 mapping
+    // it represents) without touching .glyphs / .designspace.
+    const qs = options.csvOnly ? '?csv_only=true' : '';
+    const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}${qs}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -173,8 +180,12 @@ export const api = {
     return parseJSON(response);
   },
 
-  async deleteInstance(instanceName) {
-    const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}`, {
+  async deleteInstance(instanceName, options = {}) {
+    // ``options.csvOnly`` adds ``?csv_only=true`` so the server skips
+    // the source-file delete. Used for studio-only rows (which don't
+    // exist in the source) and the "unmap" path on source rows.
+    const qs = options.csvOnly ? '?csv_only=true' : '';
+    const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}${qs}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -264,58 +275,10 @@ export const api = {
     return parseJSON(response);
   },
 
-  async checkSpacAxis() {
-    const response = await fetch(`${API_BASE}/spacing/check`);
-    if (!response.ok) {
-      throw new Error(`Failed to check SPAC axis: ${response.status} ${response.statusText}`);
-    }
-    return parseJSON(response);
-  },
-
-  async getSpacValues() {
-    const response = await fetch(`${API_BASE}/spacing/values`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch SPAC values: ${response.status} ${response.statusText}`);
-    }
-    return parseJSON(response);
-  },
-
-  async initSpacAxis() {
-    const response = await fetch(`${API_BASE}/spacing/init`, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      const error = await parseJSON(response).catch(() => ({ error: `Failed to initialize SPAC axis: ${response.status}` }));
-      throw new Error(error.error || `Failed to initialize SPAC axis: ${response.status} ${response.statusText}`);
-    }
-    return parseJSON(response);
-  },
-
-  async updateSpacValue(instanceName, value) {
-    const response = await fetch(`${API_BASE}/spacing/instance/${encodeURIComponent(instanceName)}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ value }),
-    });
-    if (!response.ok) {
-      const error = await parseJSON(response).catch(() => ({ error: `Failed to update SPAC value: ${response.status}` }));
-      throw new Error(error.error || `Failed to update SPAC value: ${response.status} ${response.statusText}`);
-    }
-    return parseJSON(response);
-  },
-
-  async rebuildPreviewFont() {
-    const response = await fetch(`${API_BASE}/spacing/rebuild`, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      const error = await parseJSON(response).catch(() => ({ error: `Failed to rebuild preview font: ${response.status}` }));
-      throw new Error(error.error || `Failed to rebuild preview font: ${response.status} ${response.statusText}`);
-    }
-    return parseJSON(response);
-  },
+  // SPAC API methods (checkSpacAxis, getSpacValues, initSpacAxis,
+  // updateSpacValue, rebuildPreviewFont) were removed when SPAC support
+  // was deferred. The dormant backend endpoints under /api/spacing/*
+  // can be re-exposed here when the axis lands.
 
   async registerEditingInstance(instanceName) {
     const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}/editing`, {

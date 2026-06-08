@@ -3,7 +3,7 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, spacMode, spacAxisExists, syncStatus = 'green', onRename, onUpdateInstance, onAddToSource, calculateAdvanceWidth, spacValues, advanceWidthLoading, currentAdvanceWidth }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -21,13 +21,8 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
     ? editingCoordinates
     : (instanceEditingCoordinates[instance.name] || instance.coordinates);
   
-  // Add SPAC to coordinates if spacMode is enabled
+  // SPAC support is deferred — the coordinate dict is rendered as-is.
   const coordinatesForWidth = { ...activeCoordinates };
-  if (spacMode && spacValues && spacValues[instance.name] !== undefined) {
-    coordinatesForWidth.SPAC = spacValues[instance.name];
-  } else if (spacMode && activeCoordinates.SPAC === undefined) {
-    coordinatesForWidth.SPAC = 0;
-  }
   
   // Calculate advance width for this instance
   // If this is the selected instance and we have an exact API value, use it
@@ -49,8 +44,8 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
     }
   }, [calculateAdvanceWidth, fontLoaded, coordinatesForWidth, sampleText, instance.name, isSelected, currentAdvanceWidth]);
   
-  // Build font-variation-settings string
-  // SPAC is now included in activeCoordinates if spacMode is enabled
+  // Build font-variation-settings string from whatever axes the
+  // source declares.
   let fontVariationSettings = Object.entries(activeCoordinates)
     .map(([tag, value]) => `"${tag}" ${value}`)
     .join(', ');
@@ -114,12 +109,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               }}
               title={isSelected && onRename ? "Click to edit name" : ""}
             >
+              {/* Origin marker (SRC badge) is rendered next to the
+                  sync-status dot in instance-header-right — see below.
+                  Studio-only rows get no badge: "no badge" already
+                  reads as studio-only since SRC is the affordance. */}
               {instance.name}
-              {isStudioOnly && (
-                <span className="studio-only-badge" title="Studio-only instance — lives in the CSV; not in the source file. Click 'Add to source' to promote it.">
-                  studio-only
-                </span>
-              )}
             </h3>
           )}
         </div>
@@ -159,52 +153,32 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               🗑️
             </button>
           )}
-          {isStudioOnly && onAddToSource && (
-            <button
-              className="add-to-source-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isSelected) {
-                  onAddToSource(instance.name);
-                }
-              }}
-              title="Add this studio-only instance to the source file's instance list"
-              style={{ visibility: isSelected ? 'visible' : 'hidden' }}
+          {/* The standalone ＋src promote button was removed — the
+              flyout's "Add to source file" option (visible whenever
+              a studio-only row has a pending edit) is the single
+              save path. Nudge any axis to surface the flyout. */}
+          {/* SRC badge — shown only for source-defined rows. Sits
+              immediately left of the sync-status dot so the user can
+              read both the persistence-location and the
+              edited/saved status as a single visual block. Studio-only
+              rows get no badge (absence == studio). */}
+          {!isStudioOnly && (
+            <span
+              className="origin-badge origin-badge-source"
+              title="Source-defined instance — this row is declared in the .glyphs / .designspace source file. Saving from the flyout's 'Save to source file' option writes any edited coordinates back into that file. Removing the SRC badge means the row exists only in the avar2 mapping CSV."
+              aria-label="source-defined instance"
             >
-              ＋src
-            </button>
+              SRC
+            </span>
           )}
-          <div className="instance-coordinates">
-            {Object.entries(activeCoordinates).map(([tag, value]) => (
-              <span key={tag} className="coordinate">
-                {tag}: {formatAxisValue(value)}
-              </span>
-            ))}
-            {/* Show SPAC coordinate when SPAC mode is enabled */}
-            {spacMode && spacAxisExists && activeCoordinates.SPAC !== undefined && (
-              <span className="coordinate">
-                SPAC: {formatAxisValue(activeCoordinates.SPAC)}
-              </span>
-            )}
-            {/* Show advance width */}
-            {advanceWidthLoading ? (
-              <span className="coordinate advance-width-coordinate advance-width-loading">
-                <span className="advance-width-spinner"></span>
-                Calculating...
-              </span>
-            ) : advanceWidth !== null && advanceWidth !== undefined ? (
-              <span className="coordinate advance-width-coordinate">
-                Width: {typeof advanceWidth === 'number' ? Math.round(advanceWidth) : advanceWidth} units
-              </span>
-            ) : null}
-          </div>
-          <div 
+          {/* Coordinates moved below the sample text — see render-end. */}
+          <div
             className="sync-status-dot-wrapper"
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
               e.nativeEvent?.stopImmediatePropagation();
-              if (syncStatus === 'orange' && onUpdateInstance) {
+              if (syncStatus === 'orange' && onUpdateInstanceStudio) {
                 setShowFlyout(true);
               }
             }}
@@ -219,7 +193,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               e.preventDefault();
             }}
             style={{
-              cursor: syncStatus === 'orange' && onUpdateInstance ? 'pointer' : 'default',
+              cursor: syncStatus === 'orange' && onUpdateInstanceStudio ? 'pointer' : 'default',
               display: 'inline-flex',
               alignItems: 'center',
               position: 'relative',
@@ -239,7 +213,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
                 pointerEvents: 'auto'
               }}
             ></span>
-            {showFlyout && syncStatus === 'orange' && onUpdateInstance && dotRef.current && rowRef.current && (() => {
+            {showFlyout && syncStatus === 'orange' && onUpdateInstanceStudio && dotRef.current && rowRef.current && (() => {
               // Calculate position relative to instance row bounds
               const dotRect = dotRef.current.getBoundingClientRect();
               const rowRect = rowRef.current.getBoundingClientRect();
@@ -309,14 +283,10 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               return (
                 <InstanceFlyout
                   isOpen={showFlyout}
-                  onClose={() => {
-                    setShowFlyout(false);
-                  }}
-                  onUpdateInstance={() => {
-                    // Update this specific instance by name
-                    onUpdateInstance(instance.name);
-                  }}
-                  instanceName={instance.name}
+                  onClose={() => setShowFlyout(false)}
+                  onUpdateStudio={onUpdateInstanceStudio}
+                  onUpdateSource={onUpdateInstanceSource}
+                  instanceOrigin={instance.origin || 'source'}
                   position={positionObj}
                 />
               );
@@ -392,6 +362,23 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
           }}
         >
           {sampleText}
+        </div>
+        <div className="instance-coordinates">
+          {Object.entries(activeCoordinates).map(([tag, value]) => (
+            <span key={tag} className="coordinate">
+              {tag}: {formatAxisValue(value)}
+            </span>
+          ))}
+          {advanceWidthLoading ? (
+            <span className="coordinate advance-width-coordinate advance-width-loading">
+              <span className="advance-width-spinner"></span>
+              Calculating...
+            </span>
+          ) : advanceWidth !== null && advanceWidth !== undefined ? (
+            <span className="coordinate advance-width-coordinate">
+              Width: {typeof advanceWidth === 'number' ? Math.round(advanceWidth) : advanceWidth} units
+            </span>
+          ) : null}
         </div>
       </div>
     </div>

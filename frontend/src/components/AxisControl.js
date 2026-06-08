@@ -85,8 +85,21 @@ function AxisControl({ axis, value, onChange, disabled }) {
     }
   }, [value, isEditing]);
 
+  // An axis with no master coverage has no gvar deltas — its slider
+  // would do nothing visible if we let the user move it. Disable the
+  // control entirely and surface a clear CTA telling the designer
+  // what's missing.
+  const emptyAxis = axis.has_master_coverage === false;
+  const effectiveDisabled = disabled || emptyAxis;
+  const emptyTooltip = emptyAxis
+    ? `${axis.tag} has no master coverage. Add a master at an extreme value (in Glyphs.app or the .designspace) to enable this slider.`
+    : undefined;
+
   return (
-    <div className="axis-control">
+    <div
+      className={`axis-control${emptyAxis ? " axis-control-empty" : ""}`}
+      title={emptyTooltip}
+    >
       <div className="axis-header">
         <label className="axis-name">{axis.name}</label>
         <span className="axis-tag">{axis.tag}</span>
@@ -99,7 +112,7 @@ function AxisControl({ axis, value, onChange, disabled }) {
           step={0.1}
           value={value}
           onChange={handleSliderChange}
-          disabled={disabled}
+          disabled={effectiveDisabled}
           className="axis-slider"
         />
         <div className="axis-values">
@@ -113,19 +126,24 @@ function AxisControl({ axis, value, onChange, disabled }) {
               onChange={handleInputChange}
               onBlur={handleInputBlur}
               onKeyDown={handleInputKeyDown}
-              disabled={disabled}
+              disabled={effectiveDisabled}
             />
           ) : (
-            <span 
-              className="axis-current axis-current-clickable"
-              onClick={handleValueClick}
-              title="Click to edit value"
+            <span
+              className={`axis-current${emptyAxis ? "" : " axis-current-clickable"}`}
+              onClick={emptyAxis ? undefined : handleValueClick}
+              title={emptyTooltip || "Click to edit value"}
             >
               {formatAxisValue(value)}
             </span>
           )}
           <span className="axis-max">{axis.max}</span>
         </div>
+        {emptyAxis && (
+          <div className="axis-empty-prompt">
+            Add a master at an extreme value to enable this axis.
+          </div>
+        )}
       </div>
     </div>
   );

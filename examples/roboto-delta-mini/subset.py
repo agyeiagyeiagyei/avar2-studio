@@ -27,10 +27,15 @@ from xml.etree import ElementTree as ET
 SOURCES_DIR = Path("/tmp/roboto-delta-mini/sources")
 
 DIGIT_NAMES = {"zero","one","two","three","four","five","six","seven","eight","nine"}
+# Composite-glyph dependencies: i and j in Roboto Delta have zero
+# contours and only reference idotless/jdotless/idot via <component>
+# — keeping the parent without these renders the glyph as blank.
+COMPOSITE_DEPS = {"idotless", "jdotless", "idot"}
 KEEP_GLYPHS = (
     set(string.ascii_uppercase)
     | set(string.ascii_lowercase)
     | DIGIT_NAMES
+    | COMPOSITE_DEPS
     | {".notdef", "space"}
 )
 

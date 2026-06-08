@@ -23,6 +23,32 @@ support alongside `.glyphs`, plus a two-tier instance model that
 keeps exploratory grid points out of the designer's source file.
 Not yet on PyPI.
 
+## How it works
+
+A parametric font doesn't ship a `Regular` or `Bold` knob — it ships
+axes that describe *the shape of the strokes*: `XOPQ` for vertical
+stroke thickness, `YOPQ` for horizontal, `XTRA` for counter width
+(and similar). End users want familiar `wght` / `wdth` / `opsz`
+sliders, not those. avar2-studio's job is to translate "what a
+designer would call a style" into "where in parametric space that
+style lives," and emit an avar2 mapping table that connects the two.
+
+In practice: you point avar2-studio at a `.glyphs` or `.designspace`,
+author named instances (`Regular Condensed`, `Bold`, `Thin
+Extended`, …) by tuning their parametric coordinates in the UI, and
+the build pipeline writes an avar2 table that makes a user-facing
+`wght=400` slider resolve to the parametric point you chose. Each
+instance is one row in a sibling `{FamilyName}-avar.csv`; a usable
+designspace is a few dozen of those rows spanning the design grid.
+
+[docs/authoring-instances.md](./docs/authoring-instances.md) is the
+single reference for this workflow. It walks both approaches —
+[`examples/crispy-mini`](./examples/crispy-mini/)'s unified three-axis
+layout and [`examples/roboto-delta-mini`](./examples/roboto-delta-mini/)'s
+case-split nine-axis layout — with animations of each, the
+parametric-coords-per-instance tables, and a heuristic for picking
+between them on your own source.
+
 ## Install
 
 ```bash

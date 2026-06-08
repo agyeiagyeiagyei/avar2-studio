@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, spacMode, spacAxisExists, getInstanceSyncStatus, onRenameInstance, onUpdateInstance, onAddToSource, calculateAdvanceWidth, spacValues, advanceWidthLoading, currentAdvanceWidth }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -134,14 +134,11 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             onDelete={onDeleteInstance}
             onMove={onMoveInstance}
             allInstances={instances}
-            spacMode={spacMode}
-            spacAxisExists={spacAxisExists}
             syncStatus={getInstanceSyncStatus ? getInstanceSyncStatus(instance) : 'green'}
             onRename={onRenameInstance}
-            onUpdateInstance={onUpdateInstance ? () => onUpdateInstance(instance.name) : undefined}
-            onAddToSource={onAddToSource}
+            onUpdateInstanceStudio={onUpdateInstanceStudio ? () => onUpdateInstanceStudio(instance.name) : undefined}
+            onUpdateInstanceSource={onUpdateInstanceSource ? () => onUpdateInstanceSource(instance) : undefined}
             calculateAdvanceWidth={calculateAdvanceWidth}
-            spacValues={spacValues}
             advanceWidthLoading={advanceWidthLoading}
             currentAdvanceWidth={selectedInstance?.name === instance.name ? currentAdvanceWidth : null}
           />

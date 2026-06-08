@@ -18,7 +18,7 @@ both:
 | Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOUC`, `YOUC`, `XTUC` (uppercase-scoped) |
 | Author intent | "One stroke axis describes the whole font" | "Caps and lowercase need independent optical tuning" |
 | Slider effect | Every glyph responds | Only uppercase responds |
-| Pre-defined instances | 29 (`Thin Condensed`, …, `Black`) | 0 |
+| Pre-defined instances | 1 (`Default` at first master) | 1 (`Default` at first master) |
 | Glyph count | 64 (A–Z, a–z, 0–9, space + auto `.notdef`) | 64 (same) |
 
 **Crispy's even-tone design** lets one set of axes (`XOPQ` / `YOPQ` /
@@ -41,5 +41,10 @@ output VF gets an avar2 table mapping `wght` to a coherent parametric
 location, and the same UI affordances (create studio-only instance,
 add to source, edit coords) apply.
 
-See each fixture's README for axes table, glyph coverage, how it was
-made, and a sample CSV mapping for authoring.
+The parametric → stylistic workflow — covering both fixtures, with
+animations of each — lives in
+[../docs/authoring-instances.md](../docs/authoring-instances.md).
+
+The fixture READMEs below stay focused on what each example *is*:
+axes table, glyph coverage, and how the subset was assembled from
+upstream.

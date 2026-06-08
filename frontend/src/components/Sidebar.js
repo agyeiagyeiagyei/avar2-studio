@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Sidebar.css';
 import AxisControl from './AxisControl';
-import SpacAxisControl from './SpacAxisControl';
+// SPAC support is deferred from v1; the SpacAxisControl import was
+// removed alongside the SPAC mode toggle and the spac-error-state UI.
 import DuplicateModal from './DuplicateModal';
 import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onUpdateAllInstances, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, spacMode, spacAxisExists, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false }) {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
   const [showEditAxisModal, setShowEditAxisModal] = useState(false);
   const [editingAxisName, setEditingAxisName] = useState(null);
@@ -49,7 +51,11 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
     );
   }, [selectedInstance, coordinates, originalCoordinates]);
   
-  const duplicateButtonText = coordinatesChanged ? "Add New Instance" : "Duplicate Instance";
+  // Always show "Duplicate Instance" — this button literally opens the
+  // Duplicate modal. The historical rename to "Add New Instance" when
+  // the row had pending edits was misleading once the proper
+  // "+ New Instance" button below AVAR2 MAPPINGS landed.
+  const duplicateButtonText = "Duplicate Instance";
   
   return (
     <aside className="sidebar">
@@ -153,27 +159,11 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
       </div>
       
       <div className="axis-controls">
-        {axes.map(axis => {
-          // Skip SPAC axis if spacMode is OFF
-          if ((axis.tag === 'SPAC' || axis.tag === 'spac') && !spacMode) {
-            return null;
-          }
-          
-          // Render SPAC axis - now uses same pattern as other axes (no Apply button)
-          // SPAC preview uses font-variation-settings (not letter-spacing) for accurate rendering
-          if ((axis.tag === 'SPAC' || axis.tag === 'spac') && spacMode) {
-            return (
-              <SpacAxisControl
-                key={axis.tag}
-                axis={axis}
-                value={coordinates[axis.tag] ?? axis.default}
-                onChange={(value) => onAxisChange(axis.tag, value)}
-                disabled={disabled}
-              />
-            );
-          }
-          // Render other axes normally
-          return (
+        {(() => {
+          // Every axis renders as a plain AxisControl. SPAC support is
+          // deferred; if a source happens to declare a SPAC axis it just
+          // renders as a normal parametric/avar2 axis with no special UX.
+          const renderAxis = (axis) => (
             <AxisControl
               key={axis.tag}
               axis={axis}
@@ -182,100 +172,126 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
               disabled={disabled}
             />
           );
-        })}
-        
-        {/* SPAC error state - when toggle is ON but axis doesn't exist */}
-        {spacMode && !spacAxisExists && (
-          <div className="spac-error-state">
-            <div>SPAC axis not available. Click toggle to initialize.</div>
-          </div>
-        )}
+
+          // Sidebar only renders the axes that actively deform the font
+          // (has_master_coverage=true). Empty axes — the avar2 mapping
+          // targets like ``wght`` — live in the AVAR2 MAPPINGS section
+          // below where they belong conceptually (with the mapping rows
+          // that drive them), not duplicated up here.
+          const coreAxes = axes.filter(a => a.has_master_coverage !== false);
+
+          return (
+            <>
+              {coreAxes.length > 0 && (
+                <div className="axis-group">
+                  <h3 className="axis-group-heading">Core / parametric axes</h3>
+                  {coreAxes.map(renderAxis)}
+                </div>
+              )}
+
+            </>
+          );
+        })()}
       </div>
       
-      {avar2Mode && selectedInstance && (() => {
+      {avar2Mode && (() => {
         // Check if there are any traditional axes in the CSV
         const hasTraditionalAxes = avar2Axes?.traditional_axes?.columns && avar2Axes.traditional_axes.columns.length > 0;
-        
+
         return (
         <div className="avar2-traditional-axes">
-          <h3 className="avar2-section-title">AVAR2 MAPPINGS</h3>
+          {/* Heading row: title left, compact "+ Add" button right. The
+              button is the canonical entry point for declaring a new
+              traditional/input axis (wdth, opsz, …). The section header
+              is always visible — even without a selected instance —
+              so the user knows where the mapping rows live. */}
+          <div className="avar2-section-header">
+            <h3 className="avar2-section-title">AVAR2 MAPPINGS</h3>
+            <button
+              className="btn-add-axis-inline"
+              onClick={() => setShowAddAxisModal(true)}
+              title="Declare a new traditional / avar2-input axis (e.g. wdth, opsz) that the mapping table will route into parametric coords"
+            >
+              + Add
+            </button>
+          </div>
           {(() => {
             // Show loading state if data is not ready yet
             if (!avar2Axes || avar2Instances.length === 0) {
               return <div className="avar2-loading">Loading mappings...</div>;
             }
-            
-            // If no traditional axes exist, show "Add Axis" button
+
+            // If no traditional axes exist, the inline + Add button in
+            // the heading is the only entry point.
             if (!hasTraditionalAxes) {
               return (
-                <>
-                  <hr className="sidebar-separator" />
-                  <div className="avar2-add-axis-section">
-                    <button
-                      className="btn btn-add-axis"
-                      onClick={() => {
-                        setShowAddAxisModal(true);
-                      }}
-                    >
-                      + Add Axis
-                    </button>
-                  </div>
-                </>
+                <div className="avar2-empty-hint">
+                  No mapping axes yet. Use <strong>+ Add</strong> above to declare one (wdth, opsz, …).
+                </div>
+              );
+            }
+
+            // No instance selected: render the same axis grid with empty
+            // value cells so the user sees what mapping inputs exist
+            // without committing to a row.
+            if (!selectedInstance) {
+              const columns = avar2Axes?.traditional_axes?.columns || [];
+              return (
+                <div className="traditional-axes-list">
+                  {columns.filter(col => col.toUpperCase() !== 'SPAC').map(col => (
+                    <div key={col} className="traditional-axis-item">
+                      <div className="traditional-axis-tag">{col}</div>
+                      <div className="traditional-axis-value traditional-axis-value-placeholder">
+                        —
+                      </div>
+                    </div>
+                  ))}
+                </div>
               );
             }
             
             const mapping = avar2Instances.find(
               inst => inst.instance_name === selectedInstance.name
             );
-            // Only show mappings if there are traditional axes (in:) to display
-            if (mapping && mapping.avar2_mapping && mapping.avar2_mapping.in && Object.keys(mapping.avar2_mapping.in).length > 0) {
-              const traditionalAxes = mapping.avar2_mapping.in;
+            // Iterate column-driven (instead of mapping-driven) so:
+            //   1. SPAC stays filtered out — the deferred axis would
+            //      otherwise sneak back in from the CSV's ``in:`` keys.
+            //   2. Rows with no avar2 mapping at all (e.g. the
+            //      ``…SmallOpsz`` instances Glyphs uses internally to
+            //      derive an optical-size master) still render the
+            //      column framework with ``—`` placeholders, instead
+            //      of collapsing the whole section to nothing.
+            {
+              const traditionalAxes = (mapping && mapping.avar2_mapping && mapping.avar2_mapping.in) || {};
               const metadata = avar2Axes?.metadata || {};
-              
-              // Get axis column names from metadata or use normalized tags
-              const axisColumns = avar2Axes?.traditional_axes?.columns || [];
-              
+              const axisColumns = (avar2Axes?.traditional_axes?.columns || [])
+                .filter(col => col.toUpperCase() !== 'SPAC');
+
+              if (axisColumns.length === 0) {
+                return (
+                  <div className="avar2-empty-hint">
+                    Mapping rows live in the sibling -avar.csv. This instance doesn't have one yet.
+                  </div>
+                );
+              }
+
+              // Column → normalized-tag map. Mirrors the inverse map
+              // used previously when iteration was mapping-driven.
+              const columnToTagMap = {
+                'WGHT': 'wght',
+                'WDTH': 'wdth',
+                'OPSZ': 'opsz',
+                'CNTR': 'cntr',
+                'CONTRAST': 'cntr',
+              };
+
               return (
                 <>
                   <div className="traditional-axes-list">
-                    {Object.entries(traditionalAxes)
-                      .filter(([tag]) => {
-                        // Exclude SPAC from avar2 mappings
-                        const normalizedTag = tag.toLowerCase();
-                        return normalizedTag !== 'spac';
-                      })
-                      .map(([tag, value]) => {
-                      // Map normalized tag (wght, wdth, etc.) to CSV column name
-                      // The backend provides normalized tags in avar2_mapping.in, but we need CSV column names
-                      const tagToColumnMap = {
-                        'wght': 'WGHT',
-                        'wdth': 'WDTH', 
-                        'opsz': 'OPSZ',
-                        'cntr': 'CNTR'  // CNTR is the CSV column name
-                      };
-                      
-                      // Try to find CSV column by matching normalized tag
-                      let axisColumn = tagToColumnMap[tag] || tag.toUpperCase();
-                      
-                      // Skip SPAC column
-                      if (axisColumn === 'SPAC' || axisColumn === 'spac') {
-                        return null;
-                      }
-                      
-                      // If not found in map, try to find in columns by normalizing
-                      if (!axisColumns.includes(axisColumn)) {
-                        const found = axisColumns.find(col => {
-                          const normalized = col.toUpperCase().replace(/-E$/, '');
-                          const tagMap = { WGHT: 'wght', WDTH: 'wdth', OPSZ: 'opsz', CONTRAST: 'cntr', CNTR: 'cntr' };
-                          return tagMap[normalized] === tag;
-                        });
-                        if (found) axisColumn = found;
-                      }
-                      
-                      // Skip SPAC again after column lookup
-                      if (axisColumn === 'SPAC' || axisColumn === 'spac') {
-                        return null;
-                      }
+                    {axisColumns.map((axisColumn) => {
+                      const tag = columnToTagMap[axisColumn.toUpperCase()] || axisColumn.toLowerCase();
+                      const value = traditionalAxes[tag];
+                      const hasValue = value !== undefined && value !== null;
                       
                       // Use metadata from backend (which ensures all axes are in JSON)
                       // CSV column names (like "WGHT") are the keys in metadata
@@ -302,8 +318,8 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                       const axisMax = axisMeta?.max ?? 1000;
                       
                       return (
-                        <div key={tag} className="traditional-axis-item">
-                          <div 
+                        <div key={axisColumn} className="traditional-axis-item">
+                          <div
                             className={`traditional-axis-tag ${isParametricAxis ? '' : 'clickable'}`}
                             onClick={() => {
                               if (!isParametricAxis) {
@@ -316,7 +332,14 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                             {axisLabel}
                             {isParametricAxis && <span className="parametric-badge"> (Glyphs)</span>}
                           </div>
-                          {isEditing && !isParametricAxis ? (
+                          {!hasValue && !isEditing ? (
+                            <div
+                              className="traditional-axis-value traditional-axis-value-placeholder"
+                              title={`No avar2 mapping for "${axisColumn}" on this instance. SmallOpsz / internal-only rows in Glyphs aren't declared in the avar2 mapping CSV.`}
+                            >
+                              —
+                            </div>
+                          ) : isEditing && !isParametricAxis ? (
                             <input
                               type="number"
                               className="traditional-axis-value-input"
@@ -324,8 +347,15 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                               step="0.1"
                               autoFocus
                               ref={(input) => {
-                                // Select all text when input becomes focused
-                                if (input) {
+                                // Select only on first mount. An inline
+                                // ref callback runs on every render, so
+                                // unconditionally calling .select() here
+                                // re-selected the typed text on every
+                                // keystroke and the next character
+                                // replaced what was already there —
+                                // typing "700" only ever showed "0".
+                                if (input && !input.dataset.selected) {
+                                  input.dataset.selected = "1";
                                   input.select();
                                 }
                               }}
@@ -378,7 +408,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                                   });
                                 }
                               }}
-                              title={isParametricAxis ? "Parametric axis (from Glyphs file) - cannot edit" : `Click to edit (range: ${axisMeta.min} to ${axisMeta.max})`}
+                              title={isParametricAxis ? "Parametric axis (from Glyphs file) - cannot edit" : `Click to edit (range: ${axisMin} to ${axisMax})`}
                             >
                               {isSaving ? '...' : value.toFixed(1)}
                             </div>
@@ -390,75 +420,43 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                   {valueError && (
                     <div className="avar2-error-message">{valueError}</div>
                   )}
-                  <hr className="sidebar-separator" />
-                  <div className="avar2-add-axis-section">
-                    <button
-                      className="btn btn-add-axis"
-                      onClick={() => {
-                        setShowAddAxisModal(true);
-                      }}
-                    >
-                      Add Axis
-                    </button>
-                  </div>
                 </>
               );
             }
-            // No mapping for this instance, but traditional axes exist - show "Add Axis" button
-            return (
-              <>
-                <hr className="sidebar-separator" />
-                <div className="avar2-add-axis-section">
-                  <button
-                    className="btn btn-add-axis"
-                    onClick={() => {
-                      setShowAddAxisModal(true);
-                    }}
-                  >
-                    + Add Axis
-                  </button>
-                </div>
-              </>
-            );
           })()}
         </div>
         );
       })()}
       
-      {onUpdateAllInstances && (() => {
-        // Check if any instances have unsaved changes
-        const hasUnsavedChanges = instances && getInstanceSyncStatus
-          ? instances.some(instance => getInstanceSyncStatus(instance) === 'orange')
-          : false;
-        
-        return (
-          <div className="update-button-section">
-            <button
-              onClick={onUpdateAllInstances}
-              className="btn btn-update"
-              disabled={glyphsFileHasUnsavedChanges || !hasUnsavedChanges || building}
-              title={
-                glyphsFileHasUnsavedChanges
-                  ? "Save Glyphs file before updating instances"
-                  : !hasUnsavedChanges
-                  ? "No instances have unsaved changes"
-                  : building
-                  ? "Updating instances..."
-                  : "Update all instances with unsaved changes"
-              }
-            >
-              {building ? "Updating..." : "Update All Instances"}
-            </button>
-          </div>
-        );
-      })()}
-      
-      {!disabled && (
+      {/* New-instance entry point — sits right below AVAR2 MAPPINGS as
+          the primary "make a new row" action. Duplicate (below) is the
+          alternative path when an existing instance is selected. */}
+      {onCreateNewInstance && (
+        <div className="new-instance-button-section">
+          <button
+            onClick={() => setShowNewInstanceModal(true)}
+            className="btn btn-new-instance"
+            title="Create a fresh studio-only instance with values you specify per axis"
+          >
+            + New Instance
+          </button>
+        </div>
+      )}
+
+      {/* Update All Instances was removed in favor of singular updates
+          per row via the orange sync-dot flyout. Each instance saves
+          itself when the user clicks Update Instance there. */}
+
+
+      {/* Reset only renders when there's a row selected to reset.
+          Previously the section rendered with the button greyed out
+          whenever ``disabled`` was false, which still consumed
+          vertical space in the empty state. */}
+      {selectedInstance && !disabled && (
         <div className="reset-button-section">
           <button
             onClick={onResetCoordinates}
             className="btn btn-reset"
-            disabled={!selectedInstance}
           >
             Reset to Original
           </button>
@@ -484,6 +482,18 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           onDuplicateInstance(newName);
         }}
         instanceName={selectedInstance?.name || ''}
+      />
+
+      <DuplicateModal
+        isOpen={showNewInstanceModal}
+        onClose={() => setShowNewInstanceModal(false)}
+        onConfirm={(newName, newCoords) => {
+          setShowNewInstanceModal(false);
+          onCreateNewInstance(newName, newCoords);
+        }}
+        instanceName=""
+        mode="new"
+        axes={axes || []}
       />
       
       <AddAxisModal

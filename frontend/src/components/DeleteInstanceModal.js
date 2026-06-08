@@ -2,17 +2,21 @@ import React, { useState } from 'react';
 import './DeleteInstanceModal.css';
 
 function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsFileHasUnsavedChanges }) {
-  const [deleteFromGlyphs, setDeleteFromGlyphs] = useState(false);
+  // Default to deleting from source AND CSV — that's almost always
+  // what the user wants when they click the trash icon. The unchecked
+  // path keeps the source instance but removes its avar2 mapping row
+  // (useful when "unmapping" without losing the source-side instance).
+  const [deleteFromGlyphs, setDeleteFromGlyphs] = useState(true);
 
   if (!isOpen) return null;
 
   const handleConfirm = () => {
     onConfirm(deleteFromGlyphs);
-    setDeleteFromGlyphs(false); // Reset for next time
+    setDeleteFromGlyphs(true); // Reset for next open
   };
 
   const handleCancel = () => {
-    setDeleteFromGlyphs(false); // Reset
+    setDeleteFromGlyphs(true);
     onClose();
   };
 
@@ -21,20 +25,20 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
   return (
     <div className="modal-overlay" onClick={handleCancel}>
       <div className="delete-instance-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Delete Instance</h3>
+        <h3>Delete instance</h3>
         <p className="delete-instance-message">
           {deleteFromGlyphs
-            ? `Permanently delete instance "${instanceName}" from the Glyphs file and preview?`
-            : `Remove instance "${instanceName}" from preview?`}
+            ? `Delete "${instanceName}" from the source file and the avar2 mapping CSV.`
+            : `Remove "${instanceName}" from the avar2 mapping CSV. The source-file instance stays.`}
         </p>
         {deleteFromGlyphs && (
           <p className="delete-instance-warning">
-            ⚠️ This action cannot be undone. The instance will be permanently removed from the font file.
+            ⚠️ This rewrites your .glyphs / .designspace. Can't be undone from here.
           </p>
         )}
         {isDisabled && (
           <p className="delete-instance-error">
-            ⚠️ Cannot delete from Glyphs file: The file has unsaved changes. Please save the file first.
+            ⚠️ Glyphs file has unsaved changes. Save the file first, or uncheck the box below to keep the source instance.
           </p>
         )}
         <div className="delete-instance-checkbox">
@@ -45,7 +49,7 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
               onChange={(e) => setDeleteFromGlyphs(e.target.checked)}
               disabled={glyphsFileHasUnsavedChanges}
             />
-            <span>Also delete from Glyphs file</span>
+            <span>Also delete from the source file (.glyphs / .designspace)</span>
           </label>
         </div>
         <div className="delete-instance-buttons">
@@ -60,7 +64,7 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
             onClick={handleConfirm}
             disabled={isDisabled}
           >
-            {deleteFromGlyphs ? 'Delete Permanently' : 'Remove from Preview'}
+            {deleteFromGlyphs ? 'Delete from source + CSV' : 'Remove from CSV only'}
           </button>
         </div>
       </div>

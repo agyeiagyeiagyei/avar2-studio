@@ -17,6 +17,12 @@ axes (caps, lowercase, and figures get independent thick/thin/counter
 tuning) vs Crispy's unified `XOPQ`/`YOPQ`/`XTRA` (one set of axes
 deforms every glyph).
 
+The parametric → stylistic workflow walkthrough — including the
+animation morphing `Aa Bb 12` from Regular to Bold across all nine
+parametric axes — lives in the centralized
+[../../docs/authoring-instances.md](../../docs/authoring-instances.md)
+alongside the matching Crispy walkthrough.
+
 ## Why this exists
 
 Roboto Delta is the canonical real-world parametric font. The upstream

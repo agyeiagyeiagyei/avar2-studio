@@ -133,6 +133,11 @@ def _axes_from_glyphs(font: GSFont) -> List[Dict]:
             "min": lo,
             "max": hi,
             "default": lo,
+            # "Master coverage" = at least one master sits at a
+            # non-default position. When false the axis is declared but
+            # gvar has no deltas for it — sliders move and nothing
+            # changes until an avar2 mapping is authored.
+            "has_master_coverage": lo != hi,
         })
     return out
 
@@ -140,12 +145,23 @@ def _axes_from_glyphs(font: GSFont) -> List[Dict]:
 def _axes_from_designspace(doc: DesignSpaceDocument) -> List[Dict]:
     out: List[Dict] = []
     for ax in doc.axes:
+        # An axis has master coverage iff at least one <source>'s
+        # <location> for this axis differs from its default value.
+        ax_default = float(ax.default)
+        covered = False
+        for src in doc.sources:
+            loc = src.location or {}
+            val = loc.get(ax.name)
+            if val is not None and float(val) != ax_default:
+                covered = True
+                break
         out.append({
             "tag": ax.tag,
             "name": ax.name,
             "min": float(ax.minimum),
             "max": float(ax.maximum),
-            "default": float(ax.default),
+            "default": ax_default,
+            "has_master_coverage": covered,
         })
     return out
 

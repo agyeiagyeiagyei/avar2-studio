@@ -2,9 +2,17 @@
 
 A small self-contained demo source derived from
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy). Three parametric
-axes (`XOPQ`, `YOPQ`, `XTRA`), 29 source-defined instances pre-mapped
-to traditional axes via the sibling CSV — the "designer's source has
-intent baked in" workflow.
+axes (`XOPQ`, `YOPQ`, `XTRA`), **one `Default` instance** anchored at
+the first master's location — the minimum needed for the font to
+export and for the studio's UI to render a starting row. The intended
+workflow is to duplicate that row and tune the parametric coords to
+author each new style.
+
+The parametric → stylistic workflow walkthrough — including the
+animation that morphs `Adhesion` from the corner `Default` to a
+`Regular Condensed` location — lives in the centralized
+[../../docs/authoring-instances.md](../../docs/authoring-instances.md)
+alongside the matching Roboto Delta walkthrough.
 
 ```bash
 avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
@@ -20,7 +28,7 @@ layouts real-world variable fonts use:
 | Source format | `.glyphs` | `.designspace` + UFOs |
 | Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOUC`, `YOUC`, `XTUC` (uppercase-scoped) |
 | Glyph scope | Affects every glyph (caps + lowercase + digits) | Only uppercase glyphs respond; lowercase renders from the default master |
-| Starting instances | 29 source-defined (`Thin Condensed`, `Regular`, `Bold`, …) | 0 |
+| Starting instances | 1 (`Default` at first master) | 1 (`Default` at first master) |
 | Designer intent | "Even tone — one stroke axis describes the whole font" | "Case-aware — caps need different optical tuning than lowercase" |
 
 Crispy's even-tone design means one set of parametric axes covers the

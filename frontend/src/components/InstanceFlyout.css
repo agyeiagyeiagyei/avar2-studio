@@ -41,3 +41,15 @@
 .flyout-item:active {
   background-color: #e9e9e9;
 }
+
+.flyout-item + .flyout-item {
+  border-top: 1px solid #eee;
+}
+
+.flyout-item-source {
+  color: #2c5aa0;
+}
+
+.flyout-item-source:hover {
+  background: #eef3fb;
+}
