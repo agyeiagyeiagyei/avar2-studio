@@ -32,6 +32,7 @@ wiping ``.avar2-studio/`` regenerates it.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -212,3 +213,110 @@ def _validate_tag(tag: str) -> str:
     if not all(33 <= ord(c) <= 126 for c in stripped):
         raise ValueError(f"tag must be ASCII-printable (got '{stripped}')")
     return stripped.lower()
+
+
+# --------------------------------------------------------------------------
+# Shadow source file (v2 slice 2)
+#
+# The studio never writes to the original source. When the user declares
+# at least one control axis, we generate a SHADOW .glyphs file at
+# ``<original-dir>/.avar2-studio/shadow/<basename>`` derived from
+# ``original + sidecar``. The build pipeline points at the shadow when
+# it exists; otherwise it falls back to the original (so users who
+# never declare control axes pay no shadow cost).
+#
+# v2 scope is .glyphs only — .designspace shadow management is heavier
+# (per-location UFO masters) and deferred to v2.5 per the design doc.
+# --------------------------------------------------------------------------
+
+
+def shadow_dir_for(original_path: Path) -> Path:
+    """Per-source shadow directory: sibling to the original under the
+    studio's existing ``.avar2-studio/`` workdir."""
+    return original_path.parent / ".avar2-studio" / "shadow"
+
+
+def shadow_path_for(original_path: Path) -> Path:
+    """Path to the shadow source file. Same basename as the original
+    so external tooling (Glyphs.app, fontmake) treats the two as
+    structurally identical."""
+    return shadow_dir_for(original_path) / original_path.name
+
+
+def shadow_exists(original_path: Path) -> bool:
+    return shadow_path_for(original_path).exists()
+
+
+def regenerate_shadow(original_path: Path) -> Optional[Path]:
+    """Derive the shadow from ``original + sidecar``:
+
+      1. Wipe and re-copy the original to the shadow path.
+      2. Mutate the shadow .glyphs file via glyphsLib to add every
+         control axis from the sidecar that isn't already in the
+         font's axis list. Each master's coordinate vector is
+         extended with the new axis's default value, since masters
+         sit at the axis default until brace layers exist.
+
+    Returns the shadow path on success, ``None`` if regeneration
+    isn't applicable (e.g., sidecar is empty — caller should treat
+    that as "no shadow needed"). Raises on hard failures so the
+    HTTP layer can 500.
+    """
+    if original_path.suffix.lower() != ".glyphs":
+        # .designspace shadow handling lands in v2.5. Skip silently
+        # so v2 slice 2 still ships with the .glyphs path working.
+        return None
+
+    axes_to_add = list_axes(original_path)
+    if not axes_to_add:
+        # Sidecar empty — caller can remove any pre-existing shadow.
+        return None
+
+    shadow_path = shadow_path_for(original_path)
+    shadow_dir_for(original_path).mkdir(parents=True, exist_ok=True)
+
+    # Always re-copy from original. The shadow is fully derived;
+    # incremental updates would just multiply the bug surface.
+    shutil.copy2(original_path, shadow_path)
+
+    # Mutate the shadow's axis list. We import glyphsLib lazily so
+    # this module stays importable in non-.glyphs contexts (and unit
+    # tests don't need to pull glyphsLib for sidecar-only tests).
+    from glyphsLib import GSFont
+    from glyphsLib.classes import GSAxis
+
+    font = GSFont(str(shadow_path))
+    existing_tags = {str(getattr(ax, "axisTag", "")).lower() for ax in font.axes}
+
+    for spec in axes_to_add:
+        tag = (spec.get("tag") or "").strip().lower()
+        if not tag or tag in existing_tags:
+            continue
+        new_axis = GSAxis()
+        new_axis.axisTag = tag
+        new_axis.name = spec.get("display_name") or tag
+        font.axes.append(new_axis)
+        existing_tags.add(tag)
+
+        default_value = float(spec.get("default", 0))
+        # Each master sits at the axis default for this new axis (no
+        # master coverage until brace layers exist). Extend each
+        # master's coordinate vector accordingly.
+        for master in font.masters:
+            coords = list(getattr(master, "axes", None) or [])
+            coords.append(default_value)
+            master.axes = coords
+
+    font.save(str(shadow_path))
+    return shadow_path
+
+
+def remove_shadow(original_path: Path) -> bool:
+    """Delete the shadow directory entirely. Called when the sidecar
+    becomes empty — original is the sole source again. Returns True
+    if anything was removed."""
+    shadow_dir = shadow_dir_for(original_path)
+    if not shadow_dir.exists():
+        return False
+    shutil.rmtree(shadow_dir)
+    return True

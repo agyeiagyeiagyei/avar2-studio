@@ -193,17 +193,22 @@ function App() {
       const health = await api.health();
 
       // Detect a source swap. The Load Font dropdown ultimately calls
-      // loadData() with a new health.glyphs_path; the polling tick
-      // calls loadData() with the same path. Per-instance state
-      // (selectedInstance, editingCoordinates, the per-instance
-      // scratch maps) is keyed by axis tags + instance names that
-      // belong to the OLD source — none of those are valid in the
-      // new source, and leaving them around makes the Sidebar slider
-      // dict read NaN for axes that don't exist and the InstanceRow
-      // grid render with the wrong axis values.
+      // loadData() with a new source; the polling tick calls loadData()
+      // with the same source. Per-instance state (selectedInstance,
+      // editingCoordinates, scratch maps) is keyed by axis tags +
+      // instance names that belong to the OLD source — none of those
+      // are valid in the new source, and leaving them around makes
+      // the Sidebar slider dict read NaN and the InstanceRow grid
+      // render with the wrong axis values.
+      //
+      // Key off original_path, not glyphs_path. CONTROL AXES swaps
+      // glyphs_path from original → shadow but the user is still
+      // working on the same source; treating that as a swap would
+      // throw away their in-progress edits on every axis declaration.
+      const sourceIdentity = health.original_path || health.glyphs_path || null;
       const isSourceSwap = (
         loadedGlyphsPathRef.current !== null &&
-        loadedGlyphsPathRef.current !== (health.glyphs_path || null)
+        loadedGlyphsPathRef.current !== sourceIdentity
       );
       if (isSourceSwap) {
         setSelectedInstance(null);
@@ -215,7 +220,7 @@ function App() {
         setCurrentAdvanceWidth(null);
         setCurrentAdvanceWidthPixels(null);
       }
-      loadedGlyphsPathRef.current = health.glyphs_path || null;
+      loadedGlyphsPathRef.current = sourceIdentity;
 
       // Blind launch: no source loaded server-side. Skip the auto-build
       // (there's nothing to build) — the Header's Load Font dropdown
@@ -335,19 +340,36 @@ function App() {
     });
   }, []);
 
-  // CONTROL AXES — declare + remove (v2 slice 1). Brace-layer
-  // authoring + shadow file + Fontra integration arrive in
-  // later slices.
+  // CONTROL AXES — declare + remove. The backend regenerates the
+  // shadow .glyphs file and rebuilds; we refetch axes + coverage +
+  // font URL so the new slider appears and the preview swaps to the
+  // shadow build. loadData() can't be used here because it would
+  // re-fire the source-swap detection mid-edit and clear state.
+  const refreshAfterControlAxisChange = useCallback(async () => {
+    try {
+      const [axesData] = await Promise.all([
+        api.getAxes(),
+        loadGlyphCoverage(),
+      ]);
+      setAxes(axesData.axes || []);
+      // Cache-bust the font URL so the preview picks up the rebuilt
+      // shadow font. trigger_build ran server-side; the next URL hit
+      // gets the new bytes.
+      setFontUrl(api.getFontUrl());
+    } catch (err) {
+      console.warn('Failed to refresh after control-axis change:', err);
+    }
+  }, []);
+
   const handleCreateControlAxis = useCallback(async (axis) => {
     await api.createControlAxis(axis);
-    // Refetch coverage so the new axis appears with source=studio.
-    await loadGlyphCoverage();
-  }, []);
+    await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
 
   const handleDeleteControlAxis = useCallback(async (tag) => {
     try {
       await api.deleteControlAxis(tag);
-      await loadGlyphCoverage();
+      await refreshAfterControlAxisChange();
       // Drop it from the disabled set if it was disabled.
       setDisabledControlAxes(prev => {
         if (!prev.has(tag)) return prev;
@@ -358,7 +380,7 @@ function App() {
     } catch (err) {
       setError(err.message || `Failed to delete control axis "${tag}"`);
     }
-  }, []);
+  }, [refreshAfterControlAxisChange]);
 
   // Axis tag → default value lookup. Used by InstanceRow's
   // preview-coordinates memo to pin disabled control axes to their

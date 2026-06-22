@@ -116,7 +116,8 @@ def _serve_ui_favicon():
     return send_from_directory(str(_BUNDLE_DIR), "favicon.ico")
 
 # Global state
-GLYPHS_PATH: Optional[Path] = None  # The source file (.glyphs OR .designspace). Name kept for git history; SOURCE_FORMAT tracks which.
+GLYPHS_PATH: Optional[Path] = None  # The ACTIVE source — what reads + builds operate on. When CONTROL AXES are declared, this points at the shadow .glyphs; otherwise it's the same as ORIGINAL_PATH. Name kept for git history; SOURCE_FORMAT tracks which.
+ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at. Sidecar paths and push-to-source target this. Studio NEVER writes to it directly for control-axis work (shadow staging only).
 SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
 BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
@@ -612,6 +613,53 @@ def get_axes():
         return jsonify({"axes": []})
     try:
         axes = get_axes_from_glyphs(GLYPHS_PATH)
+
+        # CONTROL AXES overlay. The source/shadow .glyphs may or may
+        # not have the control axis yet (depending on slice — slice 2
+        # generates a shadow but builds from the original, so the
+        # source-derived axes won't include the control axis). Either
+        # way the sidecar carries the canonical declaration; merge
+        # it in so the frontend gets a unified list.
+        if ORIGINAL_PATH is not None:
+            try:
+                sidecar_axes = list(_control_axes.list_axes(ORIGINAL_PATH))
+                if sidecar_axes:
+                    by_tag = {str(ax.get("tag", "")).lower(): ax for ax in axes}
+                    for spec in sidecar_axes:
+                        tag_lower = str(spec.get("tag", "")).lower()
+                        if not tag_lower:
+                            continue
+                        existing = by_tag.get(tag_lower)
+                        if existing is not None:
+                            # Source already declares this tag — overlay
+                            # the designer's range on top.
+                            existing["min"] = float(spec["min"])
+                            existing["max"] = float(spec["max"])
+                            existing["default"] = float(spec["default"])
+                            existing["name"] = spec.get("display_name") or existing.get("name")
+                            existing["has_master_coverage"] = True
+                            existing["is_control_axis"] = True
+                        else:
+                            # Source doesn't know about this axis yet
+                            # (slice 2: no shadow swap). Synthesise an
+                            # entry from sidecar so the slider still
+                            # renders. font-variation-settings on a
+                            # non-existent axis is silently ignored by
+                            # the browser, so moving the slider has no
+                            # visual effect — exactly what we want
+                            # until brace layers exist in slice 3+.
+                            axes.append({
+                                "tag": tag_lower,
+                                "name": spec.get("display_name") or tag_lower,
+                                "min": float(spec["min"]),
+                                "max": float(spec["max"]),
+                                "default": float(spec["default"]),
+                                "has_master_coverage": True,
+                                "is_control_axis": True,
+                            })
+            except Exception as overlay_exc:
+                print(f"Warning: control-axes overlay on /api/axes failed: {overlay_exc}", file=sys.stderr)
+
         return jsonify({"axes": axes})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1481,6 +1529,12 @@ def health():
         return jsonify({
             "status": "ok",
             "glyphs_path": str(GLYPHS_PATH) if GLYPHS_PATH else None,
+            # original_path is the path the USER pointed at. glyphs_path
+            # is the ACTIVE build/read path which becomes the shadow
+            # whenever CONTROL AXES are declared. Frontend uses the
+            # former as the "source identity" for swap detection so
+            # declaring a control axis doesn't look like a swap.
+            "original_path": str(ORIGINAL_PATH) if ORIGINAL_PATH else None,
             "source_format": SOURCE_FORMAT,
             "font_built": VARIABLE_FONT_PATH.exists() if VARIABLE_FONT_PATH else False,
             "family_name": family_name,
@@ -2327,7 +2381,8 @@ def glyph_coverage():
         # surface edit / delete buttons.
         try:
             total = next(iter(coverage.values()), {}).get("total_glyphs", 0) if coverage else 0
-            for ax in _control_axes.list_axes(GLYPHS_PATH):
+            sidecar_path = ORIGINAL_PATH if ORIGINAL_PATH is not None else GLYPHS_PATH
+            for ax in _control_axes.list_axes(sidecar_path):
                 tag_lower = (ax.get("tag") or "").lower()
                 if not tag_lower:
                     continue
@@ -2380,12 +2435,12 @@ def glyph_coverage():
 @app.route('/api/control-axes', methods=['GET'])
 def list_control_axes():
     """Return the sidecar's control-axis declarations."""
-    if GLYPHS_PATH is None:
+    if ORIGINAL_PATH is None:
         return jsonify({"axes": []})
     try:
         return jsonify({
-            "axes": _control_axes.list_axes(GLYPHS_PATH),
-            "sidecar_path": str(_control_axes.sidecar_path_for(GLYPHS_PATH)),
+            "axes": _control_axes.list_axes(ORIGINAL_PATH),
+            "sidecar_path": str(_control_axes.sidecar_path_for(ORIGINAL_PATH)),
         })
     except Exception as e:
         print(f"Error listing control axes: {e}", file=sys.stderr)
@@ -2399,22 +2454,36 @@ def create_control_axis():
         { "tag": "crbr", "display_name": "Crossbar",
           "default": 0, "min": -100, "max": 100 }
 
-    Persists to the sibling ``<basename>-control.json`` file. The
-    shadow source file + axis-declaration writeback land in v2.2.
+    Persists to the sibling ``<basename>-control.json``, regenerates
+    the shadow .glyphs file (with the new axis added to the source's
+    axis list + each master extended at the axis default), and
+    triggers a font rebuild. The slider appears in the preview
+    immediately; until coverage glyphs + brace layers exist (later
+    slices) moving it has no visual effect because every glyph sits
+    at the axis default on every master.
     """
-    if GLYPHS_PATH is None:
+    if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     try:
         entry = _control_axes.add_axis(
-            GLYPHS_PATH,
+            ORIGINAL_PATH,
             tag=data.get("tag", ""),
             display_name=data.get("display_name", ""),
             default=data.get("default", 0),
             min_value=data.get("min", 0),
             max_value=data.get("max", 0),
         )
-        return jsonify({"success": True, "axis": entry})
+
+        # Generate / refresh the shadow for slice 3+ to consume.
+        # Build stays pointed at the original — see _apply_source_path.
+        shadow = None
+        try:
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow regeneration after add failed: {shadow_exc}", file=sys.stderr)
+
+        return jsonify({"success": True, "axis": entry, "shadow_path": str(shadow) if shadow else None})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
@@ -2426,13 +2495,30 @@ def create_control_axis():
 
 @app.route('/api/control-axes/<tag>', methods=['DELETE'])
 def delete_control_axis(tag: str):
-    """Remove a control-axis declaration from the sidecar."""
-    if GLYPHS_PATH is None:
+    """Remove a control-axis declaration from the sidecar. If the
+    sidecar still has any axes, regenerate the shadow without the
+    deleted one; if it's now empty, remove the shadow entirely so
+    the build pipeline falls back to the original source."""
+    if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:
-        removed = _control_axes.remove_axis(GLYPHS_PATH, tag)
+        removed = _control_axes.remove_axis(ORIGINAL_PATH, tag)
         if not removed:
             return jsonify({"error": f"control axis '{tag}' not found"}), 404
+
+        # Keep the shadow in sync with the new sidecar state for
+        # slice 3+. If the sidecar is now empty, drop the shadow
+        # entirely — clean filesystem state and no stale data for
+        # the next axis-add.
+        try:
+            remaining = _control_axes.list_axes(ORIGINAL_PATH)
+            if remaining:
+                _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            else:
+                _control_axes.remove_shadow(ORIGINAL_PATH)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow refresh after delete failed: {shadow_exc}", file=sys.stderr)
+
         return jsonify({"success": True, "tag": tag.lower()})
     except Exception as e:
         print(f"Error deleting control axis: {e}", file=sys.stderr)
@@ -3776,7 +3862,7 @@ def _apply_source_path(path: Path) -> None:
     re-bootstraps the CSV + config sidecars, and kicks off an
     auto-build. Raises ValueError / UnsupportedSourceFormat on bad input
     so callers (CLI + /api/load-source) can surface the failure."""
-    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, VARIABLE_FONT_PATH
+    global GLYPHS_PATH, ORIGINAL_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, VARIABLE_FONT_PATH
     global PREVIEW_DIR, PREVIEW_CSV_PATH, PREVIEW_CONFIG_PATH
     global LAST_BUILD_TIME, LAST_BUILD_STATUS, LAST_BUILD_ERROR
     global EDITING_INSTANCES
@@ -3791,6 +3877,13 @@ def _apply_source_path(path: Path) -> None:
         )
 
     SOURCE_FORMAT = _source_font.detect_format(resolved)
+    ORIGINAL_PATH = resolved
+    # GLYPHS_PATH currently always equals ORIGINAL_PATH — slice 2 keeps
+    # the build pipeline pointed at the original. The shadow .glyphs is
+    # still generated (so slice 3+ can consume it for brace-layer
+    # authoring) but until those layers exist the shadow and the
+    # original compile to identical fvars (fontc drops axes with no
+    # deltas). Slice 3 will conditionally swap to the shadow.
     GLYPHS_PATH = resolved
 
     workdir = GLYPHS_PATH.parent / ".avar2-studio"
@@ -3811,6 +3904,15 @@ def _apply_source_path(path: Path) -> None:
     LAST_BUILD_STATUS = None
     LAST_BUILD_ERROR = None
     EDITING_INSTANCES = set()
+
+    # CONTROL AXES — keep the shadow in sync on load so it's ready
+    # for slice 3 brace-layer authoring. We don't swap GLYPHS_PATH
+    # to it yet (see comment on GLYPHS_PATH assignment above).
+    try:
+        if _control_axes.list_axes(ORIGINAL_PATH):
+            _control_axes.regenerate_shadow(ORIGINAL_PATH)
+    except Exception as exc:
+        print(f"Warning: failed to regenerate control-axes shadow on load: {exc}", file=sys.stderr)
 
     _initialize_preview_csv_from_glyphs()
     _initialize_preview_config_from_glyphs()
