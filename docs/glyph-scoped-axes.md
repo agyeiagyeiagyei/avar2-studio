@@ -5,6 +5,74 @@
 > in v2 as a duplicate-layer staging model that mirrors how the studio
 > already handles instance edits.
 
+## Reframe — "control axes" as the umbrella
+
+The studio today has two recognised axis kinds:
+
+1. **Parametric axes** — declared in the source file, backed by
+   master deltas. `is_parametric: true` in `axis-metadata.json`.
+   Read-only on min/max because the masters themselves define the
+   travel.
+2. **Traditional / avar2-input axes** — declared via the **+ Add**
+   button under AVAR2 MAPPINGS. The user picks tag, display name,
+   default, min, max. The axis exists only to be routed through the
+   sibling `-avar.csv` mapping table to parametric outputs.
+   `is_parametric: false` in `axis-metadata.json`.
+
+The glyph-scoped axes we want to add are a **third backing** for
+something that looks just like (2) from the user's perspective —
+declared in the studio, with user-picked min/max, but **wired up to
+glyph-level variation instead of to the avar2 mapping table.**
+
+That common surface deserves a name. The unifying concept is a
+**control axis**: an axis the *designer* declares (not the source
+file) with its own range, whose effect is realised through one or
+more backings:
+
+| Backing | Where the variation lives | Existing today? |
+|---|---|---|
+| **avar2 mapping** | a column in `<basename>-avar.csv` routed to parametric output axes | ✓ |
+| **glyph-scoped** | brace layers in `.glyphs` or alternate UFO masters tied to a named subset of glyphs | ✗ — what this doc proposes |
+| (future) **hybrid** | both — a control axis that drives avar2 routing AND has per-glyph master deltas | also ✗ |
+
+The min/max declaration plumbing — `AddAxisModal`, `EditAxisModal`,
+`axis-metadata.json`, `POST/PUT /api/avar2/axis` — already exists
+and is correct for control axes. What's missing is:
+
+- A way to mark a control axis's backing as **glyph-scoped** instead
+  of (or in addition to) avar2-mapping.
+- A way to enumerate which glyphs back it (read from brace layers /
+  masters in v1; editable in v2).
+- UI labels that don't conflate "I declared this axis" with "this
+  axis must route through avar2".
+
+The endpoint name `/api/avar2/axis` is a little misleading once
+control axes can have non-avar2 backings — keep the route for
+back-compat, but the *data shape* should grow a `backing` discriminator
+(`'avar2' | 'glyph_scoped' | 'hybrid'`). Storage layout in
+`axis-metadata.json`:
+
+```jsonc
+{
+  "CRBR": {
+    "display_name": "Crossbar",
+    "registered_tag": "crbr",
+    "min": -100,
+    "max": 100,
+    "default": 0,
+    "is_parametric": false,
+    "backing": "glyph_scoped",     // ← NEW
+    "glyph_coverage": [            // ← NEW (v2 — read-derived in v1)
+      "A", "E", "F", "H", "e", "f", "t"
+    ]
+  }
+}
+```
+
+The rest of this doc proceeds with the "glyph-scoped backing"
+specifics — but with the understanding that we're describing **one
+backing of a control axis**, not a separate axis class.
+
 ## What problem this solves
 
 In a parametric font, **most axes are font-wide** — every glyph
@@ -237,16 +305,23 @@ glyph shapes.
 This branch (``glyph-scoped-axes``) is for the v1 read-only work:
 
 1. **Backend** — `glyph_coverage.py` module with the two functions
-   sketched above. New `GET /api/glyph-coverage` endpoint.
+   sketched above. New `GET /api/glyph-coverage` endpoint. Extend
+   `axis-metadata.json` schema with the `backing` discriminator and
+   teach `_load_axis_metadata` to default existing entries to
+   `backing: "avar2"` for back-compat.
 2. **Frontend** — new `GlyphCoverage` component rendered under
-   AVAR2 MAPPINGS. Reads ``/api/glyph-coverage`` on font load.
+   AVAR2 MAPPINGS (panel may eventually want a CONTROL AXES rename
+   once the reframe lands in the UI). Reads ``/api/glyph-coverage``
+   on font load.
 3. **No source mutation** in v1. The "Edit alternates in Glyphs.app"
    note is the only authoring affordance — users open their font
    editor, modify glyphs, re-load in the studio to see updated
    coverage.
 
 v2 (separate branch later): the duplicate-layer staging + sidecar
-JSON + flyout integration.
+JSON + flyout integration. **+ Add** modal grows a "Backing" radio
+(avar2-input / glyph-scoped / hybrid) so the user picks the backing
+when declaring a control axis.
 
 ## Open questions still
 
@@ -264,3 +339,15 @@ JSON + flyout integration.
   mentioned "perhaps by some kind of text list" — I lean
   newline-separated with optional grouping comments (``# letters with
   crossbars``) for readability.
+- **UI rename — AVAR2 MAPPINGS → CONTROL AXES?** Once a control
+  axis can have a glyph-scoped backing, calling the section "AVAR2
+  MAPPINGS" misleads. But the rename ripples through tooltips,
+  empty-state hints, and at least one CSS classname. Do it as a
+  pre-v1 cosmetic pass, or defer until v2 when the backing selector
+  actually lands? Leaning defer — the existing label is wrong but
+  not actively misleading until users can pick a non-avar2 backing.
+- **Back-compat for `axis-metadata.json` without `backing`** —
+  treat absence as `backing: "avar2"`. `_load_axis_metadata` should
+  fill the field in on load so the rest of the code can assume it's
+  present. No migration needed; the field just appears on the next
+  write.
