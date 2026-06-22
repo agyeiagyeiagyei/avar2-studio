@@ -391,6 +391,11 @@ function App() {
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
+  const handleSetControlAxisExtraLocations = useCallback(async (tag, extraLocations) => {
+    await api.setControlAxisExtraLocations(tag, extraLocations);
+    await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
+
   // CONTROL AXES — open the shadow in Fontra (v2 slice 5a).
   const handleOpenControlAxisInEditor = useCallback(async (tag) => {
     try {
@@ -1758,6 +1763,7 @@ function App() {
             onCreateControlAxis={handleCreateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
             onSetControlAxisCoverage={handleSetControlAxisCoverage}
+            onSetControlAxisExtraLocations={handleSetControlAxisExtraLocations}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}

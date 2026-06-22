@@ -163,6 +163,30 @@ def remove_axis(source_path: Path, tag: str) -> bool:
     return True
 
 
+def set_extra_locations(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
+    """Replace the axis's ``extra_locations`` list with ``entries``.
+    Each entry must be ``{glyph: str, location: {axis_tag: number}}``.
+    Returns the canonical-shape stored list.
+
+    Raises ``ValueError`` if the axis tag doesn't exist in the sidecar.
+    """
+    tag_norm = (tag or "").strip().lower()
+    if not tag_norm:
+        raise ValueError("tag is required")
+    data = load(source_path)
+    target = None
+    for ax in data["axes"]:
+        if str(ax.get("tag", "")).lower() == tag_norm:
+            target = ax
+            break
+    if target is None:
+        raise ValueError(f"control axis '{tag_norm}' not found")
+    cleaned = _normalise_extra_locations(entries)
+    target["extra_locations"] = cleaned
+    _save(source_path, data)
+    return cleaned
+
+
 def set_coverage(source_path: Path, tag: str, glyph_names: List[str]) -> List[str]:
     """Replace an axis's coverage list with ``glyph_names``. De-dups,
     preserves the input order (designer ordering carries meaning when
@@ -223,9 +247,41 @@ def _normalise(data: Dict) -> Dict:
             "min": float(ax.get("min", -1000)),
             "max": float(ax.get("max", 1000)),
             "coverage": list(ax.get("coverage") or []),
+            # extra_locations: list of {glyph, location} entries —
+            # additional brace layers beyond the auto-seeded min/max
+            # pair. Each location is a sparse dict {axis_tag: value};
+            # axes not in the dict interpolate from masters.
+            "extra_locations": _normalise_extra_locations(ax.get("extra_locations")),
             "layers": dict(ax.get("layers") or {}),
         })
     return {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes}
+
+
+def _normalise_extra_locations(raw) -> List[Dict]:
+    out: List[Dict] = []
+    if not isinstance(raw, list):
+        return out
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        glyph = entry.get("glyph")
+        location = entry.get("location")
+        if not isinstance(glyph, str) or not glyph.strip():
+            continue
+        if not isinstance(location, dict) or not location:
+            continue
+        clean_loc: Dict[str, float] = {}
+        for tag, value in location.items():
+            if not isinstance(tag, str) or not tag.strip():
+                continue
+            try:
+                clean_loc[tag.strip()] = float(value)
+            except (TypeError, ValueError):
+                continue
+        if not clean_loc:
+            continue
+        out.append({"glyph": glyph.strip(), "location": clean_loc})
+    return out
 
 
 def _save(source_path: Path, data: Dict) -> None:
@@ -361,83 +417,136 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             coords.append(default_value)
             master.axes = coords
 
-    # Seed brace layers for coverage glyphs (v2 slice 3). For each
-    # control axis with coverage, every covered glyph gets two seed
-    # brace layers — one at axis-min and one at axis-max. Each layer
-    # is a copy of the default master's outline so the brace exists
-    # as a structural target. v2 slice 5 (Fontra) lets the designer
+    # Tag → axis-index map across the full final axis list. Used by
+    # both the auto-seed (axis-min/max) loop and the extra_locations
+    # loop below to resolve sparse {axis_tag: value} dicts.
+    full_axis_index_by_tag: Dict[str, int] = {}
+    for i, ax in enumerate(font.axes):
+        full_axis_index_by_tag[str(getattr(ax, "axisTag", "")).lower()] = i
+
+    # Seed brace layers for coverage glyphs (v2 slice 3) + any
+    # custom-location entries from extra_locations (v2 slice 4).
+    # For each control axis with coverage, every covered glyph gets
+    # two seed brace layers (axis-min, axis-max). For each
+    # extra_location entry, an additional brace layer at the full
+    # location vector derived by overlaying the sparse pin on the
+    # default master's position. Each layer is a copy of the
+    # default master's outline (or a preserved outline from a
+    # previous shadow regenerate) so the brace exists as a
+    # structural target. v2 slice 5 (Fontra) lets the designer
     # replace these seeded outlines with actual alternate drawings.
     if font.masters:
         default_master = font.masters[0]
         default_master_id = default_master.id
         default_loc = list(getattr(default_master, "axes", None) or [])
 
+        # Build the seed-location list per (axis, glyph). Two flavours:
+        # (1) auto seeds at axis-min/max for every coverage glyph;
+        # (2) extra_locations as the designer pinned them.
+        seed_jobs: List[tuple] = []  # (glyph_name, location_list, axis_tag_for_idempotency_check)
         for spec in axes_to_add:
             tag = (spec.get("tag") or "").strip().lower()
             if not tag:
                 continue
-            coverage = list(spec.get("coverage") or [])
-            if not coverage:
-                continue
             axis_index = axis_index_by_tag.get(tag)
             if axis_index is None:
                 continue
-            seed_values = [float(spec.get("min", 0)), float(spec.get("max", 0))]
-            for glyph_name in coverage:
-                glyph = font.glyphs[glyph_name] if glyph_name in font.glyphs else None
-                if glyph is None:
-                    print(
-                        f"  [control-axes] coverage glyph '{glyph_name}' "
-                        f"not in source — skipping seed layer",
-                    )
+
+            coverage = list(spec.get("coverage") or [])
+            if coverage:
+                for seed_value in [float(spec.get("min", 0)), float(spec.get("max", 0))]:
+                    for glyph_name in coverage:
+                        location = list(default_loc)
+                        location[axis_index] = seed_value
+                        seed_jobs.append((glyph_name, location))
+
+            # extra_locations (slice 4): per-glyph, full N-D location
+            # built by overlaying sparse pins on the default-master
+            # coordinates.
+            for entry in spec.get("extra_locations") or []:
+                glyph_name = entry.get("glyph")
+                if not glyph_name:
                     continue
-                default_layer = next(
-                    (l for l in glyph.layers if l.associatedMasterId == default_master_id),
-                    None,
-                )
-                if default_layer is None:
-                    continue
-                for seed_value in seed_values:
-                    location = list(default_loc)
-                    location[axis_index] = seed_value
-                    # Skip if a brace layer at this exact location
-                    # already exists (idempotent regeneration).
-                    if any(
-                        list(dict(getattr(l, "attributes", None) or {}).get("coordinates") or [])
-                        == location
-                        for l in glyph.layers
-                    ):
+                pinned = entry.get("location") or {}
+                location = list(default_loc)
+                pinned_any = False
+                for pin_tag, pin_value in pinned.items():
+                    idx = full_axis_index_by_tag.get(str(pin_tag).lower())
+                    if idx is None:
                         continue
-                    # If the previous shadow had drawn outlines at
-                    # this (glyph, location) — preserve them. Otherwise
-                    # seed with the default master's outline so the
-                    # brace layer is a no-op until the designer edits.
-                    preserved = preserved_layers.get(
-                        (glyph_name, tuple(float(v) for v in location))
-                    )
-                    if preserved is not None:
-                        layer_paths = preserved["paths"]
-                        layer_components = preserved["components"]
-                        layer_anchors = preserved["anchors"]
-                        layer_width = preserved["width"]
-                    else:
-                        layer_paths = list(default_layer.paths) if default_layer.paths else []
-                        layer_components = (
-                            list(default_layer.components) if default_layer.components else []
-                        )
-                        layer_anchors = (
-                            list(default_layer.anchors) if default_layer.anchors else []
-                        )
-                        layer_width = default_layer.width
-                    brace = GSLayer()
-                    brace.associatedMasterId = default_master_id
-                    brace.attributes = {"coordinates": location}
-                    brace.paths = layer_paths
-                    brace.components = layer_components
-                    brace.anchors = layer_anchors
-                    brace.width = layer_width
-                    brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
-                    glyph.layers.append(brace)
+                    try:
+                        location[idx] = float(pin_value)
+                        pinned_any = True
+                    except (TypeError, ValueError):
+                        continue
+                if not pinned_any:
+                    continue
+                seed_jobs.append((glyph_name, location))
+
+        # De-duplicate seed jobs — same (glyph, location) added by
+        # multiple paths only needs writing once.
+        seen_jobs: set = set()
+        for glyph_name, location in seed_jobs:
+            job_key = (glyph_name, tuple(location))
+            if job_key in seen_jobs:
+                continue
+            seen_jobs.add(job_key)
+
+            glyph = font.glyphs[glyph_name] if glyph_name in font.glyphs else None
+            if glyph is None:
+                print(
+                    f"  [control-axes] glyph '{glyph_name}' not in source — skipping seed layer",
+                )
+                continue
+            default_layer = next(
+                (l for l in glyph.layers if l.associatedMasterId == default_master_id),
+                None,
+            )
+            if default_layer is None:
+                continue
+
+            # Skip if a brace layer at this exact location already
+            # exists (idempotent regeneration; also catches collisions
+            # between an auto-seed and an extra_location that happen
+            # to land at the same point).
+            if any(
+                list(dict(getattr(l, "attributes", None) or {}).get("coordinates") or [])
+                == location
+                for l in glyph.layers
+            ):
+                continue
+
+            # If the previous shadow had drawn outlines at this
+            # (glyph, location) — preserve them. Otherwise seed with
+            # the default master's outline so the brace layer is a
+            # no-op until the designer edits.
+            preserved = preserved_layers.get(
+                (glyph_name, tuple(float(v) for v in location))
+            )
+            if preserved is not None:
+                layer_paths = preserved["paths"]
+                layer_components = preserved["components"]
+                layer_anchors = preserved["anchors"]
+                layer_width = preserved["width"]
+            else:
+                layer_paths = list(default_layer.paths) if default_layer.paths else []
+                layer_components = (
+                    list(default_layer.components) if default_layer.components else []
+                )
+                layer_anchors = (
+                    list(default_layer.anchors) if default_layer.anchors else []
+                )
+                layer_width = default_layer.width
+
+            brace = GSLayer()
+            brace.associatedMasterId = default_master_id
+            brace.attributes = {"coordinates": location}
+            brace.paths = layer_paths
+            brace.components = layer_components
+            brace.anchors = layer_anchors
+            brace.width = layer_width
+            brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
+            glyph.layers.append(brace)
 
     font.save(str(shadow_path))
     return shadow_path

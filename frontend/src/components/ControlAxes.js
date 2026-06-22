@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './ControlAxes.css';
 import CoverageEditor from './CoverageEditor';
+import AddBraceLocationModal from './AddBraceLocationModal';
 
 /**
  * CONTROL AXES panel — v1 read-only.
@@ -21,8 +22,23 @@ import CoverageEditor from './CoverageEditor';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage, onOpenInEditor }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage, onOpenInEditor, onSetExtraLocations, allAxes }) {
   const [expandedTag, setExpandedTag] = useState(null);
+  // {tag, axisDefault, coverageGlyphs} when the add-location modal
+  // is open; null otherwise.
+  const [addLocationFor, setAddLocationFor] = useState(null);
+
+  const handleAddExtraLocation = async (ax, entry) => {
+    if (typeof onSetExtraLocations !== 'function') return;
+    const merged = [...(ax.extra_locations || []), entry];
+    await onSetExtraLocations(ax.tag, merged);
+  };
+
+  const handleRemoveExtraLocation = async (ax, index) => {
+    if (typeof onSetExtraLocations !== 'function') return;
+    const next = (ax.extra_locations || []).filter((_, i) => i !== index);
+    await onSetExtraLocations(ax.tag, next);
+  };
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
   // shows a count so the user knows how many are hiding behind the
@@ -160,12 +176,63 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                     </div>
                   )}
                   {isStudio && typeof onSetCoverage === 'function' ? (
-                    <CoverageEditor
-                      tag={ax.tag}
-                      coverage={ax.covers}
-                      onSave={onSetCoverage}
-                      onOpenInEditor={onOpenInEditor}
-                    />
+                    <>
+                      <CoverageEditor
+                        tag={ax.tag}
+                        coverage={ax.covers}
+                        onSave={onSetCoverage}
+                        onOpenInEditor={onOpenInEditor}
+                      />
+                      {typeof onSetExtraLocations === 'function' && (ax.covers || []).length > 0 && (
+                        <div className="extra-locations">
+                          <div className="extra-locations-header">
+                            <span className="extra-locations-label">
+                              Custom brace layer locations
+                              <span className="extra-locations-hint">
+                                — additional brace layers beyond the auto-seeded min/max pair
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              className="extra-locations-add"
+                              onClick={() => setAddLocationFor({
+                                tag: ax.tag,
+                                axisDefault: ax.default,
+                                coverage: ax.covers,
+                              })}
+                            >
+                              + Add layer location
+                            </button>
+                          </div>
+                          {(ax.extra_locations || []).length > 0 ? (
+                            <ul className="extra-locations-list">
+                              {(ax.extra_locations || []).map((entry, i) => (
+                                <li key={i} className="extra-location-row">
+                                  <span className="extra-location-glyph">{entry.glyph}</span>
+                                  <span className="extra-location-coords">
+                                    @ {'{' + Object.entries(entry.location || {})
+                                      .map(([t, v]) => `${t}=${v}`)
+                                      .join(', ') + '}'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="extra-location-remove"
+                                    title="Remove this brace-layer location."
+                                    onClick={() => handleRemoveExtraLocation(ax, i)}
+                                  >
+                                    ✕
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="extra-locations-empty">
+                              No custom locations yet. Auto seeds at {ax.min} and {ax.max} are present for every coverage glyph.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="control-axis-glyphs">
                       {ax.covers.length > 0 ? (
@@ -198,6 +265,21 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           );
         })}
       </div>
+      )}
+
+      {addLocationFor && (
+        <AddBraceLocationModal
+          isOpen={!!addLocationFor}
+          onClose={() => setAddLocationFor(null)}
+          axisTag={addLocationFor.tag}
+          axisDefault={addLocationFor.axisDefault}
+          coverageGlyphs={addLocationFor.coverage}
+          allAxes={allAxes || []}
+          onCreate={async (entry) => {
+            const ax = controlLikeAxes.find(a => a.tag === addLocationFor.tag);
+            if (ax) await handleAddExtraLocation(ax, entry);
+          }}
+        />
       )}
     </div>
   );

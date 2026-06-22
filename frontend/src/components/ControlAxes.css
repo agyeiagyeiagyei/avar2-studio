@@ -399,3 +399,103 @@
   border-radius: 3px;
   padding: 0.3rem 0.5rem;
 }
+
+.extra-locations {
+  margin-top: 0.7rem;
+  border-top: 1px dashed #ddd;
+  padding-top: 0.5rem;
+}
+
+.extra-locations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.extra-locations-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.extra-locations-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 0.62rem;
+}
+
+.extra-locations-add {
+  background: white;
+  border: 1px solid #d6cdf0;
+  color: #5b3a8f;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.extra-locations-add:hover {
+  background: #f1eef9;
+}
+
+.extra-locations-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.extra-location-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.45rem;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 3px;
+  font-size: 0.7rem;
+}
+
+.extra-location-glyph {
+  font-family: monospace;
+  font-weight: 600;
+  color: #2c5aa0;
+  background: #eef3fb;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+}
+
+.extra-location-coords {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.65rem;
+  color: #5b3a8f;
+}
+
+.extra-location-remove {
+  background: none;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  color: #b8350c;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.extra-location-remove:hover {
+  background: #fdecea;
+}
+
+.extra-locations-empty {
+  font-size: 0.65rem;
+  color: #888;
+  font-style: italic;
+  padding: 0.2rem 0;
+}

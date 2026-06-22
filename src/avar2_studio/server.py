@@ -2402,6 +2402,7 @@ def glyph_coverage():
                     continue
                 sidecar_coverage = list(ax.get("coverage") or [])
                 existing = by_tag.get(tag_lower)
+                extra_locations = list(ax.get("extra_locations") or [])
                 if existing is not None:
                     # Sidecar wins on identity. Coverage is the union
                     # of source-derived (brace layers in shadow) and
@@ -2418,6 +2419,7 @@ def glyph_coverage():
                     existing["default"] = ax.get("default")
                     existing["min"] = ax.get("min")
                     existing["max"] = ax.get("max")
+                    existing["extra_locations"] = extra_locations
                     # Recompute kind from the merged coverage so
                     # "scoped" vs "partial" still reflects reality.
                     existing["kind"] = _glyph_coverage._classify(
@@ -2435,6 +2437,7 @@ def glyph_coverage():
                         "default": ax.get("default"),
                         "min": ax.get("min"),
                         "max": ax.get("max"),
+                        "extra_locations": extra_locations,
                     })
                     by_tag[tag_lower] = out[-1]
         except Exception as e:
@@ -2670,6 +2673,54 @@ def open_control_axis_in_editor(tag: str):
         "project": project,
         "tag": tag.lower(),
     })
+
+
+@app.route('/api/control-axes/<tag>/extra-locations', methods=['PUT'])
+def set_control_axis_extra_locations(tag: str):
+    """Replace the axis's ``extra_locations`` list. Body::
+
+        {"extra_locations": [
+            {"glyph": "e", "location": {"crbr": -50}},
+            {"glyph": "e", "location": {"crbr": 100, "XOPQ": 407}}
+        ]}
+
+    Each entry pins a brace layer at a specific N-D location for one
+    glyph. Axes omitted from ``location`` interpolate from masters.
+    Saves to sidecar, regenerates the shadow with the new layers,
+    and triggers a rebuild.
+    """
+    global GLYPHS_PATH, VARIABLE_FONT_PATH
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    entries = data.get("extra_locations")
+    if not isinstance(entries, list):
+        return jsonify({"error": "Body must include 'extra_locations' as a list."}), 400
+    try:
+        stored = _control_axes.set_extra_locations(ORIGINAL_PATH, tag, entries)
+
+        shadow = None
+        try:
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow regeneration after extra-locations update failed: {shadow_exc}", file=sys.stderr)
+
+        if shadow is not None:
+            GLYPHS_PATH = shadow
+            VARIABLE_FONT_PATH = None
+            try:
+                trigger_build()
+            except Exception as build_exc:
+                print(f"Warning: rebuild after extra-locations update failed: {build_exc}", file=sys.stderr)
+
+        return jsonify({"success": True, "tag": tag.lower(), "extra_locations": stored})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        print(f"Error setting extra_locations: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/control-axes/<tag>/coverage', methods=['PUT'])
