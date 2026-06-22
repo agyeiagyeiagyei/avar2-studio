@@ -31,30 +31,81 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
   }
   const orderedGlyphs = Array.from(byGlyph.keys());
 
-  // For an axis to truly deform a glyph in both directions from
-  // its default, the glyph needs brace layers on BOTH sides of the
-  // axis default — one below, one above. With only one side,
-  // moving the slider in the other direction extrapolates from
-  // the single delta, which is usually nonsense.
-  //
-  // We check for the CONTROL AXIS only (the one this LayersEditor
-  // is bound to). Custom multi-axis pins are extra; coverage of
-  // both directions on the control axis is what makes the axis
-  // "active" for that glyph.
+  // Per-glyph coverage diagnostics on the CONTROL axis. We want to
+  // warn the designer when the rendered slider will extrapolate
+  // beyond the authored range:
+  //   1. No layers below the axis default → slider toward min does
+  //      nothing for this glyph.
+  //   2. No layers above the axis default → mirror.
+  //   3. Lowest authored layer doesn't reach axis-min — slider
+  //      travel between the lowest layer and axis-min linearly
+  //      extrapolates the delta (usually broken).
+  //   4. Highest authored layer doesn't reach axis-max — mirror.
+  const axisMin = axis ? axis.min : 0;
+  const axisMax = axis ? axis.max : 0;
   const axisDefault = axis ? axis.default : 0;
+
   const classifyGlyphCoverage = (entries) => {
-    let below = false;
-    let above = false;
+    let belowVal = null;     // most-negative axis value among entries
+    let aboveVal = null;     // most-positive axis value among entries
     for (const e of entries) {
       const v = e.location ? e.location[tag] : undefined;
       if (v === undefined) continue;
-      if (v < axisDefault) below = true;
-      else if (v > axisDefault) above = true;
+      if (v < axisDefault && (belowVal === null || v < belowVal)) belowVal = v;
+      if (v > axisDefault && (aboveVal === null || v > aboveVal)) aboveVal = v;
     }
-    if (below && above) return { kind: 'ok' };
-    if (below) return { kind: 'one-sided', side: 'below' };
-    if (above) return { kind: 'one-sided', side: 'above' };
-    return { kind: 'none' };
+    const hasBelow = belowVal !== null;
+    const hasAbove = aboveVal !== null;
+    const reachesMin = hasBelow && belowVal <= axisMin;
+    const reachesMax = hasAbove && aboveVal >= axisMax;
+    const issues = [];
+    if (!hasBelow) issues.push({ kind: 'no-below' });
+    else if (!reachesMin) issues.push({ kind: 'extrapolates-below', at: belowVal });
+    if (!hasAbove) issues.push({ kind: 'no-above' });
+    else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
+    return {
+      ok: issues.length === 0,
+      issues,
+      belowVal,
+      aboveVal,
+      reachesMin,
+      reachesMax,
+    };
+  };
+
+  const describeIssues = (cov) => {
+    if (cov.ok) return '';
+    return cov.issues.map(i => {
+      if (i.kind === 'no-below') return `No layer below default — slider toward ${axisMin} won't deform this glyph.`;
+      if (i.kind === 'no-above') return `No layer above default — slider toward ${axisMax} won't deform this glyph.`;
+      if (i.kind === 'extrapolates-below') return `Lowest layer is at ${tag}=${i.at}; the axis goes to ${axisMin}. Slider between ${i.at} and ${axisMin} will extrapolate from your authored outline (usually overshoot / broken).`;
+      if (i.kind === 'extrapolates-above') return `Highest layer is at ${tag}=${i.at}; the axis goes to ${axisMax}. Slider between ${i.at} and ${axisMax} will extrapolate.`;
+      return '';
+    }).filter(Boolean).join(' ');
+  };
+
+  // "Pin layers to axis extremes" — when a glyph has layers that
+  // don't reach axis-min / axis-max, move the lowest layer to
+  // axis-min and the highest to axis-max. Outlines come along
+  // with the location change; intermediate layers untouched.
+  const pinExtremesForGlyph = async (glyphName) => {
+    if (typeof onChangeLayers !== 'function') return;
+    const cov = classifyGlyphCoverage(byGlyph.get(glyphName) || []);
+    const next = (layers || []).map(entry => {
+      if (entry.glyph !== glyphName) return entry;
+      const v = entry.location[tag];
+      if (v === undefined) return entry;
+      // Lowest layer on the below side → axis.min.
+      if (cov.belowVal !== null && v === cov.belowVal && v > axisMin) {
+        return { ...entry, location: { ...entry.location, [tag]: axisMin } };
+      }
+      // Highest layer on the above side → axis.max.
+      if (cov.aboveVal !== null && v === cov.aboveVal && v < axisMax) {
+        return { ...entry, location: { ...entry.location, [tag]: axisMax } };
+      }
+      return entry;
+    });
+    await onChangeLayers(tag, next);
   };
 
   const toggleCollapsed = (glyph) => {
@@ -92,9 +143,17 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
         const glyphLayers = byGlyph.get(glyphName) || [];
         const isCollapsed = !!collapsed[glyphName];
         const coverage = classifyGlyphCoverage(glyphLayers);
-        const needsMoreLayers = coverage.kind !== 'ok';
+        const needsAttention = !coverage.ok;
+        // The "pin to extremes" affordance only helps when there's a
+        // layer to push — i.e. one or both sides authored but not at
+        // the extreme. A missing side entirely can't be pinned (no
+        // layer to move); designer adds a new one instead.
+        const canPinExtremes = (
+          (coverage.belowVal !== null && coverage.belowVal > axisMin) ||
+          (coverage.aboveVal !== null && coverage.aboveVal < axisMax)
+        );
         return (
-          <div key={glyphName} className={`layers-glyph-block ${needsMoreLayers ? 'needs-more' : ''}`}>
+          <div key={glyphName} className={`layers-glyph-block ${needsAttention ? 'needs-more' : ''}`}>
             <div
               className="layers-glyph-header"
               onClick={() => toggleCollapsed(glyphName)}
@@ -104,23 +163,32 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
               <span className="layers-glyph-count">
                 {glyphLayers.length} layer{glyphLayers.length === 1 ? '' : 's'}
               </span>
-              {needsMoreLayers && (
+              {needsAttention && (
                 <span
                   className="layers-glyph-warning"
-                  title={
-                    coverage.kind === 'none'
-                      ? `No brace layers vary along ${tag} (only multi-axis pins). ${glyphName} won't deform as the slider moves.`
-                      : coverage.side === 'below'
-                        ? `Only layers below ${tag} default (${axisDefault}). Add a layer above ${axisDefault} so the slider works in both directions.`
-                        : `Only layers above ${tag} default (${axisDefault}). Add a layer below ${axisDefault} so the slider works in both directions.`
-                  }
+                  title={describeIssues(coverage)}
                 >
-                  ⚠ needs another
+                  ⚠ extrapolates
                 </span>
               )}
             </div>
             {!isCollapsed && (
               <>
+                {needsAttention && (
+                  <div className="layers-glyph-diagnostic">
+                    <div className="diagnostic-text">{describeIssues(coverage)}</div>
+                    {canPinExtremes && (
+                      <button
+                        type="button"
+                        className="diagnostic-pin"
+                        onClick={() => pinExtremesForGlyph(glyphName)}
+                        title={`Push the lowest layer to ${tag}=${axisMin}${coverage.aboveVal !== null && coverage.aboveVal < axisMax ? ` and the highest to ${tag}=${axisMax}` : ''}. Outline data carries over; only the location changes.`}
+                      >
+                        Pin layers to axis extremes
+                      </button>
+                    )}
+                  </div>
+                )}
                 <ul className="layers-glyph-list">
                   {glyphLayers.map((entry, i) => (
                     <li
