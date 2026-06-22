@@ -408,17 +408,34 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                         for l in glyph.layers
                     ):
                         continue
+                    # If the previous shadow had drawn outlines at
+                    # this (glyph, location) — preserve them. Otherwise
+                    # seed with the default master's outline so the
+                    # brace layer is a no-op until the designer edits.
+                    preserved = preserved_layers.get(
+                        (glyph_name, tuple(float(v) for v in location))
+                    )
+                    if preserved is not None:
+                        layer_paths = preserved["paths"]
+                        layer_components = preserved["components"]
+                        layer_anchors = preserved["anchors"]
+                        layer_width = preserved["width"]
+                    else:
+                        layer_paths = list(default_layer.paths) if default_layer.paths else []
+                        layer_components = (
+                            list(default_layer.components) if default_layer.components else []
+                        )
+                        layer_anchors = (
+                            list(default_layer.anchors) if default_layer.anchors else []
+                        )
+                        layer_width = default_layer.width
                     brace = GSLayer()
                     brace.associatedMasterId = default_master_id
                     brace.attributes = {"coordinates": location}
-                    brace.paths = list(default_layer.paths) if default_layer.paths else []
-                    brace.components = (
-                        list(default_layer.components) if default_layer.components else []
-                    )
-                    brace.anchors = (
-                        list(default_layer.anchors) if default_layer.anchors else []
-                    )
-                    brace.width = default_layer.width
+                    brace.paths = layer_paths
+                    brace.components = layer_components
+                    brace.anchors = layer_anchors
+                    brace.width = layer_width
                     brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
                     glyph.layers.append(brace)
 
@@ -443,3 +460,61 @@ def remove_shadow(original_path: Path) -> bool:
         return False
     shutil.rmtree(shadow_dir)
     return True
+
+
+def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]:
+    """Read every brace layer from a shadow .glyphs and return a
+    map keyed by ``(glyph_name, location_tuple)`` to the layer's
+    outline data (paths / components / anchors / width). Used by
+    regenerate_shadow to preserve drawn outlines across regenerations.
+
+    The location tuple is the layer's ``attributes.coordinates`` as a
+    tuple of floats. We treat any layer carrying a coordinates entry
+    as a brace layer — including the ones we authored ourselves at
+    axis-min / axis-max. Layers at master positions and default-master
+    layers (no coordinates attribute) are skipped.
+    """
+    if not shadow_path.exists():
+        return {}
+    try:
+        from glyphsLib import GSFont
+        font = GSFont(str(shadow_path))
+    except Exception as exc:
+        print(f"Warning: failed to read previous shadow for outline preservation: {exc}", file=sys.stderr)
+        return {}
+
+    out: Dict[tuple, Dict[str, object]] = {}
+    for glyph in font.glyphs:
+        for layer in glyph.layers:
+            attrs = getattr(layer, "attributes", None) or {}
+            coords = attrs.get("coordinates") if hasattr(attrs, "get") else None
+            if not coords:
+                continue
+            # Normalise coords to a tuple of floats. glyphsLib gives us
+            # a list; tuple makes it hashable for dict keys.
+            try:
+                if isinstance(coords, (list, tuple)):
+                    loc = tuple(float(v) for v in coords)
+                elif hasattr(coords, "items"):
+                    # Dict-shaped {axis_index: value}. Preserve key order
+                    # by sorting on int key.
+                    loc = tuple(
+                        float(v) for _, v in sorted(coords.items(), key=lambda kv: int(kv[0]))
+                    )
+                else:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            out[(glyph.name, loc)] = {
+                "paths": list(layer.paths) if layer.paths else [],
+                "components": list(layer.components) if layer.components else [],
+                "anchors": list(layer.anchors) if layer.anchors else [],
+                "width": layer.width,
+            }
+    return out
+
+
+# sys is referenced in _extract_brace_outlines via print(file=sys.stderr).
+# Imported here rather than at module top to keep the rest of the
+# module unaware of stderr plumbing.
+import sys
