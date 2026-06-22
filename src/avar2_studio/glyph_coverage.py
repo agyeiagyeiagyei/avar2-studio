@@ -139,17 +139,46 @@ def _coverage_from_glyphs(font: GSFont) -> Dict[str, Dict[str, object]]:
 def _layer_location(layer, num_axes: int) -> Optional[tuple]:
     """Return the layer's axis location as a tuple of floats (one per
     declared axis), or ``None`` if the layer has no explicit axis
-    location (i.e. it's a default-master layer)."""
+    location (i.e. it's a default-master layer).
+
+    glyphsLib normalises brace-layer coordinates in two flavours
+    depending on the source version:
+
+      - list:  ``[94, 2, 2, -100]`` — values in axis declaration order
+      - dict:  ``{0: 94, 1: 2, 2: 2, 3: -100}`` — keyed by axis index
+
+    Crispy Mini's existing brace layers serialise as lists; the
+    layers we author from regenerate_shadow also use list form (the
+    Glyphs plist writer rejects dicts with int keys). Handle both
+    here so detection works regardless of which form ends up on disk.
+    """
     attrs = getattr(layer, "attributes", None) or {}
     coords = attrs.get("coordinates") if hasattr(attrs, "get") else None
     if not coords:
         return None
+
     out: List[float] = []
-    for i in range(num_axes):
-        v = coords.get(i) if hasattr(coords, "get") else None
-        if v is None:
-            return None  # incomplete — treat as not a brace location
-        out.append(float(v))
+    if isinstance(coords, (list, tuple)):
+        if len(coords) < num_axes:
+            return None
+        for i in range(num_axes):
+            try:
+                out.append(float(coords[i]))
+            except (TypeError, ValueError):
+                return None
+    else:
+        # Dict-shaped — keyed by axis index.
+        getter = getattr(coords, "get", None)
+        if getter is None:
+            return None
+        for i in range(num_axes):
+            v = getter(i)
+            if v is None:
+                return None
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                return None
     return tuple(out)
 
 

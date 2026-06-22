@@ -2374,38 +2374,61 @@ def glyph_coverage():
             })
 
         # Merge in studio-declared control axes from the sidecar.
-        # These are user-created via the +Add Control Axis modal and
-        # don't yet have brace layers — they appear with empty
-        # coverage until the user declares glyphs (v2.1) and draws
-        # outlines (v2.2). Tagged ``source: "studio"`` so the UI can
-        # surface edit / delete buttons.
+        # If an axis tag is in the sidecar, it's authoritatively a
+        # studio-declared control axis — re-tag any existing
+        # source-derived entry with ``source: "studio"`` and overlay
+        # the sidecar's metadata + coverage list. Otherwise append
+        # the sidecar entry as a new row.
+        #
+        # The retag matters once the shadow .glyphs has the axis in
+        # its axis list (slice 2.2+): a source-derived entry would
+        # otherwise hide the studio origin and the UI loses its
+        # edit / delete affordances.
         try:
             total = next(iter(coverage.values()), {}).get("total_glyphs", 0) if coverage else 0
             sidecar_path = ORIGINAL_PATH if ORIGINAL_PATH is not None else GLYPHS_PATH
+            by_tag = {str(a["tag"]).lower(): a for a in out}
             for ax in _control_axes.list_axes(sidecar_path):
                 tag_lower = (ax.get("tag") or "").lower()
                 if not tag_lower:
                     continue
-                # If a sidecar entry shadows a source-declared axis tag
-                # (unlikely but possible), keep the source entry as
-                # authoritative and skip the sidecar duplicate.
-                if any(a["tag"].lower() == tag_lower for a in out):
-                    continue
-                out.append({
-                    "tag": tag_lower,
-                    "name": ax.get("display_name") or tag_lower,
-                    "covers": list(ax.get("coverage") or []),
-                    "covers_count": len(ax.get("coverage") or []),
-                    "total_glyphs": total,
-                    "kind": "scoped",
-                    "source": "studio",
-                    # Studio-declared axes carry their range too so
-                    # the frontend can render a slider preview when
-                    # the build pipeline starts respecting them.
-                    "default": ax.get("default"),
-                    "min": ax.get("min"),
-                    "max": ax.get("max"),
-                })
+                sidecar_coverage = list(ax.get("coverage") or [])
+                existing = by_tag.get(tag_lower)
+                if existing is not None:
+                    # Sidecar wins on identity. Coverage is the union
+                    # of source-derived (brace layers in shadow) and
+                    # sidecar-declared (designer intent). They should
+                    # overlap once regenerate_shadow has run, but
+                    # union is the safe shape during transient
+                    # states between save → regen → next fetch.
+                    src_covers = existing.get("covers") or []
+                    merged = list(dict.fromkeys([*sidecar_coverage, *src_covers]))
+                    existing["source"] = "studio"
+                    existing["name"] = ax.get("display_name") or existing.get("name")
+                    existing["covers"] = merged
+                    existing["covers_count"] = len(merged)
+                    existing["default"] = ax.get("default")
+                    existing["min"] = ax.get("min")
+                    existing["max"] = ax.get("max")
+                    # Recompute kind from the merged coverage so
+                    # "scoped" vs "partial" still reflects reality.
+                    existing["kind"] = _glyph_coverage._classify(
+                        len(merged), existing.get("total_glyphs", total)
+                    )
+                else:
+                    out.append({
+                        "tag": tag_lower,
+                        "name": ax.get("display_name") or tag_lower,
+                        "covers": sidecar_coverage,
+                        "covers_count": len(sidecar_coverage),
+                        "total_glyphs": total,
+                        "kind": _glyph_coverage._classify(len(sidecar_coverage), total),
+                        "source": "studio",
+                        "default": ax.get("default"),
+                        "min": ax.get("min"),
+                        "max": ax.get("max"),
+                    })
+                    by_tag[tag_lower] = out[-1]
         except Exception as e:
             print(f"Warning: failed to merge control-axes sidecar: {e}", file=sys.stderr)
 
