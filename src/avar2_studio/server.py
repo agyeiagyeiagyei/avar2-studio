@@ -30,7 +30,7 @@ except ImportError:
     print("Warning: PyYAML not found. Install with: pip install pyyaml", file=sys.stderr)
     yaml = None
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
@@ -66,6 +66,14 @@ app = Flask(__name__, static_folder=None)
 # bundle's JS/CSS would 404.
 CORS(app)  # Enable CORS for React frontend (used during dev when the
            # React dev server runs on a separate port from the API)
+
+# flask-sock is used for the WebSocket leg of the Fontra reverse
+# proxy (v2 slice 6 focused UI). Fontra's frontend computes its ws
+# URL from ``window.location.host + "/websocket"``; when we serve
+# Fontra same-origin via the proxy, we have to forward ws traffic
+# too.
+from flask_sock import Sock
+sock = Sock(app)
 
 # Directory of the bundled React build that gets shipped inside the
 # wheel (populated by the Release CI). Routes below serve it under
@@ -2639,6 +2647,199 @@ import atexit as _atexit
 _atexit.register(_stop_fontra)
 
 
+# ----------------------------------------------------------------------
+# Reverse proxy: avar2-studio at :5070 fronts Fontra at :8001
+# ----------------------------------------------------------------------
+#
+# Why proxy: cross-origin iframes can't share state with the parent
+# (no CSS injection, no JS bridging). To present a FOCUSED Fontra UI
+# — hiding the panels irrelevant to a control-axis brace edit — we
+# serve Fontra under our own origin and inject a tiny stylesheet on
+# the way through. Same-origin also unblocks future bidirectional
+# postMessage if we want to bridge state.
+#
+# Two legs:
+#   - HTTP:  /fontra/<path>  → http://127.0.0.1:8001/<path>
+#            HTML responses get a stylesheet appended that hides
+#            the panels we don't want, and absolute-path references
+#            (``href="/css/..."``) get rewritten to live under
+#            /fontra/.
+#   - WS:    /websocket?...  → ws://127.0.0.1:8001/websocket?...
+#            (Fontra's JS builds the ws URL from window.location.host
+#            so it lands here, not on Fontra's port directly.)
+
+
+# Stylesheet injected into every Fontra HTML response. Hides the
+# right-sidebar panels that aren't useful for an avar2-studio
+# brace-layer edit (transformation, glyph note, related glyphs,
+# characters/glyphs, reference font). The left sidebar's
+# text-entry + designspace-navigation panels stay — those are how
+# the designer picks the layer location.
+_FONTRA_FOCUSED_CSS = """
+<style id="avar2-studio-fontra-focus">
+  /* v2 slice 6 — focused Fontra UI when embedded in avar2-studio.
+     These selectors target Fontra's sidebar panel tabs by their
+     panel identifier. If Fontra renames panels in the future,
+     these selectors may need updating. */
+  .sidebar-tab[data-sidebar-name="reference-font"],
+  .sidebar-tab[data-sidebar-name="transformation"],
+  .sidebar-tab[data-sidebar-name="glyph-note"],
+  .sidebar-tab[data-sidebar-name="related-glyphs"],
+  .sidebar-tab[data-sidebar-name="character-glyphs"] {
+    display: none !important;
+  }
+  /* If you'd rather see them, remove this style block in DevTools
+     or open in a new tab via the modal's "Open in new tab" link. */
+</style>
+"""
+
+
+def _is_html_response(headers) -> bool:
+    ctype = headers.get("Content-Type", "")
+    return "text/html" in ctype.lower()
+
+
+def _is_css_response(headers) -> bool:
+    ctype = headers.get("Content-Type", "")
+    return "text/css" in ctype.lower()
+
+
+def _rewrite_html_paths(body: bytes) -> bytes:
+    """Rewrite absolute-path URL references in proxied Fontra HTML
+    so they resolve under our ``/fontra/`` mount instead of root.
+    Also injects the focused-UI stylesheet just before ``</head>``."""
+    text = body.decode("utf-8", errors="replace")
+    # ``href="/x"`` / ``src="/x"`` → keep "/fontra/x"
+    text = text.replace('href="/', 'href="/fontra/')
+    text = text.replace("href='/", "href='/fontra/")
+    text = text.replace('src="/', 'src="/fontra/')
+    text = text.replace("src='/", "src='/fontra/")
+    # Inject the focused-UI CSS before </head>; tolerate uppercase.
+    for needle in ("</head>", "</HEAD>"):
+        if needle in text:
+            text = text.replace(needle, _FONTRA_FOCUSED_CSS + needle, 1)
+            break
+    return text.encode("utf-8")
+
+
+def _rewrite_css_paths(body: bytes) -> bytes:
+    """Rewrite ``url(/x)`` references in proxied Fontra CSS."""
+    text = body.decode("utf-8", errors="replace")
+    text = text.replace("url(/", "url(/fontra/")
+    text = text.replace('url("/', 'url("/fontra/')
+    text = text.replace("url('/", "url('/fontra/")
+    return text.encode("utf-8")
+
+
+@app.route('/fontra/', defaults={'subpath': ''}, methods=['GET', 'POST', 'PUT', 'DELETE'])
+@app.route('/fontra/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def fontra_http_proxy(subpath: str):
+    """Proxy HTTP requests under /fontra/* to the running Fontra server."""
+    if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
+        return jsonify({"error": "Fontra subprocess is not running"}), 503
+
+    import urllib.request
+    import urllib.error
+
+    upstream = f"http://127.0.0.1:{FONTRA_PORT}/{subpath}"
+    if request.query_string:
+        upstream += "?" + request.query_string.decode("utf-8")
+
+    req = urllib.request.Request(
+        upstream,
+        method=request.method,
+        data=request.get_data() if request.method in ("POST", "PUT", "PATCH") else None,
+    )
+    # Forward useful request headers; skip Host (we're the new host).
+    for header, value in request.headers.items():
+        if header.lower() in ("host", "content-length"):
+            continue
+        req.add_header(header, value)
+
+    try:
+        upstream_resp = urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as exc:
+        upstream_resp = exc  # serve error body too
+    except Exception as exc:
+        return jsonify({"error": f"Fontra proxy failed: {exc}"}), 502
+
+    raw_body = upstream_resp.read()
+    headers = dict(upstream_resp.headers.items())
+
+    if _is_html_response(headers):
+        body = _rewrite_html_paths(raw_body)
+        headers["Content-Length"] = str(len(body))
+    elif _is_css_response(headers):
+        body = _rewrite_css_paths(raw_body)
+        headers["Content-Length"] = str(len(body))
+    else:
+        body = raw_body
+
+    # Strip headers that browsers may reject when we re-emit them.
+    for h in ("Transfer-Encoding", "Connection"):
+        headers.pop(h, None)
+
+    return Response(body, status=upstream_resp.status, headers=headers)
+
+
+@sock.route('/websocket')
+def fontra_ws_proxy(ws):
+    """Proxy WebSocket traffic to Fontra. The frontend opens
+    ``ws://<host>/websocket?...``; we connect upstream to
+    ``ws://127.0.0.1:8001/websocket?...`` with the same query string
+    and relay messages in both directions until either side hangs up.
+    """
+    if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
+        ws.close()
+        return
+
+    import websocket as ws_client_lib  # websocket-client; pulled in by flask-sock indirectly
+    qs = request.query_string.decode("utf-8")
+    upstream_url = f"ws://127.0.0.1:{FONTRA_PORT}/websocket"
+    if qs:
+        upstream_url += "?" + qs
+
+    upstream = ws_client_lib.create_connection(upstream_url, timeout=30)
+    upstream.settimeout(0.05)
+
+    import threading as _threading
+
+    def pump_upstream_to_client():
+        try:
+            while True:
+                try:
+                    msg = upstream.recv()
+                except ws_client_lib._exceptions.WebSocketTimeoutException:
+                    continue
+                except Exception:
+                    break
+                if msg is None:
+                    break
+                ws.send(msg)
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    pumper = _threading.Thread(target=pump_upstream_to_client, daemon=True)
+    pumper.start()
+
+    try:
+        while True:
+            msg = ws.receive(timeout=None)
+            if msg is None:
+                break
+            upstream.send(msg)
+    except Exception:
+        pass
+    finally:
+        try:
+            upstream.close()
+        except Exception:
+            pass
+
+
 @app.route('/api/control-axes/<tag>/open-editor', methods=['POST'])
 def open_control_axis_in_editor(tag: str):
     """Spin up Fontra on the shadow folder and return the iframe URL
@@ -2665,10 +2866,17 @@ def open_control_axis_in_editor(tag: str):
         return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
 
     project = shadow_path.name  # e.g. "CrispyMini.glyphs"
-    url = f"http://127.0.0.1:{port}/editor.html?project={project}"
+    # Return the same-origin URL through avar2-studio's reverse
+    # proxy. This is what unlocks CSS injection (the focused-UI
+    # stylesheet that hides irrelevant Fontra panels) — cross-origin
+    # iframes don't expose their DOM. The direct ``:8001`` URL is
+    # still useful as a "Open in new tab" escape hatch.
+    same_origin_url = f"/fontra/editor.html?project={project}"
+    direct_url = f"http://127.0.0.1:{port}/editor.html?project={project}"
     return jsonify({
         "success": True,
-        "url": url,
+        "url": same_origin_url,
+        "direct_url": direct_url,
         "port": port,
         "project": project,
         "tag": tag.lower(),

@@ -396,12 +396,28 @@ function App() {
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
-  // CONTROL AXES — open the shadow in Fontra (v2 slice 5a).
-  const handleOpenControlAxisInEditor = useCallback(async (tag) => {
+  // CONTROL AXES — open the shadow in Fontra (v2 slice 5a / 6).
+  // ``url`` is the same-origin proxied path (Fontra served under
+  // /fontra/* with focused-UI CSS injected); ``direct_url`` is the
+  // raw cross-origin URL for the "Open in new tab" escape.
+  // ``glyphName`` (optional) appends ``&text=/<glyph>`` so Fontra
+  // opens with that glyph in its text view.
+  const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName) => {
     try {
       setError(null);
       const data = await api.openControlAxisInEditor(tag);
-      setFontraEditor({ url: data.url, tag });
+      let url = data.url;
+      let directUrl = data.direct_url;
+      if (glyphName) {
+        // Fontra accepts /<glyphname> in the text view to select a
+        // glyph by name. JSON-encode and URI-encode so it survives
+        // the editor's url.searchParams.get(key) → JSON.parse round
+        // trip.
+        const textParam = `text=${encodeURIComponent(JSON.stringify('/' + glyphName))}`;
+        url = `${url}&${textParam}`;
+        directUrl = `${directUrl}&${textParam}`;
+      }
+      setFontraEditor({ url, directUrl, tag, glyphName });
     } catch (err) {
       setError(err.message || `Failed to open Fontra for "${tag}"`);
     }

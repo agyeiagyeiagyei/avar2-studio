@@ -499,3 +499,125 @@
   font-style: italic;
   padding: 0.2rem 0;
 }
+
+.brace-layers {
+  margin-top: 0.7rem;
+  border-top: 1px dashed #ddd;
+  padding-top: 0.6rem;
+}
+
+.brace-layers-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.brace-layers-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 0.6rem;
+}
+
+.brace-layers-glyph {
+  margin-bottom: 0.6rem;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.brace-layers-glyph-name {
+  font-family: monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #2c5aa0;
+  padding: 0.3rem 0.55rem 0.25rem;
+  background: #eef3fb;
+  border-bottom: 1px solid #d9e3ef;
+}
+
+.brace-layers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.brace-layer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.12s;
+}
+
+.brace-layer-row:last-of-type {
+  border-bottom: none;
+}
+
+.brace-layer-row:hover {
+  background-color: #f5f8ff;
+}
+
+.brace-layer-coords {
+  font-family: monospace;
+  color: #5b3a8f;
+}
+
+.brace-layer-tag {
+  background: #ece5f5;
+  color: #5b3a8f;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+
+.brace-layer-auto .brace-layer-coords {
+  color: #555;
+}
+
+.brace-layer-remove {
+  background: none;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  color: #b8350c;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.brace-layer-remove:hover {
+  background: #fdecea;
+}
+
+.brace-layer-add-row {
+  padding: 0.3rem 0.55rem;
+  border-top: 1px dashed #e6e6e6;
+}
+
+.brace-layer-add {
+  background: none;
+  border: 1px dashed #d6cdf0;
+  border-radius: 3px;
+  color: #5b3a8f;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+
+.brace-layer-add:hover {
+  background: #f1eef9;
+}

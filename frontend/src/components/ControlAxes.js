@@ -24,8 +24,8 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  */
 function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage, onOpenInEditor, onSetExtraLocations, allAxes }) {
   const [expandedTag, setExpandedTag] = useState(null);
-  // {tag, axisDefault, coverageGlyphs} when the add-location modal
-  // is open; null otherwise.
+  // {tag, axisDefault, coverageGlyphs, prefillGlyph} when the
+  // add-location modal is open; null otherwise.
   const [addLocationFor, setAddLocationFor] = useState(null);
 
   const handleAddExtraLocation = async (ax, entry) => {
@@ -34,11 +34,19 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
     await onSetExtraLocations(ax.tag, merged);
   };
 
-  const handleRemoveExtraLocation = async (ax, index) => {
+  const handleRemoveExtraLocation = async (ax, location) => {
     if (typeof onSetExtraLocations !== 'function') return;
-    const next = (ax.extra_locations || []).filter((_, i) => i !== index);
+    // Match by structural equality (glyph + location dict) so the
+    // remove survives a refetch reordering entries.
+    const next = (ax.extra_locations || []).filter(e => !sameEntry(e, location));
     await onSetExtraLocations(ax.tag, next);
   };
+
+  // Render an N-D location dict as ``{axis=value, …}``. Used both
+  // for display and to identify entries.
+  const formatLocation = (loc) => Object.entries(loc || {})
+    .map(([t, v]) => `${t}=${v}`)
+    .join(', ');
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
   // shows a count so the user knows how many are hiding behind the
@@ -184,52 +192,82 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                         onOpenInEditor={onOpenInEditor}
                       />
                       {typeof onSetExtraLocations === 'function' && (ax.covers || []).length > 0 && (
-                        <div className="extra-locations">
-                          <div className="extra-locations-header">
-                            <span className="extra-locations-label">
-                              Custom brace layer locations
-                              <span className="extra-locations-hint">
-                                — additional brace layers beyond the auto-seeded min/max pair
-                              </span>
+                        <div className="brace-layers">
+                          <div className="brace-layers-header">
+                            Brace layers per glyph
+                            <span className="brace-layers-hint">
+                              auto seeds at {ax.min} / {ax.max} for every covered glyph · custom locations editable below
                             </span>
-                            <button
-                              type="button"
-                              className="extra-locations-add"
-                              onClick={() => setAddLocationFor({
-                                tag: ax.tag,
-                                axisDefault: ax.default,
-                                coverage: ax.covers,
-                              })}
-                            >
-                              + Add layer location
-                            </button>
                           </div>
-                          {(ax.extra_locations || []).length > 0 ? (
-                            <ul className="extra-locations-list">
-                              {(ax.extra_locations || []).map((entry, i) => (
-                                <li key={i} className="extra-location-row">
-                                  <span className="extra-location-glyph">{entry.glyph}</span>
-                                  <span className="extra-location-coords">
-                                    @ {'{' + Object.entries(entry.location || {})
-                                      .map(([t, v]) => `${t}=${v}`)
-                                      .join(', ') + '}'}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="extra-location-remove"
-                                    title="Remove this brace-layer location."
-                                    onClick={() => handleRemoveExtraLocation(ax, i)}
+                          {(ax.covers || []).map(glyphName => {
+                            const customForGlyph = (ax.extra_locations || []).filter(e => e.glyph === glyphName);
+                            return (
+                              <div key={glyphName} className="brace-layers-glyph">
+                                <div className="brace-layers-glyph-name">{glyphName}</div>
+                                <ul className="brace-layers-list">
+                                  {/* Auto seeds at axis-min and axis-max. Read-only — every
+                                      coverage glyph gets these from regenerate_shadow. */}
+                                  <li
+                                    className="brace-layer-row brace-layer-auto"
+                                    onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
+                                    title="Auto-seeded brace layer at the axis minimum. Click to open in Fontra."
                                   >
-                                    ✕
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="extra-locations-empty">
-                              No custom locations yet. Auto seeds at {ax.min} and {ax.max} are present for every coverage glyph.
-                            </div>
-                          )}
+                                    <span className="brace-layer-coords">
+                                      {ax.tag} = {ax.min}
+                                    </span>
+                                    <span className="brace-layer-tag">auto</span>
+                                  </li>
+                                  <li
+                                    className="brace-layer-row brace-layer-auto"
+                                    onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
+                                    title="Auto-seeded brace layer at the axis maximum. Click to open in Fontra."
+                                  >
+                                    <span className="brace-layer-coords">
+                                      {ax.tag} = {ax.max}
+                                    </span>
+                                    <span className="brace-layer-tag">auto</span>
+                                  </li>
+                                  {customForGlyph.map((entry, i) => (
+                                    <li
+                                      key={`custom-${i}`}
+                                      className="brace-layer-row brace-layer-custom"
+                                      onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
+                                      title="Click to open in Fontra."
+                                    >
+                                      <span className="brace-layer-coords">
+                                        {formatLocation(entry.location)}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="brace-layer-remove"
+                                        title="Remove this brace-layer location."
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleRemoveExtraLocation(ax, entry);
+                                        }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </li>
+                                  ))}
+                                  <li className="brace-layer-add-row">
+                                    <button
+                                      type="button"
+                                      className="brace-layer-add"
+                                      onClick={() => setAddLocationFor({
+                                        tag: ax.tag,
+                                        axisDefault: ax.default,
+                                        coverage: [glyphName],  // restrict the picker to this glyph
+                                        prefillGlyph: glyphName,
+                                      })}
+                                    >
+                                      + Add mapping
+                                    </button>
+                                  </li>
+                                </ul>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </>
@@ -274,6 +312,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           axisTag={addLocationFor.tag}
           axisDefault={addLocationFor.axisDefault}
           coverageGlyphs={addLocationFor.coverage}
+          prefillGlyph={addLocationFor.prefillGlyph}
           allAxes={allAxes || []}
           onCreate={async (entry) => {
             const ax = controlLikeAxes.find(a => a.tag === addLocationFor.tag);
@@ -283,6 +322,23 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
       )}
     </div>
   );
+}
+
+/**
+ * Strict equality of {glyph, location} brace-layer entries.
+ */
+function sameEntry(a, b) {
+  if (!a || !b) return false;
+  if (a.glyph !== b.glyph) return false;
+  const la = a.location || {};
+  const lb = b.location || {};
+  const ka = Object.keys(la);
+  const kb = Object.keys(lb);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (Number(la[k]) !== Number(lb[k])) return false;
+  }
+  return true;
 }
 
 export default ControlAxes;

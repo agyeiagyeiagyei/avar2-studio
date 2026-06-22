@@ -24,7 +24,7 @@ import './AddBraceLocationModal.css';
  *                      axis in the source/sidecar, used to render
  *                      pin inputs
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, coverageGlyphs, allAxes }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, coverageGlyphs, allAxes, prefillGlyph }) {
   const [glyph, setGlyph] = useState('');
   const [pins, setPins] = useState({});
   const [error, setError] = useState(null);
@@ -32,14 +32,16 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
 
   useEffect(() => {
     if (!isOpen) return;
-    setGlyph((coverageGlyphs && coverageGlyphs[0]) || '');
+    // prefillGlyph wins if the modal opened from a per-glyph "+ Add
+    // mapping" button; else default to the first coverage glyph.
+    setGlyph(prefillGlyph || (coverageGlyphs && coverageGlyphs[0]) || '');
     // Seed the control axis pin at axis-min as a useful starting
     // point; user adjusts from there. Other axes start un-pinned.
     const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
     setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
     setError(null);
     setSubmitting(false);
-  }, [isOpen, coverageGlyphs, axisTag, allAxes]);
+  }, [isOpen, coverageGlyphs, axisTag, allAxes, prefillGlyph]);
 
   if (!isOpen) return null;
 
