@@ -2535,6 +2535,18 @@ def _ensure_fontra_running(content_root: Path) -> int:
     running but pointed at a different folder, restart it.
 
     Returns the port Fontra is listening on. Raises on failure.
+
+    Setup note: this requires two pieces in the same venv as
+    avar2-studio (neither is on PyPI under the obvious name):
+
+      pip install -e git+https://github.com/fontra/fontra.git
+      pip install -e git+https://github.com/fontra/fontra-glyphs.git
+
+    The ``fontra-glyphs`` package registers the ``.glyphs``
+    filesystem backend — without it Fontra throws
+    ``FileNotFoundError(None)`` when opening a .glyphs project.
+    The ``.designspace`` / ``.ufo`` backends are bundled with
+    Fontra itself.
     """
     import subprocess
     import time
