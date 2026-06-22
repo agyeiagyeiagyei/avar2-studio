@@ -71,10 +71,17 @@ The sidecar is canonical; the shadow is derivable from
   sidecar as glif/layer snippets. The shadow can then always be
   re-derived.
 
-The sidecar JSON shape:
+### Sidecar JSON shape
+
+Layers are stored per-glyph as an **array** keyed by location vector
+(not stringified — the location is a JSON object so axis-order
+quirks don't break lookups). The location is sparse: only axes the
+designer explicitly pinned appear; unspecified axes interpolate at
+build time.
 
 ```jsonc
 {
+  "version": 1,
   "axes": [
     {
       "tag": "crbr",
@@ -84,18 +91,44 @@ The sidecar JSON shape:
       "max": 100,
       "coverage": ["A", "E", "F", "H", "e", "f", "t"],
       "layers": {
-        // Per-glyph, per-axis-position outline snapshots captured
-        // back from the shadow file. v2 fills these in as the
-        // designer draws.
-        "e": {
-          "-100": { "/* glif outline data */": "..." },
-          "100":  { "/* glif outline data */": "..." }
-        }
+        "e": [
+          {
+            "location": { "crbr": -100 },
+            "glif": "<glyph>... raw glif XML ...</glyph>"
+          },
+          {
+            "location": { "crbr": 100 },
+            "glif": "..."
+          },
+          {
+            "location": { "crbr": -100, "XOPQ": 78 },
+            "glif": "..."        // short crossbar at Light specifically
+          },
+          {
+            "location": { "crbr": 100, "XOPQ": 407 },
+            "glif": "..."        // long crossbar at Bold specifically
+          }
+        ],
+        "f": [ /* … */ ]
       }
     }
   ]
 }
 ```
+
+Key choices:
+
+- **Per-glyph array, not object keyed by stringified location.**
+  Stringifying axis dicts is fragile — `{crbr:-100,XOPQ:78}` and
+  `{XOPQ:78,crbr:-100}` mean the same thing but produce different
+  string keys.
+- **`location` is sparse.** Only axes the designer pinned appear.
+  Other axes interpolate from masters / other brace layers at
+  preview / build time.
+- **`glif` is raw glif XML**, captured back from the editor on save.
+  Sidecar is the canonical store (model α); shadow regenerates from
+  `original + sidecar` on every original-mtime change.
+- **`version: 1`** so future tooling can read/write the format.
 
 ### Lazy shadow creation
 
@@ -137,21 +170,30 @@ Control-axis editing in v2 looks like this:
 2. **List coverage** in the studio: a text field per axis. Designer
    types glyph names (one per line, optional `# group comments`).
    Saved to `-control.json`.
-3. **Studio writes seed brace layers** to the shadow: every coverage
-   glyph gets a layer at axis-min and axis-max, initially identical
-   to the default master. The preview now shows the axis as a slider
-   that doesn't visually deform anything yet (because the layers
-   match the default).
-4. **Open shadow in Glyphs.app** — a button per control axis. The
-   designer draws the alternate outlines for each coverage glyph at
-   the min and max positions.
-5. **Studio captures back into sidecar.** When the shadow's mtime
-   changes (Glyphs.app saved), the studio reads the brace-layer
-   outlines for the coverage glyphs and stores them in the sidecar's
-   `layers` block. The shadow is now derivable from `original +
-   updated sidecar`.
-6. **Iterate.** Steps 4–5 repeat as the designer refines outlines.
-7. **Push to source** — explicit user action. The studio applies the
+3. **Studio writes seed brace layers** to the shadow. Each coverage
+   glyph gets layers at axis-min and axis-max by default, **at the
+   interpolated outline for that location** (not the default master
+   copy). The preview now shows the axis as a slider that doesn't
+   visually deform anything yet (because the layers match what would
+   have been interpolated anyway).
+4. **Add layers at custom locations** — per-glyph "+ Add layer at
+   custom location…" button opens a modal with one input per axis
+   (parametric + AVAR2 MAPPINGS + control). Designer pins whichever
+   axes they want; control axis is required non-default. Studio
+   writes a seed layer at that full location vector. The "seed =
+   interpolated value at the location" rule means the layer is a
+   no-op visually until edited, which avoids surprise visual snaps.
+5. **Open shadow in editor** — a button per layer (per location).
+   Opens Fontra (Path 2 — iframe) navigated to that glyph at that
+   exact location. Designer draws the alternate outlines.
+6. **Studio captures back into sidecar.** When the shadow's mtime
+   changes (editor saved), the studio reads the brace-layer
+   outlines for the coverage glyphs and stores them as raw glif XML
+   in the sidecar's `layers` block, keyed by the location vector.
+   The shadow is now derivable from `original + updated sidecar`.
+7. **Iterate.** Steps 4–6 repeat as the designer refines outlines or
+   adds/removes layer locations.
+8. **Push to source** — explicit user action. The studio applies the
    sidecar's axis declarations + brace layers to the original. After
    a successful push the axis transitions from orange (in-sidecar
    only) to green (in source). The sidecar entry can be cleared or
@@ -168,6 +210,130 @@ Same tri-state sync semantics as instances:
 Demote = "remove control axis from source": axis declaration + brace
 layers stripped from the original; sidecar entry kept; axis flips
 back to orange.
+
+## Source-format scope for v2 authoring
+
+Brace-layer authoring is structurally very different across the two
+formats the studio supports:
+
+### `.glyphs`
+
+Brace layers live inside each glyph's `<layers>` block. Adding a
+brace layer means appending one layer entry per coverage glyph,
+keyed by location. `glyphsLib` already round-trips this. The shadow
+file is a single `.glyphs` file copy; mutations are localised.
+
+### `.designspace`
+
+There are no brace layers as such — the equivalent is **a new UFO
+master at the brace location**, containing only the coverage glyphs.
+Other glyphs in that location interpolate from the existing masters
+since the new UFO doesn't carry entries for them. This is the Roboto
+Delta pattern.
+
+Heavier than `.glyphs` because:
+
+- Each unique brace location requires its own UFO directory with
+  the minimum metadata files (`fontinfo.plist`, `metainfo.plist`,
+  `layercontents.plist`, etc.).
+- The studio has to **pool** UFOs across glyphs — if `e` and `f`
+  both have a brace layer at the same location, they go in the
+  same UFO, not two separate ones.
+- The `.designspace` `<sources>` block gains an entry per pooled
+  location; mutation has to keep that block consistent.
+
+### v2 ships `.glyphs` authoring; `.designspace` defers to v2.5
+
+v2 supports control-axis authoring on `.glyphs` sources only. The
+"+ Add Control Axis" button is disabled with a tooltip explaining
+why for `.designspace` sources. v1's read-only coverage panel still
+works on `.designspace` — Roboto Delta's existing case-split
+masters are visible there; users just can't author new ones in the
+studio yet.
+
+The deferral keeps v2 scope bounded. The UFO-pooling design + the
+extra mutation surface adds roughly another week of work and a
+class of edge cases (UFO naming conflicts, dedup logic) we'd
+rather hit in v2.5 after the `.glyphs` flow is proven.
+
+## Editing context inside the embedded editor (for later)
+
+When Fontra is embedded for brace-layer editing (Path 2, v2),
+designers will need more than a single-glyph editor view. Three
+requirements parked here that v2's Fontra integration has to
+handle:
+
+### 1. Interpolation-compatibility validation
+
+The hard rule of variable font masters: every drawing for a glyph
+must have the same number of contours, the same number of points
+per contour, and matching on-curve / off-curve types. A
+well-meaning edit in Fontra (adding a point to a brace layer, for
+example) can silently break interpolation.
+
+The studio should validate compatibility on every Fontra save:
+
+- Read the just-saved brace layer's glif from the shadow.
+- Compare against the default master's outline structure for that
+  glyph (contour count, points-per-contour, point types).
+- On mismatch, raise a sidebar warning on the offending layer:
+  `⚠ e @ {crbr:-100} — 4 contours, default master has 3`.
+- Don't auto-revert. The designer might be mid-edit and adding a
+  point intentionally; they need to fix it on the default master
+  too, in which case the warning clears on next save.
+
+Likely implementation path: `fontTools.pens.RecordingPen` to walk
+each layer once and compare summaries.
+
+### 2. Context-string editing
+
+Designers don't edit `e` in isolation — they edit it next to `T`,
+`h`, `qu`, `n`, etc. to see how the new crossbar reads in real
+text. The "Open in editor" affordance should:
+
+- Take a context string the designer types into the avar2-studio
+  panel (default: `Adhesion` or whatever sample-text the studio's
+  preview is using).
+- Pass it to Fontra so the embedded editor renders the focus glyph
+  surrounded by that context.
+- Fontra's text-editing view ("text" mode) already supports this;
+  we need URL params or a `postMessage` to drive it.
+
+### 3. Axis-aware context rendering
+
+Context glyphs around the focus should render at **the axis
+parameters set in the avar2-studio UI** (the slider values the
+designer has dialled in the sidebar), NOT at the focus glyph's
+brace-layer location.
+
+So if the designer is editing `e @ {crbr:-100, XOPQ:78}` while the
+avar2-studio sliders are set to `XOPQ=187, XTRA=290, YOPQ=130,
+crbr=0`:
+
+- The **focus glyph** (the `e` being edited) renders at its
+  brace-layer location: `{crbr:-100, XOPQ:78, XTRA=290, YOPQ=130}`
+  (other axes interpolating).
+- The **context glyphs** (`T`, `h`, etc.) render at the UI's
+  current settings: `{XOPQ=187, XTRA=290, YOPQ=130, crbr=0}`.
+
+This lets the designer see how the alternate reads inside text the
+font typically renders at, not inside text frozen at the alternate
+location. It also exposes regressions: if the new crossbar makes
+`e` look out of place at Regular weight specifically, the
+designer sees that immediately.
+
+Likely implementation: extension of the Fontra URL / message
+protocol to pass two location vectors — `focus_location` and
+`context_location`. Whether Fontra natively supports per-glyph
+location overrides in its text view is unverified; if not, we
+either contribute the support upstream or fall back to "focus
+glyph in isolation" with the context coming from a parallel
+avar2-studio preview pane.
+
+These three requirements are not v2 day-one — the day-one v2 ships
+with the basic Fontra iframe and a single-glyph view. But the
+sidecar / URL / message protocol design should leave room for them
+so v2.x can land them additively.
 
 ## Disable in preview (v1)
 
