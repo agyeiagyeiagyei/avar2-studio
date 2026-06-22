@@ -382,6 +382,11 @@ function App() {
     }
   }, [refreshAfterControlAxisChange]);
 
+  const handleSetControlAxisCoverage = useCallback(async (tag, coverage) => {
+    await api.setControlAxisCoverage(tag, coverage);
+    await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
+
   // Axis tag → default value lookup. Used by InstanceRow's
   // preview-coordinates memo to pin disabled control axes to their
   // axis default at render time without mutating the user's chosen
@@ -1716,6 +1721,7 @@ function App() {
             onToggleDisableControlAxis={handleToggleDisableControlAxis}
             onCreateControlAxis={handleCreateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
+            onSetControlAxisCoverage={handleSetControlAxisCoverage}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
             onUpdateAvar2Mapping={handleUpdateAvar2Mapping}

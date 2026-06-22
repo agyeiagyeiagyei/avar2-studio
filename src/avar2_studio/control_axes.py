@@ -163,6 +163,41 @@ def remove_axis(source_path: Path, tag: str) -> bool:
     return True
 
 
+def set_coverage(source_path: Path, tag: str, glyph_names: List[str]) -> List[str]:
+    """Replace an axis's coverage list with ``glyph_names``. De-dups,
+    preserves the input order (designer ordering carries meaning when
+    they group by row/cluster). Returns the canonical stored list.
+
+    Raises ``ValueError`` if the axis tag doesn't exist in the sidecar.
+    """
+    tag_norm = (tag or "").strip().lower()
+    if not tag_norm:
+        raise ValueError("tag is required")
+
+    cleaned: List[str] = []
+    seen: set = set()
+    for name in glyph_names or []:
+        if not isinstance(name, str):
+            continue
+        stripped = name.strip()
+        if not stripped or stripped in seen:
+            continue
+        seen.add(stripped)
+        cleaned.append(stripped)
+
+    data = load(source_path)
+    target = None
+    for ax in data["axes"]:
+        if str(ax.get("tag", "")).lower() == tag_norm:
+            target = ax
+            break
+    if target is None:
+        raise ValueError(f"control axis '{tag_norm}' not found")
+    target["coverage"] = cleaned
+    _save(source_path, data)
+    return cleaned
+
+
 # --------------------------------------------------------------------------
 # Internals
 # --------------------------------------------------------------------------
@@ -283,32 +318,112 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     # this module stays importable in non-.glyphs contexts (and unit
     # tests don't need to pull glyphsLib for sidecar-only tests).
     from glyphsLib import GSFont
-    from glyphsLib.classes import GSAxis
+    from glyphsLib.classes import GSAxis, GSLayer
 
     font = GSFont(str(shadow_path))
     existing_tags = {str(getattr(ax, "axisTag", "")).lower() for ax in font.axes}
 
+    # Each control axis's index in the eventual axis list (so we can
+    # find the right slot when writing brace-layer coordinates).
+    axis_index_by_tag: Dict[str, int] = {}
+
     for spec in axes_to_add:
         tag = (spec.get("tag") or "").strip().lower()
-        if not tag or tag in existing_tags:
+        if not tag:
             continue
+        if tag in existing_tags:
+            # Pre-existing source axis — find its index for brace
+            # layer indexing.
+            for i, src_ax in enumerate(font.axes):
+                if str(getattr(src_ax, "axisTag", "")).lower() == tag:
+                    axis_index_by_tag[tag] = i
+                    break
+            continue
+
         new_axis = GSAxis()
         new_axis.axisTag = tag
         new_axis.name = spec.get("display_name") or tag
         font.axes.append(new_axis)
+        axis_index_by_tag[tag] = len(font.axes) - 1
         existing_tags.add(tag)
 
         default_value = float(spec.get("default", 0))
-        # Each master sits at the axis default for this new axis (no
-        # master coverage until brace layers exist). Extend each
-        # master's coordinate vector accordingly.
         for master in font.masters:
             coords = list(getattr(master, "axes", None) or [])
             coords.append(default_value)
             master.axes = coords
 
+    # Seed brace layers for coverage glyphs (v2 slice 3). For each
+    # control axis with coverage, every covered glyph gets two seed
+    # brace layers — one at axis-min and one at axis-max. Each layer
+    # is a copy of the default master's outline so the brace exists
+    # as a structural target. v2 slice 5 (Fontra) lets the designer
+    # replace these seeded outlines with actual alternate drawings.
+    if font.masters:
+        default_master = font.masters[0]
+        default_master_id = default_master.id
+        default_loc = list(getattr(default_master, "axes", None) or [])
+
+        for spec in axes_to_add:
+            tag = (spec.get("tag") or "").strip().lower()
+            if not tag:
+                continue
+            coverage = list(spec.get("coverage") or [])
+            if not coverage:
+                continue
+            axis_index = axis_index_by_tag.get(tag)
+            if axis_index is None:
+                continue
+            seed_values = [float(spec.get("min", 0)), float(spec.get("max", 0))]
+            for glyph_name in coverage:
+                glyph = font.glyphs[glyph_name] if glyph_name in font.glyphs else None
+                if glyph is None:
+                    print(
+                        f"  [control-axes] coverage glyph '{glyph_name}' "
+                        f"not in source — skipping seed layer",
+                    )
+                    continue
+                default_layer = next(
+                    (l for l in glyph.layers if l.associatedMasterId == default_master_id),
+                    None,
+                )
+                if default_layer is None:
+                    continue
+                for seed_value in seed_values:
+                    location = list(default_loc)
+                    location[axis_index] = seed_value
+                    # Skip if a brace layer at this exact location
+                    # already exists (idempotent regeneration).
+                    if any(
+                        list(dict(getattr(l, "attributes", None) or {}).get("coordinates") or [])
+                        == location
+                        for l in glyph.layers
+                    ):
+                        continue
+                    brace = GSLayer()
+                    brace.associatedMasterId = default_master_id
+                    brace.attributes = {"coordinates": location}
+                    brace.paths = list(default_layer.paths) if default_layer.paths else []
+                    brace.components = (
+                        list(default_layer.components) if default_layer.components else []
+                    )
+                    brace.anchors = (
+                        list(default_layer.anchors) if default_layer.anchors else []
+                    )
+                    brace.width = default_layer.width
+                    brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
+                    glyph.layers.append(brace)
+
     font.save(str(shadow_path))
     return shadow_path
+
+
+def _fmt_coord(value: float) -> str:
+    """Format a coordinate the way Glyphs.app's brace-layer-name
+    convention does: integer when whole, else fixed precision."""
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
 
 
 def remove_shadow(original_path: Path) -> bool:

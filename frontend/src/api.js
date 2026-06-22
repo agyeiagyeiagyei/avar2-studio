@@ -345,6 +345,19 @@ export const api = {
     return parseJSON(response);
   },
 
+  async setControlAxisCoverage(tag, coverage) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/coverage`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coverage }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to set coverage: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async listExamples() {
     const response = await fetch(`${API_BASE}/examples`);
     if (!response.ok) {

@@ -284,3 +284,92 @@
 .control-axis-delete-btn:hover {
   background: #fdecea;
 }
+
+.coverage-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.4rem;
+}
+
+.coverage-editor-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #444;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.coverage-editor-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 0.62rem;
+}
+
+.coverage-editor-hint code {
+  background: #f0f0f0;
+  padding: 0 0.2rem;
+  border-radius: 2px;
+}
+
+.coverage-editor-textarea {
+  width: 100%;
+  font-family: monospace;
+  font-size: 0.72rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  resize: vertical;
+  box-sizing: border-box;
+  line-height: 1.45;
+  background: #fafafa;
+}
+
+.coverage-editor-textarea:focus {
+  outline: none;
+  border-color: #2c5aa0;
+  background: white;
+  box-shadow: 0 0 0 2px rgba(44, 90, 160, 0.18);
+}
+
+.coverage-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.coverage-editor-count {
+  font-size: 0.65rem;
+  color: #666;
+}
+
+.coverage-editor-save {
+  background: #2c5aa0;
+  color: white;
+  border: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.coverage-editor-save:disabled {
+  background: #c5cdd9;
+  cursor: not-allowed;
+}
+
+.coverage-editor-save:hover:not(:disabled) {
+  background: #224a85;
+}
+
+.coverage-editor-error {
+  font-size: 0.7rem;
+  color: #b8350c;
+  background: #fdecea;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+}

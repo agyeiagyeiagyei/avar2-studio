@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './ControlAxes.css';
+import CoverageEditor from './CoverageEditor';
 
 /**
  * CONTROL AXES panel — v1 read-only.
@@ -20,7 +21,7 @@ import './ControlAxes.css';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage }) {
   const [expandedTag, setExpandedTag] = useState(null);
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
@@ -158,19 +159,25 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                       <span><strong>Default:</strong> {ax.default}</span>
                     </div>
                   )}
-                  <div className="control-axis-glyphs">
-                    {ax.covers.length > 0 ? (
-                      ax.covers.map(g => (
-                        <span key={g} className="control-axis-glyph">{g}</span>
-                      ))
-                    ) : (
-                      <span className="control-axis-glyphs-empty">
-                        {isStudio
-                          ? 'No coverage glyphs yet. Coverage editor lands in v2.3 — declare the glyphs that participate in this axis there.'
-                          : 'Declared in the source but no glyphs vary along it yet.'}
-                      </span>
-                    )}
-                  </div>
+                  {isStudio && typeof onSetCoverage === 'function' ? (
+                    <CoverageEditor
+                      tag={ax.tag}
+                      coverage={ax.covers}
+                      onSave={onSetCoverage}
+                    />
+                  ) : (
+                    <div className="control-axis-glyphs">
+                      {ax.covers.length > 0 ? (
+                        ax.covers.map(g => (
+                          <span key={g} className="control-axis-glyph">{g}</span>
+                        ))
+                      ) : (
+                        <span className="control-axis-glyphs-empty">
+                          Declared in the source but no glyphs vary along it yet.
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {isStudio && typeof onDeleteAxis === 'function' && (
                     <button
                       className="control-axis-delete-btn"

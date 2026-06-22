@@ -2493,12 +2493,65 @@ def create_control_axis():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/control-axes/<tag>/coverage', methods=['PUT'])
+def set_control_axis_coverage(tag: str):
+    """Replace the coverage glyph list for a control axis.
+
+    Body: ``{"coverage": ["e", "f", "t", ...]}``.
+
+    Regenerates the shadow .glyphs file with seed brace layers at
+    axis-min and axis-max for each coverage glyph. Each seed layer
+    is a copy of the default master's outline — the designer
+    replaces the outlines with real alternates via the editor
+    integration in slice 5. The build pipeline now switches to the
+    shadow path so the new brace layers (and the axes that hold
+    them) make it into the compiled fvar.
+    """
+    global GLYPHS_PATH, VARIABLE_FONT_PATH
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    coverage = data.get("coverage")
+    if not isinstance(coverage, list):
+        return jsonify({"error": "Body must include a 'coverage' array of glyph names."}), 400
+    try:
+        stored = _control_axes.set_coverage(ORIGINAL_PATH, tag, coverage)
+
+        # Regenerate the shadow — picks up the new coverage + brace
+        # seeds. Switch the build path to the shadow because the
+        # shadow now carries real deltas (non-default brace layer
+        # locations) that the original doesn't have.
+        shadow = None
+        try:
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow regeneration after coverage update failed: {shadow_exc}", file=sys.stderr)
+
+        if shadow is not None:
+            GLYPHS_PATH = shadow
+            VARIABLE_FONT_PATH = None
+            try:
+                trigger_build()
+            except Exception as build_exc:
+                print(f"Warning: rebuild after coverage update failed: {build_exc}", file=sys.stderr)
+
+        return jsonify({"success": True, "tag": tag.lower(), "coverage": stored})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        print(f"Error setting control-axis coverage: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/control-axes/<tag>', methods=['DELETE'])
 def delete_control_axis(tag: str):
     """Remove a control-axis declaration from the sidecar. If the
     sidecar still has any axes, regenerate the shadow without the
     deleted one; if it's now empty, remove the shadow entirely so
     the build pipeline falls back to the original source."""
+    global GLYPHS_PATH, VARIABLE_FONT_PATH
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:
@@ -2506,16 +2559,26 @@ def delete_control_axis(tag: str):
         if not removed:
             return jsonify({"error": f"control axis '{tag}' not found"}), 404
 
-        # Keep the shadow in sync with the new sidecar state for
-        # slice 3+. If the sidecar is now empty, drop the shadow
-        # entirely — clean filesystem state and no stale data for
-        # the next axis-add.
+        # Re-derive the shadow + build target. If the sidecar still
+        # has any axis with coverage, shadow stays active. Otherwise
+        # the shadow can be dropped and the build reverts to the
+        # original.
         try:
             remaining = _control_axes.list_axes(ORIGINAL_PATH)
             if remaining:
-                _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                if shadow is not None and any(ax.get("coverage") for ax in remaining):
+                    GLYPHS_PATH = shadow
+                else:
+                    GLYPHS_PATH = ORIGINAL_PATH
             else:
                 _control_axes.remove_shadow(ORIGINAL_PATH)
+                GLYPHS_PATH = ORIGINAL_PATH
+            VARIABLE_FONT_PATH = None
+            try:
+                trigger_build()
+            except Exception as build_exc:
+                print(f"Warning: rebuild after delete failed: {build_exc}", file=sys.stderr)
         except Exception as shadow_exc:
             print(f"Warning: shadow refresh after delete failed: {shadow_exc}", file=sys.stderr)
 
@@ -3905,12 +3968,18 @@ def _apply_source_path(path: Path) -> None:
     LAST_BUILD_ERROR = None
     EDITING_INSTANCES = set()
 
-    # CONTROL AXES — keep the shadow in sync on load so it's ready
-    # for slice 3 brace-layer authoring. We don't swap GLYPHS_PATH
-    # to it yet (see comment on GLYPHS_PATH assignment above).
+    # CONTROL AXES — keep the shadow in sync on load. If any axis has
+    # coverage glyphs (= the shadow has real brace-layer deltas), swap
+    # the active build path to the shadow so the compiled font
+    # actually carries the new axes. Axes with no coverage live
+    # dormant in the sidecar; the build stays on the original since
+    # the shadow would compile to the same thing.
     try:
-        if _control_axes.list_axes(ORIGINAL_PATH):
-            _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        sidecar_axes = _control_axes.list_axes(ORIGINAL_PATH)
+        if sidecar_axes:
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            if shadow is not None and any(ax.get("coverage") for ax in sidecar_axes):
+                GLYPHS_PATH = shadow
     except Exception as exc:
         print(f"Warning: failed to regenerate control-axes shadow on load: {exc}", file=sys.stderr)
 
