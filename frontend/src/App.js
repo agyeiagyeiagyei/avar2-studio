@@ -398,8 +398,18 @@ function App() {
   // ``url`` is the same-origin proxied path (Fontra served under
   // /fontra/* with focused-UI CSS injected); ``direct_url`` is the
   // raw cross-origin URL for the "Open in new tab" escape.
-  // ``glyphName`` (optional) appends ``&text=/<glyph>`` so Fontra
-  // opens with that glyph in its text view.
+  //
+  // When ``glyphName`` is passed we append query params that
+  // Fontra's editor reads into its viewInfo dict (each value is
+  // JSON-parsed by Fontra). The params:
+  //   - text         — places the glyph in the text view (/name)
+  //   - selectedGlyphName — names the selected glyph
+  //   - selectedGlyph — drops the editor into edit mode on the
+  //                     first cell, so the canvas opens with the
+  //                     outline ready to draw
+  // Without selectedGlyph, the designer would land on the text
+  // view and have to click into the glyph to enter edit mode —
+  // which felt like "I don't see the glyph to be edited."
   const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName) => {
     try {
       setError(null);
@@ -407,13 +417,15 @@ function App() {
       let url = data.url;
       let directUrl = data.direct_url;
       if (glyphName) {
-        // Fontra accepts /<glyphname> in the text view to select a
-        // glyph by name. JSON-encode and URI-encode so it survives
-        // the editor's url.searchParams.get(key) → JSON.parse round
-        // trip.
-        const textParam = `text=${encodeURIComponent(JSON.stringify('/' + glyphName))}`;
-        url = `${url}&${textParam}`;
-        directUrl = `${directUrl}&${textParam}`;
+        const params = [
+          ['text', '/' + glyphName],
+          ['selectedGlyphName', glyphName],
+          ['selectedGlyph', { lineIndex: 0, glyphIndex: 0, isEditing: true }],
+        ]
+          .map(([k, v]) => `${k}=${encodeURIComponent(JSON.stringify(v))}`)
+          .join('&');
+        url = `${url}&${params}`;
+        directUrl = `${directUrl}&${params}`;
       }
       setFontraEditor({ url, directUrl, tag, glyphName });
     } catch (err) {

@@ -702,6 +702,23 @@
   font-family: monospace;
 }
 
+.layers-glyph-warning {
+  font-size: 0.6rem;
+  color: #6b3d00;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  cursor: help;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.layers-glyph-block.needs-more .layers-glyph-header {
+  background: #fff8e0;
+  border-bottom-color: #f0e3a8;
+}
+
 .layers-glyph-list {
   list-style: none;
   margin: 0;

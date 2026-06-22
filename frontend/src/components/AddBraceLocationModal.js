@@ -131,6 +131,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             {(allAxes || []).map(axis => {
               const isPinned = axis.tag in pins;
               const isControlAxis = axis.tag === axisTag;
+              const currentValue = isPinned ? pins[axis.tag] : axis.default;
+              const step = (axis.max - axis.min) / 1000;
               return (
                 <div
                   key={axis.tag}
@@ -146,7 +148,22 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                     />
                     <span className="pin-tag">{axis.tag}</span>
                   </label>
-                  <span className="pin-range">{axis.min} … {axis.max}</span>
+                  <div className="pin-slider-wrap">
+                    <input
+                      type="range"
+                      className="pin-slider"
+                      disabled={!isPinned}
+                      min={axis.min}
+                      max={axis.max}
+                      step={step > 0 ? step : 0.1}
+                      value={currentValue}
+                      onChange={e => setPinValue(axis.tag, e.target.value)}
+                    />
+                    <div className="pin-slider-ticks">
+                      <span>{axis.min}</span>
+                      <span>{axis.max}</span>
+                    </div>
+                  </div>
                   <input
                     type="number"
                     className="pin-value"
@@ -154,7 +171,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                     min={axis.min}
                     max={axis.max}
                     step={0.1}
-                    value={isPinned ? pins[axis.tag] : axis.default}
+                    value={currentValue}
                     onChange={e => setPinValue(axis.tag, e.target.value)}
                   />
                 </div>
