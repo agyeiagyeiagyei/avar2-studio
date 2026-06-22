@@ -1,0 +1,199 @@
+.control-axes {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eee;
+}
+
+.control-axes-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.control-axes-header:hover .control-axes-title {
+  color: #333;
+}
+
+.control-axes-section-caret {
+  color: #888;
+  width: 0.9em;
+  font-size: 0.8em;
+}
+
+.control-axes-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #555;
+  margin: 0;
+}
+
+.control-axes-count {
+  display: inline-block;
+  padding: 0.02rem 0.32rem;
+  background: #eef2f7;
+  color: #2c5aa0;
+  border-radius: 8px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-family: monospace;
+  line-height: 1.2;
+}
+
+.control-axes-disabled-count {
+  display: inline-block;
+  padding: 0.02rem 0.32rem;
+  background: #fdecea;
+  color: #b8350c;
+  border-radius: 8px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.control-axes-subtitle {
+  font-size: 0.6rem;
+  color: #999;
+  font-style: italic;
+  margin-left: auto;
+}
+
+.control-axes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.control-axis-row {
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  background: #fafafa;
+  overflow: hidden;
+  transition: opacity 0.15s;
+}
+
+.control-axis-row.disabled {
+  opacity: 0.45;
+}
+
+.control-axis-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.72rem;
+}
+
+.control-axis-header:hover {
+  background-color: #f0f0f0;
+}
+
+.control-axis-caret {
+  color: #888;
+  width: 0.9em;
+  font-size: 0.85em;
+}
+
+.control-axis-tag {
+  font-family: monospace;
+  font-weight: 600;
+  color: #333;
+  letter-spacing: 0.02em;
+}
+
+.control-axis-name {
+  color: #666;
+  font-size: 0.65rem;
+  flex: 1;
+}
+
+.kind-badge {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: help;
+  border: 1px solid transparent;
+}
+
+.kind-scoped {
+  background: #e7f1ff;
+  color: #0b4a8f;
+  border-color: #b6d4fe;
+}
+
+.kind-partial {
+  background: #fff3cd;
+  color: #6b3d00;
+  border-color: #ffe69c;
+}
+
+.control-axis-count {
+  color: #999;
+  font-size: 0.6rem;
+  font-family: monospace;
+}
+
+.control-axis-disable {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.control-axis-disable.on {
+  background: #fdecea;
+  border-color: #f1c0c0;
+}
+
+.control-axis-disable:hover {
+  background: #f0f0f0;
+}
+
+.control-axis-disable.on:hover {
+  background: #f9d4d2;
+}
+
+.control-axis-body {
+  padding: 0.4rem 0.6rem 0.6rem 1.6rem;
+  border-top: 1px dashed #ddd;
+  background: white;
+}
+
+.control-axis-glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.3rem;
+}
+
+.control-axis-glyph {
+  display: inline-block;
+  padding: 0.05rem 0.3rem;
+  background: #f0f3f9;
+  border-radius: 2px;
+  font-family: monospace;
+  font-size: 0.62rem;
+  color: #2c5aa0;
+}
+
+.control-axis-glyphs-empty {
+  font-size: 0.65rem;
+  color: #888;
+  font-style: italic;
+}

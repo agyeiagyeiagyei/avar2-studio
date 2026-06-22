@@ -55,6 +55,7 @@ except ImportError:
 
 from . import source_font as _source_font
 from . import csv_io as _csv_io
+from . import glyph_coverage as _glyph_coverage
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -2252,6 +2253,72 @@ def get_avar2_mappings():
             "parametric_axes": out_cols
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/glyph-coverage', methods=['GET'])
+def glyph_coverage():
+    """Return per-axis glyph coverage (v1 read-only for CONTROL AXES).
+
+    Walks brace layers (``.glyphs``) or alternate-master UFOs
+    (``.designspace``) and reports, per axis, the names of glyphs
+    that contribute variation along that axis. The frontend uses
+    ``covers_count / total_glyphs`` + the ``kind`` classification to
+    surface axes under the appropriate panel:
+
+      - ``"universal"`` (full coverage) → stays under AVAR2 MAPPINGS /
+                                          parametric.
+      - ``"scoped"``    (small subset)  → CONTROL AXES.
+      - ``"partial"``   (in between)    → CONTROL AXES with smell badge.
+
+    Response shape::
+
+        {
+          "axes": [
+            {
+              "tag": "XOPQ",
+              "name": "X-Opacity",
+              "covers": ["A", "B", ..., "z"],
+              "covers_count": 245,
+              "total_glyphs": 245,
+              "kind": "universal"
+            },
+            ...
+          ]
+        }
+    """
+    if GLYPHS_PATH is None:
+        return jsonify({"axes": []})
+    try:
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        coverage = _glyph_coverage.compute_coverage(font)
+
+        # Pair the coverage data with axis names / display info from the
+        # already-loaded source axes so the frontend gets one
+        # self-sufficient response. Axis tag is the join key.
+        source_axes = _source_font.get_axes(font)
+        axis_by_tag = {ax["tag"]: ax for ax in source_axes}
+
+        out = []
+        for tag, info in coverage.items():
+            axis_meta = axis_by_tag.get(tag, {})
+            out.append({
+                "tag": tag,
+                "name": axis_meta.get("name") or tag,
+                "covers": info["covers"],
+                "covers_count": info["covers_count"],
+                "total_glyphs": info["total_glyphs"],
+                "kind": info["kind"],
+            })
+        # Stable ordering: universal first (least interesting), then
+        # scoped, then partial. Within each bucket, by tag.
+        kind_order = {"universal": 0, "scoped": 1, "partial": 2}
+        out.sort(key=lambda a: (kind_order.get(a["kind"], 99), a["tag"]))
+        return jsonify({"axes": out})
+    except Exception as e:
+        print(f"Error in /api/glyph-coverage: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

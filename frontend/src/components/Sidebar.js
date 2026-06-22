@@ -6,9 +6,10 @@ import AxisControl from './AxisControl';
 import DuplicateModal from './DuplicateModal';
 import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
+import ControlAxes from './ControlAxes';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis }) {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
@@ -193,7 +194,21 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           );
         })()}
       </div>
-      
+
+      {/* CONTROL AXES — sits directly below the parametric axes
+          since both are "axes that deform the font" (vs AVAR2
+          MAPPINGS which is mapping-table state). Surfaces axes
+          whose effect is constrained to a named subset of glyphs
+          (case-split parametric axes like Roboto Delta's
+          XOUC/XOLC/XOFI). Component returns null when there are
+          no scoped/partial axes, so pure-parametric fonts like
+          Crispy Mini won't see this section. */}
+      <ControlAxes
+        axes={glyphCoverageAxes}
+        disabledAxes={disabledControlAxes || new Set()}
+        onToggleDisable={onToggleDisableControlAxis || (() => {})}
+      />
+
       {avar2Mode && (() => {
         // Check if there are any traditional axes in the CSV
         const hasTraditionalAxes = avar2Axes?.traditional_axes?.columns && avar2Axes.traditional_axes.columns.length > 0;
@@ -429,7 +444,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         </div>
         );
       })()}
-      
+
       {/* New-instance entry point — sits right below AVAR2 MAPPINGS as
           the primary "make a new row" action. Duplicate (below) is the
           alternative path when an existing instance is selected. */}

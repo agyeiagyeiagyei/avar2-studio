@@ -3,7 +3,7 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth, disabledControlAxes, axisDefaults }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -21,8 +21,27 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
     ? editingCoordinates
     : (instanceEditingCoordinates[instance.name] || instance.coordinates);
   
+  // Apply the CONTROL AXES preview-disable: any axis the user has
+  // toggled off via the eye icon renders at its axis default,
+  // regardless of the slider / CSV value. Frontend-only — the
+  // actual edit state is untouched, so re-enabling restores the
+  // user's chosen value immediately.
+  const previewCoordinates = React.useMemo(() => {
+    if (!disabledControlAxes || disabledControlAxes.size === 0) {
+      return activeCoordinates;
+    }
+    const out = { ...activeCoordinates };
+    for (const tag of disabledControlAxes) {
+      const fallback = axisDefaults && axisDefaults[tag];
+      if (fallback !== undefined) {
+        out[tag] = fallback;
+      }
+    }
+    return out;
+  }, [activeCoordinates, disabledControlAxes, axisDefaults]);
+
   // SPAC support is deferred — the coordinate dict is rendered as-is.
-  const coordinatesForWidth = { ...activeCoordinates };
+  const coordinatesForWidth = { ...previewCoordinates };
   
   // Calculate advance width for this instance
   // If this is the selected instance and we have an exact API value, use it
@@ -45,8 +64,9 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   }, [calculateAdvanceWidth, fontLoaded, coordinatesForWidth, sampleText, instance.name, isSelected, currentAdvanceWidth]);
   
   // Build font-variation-settings string from whatever axes the
-  // source declares.
-  let fontVariationSettings = Object.entries(activeCoordinates)
+  // source declares. previewCoordinates differs from activeCoordinates
+  // only when the CONTROL AXES disable toggle has axes pinned.
+  let fontVariationSettings = Object.entries(previewCoordinates)
     .map(([tag, value]) => `"${tag}" ${value}`)
     .join(', ');
 

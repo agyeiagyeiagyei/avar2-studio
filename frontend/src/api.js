@@ -305,6 +305,14 @@ export const api = {
     return parseJSON(response);
   },
 
+  async getGlyphCoverage() {
+    const response = await fetch(`${API_BASE}/glyph-coverage`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch glyph coverage: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
   async listExamples() {
     const response = await fetch(`${API_BASE}/examples`);
     if (!response.ok) {

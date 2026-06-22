@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
 import Header from './components/Header';
@@ -45,6 +45,17 @@ function App() {
   const [avar2Mode] = useState(true);
   const [avar2Instances, setAvar2Instances] = useState([]);
   const [avar2Axes, setAvar2Axes] = useState(null);
+  // CONTROL AXES — v1 read-only. Populated from /api/glyph-coverage.
+  // Disabled set is session-local: when an axis tag is in the set,
+  // the preview pins it to its default value at render time.
+  const [glyphCoverageAxes, setGlyphCoverageAxes] = useState([]);
+  const [disabledControlAxes, setDisabledControlAxes] = useState(new Set());
+  // Tracks the most recent ``glyphs_path`` we loaded data for. Used by
+  // loadData() to detect a source swap (Load Font dropdown → new font)
+  // so we can clear per-instance state. A polling-tick reload to the
+  // same source must NOT wipe in-progress edits, so we only reset
+  // when this ref's value actually changes.
+  const loadedGlyphsPathRef = useRef(null);
   // SPAC support is deferred from v1; the spacMode/spacAxisExists/
   // spacValues state, the checkSpacAxisStatus() helper, and the
   // loadSpacValues() helper were all removed when SPAC was pulled
@@ -73,6 +84,9 @@ function App() {
     loadAvar2Data().catch(() => {
       // Silently fail - avar2 is optional
     });
+    // Preload CONTROL AXES coverage. Hidden in the UI unless the
+    // source ships glyph-scoped variation.
+    loadGlyphCoverage();
     // Check sync status
     checkSyncStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,6 +192,31 @@ function App() {
       // Check health and font status
       const health = await api.health();
 
+      // Detect a source swap. The Load Font dropdown ultimately calls
+      // loadData() with a new health.glyphs_path; the polling tick
+      // calls loadData() with the same path. Per-instance state
+      // (selectedInstance, editingCoordinates, the per-instance
+      // scratch maps) is keyed by axis tags + instance names that
+      // belong to the OLD source — none of those are valid in the
+      // new source, and leaving them around makes the Sidebar slider
+      // dict read NaN for axes that don't exist and the InstanceRow
+      // grid render with the wrong axis values.
+      const isSourceSwap = (
+        loadedGlyphsPathRef.current !== null &&
+        loadedGlyphsPathRef.current !== (health.glyphs_path || null)
+      );
+      if (isSourceSwap) {
+        setSelectedInstance(null);
+        setEditingCoordinates({});
+        setOriginalCoordinates({});
+        setInstanceEditingCoordinates({});
+        setInstanceOriginalCoordinates({});
+        setAdvanceWidthCache({});
+        setCurrentAdvanceWidth(null);
+        setCurrentAdvanceWidthPixels(null);
+      }
+      loadedGlyphsPathRef.current = health.glyphs_path || null;
+
       // Blind launch: no source loaded server-side. Skip the auto-build
       // (there's nothing to build) — the Header's Load Font dropdown
       // will swap a source in, after which loadData re-runs.
@@ -233,6 +272,12 @@ function App() {
       } else if (health.font_built && !fontUrl) {
         setFontUrl(api.getFontUrl());
       }
+
+      // CONTROL AXES coverage is source-derived; refetch on every
+      // loadData (source swap, post-build reload). Disabled-set
+      // resets too — a new source's axes are a fresh slate.
+      loadGlyphCoverage();
+      setDisabledControlAxes(new Set());
     } catch (err) {
       setError(err.message);
       console.error('Failed to load data:', err);
@@ -248,15 +293,15 @@ function App() {
         setAvar2Instances(data.instances || []);
         return data;
       });
-      
+
       const axesPromise = api.getAvar2Axes().then(data => {
         setAvar2Axes(data);
         return data;
       });
-      
+
       // Wait for both to complete (but state updates happen immediately)
       await Promise.all([instancesPromise, axesPromise]);
-      
+
       // avar2Mode is always enabled, no need to set it
     } catch (err) {
       console.error('Failed to load avar2 data:', err);
@@ -265,6 +310,39 @@ function App() {
       setAvar2Axes(null);
     }
   };
+
+  // CONTROL AXES — v1 read-only fetch. Categorised server-side as
+  // universal / scoped / partial; the Sidebar's ControlAxes component
+  // filters to scoped + partial and hides the section if neither
+  // exists. Reloaded whenever the source changes (load-source swap).
+  const loadGlyphCoverage = async () => {
+    try {
+      const data = await api.getGlyphCoverage();
+      setGlyphCoverageAxes(data.axes || []);
+    } catch (err) {
+      // Silent — the endpoint returns [] on no-source-loaded; any
+      // hard failure just leaves the CONTROL AXES panel empty.
+      setGlyphCoverageAxes([]);
+    }
+  };
+
+  const handleToggleDisableControlAxis = useCallback((tag) => {
+    setDisabledControlAxes(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }, []);
+
+  // Axis tag → default value lookup. Used by InstanceRow's
+  // preview-coordinates memo to pin disabled control axes to their
+  // axis default at render time without mutating the user's chosen
+  // slider value.
+  const axisDefaults = React.useMemo(
+    () => Object.fromEntries((axes || []).map(a => [a.tag, a.default])),
+    [axes],
+  );
 
   const handleAddAvar2Axis = async (axisData) => {
     try {
@@ -1586,6 +1664,9 @@ function App() {
             avar2Mode={avar2Mode}
             avar2Instances={avar2Instances}
             avar2Axes={avar2Axes}
+            glyphCoverageAxes={glyphCoverageAxes}
+            disabledControlAxes={disabledControlAxes}
+            onToggleDisableControlAxis={handleToggleDisableControlAxis}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
             onUpdateAvar2Mapping={handleUpdateAvar2Mapping}
@@ -1614,6 +1695,8 @@ function App() {
             onUpdateInstanceStudio={handleUpdateInstanceStudio}
             onUpdateInstanceSource={handleUpdateInstanceSource}
             onDemoteFromSource={handleDemoteFromSource}
+            disabledControlAxes={disabledControlAxes}
+            axisDefaults={axisDefaults}
             calculateAdvanceWidth={calculateAdvanceWidth}
             advanceWidthLoading={advanceWidthLoading}
             currentAdvanceWidth={currentAdvanceWidth}
