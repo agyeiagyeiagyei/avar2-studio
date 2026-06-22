@@ -223,10 +223,20 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           axisDefault={addLocationFor.axisDefault}
           prefillGlyphs={addLocationFor.prefillGlyphs}
           lockGlyphs={addLocationFor.lockGlyphs}
+          editLayer={addLocationFor.editLayer}
           allAxes={allAxes || []}
           onCreate={async (entries) => {
-            const ax = controlLikeAxes.find(a => a.tag === addLocationFor.tag);
-            if (ax) await handleAddLayers(ax, entries);
+            // Edit flow: the LayersEditor row supplied a
+            // ``replaceLayer`` callback that swaps the single
+            // existing entry. Add flow: append to the axis's layers.
+            if (addLocationFor.editLayer && typeof addLocationFor.replaceLayer === 'function') {
+              if (entries.length) {
+                await addLocationFor.replaceLayer(entries[0]);
+              }
+            } else {
+              const ax = controlLikeAxes.find(a => a.tag === addLocationFor.tag);
+              if (ax) await handleAddLayers(ax, entries);
+            }
           }}
         />
       )}

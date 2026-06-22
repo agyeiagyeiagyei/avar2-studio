@@ -777,6 +777,27 @@
   color: #5b3a8f;
 }
 
+.layer-actions {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.layer-open-fontra {
+  background: none;
+  border: 1px solid #d6cdf0;
+  border-radius: 3px;
+  color: #5b3a8f;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.layer-open-fontra:hover {
+  background: #f1eef9;
+}
+
 .layer-remove {
   background: none;
   border: 1px solid #f1c0c0;

@@ -26,7 +26,7 @@ import './AddBraceLocationModal.css';
  *   lockGlyphs         — if true, the glyph field is read-only
  *                        (per-glyph "+ Add layer for X" sets this)
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, prefillGlyphs, lockGlyphs }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, prefillGlyphs, lockGlyphs, editLayer }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});
   const [error, setError] = useState(null);
@@ -34,12 +34,20 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
 
   useEffect(() => {
     if (!isOpen) return;
-    setGlyphsInput(prefillGlyphs || '');
-    const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
-    setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
+    if (editLayer) {
+      // Edit mode — prefill from the existing layer's data. The glyph
+      // is always locked when editing (changing the glyph would mean
+      // it's a different entry, not an edit).
+      setGlyphsInput(editLayer.glyph || '');
+      setPins({ ...(editLayer.location || {}) });
+    } else {
+      setGlyphsInput(prefillGlyphs || '');
+      const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
+      setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
+    }
     setError(null);
     setSubmitting(false);
-  }, [isOpen, prefillGlyphs, axisTag, allAxes]);
+  }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer]);
 
   if (!isOpen) return null;
 
@@ -88,21 +96,26 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       await onCreate(entries);
       onClose();
     } catch (err) {
-      setError(err.message || 'Failed to add layers');
+      setError(err.message || (editLayer ? 'Failed to update layer' : 'Failed to add layers'));
     } finally {
       setSubmitting(false);
     }
   };
 
+  const isEdit = !!editLayer;
+  const effectiveLockGlyphs = !!lockGlyphs || isEdit;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="add-brace-location-modal" onClick={e => e.stopPropagation()}>
-        <h3>Add brace layer{parsedGlyphs.length > 1 ? 's' : ''}</h3>
+        <h3>{isEdit ? 'Edit brace layer location' : `Add brace layer${parsedGlyphs.length > 1 ? 's' : ''}`}</h3>
         <p className="modal-help">
-          One brace layer per glyph, all at the same axis location.
-          Type plain characters (<code>AEFH</code>) or
-          slash-named glyphs (<code>/idotless</code>). Mix and match
-          allowed. Whitespace / commas are optional separators.
+          {isEdit
+            ? 'Change the axis values for this brace layer. The outline data carries over — only the location changes.'
+            : <>One brace layer per glyph, all at the same axis location.
+              Type plain characters (<code>AEFH</code>) or
+              slash-named glyphs (<code>/idotless</code>). Mix and match
+              allowed. Whitespace / commas are optional separators.</>}
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
@@ -119,7 +132,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               type="text"
               value={glyphsInput}
               onChange={e => setGlyphsInput(e.target.value)}
-              readOnly={!!lockGlyphs}
+              readOnly={effectiveLockGlyphs}
               autoComplete="off"
               spellCheck={false}
               placeholder="e.g. AEFH or /idotless or A E F H"
@@ -180,11 +193,13 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
           </div>
 
           <div className="location-preview">
-            <strong>Will create:</strong>{' '}
+            <strong>{isEdit ? 'New location:' : 'Will create:'}</strong>{' '}
             <code>
-              {parsedGlyphs.length === 0
-                ? '(no glyphs)'
-                : `${parsedGlyphs.length} brace layer${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
+              {isEdit
+                ? `${parsedGlyphs[0] || ''} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
+                : parsedGlyphs.length === 0
+                  ? '(no glyphs)'
+                  : `${parsedGlyphs.length} brace layer${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
             </code>
           </div>
 
@@ -195,7 +210,11 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               Cancel
             </button>
             <button type="submit" className="btn btn-confirm" disabled={submitting}>
-              {submitting ? 'Adding…' : `Add ${parsedGlyphs.length || ''} layer${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
+              {submitting
+                ? (isEdit ? 'Saving…' : 'Adding…')
+                : isEdit
+                  ? 'Save changes'
+                  : `Add ${parsedGlyphs.length || ''} layer${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
             </button>
           </div>
         </form>

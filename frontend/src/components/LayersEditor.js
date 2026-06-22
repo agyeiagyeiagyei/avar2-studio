@@ -117,6 +117,11 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
     await onChangeLayers(tag, next);
   };
 
+  const replaceLayer = async (oldEntry, newEntry) => {
+    const next = (layers || []).map(e => sameEntry(e, oldEntry) ? newEntry : e);
+    await onChangeLayers(tag, next);
+  };
+
   const formatLocation = (loc) => Object.entries(loc || {})
     .map(([t, v]) => `${t} = ${v}`)
     .join(', ');
@@ -194,21 +199,33 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
                     <li
                       key={i}
                       className="layer-row"
-                      onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName)}
-                      title="Click to open this glyph in Fontra."
+                      onClick={() => onRequestAddModal && onRequestAddModal({
+                        tag,
+                        axisDefault: axis.default,
+                        editLayer: entry,
+                        replaceLayer: (newEntry) => replaceLayer(entry, newEntry),
+                      })}
+                      title="Click to edit this brace layer's axis values."
                     >
                       <span className="layer-coords">{formatLocation(entry.location)}</span>
-                      <button
-                        type="button"
-                        className="layer-remove"
-                        title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeLayer(entry);
-                        }}
-                      >
-                        ✕
-                      </button>
+                      <div className="layer-actions" onClick={e => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="layer-open-fontra"
+                          title="Open this glyph in Fontra to draw the outline."
+                          onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName)}
+                        >
+                          ↗
+                        </button>
+                        <button
+                          type="button"
+                          className="layer-remove"
+                          title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
+                          onClick={() => removeLayer(entry)}
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>

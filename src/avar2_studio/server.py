@@ -2676,25 +2676,36 @@ _atexit.register(_stop_fontra)
 
 # Stylesheet injected into every Fontra HTML response. Hides the
 # right-sidebar panels that aren't useful for an avar2-studio
-# brace-layer edit (transformation, glyph note, related glyphs,
-# characters/glyphs, reference font). The left sidebar's
-# text-entry + designspace-navigation panels stay — those are how
-# the designer picks the layer location.
+# brace-layer edit. Identifiers come from each panel class's
+# ``identifier`` property in views-editor/src/panel-*.js — they
+# must match exactly. Identifiers used today (will need updating
+# if Fontra renames):
+#   reference-font, selection-transformation, glyph-note,
+#   related-glyphs, characters-glyphs
+#
+# The left sidebar's text-entry + designspace-navigation +
+# glyph-search panels stay — those are how the designer picks the
+# layer location.
 _FONTRA_FOCUSED_CSS = """
 <style id="avar2-studio-fontra-focus">
   /* v2 slice 6 — focused Fontra UI when embedded in avar2-studio.
-     These selectors target Fontra's sidebar panel tabs by their
-     panel identifier. If Fontra renames panels in the future,
-     these selectors may need updating. */
+     Hide both the sidebar TAB (the icon you click) and the
+     CONTENT (the panel body) so the panel stays gone whether it
+     was previously open or closed. */
   .sidebar-tab[data-sidebar-name="reference-font"],
-  .sidebar-tab[data-sidebar-name="transformation"],
+  .sidebar-tab[data-sidebar-name="selection-transformation"],
   .sidebar-tab[data-sidebar-name="glyph-note"],
   .sidebar-tab[data-sidebar-name="related-glyphs"],
-  .sidebar-tab[data-sidebar-name="character-glyphs"] {
+  .sidebar-tab[data-sidebar-name="characters-glyphs"],
+  .sidebar-content[data-sidebar-name="reference-font"],
+  .sidebar-content[data-sidebar-name="selection-transformation"],
+  .sidebar-content[data-sidebar-name="glyph-note"],
+  .sidebar-content[data-sidebar-name="related-glyphs"],
+  .sidebar-content[data-sidebar-name="characters-glyphs"] {
     display: none !important;
   }
-  /* If you'd rather see them, remove this style block in DevTools
-     or open in a new tab via the modal's "Open in new tab" link. */
+  /* If you need any of those back, remove this style block in
+     DevTools or use the modal's "Open in new tab" link. */
 </style>
 """
 
@@ -2719,6 +2730,13 @@ def _rewrite_html_paths(body: bytes) -> bytes:
     text = text.replace("href='/", "href='/fontra/")
     text = text.replace('src="/', 'src="/fontra/')
     text = text.replace("src='/", "src='/fontra/")
+    # JS import map — Fontra ships ``"fontra/": "/"`` so any
+    # ``import "fontra/core/..."`` resolves to ``/core/...`` on the
+    # parent origin. With us proxying Fontra under ``/fontra/`` we
+    # need to point that import map at ``/fontra/`` instead, or
+    # every JS module load 404s and the canvas never initialises.
+    text = text.replace('"fontra/": "/"', '"fontra/": "/fontra/"')
+    text = text.replace("'fontra/': '/'", "'fontra/': '/fontra/'")
     # Inject the focused-UI CSS before </head>; tolerate uppercase.
     for needle in ("</head>", "</HEAD>"):
         if needle in text:
