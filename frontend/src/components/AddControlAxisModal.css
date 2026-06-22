@@ -1,0 +1,98 @@
+.add-control-axis-modal {
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 1.25rem 1.4rem 1.1rem;
+  width: 360px;
+  max-width: 92vw;
+}
+
+.add-control-axis-modal h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.add-control-axis-modal .modal-help {
+  margin: 0 0 0.9rem;
+  font-size: 0.72rem;
+  color: #777;
+  line-height: 1.45;
+}
+
+.add-control-axis-modal .form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.7rem;
+}
+
+.add-control-axis-modal .form-row label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.add-control-axis-modal .form-row .hint {
+  font-weight: 400;
+  color: #999;
+}
+
+.add-control-axis-modal .form-row .hint code {
+  background: #f0f0f0;
+  padding: 0.05rem 0.25rem;
+  border-radius: 2px;
+}
+
+.add-control-axis-modal .form-row input {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.add-control-axis-modal .form-row input:focus {
+  outline: none;
+  border-color: #2c5aa0;
+  box-shadow: 0 0 0 2px rgba(44, 90, 160, 0.18);
+}
+
+.add-control-axis-modal .form-row input.has-error {
+  border-color: #dc3545;
+}
+
+.add-control-axis-modal .form-row-triple {
+  flex-direction: row;
+  gap: 0.5rem;
+}
+
+.add-control-axis-modal .form-row-triple > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.add-control-axis-modal .field-error {
+  font-size: 0.65rem;
+  color: #b8350c;
+}
+
+.add-control-axis-modal .submit-error {
+  font-size: 0.75rem;
+  color: #b8350c;
+  background: #fdecea;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  padding: 0.4rem 0.55rem;
+  margin-bottom: 0.6rem;
+}
+
+.add-control-axis-modal .modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}

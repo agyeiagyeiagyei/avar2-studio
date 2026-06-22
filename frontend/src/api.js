@@ -313,6 +313,38 @@ export const api = {
     return parseJSON(response);
   },
 
+  async listControlAxes() {
+    const response = await fetch(`${API_BASE}/control-axes`);
+    if (!response.ok) {
+      throw new Error(`Failed to list control axes: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async createControlAxis(axis) {
+    const response = await fetch(`${API_BASE}/control-axes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(axis),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to create control axis: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async deleteControlAxis(tag) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to delete control axis: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async listExamples() {
     const response = await fetch(`${API_BASE}/examples`);
     if (!response.ok) {

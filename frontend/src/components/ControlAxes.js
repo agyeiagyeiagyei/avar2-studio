@@ -20,7 +20,7 @@ import './ControlAxes.css';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis }) {
   const [expandedTag, setExpandedTag] = useState(null);
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
@@ -34,7 +34,13 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable }) {
     ax => ax.kind === 'scoped' || ax.kind === 'partial'
   );
 
-  if (controlLikeAxes.length === 0) {
+  // Section is rendered whenever there are control-like axes to show
+  // OR the user has the ability to declare new ones (v2). Otherwise
+  // collapse to null so pure-parametric fonts with no +Add affordance
+  // (none right now — v2 always allows declaration) don't show an
+  // empty section.
+  const canDeclare = typeof onAddClick === 'function';
+  if (controlLikeAxes.length === 0 && !canDeclare) {
     return null;
   }
 
@@ -45,32 +51,53 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable }) {
 
   return (
     <div className="control-axes">
-      <button
-        type="button"
-        className="control-axes-header"
-        onClick={() => setSectionOpen(o => !o)}
-        aria-expanded={sectionOpen}
-      >
-        <span className="control-axes-section-caret">{sectionOpen ? '▾' : '▸'}</span>
-        <h3 className="control-axes-title">CONTROL AXES</h3>
-        <span className="control-axes-count">{controlLikeAxes.length}</span>
-        {disabledCount > 0 && (
-          <span className="control-axes-disabled-count" title={`${disabledCount} disabled in preview`}>
-            {disabledCount} off
+      <div className="control-axes-header-row">
+        <button
+          type="button"
+          className="control-axes-header"
+          onClick={() => setSectionOpen(o => !o)}
+          aria-expanded={sectionOpen}
+        >
+          <span className="control-axes-section-caret">{sectionOpen ? '▾' : '▸'}</span>
+          <h3 className="control-axes-title">CONTROL AXES</h3>
+          <span className="control-axes-count">{controlLikeAxes.length}</span>
+          {disabledCount > 0 && (
+            <span className="control-axes-disabled-count" title={`${disabledCount} disabled in preview`}>
+              {disabledCount} off
+            </span>
+          )}
+          <span className="control-axes-subtitle">
+            glyph-scoped
           </span>
+        </button>
+        {canDeclare && (
+          <button
+            type="button"
+            className="control-axes-add-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddClick();
+              // Open the section so the new axis is visible after creation.
+              setSectionOpen(true);
+            }}
+            title="Declare a new control axis (designer-named axis with min/max). Coverage glyphs and brace-layer authoring arrive in later v2 slices."
+          >
+            + Add
+          </button>
         )}
-        <span className="control-axes-subtitle">
-          glyph-scoped — read-only
-        </span>
-      </button>
+      </div>
       {sectionOpen && (
       <div className="control-axes-list">
         {controlLikeAxes.map(ax => {
           const isExpanded = expandedTag === ax.tag;
           const isDisabled = disabledAxes.has(ax.tag);
+          const isStudio = ax.source === 'studio';
           const kindBadge = ax.kind === 'partial'
             ? <span className="kind-badge kind-partial" title="Most glyphs but not all — usually means the designer forgot to author a few glyphs at the alternate master.">partial</span>
-            : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only the listed glyphs change as this axis moves.">scoped</span>;
+            : <span className="kind-badge kind-scoped" title={isStudio ? 'Designer-declared control axis. Coverage glyphs land in a later v2 slice.' : 'Glyph-scoped variation. Only the listed glyphs change as this axis moves.'}>scoped</span>;
+          const originBadge = isStudio
+            ? <span className="kind-badge kind-studio" title="Declared in the studio (lives in <basename>-control.json). Not yet in the source file.">studio</span>
+            : null;
 
           return (
             <div key={ax.tag} className={`control-axis-row ${isDisabled ? 'disabled' : ''}`}>
@@ -82,6 +109,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable }) {
                 <span className="control-axis-tag">{ax.tag}</span>
                 <span className="control-axis-name">{ax.name}</span>
                 {kindBadge}
+                {originBadge}
                 <span className="control-axis-count">
                   {ax.covers_count}/{ax.total_glyphs}
                 </span>
@@ -99,6 +127,20 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable }) {
                 >
                   {isDisabled ? '👁‍🗨' : '👁'}
                 </button>
+                {isStudio && typeof onDeleteAxis === 'function' && (
+                  <button
+                    className="control-axis-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete control axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                        onDeleteAxis(ax.tag);
+                      }
+                    }}
+                    title="Delete this studio-declared control axis from the sidecar."
+                  >
+                    🗑
+                  </button>
+                )}
               </div>
               {isExpanded && (
                 <div className="control-axis-body">

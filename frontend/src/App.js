@@ -335,6 +335,31 @@ function App() {
     });
   }, []);
 
+  // CONTROL AXES — declare + remove (v2 slice 1). Brace-layer
+  // authoring + shadow file + Fontra integration arrive in
+  // later slices.
+  const handleCreateControlAxis = useCallback(async (axis) => {
+    await api.createControlAxis(axis);
+    // Refetch coverage so the new axis appears with source=studio.
+    await loadGlyphCoverage();
+  }, []);
+
+  const handleDeleteControlAxis = useCallback(async (tag) => {
+    try {
+      await api.deleteControlAxis(tag);
+      await loadGlyphCoverage();
+      // Drop it from the disabled set if it was disabled.
+      setDisabledControlAxes(prev => {
+        if (!prev.has(tag)) return prev;
+        const next = new Set(prev);
+        next.delete(tag);
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || `Failed to delete control axis "${tag}"`);
+    }
+  }, []);
+
   // Axis tag → default value lookup. Used by InstanceRow's
   // preview-coordinates memo to pin disabled control axes to their
   // axis default at render time without mutating the user's chosen
@@ -1667,6 +1692,8 @@ function App() {
             glyphCoverageAxes={glyphCoverageAxes}
             disabledControlAxes={disabledControlAxes}
             onToggleDisableControlAxis={handleToggleDisableControlAxis}
+            onCreateControlAxis={handleCreateControlAxis}
+            onDeleteControlAxis={handleDeleteControlAxis}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
             onUpdateAvar2Mapping={handleUpdateAvar2Mapping}

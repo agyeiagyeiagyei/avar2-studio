@@ -7,9 +7,14 @@ import DuplicateModal from './DuplicateModal';
 import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
 import ControlAxes from './ControlAxes';
+import AddControlAxisModal from './AddControlAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onDeleteControlAxis }) {
+  // CONTROL AXES — modal for declaring a new axis. State + render
+  // live in Sidebar because the +Add button does too; the App-level
+  // handler does the actual POST + refetch and surfaces the result.
+  const [showAddControlAxisModal, setShowAddControlAxisModal] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
@@ -207,7 +212,17 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         axes={glyphCoverageAxes}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
+        onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}
+        onDeleteAxis={onDeleteControlAxis}
       />
+      {onCreateControlAxis && (
+        <AddControlAxisModal
+          isOpen={showAddControlAxisModal}
+          onClose={() => setShowAddControlAxisModal(false)}
+          onCreate={onCreateControlAxis}
+          existingTags={(glyphCoverageAxes || []).map(a => a.tag)}
+        />
+      )}
 
       {avar2Mode && (() => {
         // Check if there are any traditional axes in the CSV

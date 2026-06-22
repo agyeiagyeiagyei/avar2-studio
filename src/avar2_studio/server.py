@@ -56,6 +56,7 @@ except ImportError:
 from . import source_font as _source_font
 from . import csv_io as _csv_io
 from . import glyph_coverage as _glyph_coverage
+from . import control_axes as _control_axes
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -2311,7 +2312,48 @@ def glyph_coverage():
                 "covers_count": info["covers_count"],
                 "total_glyphs": info["total_glyphs"],
                 "kind": info["kind"],
+                # ``source`` lets the frontend distinguish source-derived
+                # axes (read from brace layers / alternate masters) from
+                # studio-declared control axes (read from the sidecar).
+                # Only the latter get edit / delete affordances in v2.
+                "source": "source",
             })
+
+        # Merge in studio-declared control axes from the sidecar.
+        # These are user-created via the +Add Control Axis modal and
+        # don't yet have brace layers — they appear with empty
+        # coverage until the user declares glyphs (v2.1) and draws
+        # outlines (v2.2). Tagged ``source: "studio"`` so the UI can
+        # surface edit / delete buttons.
+        try:
+            total = next(iter(coverage.values()), {}).get("total_glyphs", 0) if coverage else 0
+            for ax in _control_axes.list_axes(GLYPHS_PATH):
+                tag_lower = (ax.get("tag") or "").lower()
+                if not tag_lower:
+                    continue
+                # If a sidecar entry shadows a source-declared axis tag
+                # (unlikely but possible), keep the source entry as
+                # authoritative and skip the sidecar duplicate.
+                if any(a["tag"].lower() == tag_lower for a in out):
+                    continue
+                out.append({
+                    "tag": tag_lower,
+                    "name": ax.get("display_name") or tag_lower,
+                    "covers": list(ax.get("coverage") or []),
+                    "covers_count": len(ax.get("coverage") or []),
+                    "total_glyphs": total,
+                    "kind": "scoped",
+                    "source": "studio",
+                    # Studio-declared axes carry their range too so
+                    # the frontend can render a slider preview when
+                    # the build pipeline starts respecting them.
+                    "default": ax.get("default"),
+                    "min": ax.get("min"),
+                    "max": ax.get("max"),
+                })
+        except Exception as e:
+            print(f"Warning: failed to merge control-axes sidecar: {e}", file=sys.stderr)
+
         # Stable ordering: universal first (least interesting), then
         # scoped, then partial. Within each bucket, by tag.
         kind_order = {"universal": 0, "scoped": 1, "partial": 2}
@@ -2321,6 +2363,79 @@ def glyph_coverage():
         print(f"Error in /api/glyph-coverage: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ----------------------------------------------------------------------
+# CONTROL AXES sidecar — v2 slice 1 (declaration only)
+#
+# These endpoints manage the per-source ``<basename>-control.json``
+# file: the canonical store for studio-declared control axes. The
+# shadow source file + brace-layer authoring + Fontra integration
+# arrive in later v2 slices; here we just persist the declarations
+# so the UI can show + manage them.
+# ----------------------------------------------------------------------
+
+
+@app.route('/api/control-axes', methods=['GET'])
+def list_control_axes():
+    """Return the sidecar's control-axis declarations."""
+    if GLYPHS_PATH is None:
+        return jsonify({"axes": []})
+    try:
+        return jsonify({
+            "axes": _control_axes.list_axes(GLYPHS_PATH),
+            "sidecar_path": str(_control_axes.sidecar_path_for(GLYPHS_PATH)),
+        })
+    except Exception as e:
+        print(f"Error listing control axes: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/control-axes', methods=['POST'])
+def create_control_axis():
+    """Declare a new control axis. JSON body::
+
+        { "tag": "crbr", "display_name": "Crossbar",
+          "default": 0, "min": -100, "max": 100 }
+
+    Persists to the sibling ``<basename>-control.json`` file. The
+    shadow source file + axis-declaration writeback land in v2.2.
+    """
+    if GLYPHS_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        entry = _control_axes.add_axis(
+            GLYPHS_PATH,
+            tag=data.get("tag", ""),
+            display_name=data.get("display_name", ""),
+            default=data.get("default", 0),
+            min_value=data.get("min", 0),
+            max_value=data.get("max", 0),
+        )
+        return jsonify({"success": True, "axis": entry})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        print(f"Error creating control axis: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/control-axes/<tag>', methods=['DELETE'])
+def delete_control_axis(tag: str):
+    """Remove a control-axis declaration from the sidecar."""
+    if GLYPHS_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    try:
+        removed = _control_axes.remove_axis(GLYPHS_PATH, tag)
+        if not removed:
+            return jsonify({"error": f"control axis '{tag}' not found"}), 404
+        return jsonify({"success": True, "tag": tag.lower()})
+    except Exception as e:
+        print(f"Error deleting control axis: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 

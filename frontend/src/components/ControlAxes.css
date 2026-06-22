@@ -4,18 +4,41 @@
   border-top: 1px solid #eee;
 }
 
+.control-axes-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
 .control-axes-header {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin-bottom: 0.5rem;
-  width: 100%;
+  flex: 1;
   background: none;
   border: none;
   padding: 0.2rem 0;
   cursor: pointer;
   font-family: inherit;
   text-align: left;
+}
+
+.control-axes-add-btn {
+  background: white;
+  border: 1px solid #b6d4fe;
+  color: #0b4a8f;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+}
+
+.control-axes-add-btn:hover {
+  background: #eef3fb;
 }
 
 .control-axes-header:hover .control-axes-title {
@@ -139,6 +162,27 @@
   background: #fff3cd;
   color: #6b3d00;
   border-color: #ffe69c;
+}
+
+.kind-studio {
+  background: #f1eef9;
+  color: #5b3a8f;
+  border-color: #d6cdf0;
+}
+
+.control-axis-delete {
+  background: none;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #b8350c;
+}
+
+.control-axis-delete:hover {
+  background: #fdecea;
 }
 
 .control-axis-count {
