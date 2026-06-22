@@ -2,19 +2,23 @@ import React, { useEffect, useRef } from 'react';
 import './InstanceFlyout.css';
 
 /**
- * Flyout offering two update paths for an instance:
+ * Three-option save / demote flyout. Which buttons render depends on
+ * the row's tri-state sync status:
  *
- *   - Update in avar2-studio — persists the row to the sibling
- *     ``-avar.csv`` only. Source files are untouched. Works for both
- *     studio-only and source-defined instances; for source instances
- *     it's a "tweak the avar2 mapping without changing the source"
- *     escape hatch.
- *   - Update source file / Add to source — for a source instance this
- *     writes back to .glyphs / .designspace (the historical Update
- *     Instance behavior). For a studio-only instance this promotes the
- *     row into the source file's instance list.
+ *   - Save to avar2-studio (CSV) — persists local edits to the sibling
+ *     ``-avar.csv`` only. Source files are untouched. Shown whenever
+ *     there's something to save (red state) — hidden in orange/green
+ *     where there are no pending edits.
+ *   - Save to source file — for a source instance this writes back to
+ *     .glyphs / .designspace. For a studio-only instance this promotes
+ *     the row into the source file's instance list. Shown in red and
+ *     orange. Hidden in green (the row already matches the source).
+ *   - Remove from source file — DEMOTES a source row to studio-only:
+ *     deletes the source declaration, KEEPS the CSV row so the avar2
+ *     mapping is preserved. Shown only for source rows (the operation
+ *     is meaningless on a row that isn't in source).
  */
-function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, instanceOrigin = 'source', position }) {
+function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDemoteFromSource, instanceOrigin = 'source', syncStatus = 'green', position }) {
   const flyoutRef = useRef(null);
 
   useEffect(() => {
@@ -51,12 +55,25 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, insta
       }
     : {};
 
-  const sourceLabel = instanceOrigin === 'studio'
-    ? 'Save to source file (promote)'
-    : 'Save to source file';
-  const sourceTitle = instanceOrigin === 'studio'
+  const isStudioOnly = instanceOrigin === 'studio';
+  const sourceLabel = isStudioOnly ? 'Save to source file (promote)' : 'Save to source file';
+  const sourceTitle = isStudioOnly
     ? 'Promote this studio-only instance into the source file (.glyphs / .designspace). The row gains the SRC badge afterwards.'
     : 'Write the edited coordinates back to the source file (.glyphs / .designspace). The SRC instance is permanently modified.';
+
+  // Only show "Save to avar2-studio" when there's something to save —
+  // i.e. local edits are pending (red state). Hiding it in green/orange
+  // keeps the menu small once everything is persisted.
+  const showSaveToStudio = syncStatus === 'red' && typeof onUpdateStudio === 'function';
+
+  // "Save to source" is the orange→green push. Show in red (user might
+  // jump straight to source) and orange (CSV needs syncing up). Hide
+  // in green (already in source).
+  const showSaveToSource = syncStatus !== 'green' && typeof onUpdateSource === 'function';
+
+  // Demote: only meaningful for rows that ARE in source — i.e. not
+  // studio-only. Shown in any state for source rows.
+  const showDemote = !isStudioOnly && typeof onDemoteFromSource === 'function';
 
   return (
     <div
@@ -65,17 +82,19 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, insta
       style={style}
       onClick={(e) => e.stopPropagation()}
     >
-      <button
-        className="flyout-item"
-        onClick={() => {
-          onUpdateStudio();
-          onClose();
-        }}
-        title="Persist these coordinates to the sibling -avar.csv (the avar2 mapping file) only. Your .glyphs / .designspace source file stays untouched."
-      >
-        Save to avar2-studio (CSV)
-      </button>
-      {onUpdateSource && (
+      {showSaveToStudio && (
+        <button
+          className="flyout-item"
+          onClick={() => {
+            onUpdateStudio();
+            onClose();
+          }}
+          title="Persist these coordinates to the sibling -avar.csv (the avar2 mapping file) only. Your .glyphs / .designspace source file stays untouched."
+        >
+          Save to avar2-studio (CSV)
+        </button>
+      )}
+      {showSaveToSource && (
         <button
           className="flyout-item flyout-item-source"
           onClick={() => {
@@ -85,6 +104,18 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, insta
           title={sourceTitle}
         >
           {sourceLabel}
+        </button>
+      )}
+      {showDemote && (
+        <button
+          className="flyout-item flyout-item-demote"
+          onClick={() => {
+            onDemoteFromSource();
+            onClose();
+          }}
+          title="Remove this instance from the source file (.glyphs / .designspace). The CSV row stays so the avar2 mapping is preserved; the row becomes studio-only and loses its SRC badge."
+        >
+          Remove from source file
         </button>
       )}
     </div>

@@ -216,13 +216,15 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
             </button>
           </div>
           {(() => {
-            // Show loading state if data is not ready yet
-            if (!avar2Axes || avar2Instances.length === 0) {
-              return <div className="avar2-loading">Loading mappings...</div>;
-            }
-
-            // If no traditional axes exist, the inline + Add button in
-            // the heading is the only entry point.
+            // No loading state any more. ``avar2Axes`` is null both
+            // BEFORE the first fetch lands AND after a fetch that
+            // 404'd because the source has no sibling -avar.csv. The
+            // previous code treated those identically and printed
+            // "Loading mappings..." forever for the latter — the
+            // "+ Add" hint below already covers both cases truthfully
+            // (the user needs to declare an axis to populate it),
+            // so we fall straight through to it. The momentary flash
+            // on first fetch (≤ one render frame) is acceptable.
             if (!hasTraditionalAxes) {
               return (
                 <div className="avar2-empty-hint">

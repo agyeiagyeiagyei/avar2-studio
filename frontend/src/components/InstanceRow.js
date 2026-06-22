@@ -3,7 +3,7 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -178,7 +178,9 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               e.stopPropagation();
               e.preventDefault();
               e.nativeEvent?.stopImmediatePropagation();
-              if (syncStatus === 'orange' && onUpdateInstanceStudio) {
+              // Flyout opens from any state. Even green is actionable
+              // for source-defined rows (the demote option lives there).
+              if (onUpdateInstanceStudio) {
                 setShowFlyout(true);
               }
             }}
@@ -193,7 +195,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               e.preventDefault();
             }}
             style={{
-              cursor: syncStatus === 'orange' && onUpdateInstanceStudio ? 'pointer' : 'default',
+              cursor: onUpdateInstanceStudio ? 'pointer' : 'default',
               display: 'inline-flex',
               alignItems: 'center',
               position: 'relative',
@@ -205,15 +207,16 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               ref={dotRef}
               className={`sync-status-dot sync-status-${syncStatus}`}
               title={
-                syncStatus === 'green' ? 'Synced with Glyphs file' :
-                syncStatus === 'orange' ? 'Edited but not saved - Click to update' :
+                syncStatus === 'green' ? 'Saved in source file — click to demote (remove from source, keep in studio)' :
+                syncStatus === 'orange' ? 'Saved in avar2-studio CSV only — click to save to source / demote' :
+                syncStatus === 'red' ? 'Unsaved edits — click to choose where to save' :
                 'Unknown status'
               }
               style={{
                 pointerEvents: 'auto'
               }}
             ></span>
-            {showFlyout && syncStatus === 'orange' && onUpdateInstanceStudio && dotRef.current && rowRef.current && (() => {
+            {showFlyout && onUpdateInstanceStudio && dotRef.current && rowRef.current && (() => {
               // Calculate position relative to instance row bounds
               const dotRect = dotRef.current.getBoundingClientRect();
               const rowRect = rowRef.current.getBoundingClientRect();
@@ -286,7 +289,9 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
                   onClose={() => setShowFlyout(false)}
                   onUpdateStudio={onUpdateInstanceStudio}
                   onUpdateSource={onUpdateInstanceSource}
+                  onDemoteFromSource={onDemoteFromSource}
                   instanceOrigin={instance.origin || 'source'}
+                  syncStatus={syncStatus}
                   position={positionObj}
                 />
               );

@@ -181,10 +181,13 @@ export const api = {
   },
 
   async deleteInstance(instanceName, options = {}) {
-    // ``options.csvOnly`` adds ``?csv_only=true`` so the server skips
-    // the source-file delete. Used for studio-only rows (which don't
-    // exist in the source) and the "unmap" path on source rows.
-    const qs = options.csvOnly ? '?csv_only=true' : '';
+    // Three modes:
+    //   - {csvOnly: true}    → CSV-only delete; source declaration kept
+    //   - {sourceOnly: true} → source-only delete; CSV row kept (DEMOTE)
+    //   - default            → both source + CSV
+    let qs = '';
+    if (options.csvOnly) qs = '?csv_only=true';
+    else if (options.sourceOnly) qs = '?source_only=true';
     const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}${qs}`, {
       method: 'DELETE',
     });

@@ -2448,38 +2448,43 @@ def register_editing_instance(instance_name: str):
 
 @app.route('/api/instance/<instance_name>', methods=['DELETE'])
 def delete_instance(instance_name: str):
-    """Delete an instance.
+    """Delete or demote an instance. Three modes selected by query param:
 
-    Default behavior removes the instance from both the source file
-    (.glyphs / .designspace) and the sibling CSV. Pass
-    ``?csv_only=true`` to skip the source-file delete — use that for
-    studio-only rows (which don't exist in the source) and for "unmap"
-    operations on source-defined rows that should stay in the source
-    but lose their avar2 mapping row.
+    - default (no param)        — remove from source file AND CSV
+    - ``?csv_only=true``        — remove from CSV; keep source declaration
+    - ``?source_only=true``     — remove from source; keep CSV row (DEMOTE
+                                  a source instance to studio-only)
+
+    The two ``_only`` modes are mutually exclusive; specifying both
+    returns 400.
     """
     csv_only_flag = request.args.get('csv_only', '').lower() in ('1', 'true', 'yes')
+    source_only_flag = request.args.get('source_only', '').lower() in ('1', 'true', 'yes')
+
+    if csv_only_flag and source_only_flag:
+        return jsonify({"error": "csv_only and source_only are mutually exclusive."}), 400
 
     # For source-file writeback we still require the Glyphs file not be
     # holding unsaved edits in the Glyphs.app process. CSV-only deletes
     # don't touch the source, so the check doesn't apply.
-    if not csv_only_flag and _check_glyphs_file_unsaved_changes(GLYPHS_PATH):
+    touches_source = not csv_only_flag  # both default and source_only touch source
+    if touches_source and _check_glyphs_file_unsaved_changes(GLYPHS_PATH):
         return jsonify({"error": "Glyphs file has unsaved changes. Please save the file first."}), 409
 
     try:
         global EDITING_INSTANCES
         EDITING_INSTANCES.discard(instance_name)
 
-        # Source-file delete only fires when the caller actually wants
-        # one. For studio-only rows the source never had the instance,
-        # so source-delete would fail; csv_only_flag is the explicit
-        # signal that the caller knows the row is CSV-only.
-        if not csv_only_flag:
+        # Source-file delete fires for default + source_only. CSV-only
+        # skips it (the row was never in the source).
+        if touches_source:
             glyphs_deleted = delete_instance_in_glyphs(GLYPHS_PATH, instance_name)
             if not glyphs_deleted:
                 return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
 
-        # Delete from preview CSV if it exists
-        csv_path = _get_preview_csv_path()
+        # CSV delete fires for default + csv_only. source_only PRESERVES
+        # the CSV row — that's the "demote to studio-only" semantic.
+        csv_path = _get_preview_csv_path() if not source_only_flag else None
         if csv_path and csv_path.exists():
             try:
                 import csv
@@ -2547,11 +2552,12 @@ def delete_instance(instance_name: str):
         rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
         rebuild_thread.start()
         
-        msg = (
-            f"Deleted instance '{instance_name}' from CSV (source untouched)"
-            if csv_only_flag
-            else f"Deleted instance '{instance_name}' from source file and CSV"
-        )
+        if csv_only_flag:
+            msg = f"Deleted instance '{instance_name}' from CSV (source untouched)"
+        elif source_only_flag:
+            msg = f"Demoted instance '{instance_name}' — removed from source, CSV row kept"
+        else:
+            msg = f"Deleted instance '{instance_name}' from source file and CSV"
         return jsonify({"success": True, "message": msg})
     except Exception as e:
         import traceback

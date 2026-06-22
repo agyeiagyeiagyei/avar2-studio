@@ -438,33 +438,74 @@ function App() {
 
   const [originalCoordinates, setOriginalCoordinates] = useState({});
 
-  // Sync status for the orange-dot indicator. Compares the editing
-  // coordinates against the originals — a divergence means the user has
-  // unsaved edits.
+  // Tri-state sync status:
+  //   - 'red'    — local edits exist but haven't been persisted anywhere
+  //   - 'orange' — persisted to the avar2-studio CSV but not reflected
+  //                in the source file. Either a studio-only row (lives
+  //                in CSV only) or a source-defined row whose CSV
+  //                parametric values diverge from the source's.
+  //   - 'green'  — source-defined AND source coords match CSV coords
+  //                (or no CSV row exists yet and there are no edits)
+  //
+  // The orange→green transition only happens via the flyout's
+  // "Save to source file" action. The flyout is reachable from any
+  // non-green state (and from green for source instances too — that's
+  // where the demote action lives).
+  const _sameCoords = (a, b) => {
+    if (!a || !b) return false;
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      const va = Number(a[k]);
+      const vb = Number(b[k]);
+      if (!Number.isFinite(va) || !Number.isFinite(vb)) {
+        if (a[k] !== b[k]) return false;
+      } else if (Math.abs(va - vb) > 0.01) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const getInstanceSyncStatus = useCallback((instance) => {
+    // Resolve the user's "current edits" view for this instance.
+    let edits;
     if (selectedInstance && selectedInstance.name === instance.name) {
-      if (!originalCoordinates || Object.keys(originalCoordinates).length === 0) {
-        return 'green';
-      }
-      const isSynced = JSON.stringify(editingCoordinates) === JSON.stringify(originalCoordinates);
-      return isSynced ? 'green' : 'orange';
+      edits = editingCoordinates;
+    } else {
+      edits = instanceEditingCoordinates[instance.name];
     }
 
-    const savedCoordinates = instanceEditingCoordinates[instance.name];
-    const savedOriginalCoords = instanceOriginalCoordinates[instance.name];
+    // The CSV's parametric out-values for this row, if present. The
+    // /api/avar2/instances endpoint exposes both ``out`` (CSV parametric
+    // coords) and ``glyphs_coordinates`` (source-derived) — comparing
+    // them tells us whether the CSV has been written past the source.
+    const mapping = avar2Instances.find(m => m.instance_name === instance.name);
+    const csvCoords = mapping && mapping.avar2_mapping && mapping.avar2_mapping.out;
+    const sourceCoords = instance.coordinates;
 
-    if (savedCoordinates && Object.keys(savedCoordinates).length > 0) {
-      const comparisonCoords =
-        savedOriginalCoords && Object.keys(savedOriginalCoords).length > 0
-          ? savedOriginalCoords
-          : instance.coordinates;
-      const isSynced = JSON.stringify(savedCoordinates) === JSON.stringify(comparisonCoords);
-      if (!isSynced) {
-        return 'orange';
-      }
+    // The most recent "persisted" snapshot for this row. CSV wins over
+    // source because the studio's csv_only save path bypasses the
+    // source file — CSV is the authoritative "last save" view.
+    const persisted = (csvCoords && Object.keys(csvCoords).length > 0) ? csvCoords : sourceCoords;
+
+    if (edits && Object.keys(edits).length > 0 && !_sameCoords(edits, persisted)) {
+      return 'red';   // dirty — local edits not persisted
     }
+
+    if (instance.origin === 'studio') {
+      // Studio-only rows live in the CSV alone. Promotion to source
+      // turns them green.
+      return 'orange';
+    }
+
+    if (csvCoords && Object.keys(csvCoords).length > 0 && !_sameCoords(csvCoords, sourceCoords)) {
+      return 'orange';   // CSV diverges from source — needs a source push
+    }
+
     return 'green';
-  }, [selectedInstance, editingCoordinates, originalCoordinates, instanceEditingCoordinates, instanceOriginalCoordinates]);
+  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, avar2Instances]);
 
   // Helper: Create normalized key from coordinates and text for caching
   const getCoordinatesKey = useCallback((coordinates, text = sampleText) => {
@@ -793,21 +834,38 @@ function App() {
     await api.unregisterEditingInstance(instanceName).catch(() => {});
   };
 
-  // Resolve which coordinates to persist when the flyout fires. For
-  // the selected row that's ``editingCoordinates``; for any other row
-  // it's whatever the user had been editing there (stored per-instance
-  // when they navigated away).
-  const _resolveEditedCoords = (instanceName) => {
+  // Resolve which coordinates to persist when the flyout fires.
+  //
+  // ``requireDirty=true`` (default) — skip when local state matches the
+  // originals. The "Save to avar2-studio (CSV)" path uses this: no
+  // edits → no save.
+  //
+  // ``requireDirty=false`` — return current state even when it matches
+  // the originals. The "Save to source file" path uses this so an
+  // orange-no-edits row (CSV saved, source not pushed) can still push
+  // its CSV values up to the source. In that state editingCoordinates
+  // already mirrors the CSV — writing them to source is the correct
+  // orange→green transition.
+  const _resolveEditedCoords = (instanceName, options = {}) => {
+    const requireDirty = options.requireDirty !== false;
     const targetInstanceName = instanceName || selectedInstance?.name;
     if (!targetInstanceName) return null;
     let coordinatesToUse;
     if (instanceName && instanceName !== selectedInstance?.name) {
       coordinatesToUse = instanceEditingCoordinates[instanceName];
-      if (!coordinatesToUse) return null;
+      if (!coordinatesToUse) {
+        // No scratch state for this row. Fall back to the source
+        // coords so the source path can still operate (the CSV-divergence
+        // case shows the same data via avar2Instances; the caller can
+        // override coords if it needs to).
+        const fallback = instances.find(inst => inst.name === targetInstanceName);
+        if (!fallback) return null;
+        coordinatesToUse = { ...fallback.coordinates };
+      }
     } else {
       if (!selectedInstance) return null;
       const hasChanges = JSON.stringify(editingCoordinates) !== JSON.stringify(originalCoordinates);
-      if (!hasChanges) return null;
+      if (requireDirty && !hasChanges) return null;
       coordinatesToUse = editingCoordinates;
     }
     return { name: targetInstanceName, coords: coordinatesToUse };
@@ -838,12 +896,46 @@ function App() {
     return handleUpdateInstance(instanceObj?.name);
   };
 
+  // Demote a source-defined row to studio-only: delete the source
+  // declaration but KEEP the CSV row so the avar2 mapping is preserved.
+  // The row stays in the UI; only its SRC badge goes away.
+  const handleDemoteFromSource = useCallback(async (instanceObj) => {
+    if (!instanceObj || instanceObj.origin !== 'source') return;
+    const confirmed = window.confirm(
+      `Remove "${instanceObj.name}" from the source file?\n\n` +
+      `The CSV row stays — the instance becomes studio-only and the SRC badge goes away. ` +
+      `This rewrites your .glyphs / .designspace file and can't be undone from here.`
+    );
+    if (!confirmed) return;
+    try {
+      setError(null);
+      setBuilding(true);
+      await api.deleteInstance(instanceObj.name, { sourceOnly: true });
+      const instancesData = await api.getInstances();
+      setInstances(instancesData.instances);
+      // The demoted row still exists (now as studio-only); reselect it
+      // so the user keeps their place. Re-bind selectedInstance to the
+      // fresh studio-only entry so the SRC badge transition lands.
+      if (selectedInstance && selectedInstance.name === instanceObj.name) {
+        const next = instancesData.instances.find(i => i.name === instanceObj.name);
+        if (next) setSelectedInstance(next);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to demote instance');
+    } finally {
+      setBuilding(false);
+    }
+  }, [selectedInstance]);
+
   const handleUpdateInstance = async (instanceName) => {
     // Existing source-writeback path. Used by:
     //   - The flyout's source-update branch (for source-defined rows).
     //   - The Sidebar's per-axis Update Instance flow (when SPAC mode
     //     used to drive a row write; now just a singular update path).
-    const resolved = _resolveEditedCoords(instanceName);
+    // requireDirty=false so an orange-no-edits row (CSV pushed past
+    // source) can still trigger the source write — pushing the CSV
+    // values up flips the row to green.
+    const resolved = _resolveEditedCoords(instanceName, { requireDirty: false });
     if (!resolved) return;
     const { name: targetInstanceName, coords: coordinatesToUse } = resolved;
 
@@ -1521,6 +1613,7 @@ function App() {
             onRenameInstance={handleRenameInstance}
             onUpdateInstanceStudio={handleUpdateInstanceStudio}
             onUpdateInstanceSource={handleUpdateInstanceSource}
+            onDemoteFromSource={handleDemoteFromSource}
             calculateAdvanceWidth={calculateAdvanceWidth}
             advanceWidthLoading={advanceWidthLoading}
             currentAdvanceWidth={currentAdvanceWidth}

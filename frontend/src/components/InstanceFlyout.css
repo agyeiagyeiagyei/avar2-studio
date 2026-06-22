@@ -53,3 +53,11 @@
 .flyout-item-source:hover {
   background: #eef3fb;
 }
+
+.flyout-item-demote {
+  color: #b8350c;
+}
+
+.flyout-item-demote:hover {
+  background: #fdecea;
+}

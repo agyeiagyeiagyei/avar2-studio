@@ -73,6 +73,10 @@
   background-color: #ff9800;
 }
 
+.sync-status-red {
+  background-color: #dc3545;
+}
+
 
 .instance-name {
   font-family: monospace;
