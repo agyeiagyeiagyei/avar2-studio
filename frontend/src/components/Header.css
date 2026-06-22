@@ -125,3 +125,89 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Load Font dropdown — top-bar entry for swapping the active source
+   at runtime (built-in examples or .glyphs upload). */
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.header-title-empty {
+  color: #888;
+  font-style: italic;
+}
+
+.header-loading-msg {
+  font-size: 0.8rem;
+  color: #666;
+  font-style: italic;
+}
+
+.load-font-dropdown {
+  position: relative;
+}
+
+.btn-load-font {
+  background: white;
+  color: #333;
+}
+
+.load-font-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 280px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  padding: 0.25rem 0;
+}
+
+.load-font-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0.85rem 0.25rem;
+}
+
+.load-font-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.load-font-item:hover {
+  background-color: #f5f8ff;
+}
+
+.load-font-item-name {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.load-font-item-subtitle {
+  font-size: 0.72rem;
+  color: #888;
+  margin-top: 0.15rem;
+}
+
+.load-font-divider {
+  height: 1px;
+  background-color: #eee;
+  margin: 0.25rem 0;
+}
+
+.load-font-item-upload .load-font-item-name {
+  color: #0b4a8f;
+}

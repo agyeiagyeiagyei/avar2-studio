@@ -32,3 +32,35 @@
   flex-direction: row;
   overflow: hidden;
 }
+
+.content-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+  color: #555;
+  text-align: center;
+}
+
+.content-empty-state h2 {
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: #444;
+  margin-bottom: 0.5rem;
+}
+
+.content-empty-state p {
+  font-size: 0.95rem;
+  color: #777;
+  max-width: 420px;
+  line-height: 1.55;
+}
+
+.content-empty-state code {
+  background: #f0f0f0;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}

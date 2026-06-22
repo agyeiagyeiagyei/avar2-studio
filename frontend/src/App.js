@@ -177,7 +177,19 @@ function App() {
 
       // Check health and font status
       const health = await api.health();
-      
+
+      // Blind launch: no source loaded server-side. Skip the auto-build
+      // (there's nothing to build) — the Header's Load Font dropdown
+      // will swap a source in, after which loadData re-runs.
+      if (!health.glyphs_path) {
+        setFontLoaded(false);
+        setFamilyName(null);
+        setInstances([]);
+        setAxes([]);
+        setLoading(false);
+        return;
+      }
+
       // If font is not built, trigger auto-build on hard reset
       if (!health.font_built && !health.building) {
         try {
@@ -1423,6 +1435,8 @@ function App() {
         building={building}
         fontLoaded={fontLoaded}
         familyName={familyName}
+        onSourceLoaded={loadData}
+        busy={building || loading}
       />
 
       <DeleteInstanceModal
@@ -1449,6 +1463,18 @@ function App() {
       )}
 
       <div className="main-content">
+        {!familyName ? (
+          // Blind launch — nothing loaded server-side. Steer the user
+          // to the Header dropdown. Header keeps rendering, so the
+          // dropdown is reachable from this state without extra wiring.
+          <div className="content-empty-state">
+            <h2>No font loaded</h2>
+            <p>
+              Use <strong>Load Font</strong> in the top bar to pick a
+              built-in example or upload your own <code>.glyphs</code> file.
+            </p>
+          </div>
+        ) : (
         <div className="content-area">
           <Sidebar
             axes={axes}
@@ -1500,6 +1526,7 @@ function App() {
             currentAdvanceWidth={currentAdvanceWidth}
           />
         </div>
+        )}
       </div>
     </div>
   );

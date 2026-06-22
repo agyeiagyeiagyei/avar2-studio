@@ -302,6 +302,45 @@ export const api = {
     return parseJSON(response);
   },
 
+  async listExamples() {
+    const response = await fetch(`${API_BASE}/examples`);
+    if (!response.ok) {
+      throw new Error(`Failed to list examples: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
+  async loadExample(exampleId) {
+    const response = await fetch(`${API_BASE}/load-source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ example: exampleId }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to load example: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async uploadSource(files) {
+    // ``files`` is a FileList or array. The backend picks the .glyphs
+    // file as the source and recognises a sibling ``-avar.csv`` and/or
+    // ``avar2-axis-metadata.json`` if the user selected them in the
+    // same picker. Anything else is reported back in ``ignored_files``.
+    const formData = new FormData();
+    Array.from(files).forEach((f, i) => formData.append(`file_${i}`, f));
+    const response = await fetch(`${API_BASE}/load-source`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to upload: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async getTextWidth(text, coordinates, fontSizeRem = 2.0) {
     const params = new URLSearchParams({
       text: text,

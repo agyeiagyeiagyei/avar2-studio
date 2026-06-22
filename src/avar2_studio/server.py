@@ -553,6 +553,8 @@ def get_instances():
       Edits write to the CSV; the source is untouched until the user
       explicitly calls ``POST /api/instance/<name>/add-to-source``.
     """
+    if GLYPHS_PATH is None:
+        return jsonify({"instances": []})
     try:
         instances = get_instances_from_glyphs(GLYPHS_PATH)
         source_names = {entry["name"] for entry in instances}
@@ -604,6 +606,8 @@ def get_axes():
     (``get_axes_from_built_font``) is kept around for verification but
     isn't the API path anymore.
     """
+    if GLYPHS_PATH is None:
+        return jsonify({"axes": []})
     try:
         axes = get_axes_from_glyphs(GLYPHS_PATH)
         return jsonify({"axes": axes})
@@ -1495,6 +1499,8 @@ def health():
 @app.route('/api/glyphs-file-status', methods=['GET'])
 def glyphs_file_status():
     """Check if Glyphs file has unsaved changes."""
+    if GLYPHS_PATH is None:
+        return jsonify({"has_unsaved_changes": False, "file_path": None})
     try:
         has_unsaved = _check_glyphs_file_unsaved_changes(GLYPHS_PATH)
         return jsonify({
@@ -3510,6 +3516,241 @@ def get_avar2_font():
     )
 
 
+# ---------------------------------------------------------------------------
+# Built-in example fixtures + late-binding source loader
+# ---------------------------------------------------------------------------
+
+# Repo layout: src/avar2_studio/server.py → repo root is parent.parent.parent.
+# When the package is installed from PyPI the examples directory will NOT be
+# present; the endpoint reports an empty list in that case and the frontend
+# hides the built-in examples section.
+_REPO_ROOT_FOR_EXAMPLES = Path(__file__).resolve().parent.parent.parent
+_BUILTIN_EXAMPLES = [
+    {
+        "id": "roboto-delta-mini",
+        "name": "Roboto Delta Mini",
+        "subtitle": "Case-split parametric axes (XOUC/YOUC/XTUC, XOLC/YOLC/XTLC, XOFI/YOFI/XTFI)",
+        "source_rel": "examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace",
+    },
+    {
+        "id": "crispy-mini",
+        "name": "Crispy Mini",
+        "subtitle": "Unified parametric axes (XTRA/XOPQ/YOPQ)",
+        "source_rel": "examples/crispy-mini/sources/CrispyMini.glyphs",
+    },
+]
+
+
+def _builtin_example_source(example_id: str) -> Optional[Path]:
+    """Resolve an example's bundled source path, if it's reachable from
+    the running install (dev checkout). Returns None for PyPI installs
+    where the examples directory isn't shipped."""
+    for ex in _BUILTIN_EXAMPLES:
+        if ex["id"] == example_id:
+            candidate = _REPO_ROOT_FOR_EXAMPLES / ex["source_rel"]
+            return candidate if candidate.exists() else None
+    return None
+
+
+def _staged_workspace_for(example_id: str) -> Path:
+    """Per-example staging dir under ~/.avar2-studio/workspace/. The
+    studio writes its sibling CSV + build artifacts into this copy so
+    the shipped fixture stays clean (and git-clean) across loads."""
+    return Path.home() / ".avar2-studio" / "workspace" / example_id
+
+
+def _stage_builtin_example(example_id: str) -> Optional[Path]:
+    """Copy a built-in example's source tree into the workspace if it
+    isn't already there, then return the staged source-file path.
+    Re-stages keep the user's prior edits because we leave the
+    workspace alone if it exists."""
+    src = _builtin_example_source(example_id)
+    if src is None:
+        return None
+    workspace = _staged_workspace_for(example_id)
+    if not workspace.exists():
+        # Copy the whole sources/ directory so UFOs travel with the .designspace.
+        import shutil
+        sources_dir = src.parent
+        workspace.mkdir(parents=True, exist_ok=True)
+        for child in sources_dir.iterdir():
+            dest = workspace / child.name
+            if child.is_dir():
+                shutil.copytree(child, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(child, dest)
+    return workspace / src.name
+
+
+def _apply_source_path(path: Path) -> None:
+    """Point the running server at ``path`` as the active source. Mutates
+    the GLYPHS_PATH / SOURCE_FORMAT / BUILD_DIR / CSV_PATH globals,
+    re-bootstraps the CSV + config sidecars, and kicks off an
+    auto-build. Raises ValueError / UnsupportedSourceFormat on bad input
+    so callers (CLI + /api/load-source) can surface the failure."""
+    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, VARIABLE_FONT_PATH
+    global PREVIEW_DIR, PREVIEW_CSV_PATH, PREVIEW_CONFIG_PATH
+    global LAST_BUILD_TIME, LAST_BUILD_STATUS, LAST_BUILD_ERROR
+    global EDITING_INSTANCES
+
+    resolved = path.resolve()
+    if not resolved.exists():
+        raise ValueError(f"source file not found: {resolved}")
+    if resolved.suffix.lower() == ".ufo":
+        raise ValueError(
+            "avar2-studio requires a .designspace, not an individual UFO master. "
+            "Point it at the sibling .designspace file."
+        )
+
+    SOURCE_FORMAT = _source_font.detect_format(resolved)
+    GLYPHS_PATH = resolved
+
+    workdir = GLYPHS_PATH.parent / ".avar2-studio"
+    BUILD_DIR = workdir / "build"
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    # Reset every state global that's keyed to the previous source —
+    # otherwise PREVIEW_DIR/PREVIEW_CSV_PATH/PREVIEW_CONFIG_PATH stay
+    # pinned to the first load and every subsequent ``/api/avar2/*``
+    # call reads the OLD font's mapping CSV + axis metadata. That's
+    # how Roboto Delta's XOUC/YOUC/XTUC columns kept showing up after
+    # the user swapped to Crispy.
+    VARIABLE_FONT_PATH = None
+    CSV_PATH = None
+    PREVIEW_DIR = None
+    PREVIEW_CSV_PATH = None
+    PREVIEW_CONFIG_PATH = None
+    LAST_BUILD_TIME = None
+    LAST_BUILD_STATUS = None
+    LAST_BUILD_ERROR = None
+    EDITING_INSTANCES = set()
+
+    _initialize_preview_csv_from_glyphs()
+    _initialize_preview_config_from_glyphs()
+
+    print(f"Auto-building font from {GLYPHS_PATH}...", file=sys.stderr)
+    try:
+        trigger_build()
+    except Exception as exc:
+        # Non-fatal — the frontend can retry via /api/build.
+        print(f"⚠ Auto-build failed: {exc}", file=sys.stderr)
+
+
+@app.route('/api/examples', methods=['GET'])
+def list_examples():
+    """List the bundled example fixtures that are reachable from this
+    install. PyPI installs won't ship them — the endpoint returns
+    ``[]`` in that case so the frontend can hide the section."""
+    out = []
+    for ex in _BUILTIN_EXAMPLES:
+        if _builtin_example_source(ex["id"]) is not None:
+            out.append({
+                "id": ex["id"],
+                "name": ex["name"],
+                "subtitle": ex["subtitle"],
+            })
+    return jsonify({"examples": out})
+
+
+@app.route('/api/load-source', methods=['POST'])
+def load_source():
+    """Swap the active source at runtime. Two modes:
+       - JSON body ``{example: <id>}`` loads a built-in fixture from
+         the staged workspace under ~/.avar2-studio/workspace/.
+       - multipart/form-data: pick one .glyphs as the main source
+         plus any combination of sibling files: ``*-avar.csv`` (avar2
+         mapping table) and ``avar2-axis-metadata.json`` (axis ranges
+         / display names). Anything unrecognised is rejected with 400.
+    Returns the new active path on success."""
+    try:
+        # Multipart upload branch.
+        uploaded = list(request.files.values())
+        if uploaded:
+            workspace = Path.home() / ".avar2-studio" / "workspace" / "uploaded"
+            # Wipe the workspace so a re-upload starts fresh. Otherwise
+            # a previous upload's sibling CSV/metadata would leak into
+            # the new source's view (the same leakage class we fixed
+            # for built-in example swaps).
+            import shutil
+            if workspace.exists():
+                shutil.rmtree(workspace)
+            workspace.mkdir(parents=True, exist_ok=True)
+
+            glyphs_dest: Optional[Path] = None
+            csv_dest: Optional[Path] = None
+            metadata_dest: Optional[Path] = None
+            extras_skipped: list = []
+
+            for f in uploaded:
+                name = (f.filename or '').strip()
+                if not name:
+                    continue
+                lower = name.lower()
+                if lower.endswith('.glyphs'):
+                    if glyphs_dest is not None:
+                        return jsonify({"error": "Upload one .glyphs file at a time (got multiple)."}), 400
+                    glyphs_dest = workspace / name
+                    f.save(str(glyphs_dest))
+                elif lower.endswith('-avar.csv') or lower == 'avar2-mappings.csv':
+                    # Defer destination naming until we know the .glyphs
+                    # basename. Save to a temp name first.
+                    tmp = workspace / f".__pending_csv__{name}"
+                    f.save(str(tmp))
+                    csv_dest = tmp
+                elif lower == 'avar2-axis-metadata.json' or lower.endswith('-axis-metadata.json'):
+                    # axis-metadata.json lives in the per-project workdir
+                    # (.avar2-studio/), not next to the .glyphs file.
+                    workdir = workspace / ".avar2-studio"
+                    workdir.mkdir(parents=True, exist_ok=True)
+                    metadata_dest = workdir / "axis-metadata.json"
+                    f.save(str(metadata_dest))
+                else:
+                    extras_skipped.append(name)
+
+            if glyphs_dest is None:
+                return jsonify({
+                    "error": "No .glyphs file in the upload. Required: one .glyphs source. "
+                             "Optional: a sibling -avar.csv and/or avar2-axis-metadata.json."
+                }), 400
+
+            # Now that we know the .glyphs basename, rename the pending
+            # CSV to ``<basename>-avar.csv`` so _get_avar2_csv_path
+            # finds it via the standard sibling-lookup rule.
+            if csv_dest is not None:
+                final_csv = workspace / f"{glyphs_dest.stem}-avar.csv"
+                csv_dest.replace(final_csv)
+                csv_dest = final_csv
+
+            _apply_source_path(glyphs_dest)
+            return jsonify({
+                "success": True,
+                "path": str(glyphs_dest),
+                "csv_attached": str(csv_dest) if csv_dest else None,
+                "metadata_attached": str(metadata_dest) if metadata_dest else None,
+                "ignored_files": extras_skipped,
+            })
+
+        # Built-in example branch.
+        data = request.get_json(silent=True) or {}
+        example_id = data.get('example')
+        if not example_id:
+            return jsonify({"error": "Provide either an uploaded 'file' or JSON {example: <id>}."}), 400
+        staged = _stage_builtin_example(example_id)
+        if staged is None:
+            return jsonify({
+                "error": f"Built-in example '{example_id}' isn't available in this install. "
+                         "Examples ship with the dev checkout only."
+            }), 404
+        _apply_source_path(staged)
+        return jsonify({"success": True, "path": str(staged), "example": example_id})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        print(f"Error in /api/load-source: {exc}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 500
+
+
 def main():
     global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH
 
@@ -3568,80 +3809,53 @@ def main():
     args = parser.parse_args()
 
     global USE_FONTC
-    glyphs_arg = args.glyphs or args.glyphs_flag
-    if not glyphs_arg:
-        parser.error(
-            "missing path to source file. "
-            "Usage: avar2-studio /path/to/MyFont.glyphs  (or .designspace)"
-        )
-    GLYPHS_PATH = glyphs_arg.resolve()
-    if not GLYPHS_PATH.exists():
-        print(f"Error: source file not found: {GLYPHS_PATH}", file=sys.stderr)
-        sys.exit(1)
-
-    suffix = GLYPHS_PATH.suffix.lower()
-    if suffix == ".ufo":
-        print(
-            "Error: avar2-studio requires a .designspace, not an individual UFO master. "
-            "Point it at the sibling .designspace file.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    try:
-        SOURCE_FORMAT = _source_font.detect_format(GLYPHS_PATH)
-    except UnsupportedSourceFormat as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    # Build dir defaults to the per-project workdir (.avar2-studio/build/),
-    # which the path helpers create on demand once GLYPHS_PATH is set.
-    if args.build_dir:
-        BUILD_DIR = args.build_dir.resolve()
-    else:
-        workdir = GLYPHS_PATH.parent / ".avar2-studio"
-        BUILD_DIR = workdir / "build"
-        BUILD_DIR.mkdir(parents=True, exist_ok=True)
-
     USE_FONTC = not args.no_fontc  # Use fontc unless --no-fontc is specified
 
-    if args.csv:
-        CSV_PATH = args.csv.resolve()
+    glyphs_arg = args.glyphs or args.glyphs_flag
+    if glyphs_arg:
+        # Path-provided launch: apply immediately. CLI errors bubble up
+        # as sys.exit(1) so the script's exit code stays meaningful.
+        try:
+            resolved = glyphs_arg.resolve()
+            if not resolved.exists():
+                print(f"Error: source file not found: {resolved}", file=sys.stderr)
+                sys.exit(1)
+            _apply_source_path(resolved)
+        except (ValueError, UnsupportedSourceFormat) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        # Honour the explicit CLI overrides AFTER _apply_source_path has
+        # set sensible defaults — the user's --build-dir / --csv beat
+        # the auto-derived locations.
+        if args.build_dir:
+            BUILD_DIR = args.build_dir.resolve()
+        if args.csv:
+            CSV_PATH = args.csv.resolve()
     else:
-        CSV_PATH = None  # Will use default location
-    
-    # Initialize preview tool files (CSV and config) if they don't exist
-    _initialize_preview_csv_from_glyphs()
-    _initialize_preview_config_from_glyphs()
-    
-    # SPAC support is deferred to v2 — skip the SPAC font auto-generation
-    # that the original Crispy tool did at startup. SPAC-touching endpoints
-    # remain in place but are dead code until they're properly ported.
-
-
-    # Auto-build font on server startup
-    print(f"Auto-building font on startup...", file=sys.stderr)
-    try:
-        trigger_build()
-        if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
-            print(f"✓ Font built successfully on startup: {VARIABLE_FONT_PATH}", file=sys.stderr)
-        else:
-            print(f"⚠ Font build completed but file not found", file=sys.stderr)
-    except Exception as e:
-        print(f"⚠ Auto-build on startup failed: {e}", file=sys.stderr)
-        print(f"  Font can be built manually via /api/build endpoint", file=sys.stderr)
+        # Blind launch: no source loaded yet. The frontend will offer
+        # the Load-Font dropdown (built-in examples or .glyphs upload)
+        # which POSTs to /api/load-source. All read endpoints return
+        # graceful empties while GLYPHS_PATH is None.
+        print(
+            "No source file provided — launching blind. "
+            "Use the Load Font dropdown in the UI to pick an example or upload a .glyphs file.",
+            file=sys.stderr,
+        )
     
     print(f"Starting server on {args.host}:{args.port}", file=sys.stderr)
-    print(f"Glyphs file: {GLYPHS_PATH}", file=sys.stderr)
-    print(f"Build directory: {BUILD_DIR}", file=sys.stderr)
     print(f"Compiler: {'fontc (with fontmake fallback)' if USE_FONTC else 'fontmake only'}", file=sys.stderr)
-    if CSV_PATH:
-        print(f"CSV file: {CSV_PATH}", file=sys.stderr)
-    else:
-        csv_path = _get_avar2_csv_path()
-        if csv_path:
-            print(f"CSV file (auto-detected): {csv_path}", file=sys.stderr)
+    if GLYPHS_PATH:
+        print(f"Glyphs file: {GLYPHS_PATH}", file=sys.stderr)
+        print(f"Build directory: {BUILD_DIR}", file=sys.stderr)
+        if CSV_PATH:
+            print(f"CSV file: {CSV_PATH}", file=sys.stderr)
         else:
-            print(f"CSV file: not found (avar2 endpoints will be unavailable)", file=sys.stderr)
+            csv_path = _get_avar2_csv_path()
+            if csv_path:
+                print(f"CSV file (auto-detected): {csv_path}", file=sys.stderr)
+            else:
+                print(f"CSV file: not found (avar2 endpoints will be unavailable)", file=sys.stderr)
     
     preview_csv = _get_preview_csv_path()
     if preview_csv:
@@ -3714,14 +3928,20 @@ def main():
             except Exception as e:
                 print(f"Error handling file change: {e}", file=sys.stderr)
     
-    # Set up file watcher if watchdog is available
-    if WATCHDOG_AVAILABLE:
+    # Set up file watcher if watchdog is available AND we have a source
+    # loaded. Blind launches skip watching — the source will be loaded
+    # via /api/load-source, but a runtime-swappable file watcher is
+    # left for a future iteration. The frontend's polling tick covers
+    # the no-watcher case acceptably.
+    if WATCHDOG_AVAILABLE and GLYPHS_PATH is not None:
         event_handler = GlyphsFileHandler()
         observer = Observer()
         observer.schedule(event_handler, path=str(GLYPHS_PATH.parent), recursive=False)
         observer.start()
         OBSERVER = observer
         print(f"Real-time file watching enabled: watching {GLYPHS_PATH}", file=sys.stderr)
+    elif GLYPHS_PATH is None:
+        pass  # blind launch — watcher attaches when a source is loaded later (TODO)
     else:
         print(f"Warning: watchdog not available, falling back to periodic checking", file=sys.stderr)
         # Fallback to periodic checking
@@ -3731,7 +3951,7 @@ def main():
             if BUILDING:
                 return
             try:
-                if not GLYPHS_PATH.exists():
+                if GLYPHS_PATH is None or not GLYPHS_PATH.exists():
                     return
                 current_mtime = GLYPHS_PATH.stat().st_mtime
                 if LAST_BUILD_TIME is None or current_mtime > LAST_BUILD_TIME:
