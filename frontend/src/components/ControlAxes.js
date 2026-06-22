@@ -110,6 +110,14 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                 <span className="control-axis-name">{ax.name}</span>
                 {kindBadge}
                 {originBadge}
+                {isStudio && ax.min !== undefined && ax.max !== undefined && (
+                  <span
+                    className="control-axis-range"
+                    title={`Range ${ax.min} to ${ax.max}, default ${ax.default}`}
+                  >
+                    {ax.min}…{ax.max}
+                  </span>
+                )}
                 <span className="control-axis-count">
                   {ax.covers_count}/{ax.total_glyphs}
                 </span>
@@ -144,6 +152,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
               </div>
               {isExpanded && (
                 <div className="control-axis-body">
+                  {isStudio && (
+                    <div className="control-axis-meta">
+                      <span><strong>Range:</strong> {ax.min} … {ax.max}</span>
+                      <span><strong>Default:</strong> {ax.default}</span>
+                    </div>
+                  )}
                   <div className="control-axis-glyphs">
                     {ax.covers.length > 0 ? (
                       ax.covers.map(g => (
@@ -151,10 +165,25 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                       ))
                     ) : (
                       <span className="control-axis-glyphs-empty">
-                        Declared in the source but no glyphs vary along it yet.
+                        {isStudio
+                          ? 'No coverage glyphs yet. Coverage editor lands in v2.3 — declare the glyphs that participate in this axis there.'
+                          : 'Declared in the source but no glyphs vary along it yet.'}
                       </span>
                     )}
                   </div>
+                  {isStudio && typeof onDeleteAxis === 'function' && (
+                    <button
+                      className="control-axis-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Delete control axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                          onDeleteAxis(ax.tag);
+                        }
+                      }}
+                    >
+                      Delete control axis
+                    </button>
+                  )}
                 </div>
               )}
             </div>
