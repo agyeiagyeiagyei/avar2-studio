@@ -15,6 +15,32 @@ the parametric axes underneath**. The avar2 csv table the studio
 produces is identical in shape between them; the difference is in
 how many axes each font ships and what each one deforms.
 
+## Design approach — multiple-master heritage vs. duovar / parametric (STUB)
+
+> **Placeholder — to be expanded when we revisit the authoring
+> instances walkthrough.** This section will frame both Crispy and
+> Roboto Delta as descendants of Adobe's Multiple Master (MM) lineage
+> — designs whose axes are deformations of basic letterform attributes
+> (stroke weight, optical size, x-height, contrast) rather than
+> named styles — and contrast that with the more common "one axis
+> per user-facing dimension" (duovar / wght × wdth) approach. The
+> point will be that parametric axes are a *substrate* for the
+> conventional axes the user sees via avar2, not a competitor to them.
+>
+> Reference reading parked here:
+>
+> - Wikipedia, *Multiple master fonts* — https://en.wikipedia.org/wiki/Multiple_master_fonts
+> - Adobe community thread, *More information on variable type* —
+>   https://community.adobe.com/questions-94/more-information-on-variable-type-1503356
+> - Eye on Design, *Parametric and variable typeface systems —
+>   shape-shifters for letterforms* —
+>   https://eyeondesign.aiga.org/parametric-and-variable-typeface-systems-shape-shifters-for-letterforms/
+> - Donald Berry / University of Waterloo lecture notes on Adobe's MM
+>   model — https://cs.uwaterloo.ca/~dberry/COURSES/electronic.pub/fishler/multiple.htm
+>
+> Crispy and Roboto Delta will serve as the two worked examples for
+> the unified vs case-split decompositions inside this lineage.
+
 ## What both approaches share
 
 Neither approach exposes `wght`/`wdth`/`opsz` as gvar axes (which we would typically use as `Weight`, `Width`, and `Optical Size`). Both fonts
