@@ -118,6 +118,14 @@ def _serve_ui_favicon():
 # Global state
 GLYPHS_PATH: Optional[Path] = None  # The ACTIVE source — what reads + builds operate on. When CONTROL AXES are declared, this points at the shadow .glyphs; otherwise it's the same as ORIGINAL_PATH. Name kept for git history; SOURCE_FORMAT tracks which.
 ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at. Sidecar paths and push-to-source target this. Studio NEVER writes to it directly for control-axis work (shadow staging only).
+
+# Fontra subprocess management — v2.5a launches the Fontra editor as
+# a child process pointed at the shadow folder so we can iframe it in
+# the studio UI. Started lazily on first "open in editor" request and
+# kept warm across opens. Killed on shutdown via atexit.
+FONTRA_PROCESS: Optional[object] = None
+FONTRA_PORT: int = 8001
+FONTRA_CONTENT_ROOT: Optional[Path] = None
 SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
 BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
@@ -2516,6 +2524,142 @@ def create_control_axis():
         return jsonify({"error": str(e)}), 500
 
 
+# ----------------------------------------------------------------------
+# Fontra subprocess lifecycle (v2 slice 5a)
+# ----------------------------------------------------------------------
+
+
+def _ensure_fontra_running(content_root: Path) -> int:
+    """Ensure a Fontra subprocess is running and serving the given
+    folder as its filesystem project root. If a process is already
+    running but pointed at a different folder, restart it.
+
+    Returns the port Fontra is listening on. Raises on failure.
+    """
+    import subprocess
+    import time
+
+    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT
+
+    content_root = content_root.resolve()
+
+    # Already running at the right root — reuse.
+    if (
+        FONTRA_PROCESS is not None
+        and FONTRA_PROCESS.poll() is None
+        and FONTRA_CONTENT_ROOT == content_root
+    ):
+        return FONTRA_PORT
+
+    # Different root or dead process — kill + restart.
+    _stop_fontra()
+
+    fontra_bin = Path(sys.executable).parent / "fontra"
+    if not fontra_bin.exists():
+        raise RuntimeError(
+            f"fontra command not found at {fontra_bin}. "
+            "Is the fontra package installed in this venv?"
+        )
+
+    cmd = [
+        str(fontra_bin),
+        "--http-port", str(FONTRA_PORT),
+        "filesystem", str(content_root),
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        # New session so killing the studio doesn't take Fontra with
+        # it via signal propagation; we manage shutdown explicitly.
+        start_new_session=True,
+    )
+
+    # Give Fontra a moment to bind the port.
+    for _ in range(20):
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"fontra exited immediately (exit code {proc.returncode})"
+            )
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.2)
+                if s.connect_ex(("127.0.0.1", FONTRA_PORT)) == 0:
+                    break
+        except OSError:
+            pass
+        time.sleep(0.25)
+    else:
+        _stop_fontra()
+        raise RuntimeError(f"fontra didn't bind 127.0.0.1:{FONTRA_PORT} within ~5s")
+
+    FONTRA_PROCESS = proc
+    FONTRA_CONTENT_ROOT = content_root
+    print(f"Started Fontra on http://127.0.0.1:{FONTRA_PORT} (root={content_root})", file=sys.stderr)
+    return FONTRA_PORT
+
+
+def _stop_fontra() -> None:
+    """Kill any running Fontra subprocess. Safe to call repeatedly."""
+    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT
+    if FONTRA_PROCESS is None:
+        return
+    try:
+        if FONTRA_PROCESS.poll() is None:
+            FONTRA_PROCESS.terminate()
+            try:
+                FONTRA_PROCESS.wait(timeout=3)
+            except Exception:
+                FONTRA_PROCESS.kill()
+    except Exception as exc:
+        print(f"Warning: error stopping Fontra: {exc}", file=sys.stderr)
+    finally:
+        FONTRA_PROCESS = None
+        FONTRA_CONTENT_ROOT = None
+
+
+# Make sure Fontra is cleaned up when the studio exits.
+import atexit as _atexit
+_atexit.register(_stop_fontra)
+
+
+@app.route('/api/control-axes/<tag>/open-editor', methods=['POST'])
+def open_control_axis_in_editor(tag: str):
+    """Spin up Fontra on the shadow folder and return the iframe URL
+    the frontend should load. The shadow must exist for this to work
+    — the caller is expected to have set coverage already (the
+    coverage save in v2.3 regenerates the shadow with seed brace
+    layers, which is what Fontra opens to edit).
+    """
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+
+    if not _control_axes.shadow_exists(ORIGINAL_PATH):
+        # No coverage / no shadow yet — there's nothing to edit.
+        return jsonify({
+            "error": "No shadow file yet. Add coverage glyphs first so the studio can seed brace layers."
+        }), 400
+
+    shadow_path = _control_axes.shadow_path_for(ORIGINAL_PATH)
+    content_root = shadow_path.parent  # the shadow/ directory
+
+    try:
+        port = _ensure_fontra_running(content_root)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
+
+    project = shadow_path.name  # e.g. "CrispyMini.glyphs"
+    url = f"http://127.0.0.1:{port}/editor.html?project={project}"
+    return jsonify({
+        "success": True,
+        "url": url,
+        "port": port,
+        "project": project,
+        "tag": tag.lower(),
+    })
+
+
 @app.route('/api/control-axes/<tag>/coverage', methods=['PUT'])
 def set_control_axis_coverage(tag: str):
     """Replace the coverage glyph list for a control axis.
@@ -3990,6 +4134,11 @@ def _apply_source_path(path: Path) -> None:
     LAST_BUILD_STATUS = None
     LAST_BUILD_ERROR = None
     EDITING_INSTANCES = set()
+
+    # Stop any Fontra subprocess pointed at the previous source's
+    # shadow. It'll be re-spawned on demand when the user opens a
+    # control axis in the editor on the new source.
+    _stop_fontra()
 
     # CONTROL AXES — keep the shadow in sync on load. If any axis has
     # coverage glyphs (= the shadow has real brace-layer deltas), swap

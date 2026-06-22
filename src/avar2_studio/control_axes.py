@@ -310,6 +310,14 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     shadow_path = shadow_path_for(original_path)
     shadow_dir_for(original_path).mkdir(parents=True, exist_ok=True)
 
+    # Preserve outlines the designer has already drawn in the
+    # previous shadow (model β-with-best-effort during the v2.5a
+    # window — model α with full sidecar back-capture is a later
+    # slice). We read the existing shadow BEFORE the copy-from-
+    # original wipes it, then merge any matching brace-layer
+    # outlines back in after the axes get re-applied.
+    preserved_layers = _extract_brace_outlines(shadow_path) if shadow_path.exists() else {}
+
     # Always re-copy from original. The shadow is fully derived;
     # incremental updates would just multiply the bug surface.
     shutil.copy2(original_path, shadow_path)

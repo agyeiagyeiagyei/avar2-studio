@@ -21,7 +21,7 @@ import CoverageEditor from './CoverageEditor';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage, onOpenInEditor }) {
   const [expandedTag, setExpandedTag] = useState(null);
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
@@ -164,6 +164,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                       tag={ax.tag}
                       coverage={ax.covers}
                       onSave={onSetCoverage}
+                      onOpenInEditor={onOpenInEditor}
                     />
                   ) : (
                     <div className="control-axis-glyphs">

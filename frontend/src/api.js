@@ -358,6 +358,17 @@ export const api = {
     return parseJSON(response);
   },
 
+  async openControlAxisInEditor(tag) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/open-editor`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to open editor: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async listExamples() {
     const response = await fetch(`${API_BASE}/examples`);
     if (!response.ok) {

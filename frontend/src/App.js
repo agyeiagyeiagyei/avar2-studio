@@ -4,6 +4,7 @@ import { api } from './api';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
+import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
 
 // Default sample text uses only ASCII letters, digits, and space so it
@@ -50,6 +51,9 @@ function App() {
   // the preview pins it to its default value at render time.
   const [glyphCoverageAxes, setGlyphCoverageAxes] = useState([]);
   const [disabledControlAxes, setDisabledControlAxes] = useState(new Set());
+  // Fontra iframe state — non-null = modal is open. The url comes
+  // from POST /api/control-axes/<tag>/open-editor.
+  const [fontraEditor, setFontraEditor] = useState(null);
   // Tracks the most recent ``glyphs_path`` we loaded data for. Used by
   // loadData() to detect a source swap (Load Font dropdown → new font)
   // so we can clear per-instance state. A polling-tick reload to the
@@ -386,6 +390,34 @@ function App() {
     await api.setControlAxisCoverage(tag, coverage);
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
+
+  // CONTROL AXES — open the shadow in Fontra (v2 slice 5a).
+  const handleOpenControlAxisInEditor = useCallback(async (tag) => {
+    try {
+      setError(null);
+      const data = await api.openControlAxisInEditor(tag);
+      setFontraEditor({ url: data.url, tag });
+    } catch (err) {
+      setError(err.message || `Failed to open Fontra for "${tag}"`);
+    }
+  }, []);
+
+  // Close the Fontra modal and rebuild the font so the studio
+  // preview reflects whatever the designer drew. Fontra writes to
+  // the shadow on save; trigger_build picks up the new outlines.
+  const handleCloseFontraEditor = useCallback(async () => {
+    setFontraEditor(null);
+    try {
+      // Rebuild from the shadow. /api/build hits trigger_build on
+      // the server with the current GLYPHS_PATH (= shadow when any
+      // control axis has coverage).
+      await api.buildFont();
+      // Refresh font URL so the preview reloads the rebuilt font.
+      setFontUrl(api.getFontUrl());
+    } catch (err) {
+      console.warn('Rebuild after Fontra edits failed:', err);
+    }
+  }, []);
 
   // Axis tag → default value lookup. Used by InstanceRow's
   // preview-coordinates memo to pin disabled control axes to their
@@ -1652,6 +1684,10 @@ function App() {
 
   return (
     <div className="App">
+      <FontraEditorModal
+        editor={fontraEditor}
+        onClose={handleCloseFontraEditor}
+      />
       <Header
         onBuildFont={handleBuildFont}
         building={building}
@@ -1722,6 +1758,7 @@ function App() {
             onCreateControlAxis={handleCreateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
             onSetControlAxisCoverage={handleSetControlAxisCoverage}
+            onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
             onUpdateAvar2Mapping={handleUpdateAvar2Mapping}

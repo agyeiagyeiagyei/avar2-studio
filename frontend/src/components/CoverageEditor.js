@@ -15,7 +15,7 @@ import React, { useEffect, useState } from 'react';
  *   onSave     — async (tag, coverageArray) => void; controlled by
  *                App.js, calls the API and refreshes coverage data
  */
-function CoverageEditor({ tag, coverage, onSave }) {
+function CoverageEditor({ tag, coverage, onSave, onOpenInEditor }) {
   // Local draft state — the textarea is uncontrolled relative to
   // the prop until the user saves. Reset whenever the canonical
   // ``coverage`` changes (e.g. after a save round-trip).
@@ -65,13 +65,28 @@ function CoverageEditor({ tag, coverage, onSave }) {
           {parsedGlyphs.length} glyph{parsedGlyphs.length === 1 ? '' : 's'}
           {dirty && ' (unsaved)'}
         </span>
-        <button
-          className="coverage-editor-save"
-          onClick={handleSave}
-          disabled={!dirty || saving}
-        >
-          {saving ? 'Saving…' : 'Save coverage'}
-        </button>
+        <div className="coverage-editor-buttons">
+          {typeof onOpenInEditor === 'function' && (coverage || []).length > 0 && (
+            <button
+              type="button"
+              className="coverage-editor-open"
+              onClick={() => onOpenInEditor(tag)}
+              disabled={dirty || saving}
+              title={dirty
+                ? 'Save the coverage list first — opening Fontra without saving would edit out-of-date seed layers.'
+                : 'Open the shadow .glyphs in Fontra. Edit the seed brace layers for the coverage glyphs. Close to refresh the preview.'}
+            >
+              Open in Fontra
+            </button>
+          )}
+          <button
+            className="coverage-editor-save"
+            onClick={handleSave}
+            disabled={!dirty || saving}
+          >
+            {saving ? 'Saving…' : 'Save coverage'}
+          </button>
+        </div>
       </div>
       {error && <div className="coverage-editor-error">{error}</div>}
     </div>

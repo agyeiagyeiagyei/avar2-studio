@@ -340,6 +340,32 @@
   gap: 0.5rem;
 }
 
+.coverage-editor-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.coverage-editor-open {
+  background: white;
+  color: #5b3a8f;
+  border: 1px solid #d6cdf0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.coverage-editor-open:hover:not(:disabled) {
+  background: #f1eef9;
+}
+
+.coverage-editor-open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .coverage-editor-count {
   font-size: 0.65rem;
   color: #666;
