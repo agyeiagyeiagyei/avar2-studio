@@ -2674,40 +2674,12 @@ _atexit.register(_stop_fontra)
 #            so it lands here, not on Fontra's port directly.)
 
 
-# Stylesheet injected into every Fontra HTML response. Hides the
-# right-sidebar panels that aren't useful for an avar2-studio
-# brace-layer edit. Identifiers come from each panel class's
-# ``identifier`` property in views-editor/src/panel-*.js — they
-# must match exactly. Identifiers used today (will need updating
-# if Fontra renames):
-#   reference-font, selection-transformation, glyph-note,
-#   related-glyphs, characters-glyphs
-#
-# The left sidebar's text-entry + designspace-navigation +
-# glyph-search panels stay — those are how the designer picks the
-# layer location.
-_FONTRA_FOCUSED_CSS = """
-<style id="avar2-studio-fontra-focus">
-  /* v2 slice 6 — focused Fontra UI when embedded in avar2-studio.
-     Hide both the sidebar TAB (the icon you click) and the
-     CONTENT (the panel body) so the panel stays gone whether it
-     was previously open or closed. */
-  .sidebar-tab[data-sidebar-name="reference-font"],
-  .sidebar-tab[data-sidebar-name="selection-transformation"],
-  .sidebar-tab[data-sidebar-name="glyph-note"],
-  .sidebar-tab[data-sidebar-name="related-glyphs"],
-  .sidebar-tab[data-sidebar-name="characters-glyphs"],
-  .sidebar-content[data-sidebar-name="reference-font"],
-  .sidebar-content[data-sidebar-name="selection-transformation"],
-  .sidebar-content[data-sidebar-name="glyph-note"],
-  .sidebar-content[data-sidebar-name="related-glyphs"],
-  .sidebar-content[data-sidebar-name="characters-glyphs"] {
-    display: none !important;
-  }
-  /* If you need any of those back, remove this style block in
-     DevTools or use the modal's "Open in new tab" link. */
-</style>
-"""
+# Focused-UI CSS for the embedded Fontra editor. Rolled back to
+# empty for now — the user is still validating basic navigation
+# (does the right glyph open in the text view) and panel hiding
+# is just visual noise on top of that. Re-enable by populating
+# this string; injection wiring stays in place.
+_FONTRA_FOCUSED_CSS = ""
 
 
 def _is_html_response(headers) -> bool:

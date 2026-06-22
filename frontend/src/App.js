@@ -396,20 +396,21 @@ function App() {
 
   // CONTROL AXES — open the shadow in Fontra (v2 slice 5a / 6).
   // ``url`` is the same-origin proxied path (Fontra served under
-  // /fontra/* with focused-UI CSS injected); ``direct_url`` is the
-  // raw cross-origin URL for the "Open in new tab" escape.
+  // /fontra/* with the importmap rewritten); ``direct_url`` is
+  // the raw cross-origin URL for the "Open in new tab" escape.
   //
-  // When ``glyphName`` is passed we append query params that
-  // Fontra's editor reads into its viewInfo dict (each value is
-  // JSON-parsed by Fontra). The params:
-  //   - text         — places the glyph in the text view (/name)
-  //   - selectedGlyphName — names the selected glyph
-  //   - selectedGlyph — drops the editor into edit mode on the
-  //                     first cell, so the canvas opens with the
-  //                     outline ready to draw
-  // Without selectedGlyph, the designer would land on the text
-  // view and have to click into the glyph to enter edit mode —
-  // which felt like "I don't see the glyph to be edited."
+  // For glyph navigation we pass ONLY the ``text`` viewInfo param,
+  // which Fontra parses into its text view. Single-character glyph
+  // names go in literally (so the renderer sees the character);
+  // multi-character glyph names need Fontra's ``/name`` syntax.
+  //
+  // We previously also passed selectedGlyph + selectedGlyphName to
+  // jump straight into edit mode. selectedGlyphName isn't in
+  // Fontra's persistentSceneSettings (silently ignored) and
+  // selectedGlyph may fire before characterLines is populated,
+  // leaving the editor with a selection pointing at nothing.
+  // Until we have a reliable jump-to-edit path the designer can
+  // double-click the glyph in the text view to enter edit mode.
   const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName) => {
     try {
       setError(null);
@@ -417,15 +418,12 @@ function App() {
       let url = data.url;
       let directUrl = data.direct_url;
       if (glyphName) {
-        const params = [
-          ['text', '/' + glyphName],
-          ['selectedGlyphName', glyphName],
-          ['selectedGlyph', { lineIndex: 0, glyphIndex: 0, isEditing: true }],
-        ]
-          .map(([k, v]) => `${k}=${encodeURIComponent(JSON.stringify(v))}`)
-          .join('&');
-        url = `${url}&${params}`;
-        directUrl = `${directUrl}&${params}`;
+        // Fontra renders single-char glyph names as their literal
+        // character. Multi-char names need the /name syntax.
+        const textValue = glyphName.length === 1 ? glyphName : '/' + glyphName;
+        const param = `text=${encodeURIComponent(JSON.stringify(textValue))}`;
+        url = `${url}&${param}`;
+        directUrl = `${directUrl}&${param}`;
       }
       setFontraEditor({ url, directUrl, tag, glyphName });
     } catch (err) {
