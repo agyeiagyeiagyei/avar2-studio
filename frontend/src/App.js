@@ -386,13 +386,11 @@ function App() {
     }
   }, [refreshAfterControlAxisChange]);
 
-  const handleSetControlAxisCoverage = useCallback(async (tag, coverage) => {
-    await api.setControlAxisCoverage(tag, coverage);
-    await refreshAfterControlAxisChange();
-  }, [refreshAfterControlAxisChange]);
-
-  const handleSetControlAxisExtraLocations = useCallback(async (tag, extraLocations) => {
-    await api.setControlAxisExtraLocations(tag, extraLocations);
+  // CONTROL AXES — unified PUT /layers replaces the two old
+  // endpoints (coverage + extra-locations). Every brace layer is
+  // explicit; coverage is derived server-side.
+  const handleSetControlAxisLayers = useCallback(async (tag, layers) => {
+    await api.setControlAxisLayers(tag, layers);
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
@@ -1778,8 +1776,7 @@ function App() {
             onToggleDisableControlAxis={handleToggleDisableControlAxis}
             onCreateControlAxis={handleCreateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
-            onSetControlAxisCoverage={handleSetControlAxisCoverage}
-            onSetControlAxisExtraLocations={handleSetControlAxisExtraLocations}
+            onSetControlAxisLayers={handleSetControlAxisLayers}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}

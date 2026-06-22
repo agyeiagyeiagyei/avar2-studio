@@ -2408,18 +2408,25 @@ def glyph_coverage():
                 tag_lower = (ax.get("tag") or "").lower()
                 if not tag_lower:
                     continue
-                sidecar_coverage = list(ax.get("coverage") or [])
                 existing = by_tag.get(tag_lower)
-                extra_locations = list(ax.get("extra_locations") or [])
+                # v2.7 unified schema: ``layers`` is the canonical
+                # array. Coverage is derived from unique glyph names.
+                layers = list(ax.get("layers") or [])
+                derived_coverage: List[str] = []
+                seen_glyphs: set = set()
+                for entry in layers:
+                    g = entry.get("glyph")
+                    if g and g not in seen_glyphs:
+                        seen_glyphs.add(g)
+                        derived_coverage.append(g)
+
                 if existing is not None:
-                    # Sidecar wins on identity. Coverage is the union
-                    # of source-derived (brace layers in shadow) and
-                    # sidecar-declared (designer intent). They should
-                    # overlap once regenerate_shadow has run, but
-                    # union is the safe shape during transient
-                    # states between save → regen → next fetch.
                     src_covers = existing.get("covers") or []
-                    merged = list(dict.fromkeys([*sidecar_coverage, *src_covers]))
+                    # Union — derived (designer intent) wins for the
+                    # ordering; brace-layer-derived (from shadow) is
+                    # secondary. Should overlap perfectly once
+                    # regenerate_shadow has run.
+                    merged = list(dict.fromkeys([*derived_coverage, *src_covers]))
                     existing["source"] = "studio"
                     existing["name"] = ax.get("display_name") or existing.get("name")
                     existing["covers"] = merged
@@ -2427,9 +2434,7 @@ def glyph_coverage():
                     existing["default"] = ax.get("default")
                     existing["min"] = ax.get("min")
                     existing["max"] = ax.get("max")
-                    existing["extra_locations"] = extra_locations
-                    # Recompute kind from the merged coverage so
-                    # "scoped" vs "partial" still reflects reality.
+                    existing["layers"] = layers
                     existing["kind"] = _glyph_coverage._classify(
                         len(merged), existing.get("total_glyphs", total)
                     )
@@ -2437,15 +2442,15 @@ def glyph_coverage():
                     out.append({
                         "tag": tag_lower,
                         "name": ax.get("display_name") or tag_lower,
-                        "covers": sidecar_coverage,
-                        "covers_count": len(sidecar_coverage),
+                        "covers": derived_coverage,
+                        "covers_count": len(derived_coverage),
                         "total_glyphs": total,
-                        "kind": _glyph_coverage._classify(len(sidecar_coverage), total),
+                        "kind": _glyph_coverage._classify(len(derived_coverage), total),
                         "source": "studio",
                         "default": ax.get("default"),
                         "min": ax.get("min"),
                         "max": ax.get("max"),
-                        "extra_locations": extra_locations,
+                        "layers": layers,
                     })
                     by_tag[tag_lower] = out[-1]
         except Exception as e:
@@ -2883,101 +2888,59 @@ def open_control_axis_in_editor(tag: str):
     })
 
 
-@app.route('/api/control-axes/<tag>/extra-locations', methods=['PUT'])
-def set_control_axis_extra_locations(tag: str):
-    """Replace the axis's ``extra_locations`` list. Body::
+@app.route('/api/control-axes/<tag>/layers', methods=['PUT'])
+def set_control_axis_layers(tag: str):
+    """Replace an axis's unified ``layers`` list. Body::
 
-        {"extra_locations": [
-            {"glyph": "e", "location": {"crbr": -50}},
-            {"glyph": "e", "location": {"crbr": 100, "XOPQ": 407}}
+        {"layers": [
+            {"glyph": "e", "location": {"crbr": -100}},
+            {"glyph": "e", "location": {"crbr": 100}},
+            {"glyph": "e", "location": {"crbr": -50, "XOPQ": 407}}
         ]}
 
+    Every brace layer is explicit — no auto seeding at axis-min/max.
     Each entry pins a brace layer at a specific N-D location for one
     glyph. Axes omitted from ``location`` interpolate from masters.
     Saves to sidecar, regenerates the shadow with the new layers,
-    and triggers a rebuild.
+    and triggers a rebuild. Switches the build path to the shadow
+    when there's at least one layer; otherwise reverts to original.
     """
     global GLYPHS_PATH, VARIABLE_FONT_PATH
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
-    entries = data.get("extra_locations")
+    entries = data.get("layers")
     if not isinstance(entries, list):
-        return jsonify({"error": "Body must include 'extra_locations' as a list."}), 400
+        return jsonify({"error": "Body must include 'layers' as a list."}), 400
     try:
-        stored = _control_axes.set_extra_locations(ORIGINAL_PATH, tag, entries)
+        stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
 
         shadow = None
         try:
             shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
         except Exception as shadow_exc:
-            print(f"Warning: shadow regeneration after extra-locations update failed: {shadow_exc}", file=sys.stderr)
+            print(f"Warning: shadow regeneration after layers update failed: {shadow_exc}", file=sys.stderr)
 
-        if shadow is not None:
+        # Build path: shadow if ANY axis still has layers, else
+        # original. Avoids building from an axis-less shadow when the
+        # designer empties all layers.
+        sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
+        any_layers = any(ax.get("layers") for ax in sidecar_after)
+        if shadow is not None and any_layers:
             GLYPHS_PATH = shadow
-            VARIABLE_FONT_PATH = None
-            try:
-                trigger_build()
-            except Exception as build_exc:
-                print(f"Warning: rebuild after extra-locations update failed: {build_exc}", file=sys.stderr)
-
-        return jsonify({"success": True, "tag": tag.lower(), "extra_locations": stored})
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception as e:
-        print(f"Error setting extra_locations: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/control-axes/<tag>/coverage', methods=['PUT'])
-def set_control_axis_coverage(tag: str):
-    """Replace the coverage glyph list for a control axis.
-
-    Body: ``{"coverage": ["e", "f", "t", ...]}``.
-
-    Regenerates the shadow .glyphs file with seed brace layers at
-    axis-min and axis-max for each coverage glyph. Each seed layer
-    is a copy of the default master's outline — the designer
-    replaces the outlines with real alternates via the editor
-    integration in slice 5. The build pipeline now switches to the
-    shadow path so the new brace layers (and the axes that hold
-    them) make it into the compiled fvar.
-    """
-    global GLYPHS_PATH, VARIABLE_FONT_PATH
-    if ORIGINAL_PATH is None:
-        return jsonify({"error": "No source loaded"}), 400
-    data = request.get_json(silent=True) or {}
-    coverage = data.get("coverage")
-    if not isinstance(coverage, list):
-        return jsonify({"error": "Body must include a 'coverage' array of glyph names."}), 400
-    try:
-        stored = _control_axes.set_coverage(ORIGINAL_PATH, tag, coverage)
-
-        # Regenerate the shadow — picks up the new coverage + brace
-        # seeds. Switch the build path to the shadow because the
-        # shadow now carries real deltas (non-default brace layer
-        # locations) that the original doesn't have.
-        shadow = None
+        else:
+            GLYPHS_PATH = ORIGINAL_PATH
+        VARIABLE_FONT_PATH = None
         try:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-        except Exception as shadow_exc:
-            print(f"Warning: shadow regeneration after coverage update failed: {shadow_exc}", file=sys.stderr)
+            trigger_build()
+        except Exception as build_exc:
+            print(f"Warning: rebuild after layers update failed: {build_exc}", file=sys.stderr)
 
-        if shadow is not None:
-            GLYPHS_PATH = shadow
-            VARIABLE_FONT_PATH = None
-            try:
-                trigger_build()
-            except Exception as build_exc:
-                print(f"Warning: rebuild after coverage update failed: {build_exc}", file=sys.stderr)
-
-        return jsonify({"success": True, "tag": tag.lower(), "coverage": stored})
+        return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
-        print(f"Error setting control-axis coverage: {e}", file=sys.stderr)
+        print(f"Error setting control-axis layers: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

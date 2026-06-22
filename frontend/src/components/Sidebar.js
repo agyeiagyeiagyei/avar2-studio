@@ -10,7 +10,7 @@ import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onDeleteControlAxis, onSetControlAxisCoverage, onSetControlAxisExtraLocations, onOpenControlAxisInEditor }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onOpenControlAxisInEditor }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.
@@ -215,8 +215,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}
         onDeleteAxis={onDeleteControlAxis}
-        onSetCoverage={onSetControlAxisCoverage}
-        onSetExtraLocations={onSetControlAxisExtraLocations}
+        onSetLayers={onSetControlAxisLayers}
         onOpenInEditor={onOpenControlAxisInEditor}
       />
       {onCreateControlAxis && (

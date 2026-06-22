@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './ControlAxes.css';
-import CoverageEditor from './CoverageEditor';
+import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
 
 /**
@@ -22,31 +22,20 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onSetCoverage, onOpenInEditor, onSetExtraLocations, allAxes }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes }) {
   const [expandedTag, setExpandedTag] = useState(null);
-  // {tag, axisDefault, coverageGlyphs, prefillGlyph} when the
-  // add-location modal is open; null otherwise.
+  // ``addLocationFor`` carries the props the AddBraceLocationModal
+  // needs: which axis, what to pre-fill, whether the glyph field is
+  // locked (per-glyph add) or open (top-level bulk add).
   const [addLocationFor, setAddLocationFor] = useState(null);
 
-  const handleAddExtraLocation = async (ax, entry) => {
-    if (typeof onSetExtraLocations !== 'function') return;
-    const merged = [...(ax.extra_locations || []), entry];
-    await onSetExtraLocations(ax.tag, merged);
+  // Append a batch of new {glyph, location} entries to an axis's
+  // ``layers`` list and round-trip through the API.
+  const handleAddLayers = async (ax, newEntries) => {
+    if (typeof onSetLayers !== 'function') return;
+    const merged = [...(ax.layers || []), ...newEntries];
+    await onSetLayers(ax.tag, merged);
   };
-
-  const handleRemoveExtraLocation = async (ax, location) => {
-    if (typeof onSetExtraLocations !== 'function') return;
-    // Match by structural equality (glyph + location dict) so the
-    // remove survives a refetch reordering entries.
-    const next = (ax.extra_locations || []).filter(e => !sameEntry(e, location));
-    await onSetExtraLocations(ax.tag, next);
-  };
-
-  // Render an N-D location dict as ``{axis=value, …}``. Used both
-  // for display and to identify entries.
-  const formatLocation = (loc) => Object.entries(loc || {})
-    .map(([t, v]) => `${t}=${v}`)
-    .join(', ');
   // Section folds closed by default — Roboto Delta has 9 control axes
   // and that's a lot of vertical space if always-open. The header
   // shows a count so the user knows how many are hiding behind the
@@ -183,94 +172,15 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                       <span><strong>Default:</strong> {ax.default}</span>
                     </div>
                   )}
-                  {isStudio && typeof onSetCoverage === 'function' ? (
-                    <>
-                      <CoverageEditor
-                        tag={ax.tag}
-                        coverage={ax.covers}
-                        onSave={onSetCoverage}
-                        onOpenInEditor={onOpenInEditor}
-                      />
-                      {typeof onSetExtraLocations === 'function' && (ax.covers || []).length > 0 && (
-                        <div className="brace-layers">
-                          <div className="brace-layers-header">
-                            Brace layers per glyph
-                            <span className="brace-layers-hint">
-                              auto seeds at {ax.min} / {ax.max} for every covered glyph · custom locations editable below
-                            </span>
-                          </div>
-                          {(ax.covers || []).map(glyphName => {
-                            const customForGlyph = (ax.extra_locations || []).filter(e => e.glyph === glyphName);
-                            return (
-                              <div key={glyphName} className="brace-layers-glyph">
-                                <div className="brace-layers-glyph-name">{glyphName}</div>
-                                <ul className="brace-layers-list">
-                                  {/* Auto seeds at axis-min and axis-max. Read-only — every
-                                      coverage glyph gets these from regenerate_shadow. */}
-                                  <li
-                                    className="brace-layer-row brace-layer-auto"
-                                    onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
-                                    title="Auto-seeded brace layer at the axis minimum. Click to open in Fontra."
-                                  >
-                                    <span className="brace-layer-coords">
-                                      {ax.tag} = {ax.min}
-                                    </span>
-                                    <span className="brace-layer-tag">auto</span>
-                                  </li>
-                                  <li
-                                    className="brace-layer-row brace-layer-auto"
-                                    onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
-                                    title="Auto-seeded brace layer at the axis maximum. Click to open in Fontra."
-                                  >
-                                    <span className="brace-layer-coords">
-                                      {ax.tag} = {ax.max}
-                                    </span>
-                                    <span className="brace-layer-tag">auto</span>
-                                  </li>
-                                  {customForGlyph.map((entry, i) => (
-                                    <li
-                                      key={`custom-${i}`}
-                                      className="brace-layer-row brace-layer-custom"
-                                      onClick={() => onOpenInEditor && onOpenInEditor(ax.tag, glyphName)}
-                                      title="Click to open in Fontra."
-                                    >
-                                      <span className="brace-layer-coords">
-                                        {formatLocation(entry.location)}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="brace-layer-remove"
-                                        title="Remove this brace-layer location."
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleRemoveExtraLocation(ax, entry);
-                                        }}
-                                      >
-                                        ✕
-                                      </button>
-                                    </li>
-                                  ))}
-                                  <li className="brace-layer-add-row">
-                                    <button
-                                      type="button"
-                                      className="brace-layer-add"
-                                      onClick={() => setAddLocationFor({
-                                        tag: ax.tag,
-                                        axisDefault: ax.default,
-                                        coverage: [glyphName],  // restrict the picker to this glyph
-                                        prefillGlyph: glyphName,
-                                      })}
-                                    >
-                                      + Add mapping
-                                    </button>
-                                  </li>
-                                </ul>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
+                  {isStudio && typeof onSetLayers === 'function' ? (
+                    <LayersEditor
+                      tag={ax.tag}
+                      axis={ax}
+                      layers={ax.layers || []}
+                      onChangeLayers={onSetLayers}
+                      onOpenInEditor={onOpenInEditor}
+                      onRequestAddModal={setAddLocationFor}
+                    />
                   ) : (
                     <div className="control-axis-glyphs">
                       {ax.covers.length > 0 ? (
@@ -311,34 +221,17 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           onClose={() => setAddLocationFor(null)}
           axisTag={addLocationFor.tag}
           axisDefault={addLocationFor.axisDefault}
-          coverageGlyphs={addLocationFor.coverage}
-          prefillGlyph={addLocationFor.prefillGlyph}
+          prefillGlyphs={addLocationFor.prefillGlyphs}
+          lockGlyphs={addLocationFor.lockGlyphs}
           allAxes={allAxes || []}
-          onCreate={async (entry) => {
+          onCreate={async (entries) => {
             const ax = controlLikeAxes.find(a => a.tag === addLocationFor.tag);
-            if (ax) await handleAddExtraLocation(ax, entry);
+            if (ax) await handleAddLayers(ax, entries);
           }}
         />
       )}
     </div>
   );
-}
-
-/**
- * Strict equality of {glyph, location} brace-layer entries.
- */
-function sameEntry(a, b) {
-  if (!a || !b) return false;
-  if (a.glyph !== b.glyph) return false;
-  const la = a.location || {};
-  const lb = b.location || {};
-  const ka = Object.keys(la);
-  const kb = Object.keys(lb);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) {
-    if (Number(la[k]) !== Number(lb[k])) return false;
-  }
-  return true;
 }
 
 export default ControlAxes;

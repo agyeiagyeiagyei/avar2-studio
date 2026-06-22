@@ -137,8 +137,7 @@ def add_axis(
         "default": default_f,
         "min": min_f,
         "max": max_f,
-        "coverage": [],
-        "layers": {},
+        "layers": [],
     }
     data["axes"].append(entry)
     _save(source_path, data)
@@ -163,12 +162,13 @@ def remove_axis(source_path: Path, tag: str) -> bool:
     return True
 
 
-def set_extra_locations(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
-    """Replace the axis's ``extra_locations`` list with ``entries``.
-    Each entry must be ``{glyph: str, location: {axis_tag: number}}``.
-    Returns the canonical-shape stored list.
+def set_layers(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
+    """Replace an axis's unified ``layers`` list. Each entry shape:
+    ``{glyph: str, location: {axis_tag: number}}``. De-duplicates by
+    (glyph, location). Returns the canonical-shape stored list.
 
-    Raises ``ValueError`` if the axis tag doesn't exist in the sidecar.
+    Raises ``ValueError`` if the axis tag doesn't exist in the
+    sidecar.
     """
     tag_norm = (tag or "").strip().lower()
     if not tag_norm:
@@ -181,43 +181,8 @@ def set_extra_locations(source_path: Path, tag: str, entries: List[Dict]) -> Lis
             break
     if target is None:
         raise ValueError(f"control axis '{tag_norm}' not found")
-    cleaned = _normalise_extra_locations(entries)
-    target["extra_locations"] = cleaned
-    _save(source_path, data)
-    return cleaned
-
-
-def set_coverage(source_path: Path, tag: str, glyph_names: List[str]) -> List[str]:
-    """Replace an axis's coverage list with ``glyph_names``. De-dups,
-    preserves the input order (designer ordering carries meaning when
-    they group by row/cluster). Returns the canonical stored list.
-
-    Raises ``ValueError`` if the axis tag doesn't exist in the sidecar.
-    """
-    tag_norm = (tag or "").strip().lower()
-    if not tag_norm:
-        raise ValueError("tag is required")
-
-    cleaned: List[str] = []
-    seen: set = set()
-    for name in glyph_names or []:
-        if not isinstance(name, str):
-            continue
-        stripped = name.strip()
-        if not stripped or stripped in seen:
-            continue
-        seen.add(stripped)
-        cleaned.append(stripped)
-
-    data = load(source_path)
-    target = None
-    for ax in data["axes"]:
-        if str(ax.get("tag", "")).lower() == tag_norm:
-            target = ax
-            break
-    if target is None:
-        raise ValueError(f"control axis '{tag_norm}' not found")
-    target["coverage"] = cleaned
+    cleaned = _normalise_layers(entries)
+    target["layers"] = cleaned
     _save(source_path, data)
     return cleaned
 
@@ -234,31 +199,59 @@ def _empty() -> Dict:
 def _normalise(data: Dict) -> Dict:
     """Fill in missing schema fields so callers can assume a stable
     shape. Doesn't mutate the file on disk — that happens on next
-    save."""
+    save.
+
+    Schema migration: pre-v2.4 sidecars stored ``coverage: [...]``
+    (implicit auto-seeds at axis-min/max) + ``extra_locations: [...]``
+    (custom layers). v2.7 unifies these into a single ``layers``
+    array with every brace layer explicit. We migrate-on-load:
+    each old ``coverage`` glyph synthesises two layers (at min and
+    max); old ``extra_locations`` entries copy through. The
+    migrated shape persists on the next save.
+    """
     axes = data.get("axes") or []
     out_axes: List[Dict] = []
     for ax in axes:
         if not isinstance(ax, dict):
             continue
+        min_v = float(ax.get("min", -1000))
+        max_v = float(ax.get("max", 1000))
+        tag = (ax.get("tag") or "").strip().lower()
+
+        # Migrate legacy schema if needed.
+        layers = ax.get("layers")
+        if not isinstance(layers, list):
+            # Old shape (or absent) — synthesise from coverage + extra_locations.
+            layers = []
+            for g in (ax.get("coverage") or []):
+                if not isinstance(g, str) or not g.strip():
+                    continue
+                layers.append({"glyph": g.strip(), "location": {tag: min_v}})
+                layers.append({"glyph": g.strip(), "location": {tag: max_v}})
+            for entry in (ax.get("extra_locations") or []):
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("glyph") and entry.get("location"):
+                    layers.append(entry)
+        layers = _normalise_layers(layers)
+
         out_axes.append({
             "tag": ax.get("tag", ""),
             "display_name": ax.get("display_name", ax.get("tag", "")),
             "default": float(ax.get("default", 0)),
-            "min": float(ax.get("min", -1000)),
-            "max": float(ax.get("max", 1000)),
-            "coverage": list(ax.get("coverage") or []),
-            # extra_locations: list of {glyph, location} entries —
-            # additional brace layers beyond the auto-seeded min/max
-            # pair. Each location is a sparse dict {axis_tag: value};
-            # axes not in the dict interpolate from masters.
-            "extra_locations": _normalise_extra_locations(ax.get("extra_locations")),
-            "layers": dict(ax.get("layers") or {}),
+            "min": min_v,
+            "max": max_v,
+            "layers": layers,
         })
     return {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes}
 
 
-def _normalise_extra_locations(raw) -> List[Dict]:
+def _normalise_layers(raw) -> List[Dict]:
+    """Validate + dedup the unified layers list. Each entry shape:
+    ``{glyph: str, location: {axis_tag: number}}``. Duplicates by
+    (glyph, location) are folded — last write wins."""
     out: List[Dict] = []
+    seen: set = set()
     if not isinstance(raw, list):
         return out
     for entry in raw:
@@ -271,15 +264,19 @@ def _normalise_extra_locations(raw) -> List[Dict]:
         if not isinstance(location, dict) or not location:
             continue
         clean_loc: Dict[str, float] = {}
-        for tag, value in location.items():
-            if not isinstance(tag, str) or not tag.strip():
+        for k, v in location.items():
+            if not isinstance(k, str) or not k.strip():
                 continue
             try:
-                clean_loc[tag.strip()] = float(value)
+                clean_loc[k.strip()] = float(v)
             except (TypeError, ValueError):
                 continue
         if not clean_loc:
             continue
+        key = (glyph.strip(), tuple(sorted(clean_loc.items())))
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({"glyph": glyph.strip(), "location": clean_loc})
     return out
 
@@ -417,53 +414,28 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             coords.append(default_value)
             master.axes = coords
 
-    # Tag → axis-index map across the full final axis list. Used by
-    # both the auto-seed (axis-min/max) loop and the extra_locations
-    # loop below to resolve sparse {axis_tag: value} dicts.
+    # Tag → axis-index map across the full final axis list. Used to
+    # resolve sparse {axis_tag: value} dicts from the unified
+    # ``layers`` list into full N-D coordinate vectors.
     full_axis_index_by_tag: Dict[str, int] = {}
     for i, ax in enumerate(font.axes):
         full_axis_index_by_tag[str(getattr(ax, "axisTag", "")).lower()] = i
 
-    # Seed brace layers for coverage glyphs (v2 slice 3) + any
-    # custom-location entries from extra_locations (v2 slice 4).
-    # For each control axis with coverage, every covered glyph gets
-    # two seed brace layers (axis-min, axis-max). For each
-    # extra_location entry, an additional brace layer at the full
-    # location vector derived by overlaying the sparse pin on the
-    # default master's position. Each layer is a copy of the
-    # default master's outline (or a preserved outline from a
-    # previous shadow regenerate) so the brace exists as a
-    # structural target. v2 slice 5 (Fontra) lets the designer
-    # replace these seeded outlines with actual alternate drawings.
+    # Seed brace layers from the unified ``layers`` list (v2.7).
+    # Every brace layer is explicit — auto-seeds at axis-min/max are
+    # gone. Designer authored each location through the
+    # AddBraceLayerModal. Each layer is a copy of the default
+    # master's outline (or a preserved outline from the previous
+    # shadow if Fontra had drawn one there) so the brace exists as
+    # a structural target.
     if font.masters:
         default_master = font.masters[0]
         default_master_id = default_master.id
         default_loc = list(getattr(default_master, "axes", None) or [])
 
-        # Build the seed-location list per (axis, glyph). Two flavours:
-        # (1) auto seeds at axis-min/max for every coverage glyph;
-        # (2) extra_locations as the designer pinned them.
-        seed_jobs: List[tuple] = []  # (glyph_name, location_list, axis_tag_for_idempotency_check)
+        seed_jobs: List[tuple] = []  # (glyph_name, location_list)
         for spec in axes_to_add:
-            tag = (spec.get("tag") or "").strip().lower()
-            if not tag:
-                continue
-            axis_index = axis_index_by_tag.get(tag)
-            if axis_index is None:
-                continue
-
-            coverage = list(spec.get("coverage") or [])
-            if coverage:
-                for seed_value in [float(spec.get("min", 0)), float(spec.get("max", 0))]:
-                    for glyph_name in coverage:
-                        location = list(default_loc)
-                        location[axis_index] = seed_value
-                        seed_jobs.append((glyph_name, location))
-
-            # extra_locations (slice 4): per-glyph, full N-D location
-            # built by overlaying sparse pins on the default-master
-            # coordinates.
-            for entry in spec.get("extra_locations") or []:
+            for entry in spec.get("layers") or []:
                 glyph_name = entry.get("glyph")
                 if not glyph_name:
                     continue

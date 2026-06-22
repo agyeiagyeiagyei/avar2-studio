@@ -345,28 +345,15 @@ export const api = {
     return parseJSON(response);
   },
 
-  async setControlAxisCoverage(tag, coverage) {
-    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/coverage`, {
+  async setControlAxisLayers(tag, layers) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/layers`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ coverage }),
+      body: JSON.stringify({ layers }),
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
-      throw new Error(err.error || `Failed to set coverage: ${response.status}`);
-    }
-    return parseJSON(response);
-  },
-
-  async setControlAxisExtraLocations(tag, extraLocations) {
-    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/extra-locations`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ extra_locations: extraLocations }),
-    });
-    if (!response.ok) {
-      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
-      throw new Error(err.error || `Failed to set extra locations: ${response.status}`);
+      throw new Error(err.error || `Failed to set layers: ${response.status}`);
     }
     return parseJSON(response);
   },

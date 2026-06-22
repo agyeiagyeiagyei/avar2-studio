@@ -2,56 +2,56 @@ import React, { useEffect, useState } from 'react';
 import './AddBraceLocationModal.css';
 
 /**
- * Modal for pinning a brace layer at a custom multi-axis location
- * for one coverage glyph.
+ * Modal for declaring brace layers at a multi-axis location for one
+ * or more glyphs in a single submit.
  *
- * Each axis has a pin-toggle + value input. Unpinned axes interpolate
- * from masters; the resulting brace layer carries a sparse
- * ``location`` dict containing only the pinned axes. The control axis
- * (whose row this belongs to) is required non-default.
+ * Glyph field accepts a Fontra-style string:
+ *   - Single characters (one glyph each):  "AEFH" → ["A","E","F","H"]
+ *   - Slash-named glyphs:                  "/idotless" → ["idotless"]
+ *   - Mixed:                               "A/idotless/B" → ["A","idotless","B"]
+ *   - Whitespace / comma separators:       "A E F H" or "A, idotless"
+ *
+ * On submit, one brace layer is created per parsed glyph at the
+ * same location. The control axis (whose row this belongs to) is
+ * required pinned non-default; other axes optional.
  *
  * Props:
- *   isOpen           — render gate
- *   onClose          — () => void
- *   onCreate         — async ({glyph, location}) => void
- *   axisTag          — the control axis this layer is being added to
- *                      (its slider is highlighted + required non-default)
- *   axisDefault      — control axis default value, for the "required
- *                      non-default" check
- *   coverageGlyphs   — Array<string> — restrict the glyph picker to
- *                      glyphs already in the axis's coverage list
- *   allAxes          — Array<{tag, name, min, max, default}> — every
- *                      axis in the source/sidecar, used to render
- *                      pin inputs
+ *   isOpen             — render gate
+ *   onClose            — () => void
+ *   onCreate           — async ([{glyph, location}, ...]) => void
+ *   axisTag            — control axis tag
+ *   axisDefault        — its default value (used for non-default check)
+ *   allAxes            — every axis (for pin inputs)
+ *   prefillGlyphs      — optional initial value for the glyph field
+ *   lockGlyphs         — if true, the glyph field is read-only
+ *                        (per-glyph "+ Add layer for X" sets this)
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, coverageGlyphs, allAxes, prefillGlyph }) {
-  const [glyph, setGlyph] = useState('');
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, prefillGlyphs, lockGlyphs }) {
+  const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    // prefillGlyph wins if the modal opened from a per-glyph "+ Add
-    // mapping" button; else default to the first coverage glyph.
-    setGlyph(prefillGlyph || (coverageGlyphs && coverageGlyphs[0]) || '');
-    // Seed the control axis pin at axis-min as a useful starting
-    // point; user adjusts from there. Other axes start un-pinned.
+    setGlyphsInput(prefillGlyphs || '');
     const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
     setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
     setError(null);
     setSubmitting(false);
-  }, [isOpen, coverageGlyphs, axisTag, allAxes, prefillGlyph]);
+  }, [isOpen, prefillGlyphs, axisTag, allAxes]);
 
   if (!isOpen) return null;
 
-  const togglePin = (tag, axisInfo) => {
+  const parsedGlyphs = parseGlyphString(glyphsInput);
+
+  const togglePin = (axisInfo) => {
     setPins(prev => {
       const next = { ...prev };
-      if (tag in next) {
-        delete next[tag];
+      if (axisInfo.tag in next) {
+        delete next[axisInfo.tag];
       } else {
-        next[tag] = axisInfo?.default ?? 0;
+        next[axisInfo.tag] = axisInfo.default ?? 0;
       }
       return next;
     });
@@ -65,8 +65,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     e.preventDefault();
     if (submitting) return;
     setError(null);
-    if (!glyph) {
-      setError('Pick a glyph');
+    if (parsedGlyphs.length === 0) {
+      setError('Enter at least one glyph');
       return;
     }
     if (!(axisTag in pins)) {
@@ -77,18 +77,18 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       setError(`Pin ${axisTag} to something other than its default (${axisDefault})`);
       return;
     }
-    // Filter to numeric pins only; drop NaN.
     const cleanPins = {};
-    for (const [tag, value] of Object.entries(pins)) {
-      const n = Number(value);
-      if (Number.isFinite(n)) cleanPins[tag] = n;
+    for (const [t, v] of Object.entries(pins)) {
+      const n = Number(v);
+      if (Number.isFinite(n)) cleanPins[t] = n;
     }
+    const entries = parsedGlyphs.map(g => ({ glyph: g, location: cleanPins }));
     setSubmitting(true);
     try {
-      await onCreate({ glyph, location: cleanPins });
+      await onCreate(entries);
       onClose();
     } catch (err) {
-      setError(err.message || 'Failed to add layer');
+      setError(err.message || 'Failed to add layers');
     } finally {
       setSubmitting(false);
     }
@@ -97,24 +97,33 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="add-brace-location-modal" onClick={e => e.stopPropagation()}>
-        <h3>Add brace layer location</h3>
+        <h3>Add brace layer{parsedGlyphs.length > 1 ? 's' : ''}</h3>
         <p className="modal-help">
-          Pin a brace layer for one glyph at a specific point in axis
-          space. Unpinned axes interpolate from masters. The control
-          axis (<code>{axisTag}</code>) must be pinned non-default.
+          One brace layer per glyph, all at the same axis location.
+          Type plain characters (<code>AEFH</code>) or
+          slash-named glyphs (<code>/idotless</code>). Mix and match
+          allowed. Whitespace / commas are optional separators.
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
-            <label htmlFor="brace-glyph">Glyph</label>
-            <select
-              id="brace-glyph"
-              value={glyph}
-              onChange={e => setGlyph(e.target.value)}
-            >
-              {(coverageGlyphs || []).map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
+            <label htmlFor="brace-glyphs">
+              Glyph{parsedGlyphs.length > 1 ? 's' : ''}
+              {parsedGlyphs.length > 0 && (
+                <span className="glyphs-preview">
+                  → {parsedGlyphs.join(', ')}
+                </span>
+              )}
+            </label>
+            <input
+              id="brace-glyphs"
+              type="text"
+              value={glyphsInput}
+              onChange={e => setGlyphsInput(e.target.value)}
+              readOnly={!!lockGlyphs}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="e.g. AEFH or /idotless or A E F H"
+            />
           </div>
 
           <div className="location-pins">
@@ -131,8 +140,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                     <input
                       type="checkbox"
                       checked={isPinned}
-                      onChange={() => togglePin(axis.tag, axis)}
-                      disabled={isControlAxis}  /* always pinned for the control axis */
+                      onChange={() => togglePin(axis)}
+                      disabled={isControlAxis}
                       title={isControlAxis ? 'Required — pinning the control axis is what makes this a brace layer.' : ''}
                     />
                     <span className="pin-tag">{axis.tag}</span>
@@ -154,7 +163,12 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
           </div>
 
           <div className="location-preview">
-            <strong>Layer:</strong> <code>{glyph} @ {`{${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}</code>
+            <strong>Will create:</strong>{' '}
+            <code>
+              {parsedGlyphs.length === 0
+                ? '(no glyphs)'
+                : `${parsedGlyphs.length} brace layer${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
+            </code>
           </div>
 
           {error && <div className="submit-error">{error}</div>}
@@ -164,13 +178,60 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               Cancel
             </button>
             <button type="submit" className="btn btn-confirm" disabled={submitting}>
-              {submitting ? 'Adding…' : 'Add layer'}
+              {submitting ? 'Adding…' : `Add ${parsedGlyphs.length || ''} layer${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+/**
+ * Parse a glyph-input string per Fontra convention.
+ *
+ *   "AEFH"          → ["A", "E", "F", "H"]
+ *   "/idotless"     → ["idotless"]
+ *   "A/idotless/B"  → ["A", "idotless", "B"]
+ *   "A E F H"       → ["A", "E", "F", "H"]
+ *   "A, E, F, H"    → ["A", "E", "F", "H"]
+ *   "  "            → []
+ *
+ * Tokens with no leading "/" are treated as raw text — each
+ * character is one glyph. Tokens starting with "/" are a named
+ * glyph (the name continues until the next "/" or whitespace).
+ */
+function parseGlyphString(input) {
+  if (!input) return [];
+  const out = [];
+  const seen = new Set();
+  const push = (g) => {
+    if (g && !seen.has(g)) {
+      seen.add(g);
+      out.push(g);
+    }
+  };
+
+  // Split into tokens by whitespace / commas first.
+  const tokens = input.split(/[\s,]+/).filter(Boolean);
+  for (const token of tokens) {
+    let i = 0;
+    while (i < token.length) {
+      if (token[i] === '/') {
+        // Named glyph; consume until next '/' or end-of-token.
+        let j = i + 1;
+        while (j < token.length && token[j] !== '/') j++;
+        const name = token.slice(i + 1, j);
+        if (name) push(name);
+        i = j;
+      } else {
+        // Single character glyph.
+        push(token[i]);
+        i++;
+      }
+    }
+  }
+  return out;
 }
 
 export default AddBraceLocationModal;

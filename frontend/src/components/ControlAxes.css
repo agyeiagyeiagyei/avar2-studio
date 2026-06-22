@@ -621,3 +621,175 @@
 .brace-layer-add:hover {
   background: #f1eef9;
 }
+
+/* v2.7 unified LayersEditor — replaces CoverageEditor + the older
+   per-glyph brace-layers section. */
+.layers-editor {
+  margin-top: 0.3rem;
+}
+
+.layers-editor-header {
+  margin-bottom: 0.5rem;
+}
+
+.layers-editor-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #444;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.layers-editor-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 0.62rem;
+}
+
+.layers-editor-empty {
+  font-size: 0.7rem;
+  color: #777;
+  background: #fafafa;
+  border: 1px dashed #ddd;
+  border-radius: 3px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.layers-glyph-block {
+  margin-bottom: 0.45rem;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.layers-glyph-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  background: #eef3fb;
+  border-bottom: 1px solid #d9e3ef;
+}
+
+.layers-glyph-header:hover {
+  background: #e3ecf8;
+}
+
+.layers-glyph-caret {
+  color: #2c5aa0;
+  font-size: 0.7rem;
+  width: 0.9em;
+}
+
+.layers-glyph-name {
+  font-family: monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #2c5aa0;
+  flex: 1;
+}
+
+.layers-glyph-count {
+  font-size: 0.6rem;
+  color: #2c5aa0;
+  background: #d9e3ef;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  font-family: monospace;
+}
+
+.layers-glyph-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.12s;
+}
+
+.layer-row:hover {
+  background-color: #f5f8ff;
+}
+
+.layer-coords {
+  font-family: monospace;
+  color: #5b3a8f;
+}
+
+.layer-remove {
+  background: none;
+  border: 1px solid #f1c0c0;
+  border-radius: 3px;
+  color: #b8350c;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.layer-remove:hover {
+  background: #fdecea;
+}
+
+.layers-glyph-add-row {
+  padding: 0.3rem 0.55rem;
+  border-top: 1px dashed #e6e6e6;
+}
+
+.layer-add-for-glyph {
+  background: none;
+  border: 1px dashed #d6cdf0;
+  border-radius: 3px;
+  color: #5b3a8f;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.22rem 0.55rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+
+.layer-add-for-glyph:hover {
+  background: #f1eef9;
+}
+
+.layers-editor-toplevel-add {
+  margin-top: 0.5rem;
+}
+
+.layer-add-toplevel {
+  background: #2c5aa0;
+  color: white;
+  border: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.4rem 0.85rem;
+  border-radius: 3px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.layer-add-toplevel:hover {
+  background: #224a85;
+}
+
+.glyphs-preview {
+  font-weight: 400;
+  color: #5b3a8f;
+  font-family: monospace;
+  font-size: 0.65rem;
+  margin-left: 0.4rem;
+}
