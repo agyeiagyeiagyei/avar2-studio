@@ -195,6 +195,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                       tag={ax.tag}
                       axis={ax}
                       layers={ax.layers || []}
+                      allAxes={allAxes || []}
                       onChangeLayers={onSetLayers}
                       onOpenInEditor={onOpenInEditor}
                       onRequestAddModal={setAddLocationFor}

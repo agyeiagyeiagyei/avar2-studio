@@ -19,7 +19,7 @@ import React, { useState } from 'react';
  *   onOpenInEditor     — (tag, glyphName?) => void
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
  */
-function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onRequestAddModal }) {
+function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEditor, onRequestAddModal }) {
   const [collapsed, setCollapsed] = useState({});
 
   // Group layers by glyph, preserving first-seen order so the
@@ -122,9 +122,30 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
     await onChangeLayers(tag, next);
   };
 
-  const formatLocation = (loc) => Object.entries(loc || {})
-    .map(([t, v]) => `${t} = ${v}`)
-    .join(', ');
+  // Build the full N-D location for a brace: sparse pins from
+  // the sidecar overlaid on each declared axis's default. This
+  // matches what Fontra computes when rendering the source list
+  // (master + extraLocation), so the studio's row label and
+  // Fontra's source label are 1:1.
+  const axisByTag = new Map((allAxes || []).map(a => [a.tag, a]));
+  const buildFullLocation = (sparseLoc) => {
+    const out = [];
+    for (const ax of (allAxes || [])) {
+      const v = (sparseLoc && sparseLoc[ax.tag] !== undefined)
+        ? Number(sparseLoc[ax.tag])
+        : Number(ax.default);
+      out.push({ tag: ax.tag, name: ax.name || ax.tag, value: v, isControl: ax.tag === tag });
+    }
+    return out;
+  };
+
+  // Pretty-print the control-axis value as a quick header label
+  // (the "primary" handle the designer pinned this brace to).
+  const formatControl = (sparseLoc) => {
+    const v = sparseLoc?.[tag];
+    if (v === undefined) return `${tag} unset`;
+    return `${tag} = ${v}`;
+  };
 
   return (
     <div className="layers-editor">
@@ -195,39 +216,68 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
                   </div>
                 )}
                 <ul className="layers-glyph-list">
-                  {glyphLayers.map((entry, i) => (
-                    <li
-                      key={i}
-                      className="layer-row"
-                      onClick={() => onRequestAddModal && onRequestAddModal({
-                        tag,
-                        axisDefault: axis.default,
-                        editLayer: entry,
-                        replaceLayer: (newEntry) => replaceLayer(entry, newEntry),
-                      })}
-                      title="Click to edit this brace layer's axis values."
-                    >
-                      <span className="layer-coords">{formatLocation(entry.location)}</span>
-                      <div className="layer-actions" onClick={e => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="layer-open-fontra"
-                          title="Open this glyph in Fontra at this brace-layer location, in edit mode."
-                          onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, entry.location)}
-                        >
-                          ↗
-                        </button>
-                        <button
-                          type="button"
-                          className="layer-remove"
-                          title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
-                          onClick={() => removeLayer(entry)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                  {glyphLayers.map((entry, i) => {
+                    const fullLoc = buildFullLocation(entry.location);
+                    return (
+                      <li
+                        key={i}
+                        className="layer-row"
+                        onClick={() => onRequestAddModal && onRequestAddModal({
+                          tag,
+                          axisDefault: axis.default,
+                          editLayer: entry,
+                          replaceLayer: (newEntry) => replaceLayer(entry, newEntry),
+                        })}
+                        title="Click to edit this brace layer's axis values."
+                      >
+                        <div className="layer-coords">
+                          <div className="layer-coords-control">
+                            <span
+                              className="layer-coords-control-tag"
+                              title={(axisByTag.get(tag)?.name) || tag}
+                            >
+                              {tag}
+                            </span>
+                            <span className="layer-coords-control-eq">=</span>
+                            <span className="layer-coords-control-val">{entry.location?.[tag] ?? ''}</span>
+                            <span className="layer-coords-studio-badge" title="Brace layer authored through avar2-studio. Lives in the sidecar; written to the shadow .glyphs on save.">studio</span>
+                          </div>
+                          <div className="layer-coords-context">
+                            <span className="layer-coords-context-prefix">at</span>
+                            {fullLoc.filter(a => !a.isControl).map(a => (
+                              <span key={a.tag} className="layer-coords-axis-pair">
+                                <span
+                                  className="layer-coords-axis-tag"
+                                  title={a.name}
+                                >
+                                  {a.tag}
+                                </span>
+                                <span className="layer-coords-axis-val">{a.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="layer-actions" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="layer-open-fontra"
+                            title="Open this glyph in Fontra at this brace-layer location, in edit mode."
+                            onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, entry.location)}
+                          >
+                            ↗
+                          </button>
+                          <button
+                            type="button"
+                            className="layer-remove"
+                            title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
+                            onClick={() => removeLayer(entry)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <div className="layers-glyph-add-row">
                   <button
