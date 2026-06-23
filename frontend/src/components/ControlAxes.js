@@ -96,7 +96,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           onClick={() => setSectionOpen(o => !o)}
           aria-expanded={sectionOpen}
         >
-          <span className="control-axes-section-caret">{sectionOpen ? '▾' : '▸'}</span>
           <h3 className="control-axes-title">CONTROL AXES</h3>
           <span className="control-axes-count">{controlLikeAxes.length}</span>
           {disabledCount > 0 && (
