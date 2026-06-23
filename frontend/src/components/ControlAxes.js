@@ -22,8 +22,13 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes }) {
-  const [expandedTag, setExpandedTag] = useState(null);
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
+  // Set of axis tags that are currently expanded. Multiple axes can
+  // be open at once. Defaults to "all studio-declared axes are
+  // expanded" so opening the CONTROL AXES section drops the user
+  // straight into the per-glyph layer lists — no extra click to
+  // drill into each axis.
+  const [expandedTags, setExpandedTags] = useState(null);
   // ``addLocationFor`` carries the props the AddBraceLocationModal
   // needs: which axis, what to pre-fill, whether the glyph field is
   // locked (per-glyph add) or open (top-level bulk add).
@@ -47,6 +52,25 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
   const controlLikeAxes = (axes || []).filter(
     ax => ax.kind === 'scoped' || ax.kind === 'partial'
   );
+
+  // Resolve which tags are expanded right now. Default: all studio
+  // axes are expanded (designer just opened the section and wants
+  // to see what's there). Source-derived axes stay collapsed by
+  // default since their content is read-only.
+  const studioTagSet = React.useMemo(
+    () => new Set(controlLikeAxes.filter(ax => ax.source === 'studio').map(ax => ax.tag)),
+    [controlLikeAxes],
+  );
+  const resolvedExpandedTags = expandedTags === null ? studioTagSet : expandedTags;
+
+  const toggleAxisExpanded = (tag) => {
+    setExpandedTags(prev => {
+      const base = prev === null ? new Set(studioTagSet) : new Set(prev);
+      if (base.has(tag)) base.delete(tag);
+      else base.add(tag);
+      return base;
+    });
+  };
 
   // Section is rendered whenever there are control-like axes to show
   // OR the user has the ability to declare new ones (v2). Otherwise
@@ -103,7 +127,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
       {sectionOpen && (
       <div className="control-axes-list">
         {controlLikeAxes.map(ax => {
-          const isExpanded = expandedTag === ax.tag;
+          const isExpanded = resolvedExpandedTags.has(ax.tag);
           const isDisabled = disabledAxes.has(ax.tag);
           const isStudio = ax.source === 'studio';
           const kindBadge = ax.kind === 'partial'
@@ -127,7 +151,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
             <div key={ax.tag} className={`control-axis-row ${isDisabled ? 'disabled' : ''}`}>
               <div
                 className="control-axis-header"
-                onClick={() => setExpandedTag(isExpanded ? null : ax.tag)}
+                onClick={() => toggleAxisExpanded(ax.tag)}
               >
                 <span className="control-axis-caret">{isExpanded ? '▾' : '▸'}</span>
                 <span className="control-axis-tag">{ax.tag}</span>
@@ -244,6 +268,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           lockGlyphs={addLocationFor.lockGlyphs}
           editLayer={addLocationFor.editLayer}
           allAxes={allAxes || []}
+          allInstances={allInstances || []}
           onCreate={async (entries) => {
             // Edit flow: the LayersEditor row supplied a
             // ``replaceLayer`` callback that swaps the single

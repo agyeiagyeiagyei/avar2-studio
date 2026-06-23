@@ -26,18 +26,16 @@ import './AddBraceLocationModal.css';
  *   lockGlyphs         — if true, the glyph field is read-only
  *                        (per-glyph "+ Add layer for X" sets this)
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, prefillGlyphs, lockGlyphs, editLayer }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allInstances, prefillGlyphs, lockGlyphs, editLayer }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});
+  const [baseInstance, setBaseInstance] = useState('');  // instance name or '' (no baseline)
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     if (editLayer) {
-      // Edit mode — prefill from the existing layer's data. The glyph
-      // is always locked when editing (changing the glyph would mean
-      // it's a different entry, not an edit).
       setGlyphsInput(editLayer.glyph || '');
       setPins({ ...(editLayer.location || {}) });
     } else {
@@ -45,9 +43,32 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
       setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
     }
+    setBaseInstance('');
     setError(null);
     setSubmitting(false);
   }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer]);
+
+  // Pick an instance as the baseline location. Fills in pins for
+  // every parametric axis the instance declares; control axis stays
+  // at whatever the designer set (axis-min by default). User-friendly
+  // mental model: "give me a brace AT THE BOLD INSTANCE, with crbr=-100"
+  // instead of "give me a brace at (180, 300, 200, -100)."
+  const handlePickInstance = (instanceName) => {
+    setBaseInstance(instanceName);
+    if (!instanceName) return;
+    const inst = (allInstances || []).find(i => i.name === instanceName);
+    if (!inst || !inst.coordinates) return;
+    setPins(prev => {
+      const next = { ...prev };
+      for (const [tag, value] of Object.entries(inst.coordinates)) {
+        // Don't override the control axis from an instance — its
+        // value comes from the designer's intent for this brace.
+        if (tag === axisTag) continue;
+        next[tag] = Number(value);
+      }
+      return next;
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -138,6 +159,30 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               placeholder="e.g. AEFH or /idotless or A E F H"
             />
           </div>
+
+          {(allInstances || []).length > 0 && (
+            <div className="form-row">
+              <label htmlFor="base-instance">
+                Base on existing instance
+                <span className="form-row-hint">
+                  optional · pre-fills parametric axes from an instance's coordinates
+                </span>
+              </label>
+              <select
+                id="base-instance"
+                value={baseInstance}
+                onChange={e => handlePickInstance(e.target.value)}
+              >
+                <option value="">— none (set axes manually) —</option>
+                {(allInstances || []).map(inst => (
+                  <option key={inst.name} value={inst.name}>
+                    {inst.name}
+                    {inst.origin === 'studio' ? ' · studio' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="location-pins">
             <div className="location-pins-header">Axis pins</div>

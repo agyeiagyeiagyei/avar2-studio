@@ -211,6 +211,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
       <ControlAxes
         axes={glyphCoverageAxes}
         allAxes={axes}
+        allInstances={instances}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}

@@ -48,6 +48,16 @@
   border: 1px solid #ccc;
   border-radius: 3px;
   font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.add-brace-location-modal .form-row-hint {
+  display: block;
+  margin-top: 0.1rem;
+  font-weight: 400;
+  font-size: 0.62rem;
+  color: #999;
 }
 
 .location-pins {
