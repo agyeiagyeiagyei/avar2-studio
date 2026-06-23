@@ -55,9 +55,21 @@ function FontraEditorModal({ editor, onClose }) {
           </button>
         </div>
       </div>
+      {/* Iframe loads Fontra directly at port 8001 (cross-origin)
+          rather than through avar2-studio's /fontra/* reverse
+          proxy. The proxy works for the HTML/CSS/JS rewrite but
+          Fontra also makes runtime fetches for translations
+          (/lang/*), images, and its /api/* routes — those bypass
+          the HTML rewriter and 404 against avar2-studio's root.
+          Symptom: menubar shows literal keys (menubar.file etc),
+          sidebar tab icons blank, canvas empty.
+          Cross-origin loses CSS injection / focused-UI overlay
+          but gives the designer a working editor. Re-enable the
+          proxied URL once we extend the proxy with root-level
+          routes for /lang, /images, /api, etc. */}
       <iframe
         className="fontra-editor-iframe"
-        src={editor.url}
+        src={editor.directUrl || editor.url}
         title="Fontra editor"
       />
     </div>
