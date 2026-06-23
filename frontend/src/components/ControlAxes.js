@@ -130,13 +130,10 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           const isExpanded = resolvedExpandedTags.has(ax.tag);
           const isDisabled = disabledAxes.has(ax.tag);
           const isStudio = ax.source === 'studio';
-          // Studio-declared axes are glyph-scoped by construction, so
-          // the "studio" badge alone is enough — skip the redundant
-          // "scoped" tag. Source-derived axes still get scoped/partial
-          // since that's the meaningful signal there.
-          const originBadge = isStudio
-            ? <span className="kind-badge kind-studio" title="Declared in the studio (lives in <basename>-control.json). Not yet in the source file.">studio</span>
-            : null;
+          // Source-derived axes keep scoped/partial — that's the
+          // meaningful "does it vary all glyphs or a subset?" signal.
+          // Studio axes show no kind badge: by construction they're
+          // glyph-scoped, and the "studio" origin was redundant.
           const kindBadge = isStudio
             ? null
             : ax.kind === 'partial'
@@ -159,11 +156,8 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                 className="control-axis-header"
                 onClick={() => toggleAxisExpanded(ax.tag)}
               >
-                <span className="control-axis-caret">{isExpanded ? '▾' : '▸'}</span>
-                <span className="control-axis-tag">{ax.tag}</span>
-                <span className="control-axis-name">{ax.name}</span>
+                <span className="control-axis-tag" title={ax.name}>{ax.tag}</span>
                 {kindBadge}
-                {originBadge}
                 {isStudio && ax.min !== undefined && ax.max !== undefined && (
                   <span
                     className="control-axis-range"
@@ -172,9 +166,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                     {ax.min}…{ax.max}
                   </span>
                 )}
-                <span className="control-axis-count">
-                  {ax.covers_count}/{ax.total_glyphs}
-                </span>
                 {extrapolateCount > 0 && (
                   <span
                     className="control-axis-extrapolate"
