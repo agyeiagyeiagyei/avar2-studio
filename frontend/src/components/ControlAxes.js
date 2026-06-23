@@ -23,12 +23,10 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *                     axis. State + persistence lives in App.js.
  */
 function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
-  // Set of axis tags that are currently expanded. Multiple axes can
-  // be open at once. Defaults to "all studio-declared axes are
-  // expanded" so opening the CONTROL AXES section drops the user
-  // straight into the per-glyph layer lists — no extra click to
-  // drill into each axis.
-  const [expandedTags, setExpandedTags] = useState(null);
+  // Set of axis tags currently expanded. All axes default collapsed
+  // — matches the per-glyph-block treatment one level down. Designer
+  // clicks an axis row to drill in.
+  const [expandedTags, setExpandedTags] = useState(() => new Set());
   // ``addLocationFor`` carries the props the AddBraceLocationModal
   // needs: which axis, what to pre-fill, whether the glyph field is
   // locked (per-glyph add) or open (top-level bulk add).
@@ -53,22 +51,14 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
     ax => ax.kind === 'scoped' || ax.kind === 'partial'
   );
 
-  // Resolve which tags are expanded right now. Default: all studio
-  // axes are expanded (designer just opened the section and wants
-  // to see what's there). Source-derived axes stay collapsed by
-  // default since their content is read-only.
-  const studioTagSet = React.useMemo(
-    () => new Set(controlLikeAxes.filter(ax => ax.source === 'studio').map(ax => ax.tag)),
-    [controlLikeAxes],
-  );
-  const resolvedExpandedTags = expandedTags === null ? studioTagSet : expandedTags;
+  const resolvedExpandedTags = expandedTags;
 
   const toggleAxisExpanded = (tag) => {
     setExpandedTags(prev => {
-      const base = prev === null ? new Set(studioTagSet) : new Set(prev);
-      if (base.has(tag)) base.delete(tag);
-      else base.add(tag);
-      return base;
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
     });
   };
 
