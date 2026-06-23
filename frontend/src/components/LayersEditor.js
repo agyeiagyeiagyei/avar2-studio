@@ -20,7 +20,12 @@ import React, { useState } from 'react';
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
  */
 function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEditor, onRequestAddModal }) {
-  const [collapsed, setCollapsed] = useState({});
+  // Per-glyph block expansion. Tracks the set of EXPLICITLY
+  // COLLAPSED glyphs — anything else (including newly-appearing
+  // glyphs) is expanded. This means the default state is "every
+  // glyph open" and stays that way after rebuilds / layer adds /
+  // axis re-open, no matter what state the parent passes down.
+  const [collapsedSet, setCollapsedSet] = useState(() => new Set());
 
   // Group layers by glyph, preserving first-seen order so the
   // designer's mental ordering carries through.
@@ -109,7 +114,12 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
   };
 
   const toggleCollapsed = (glyph) => {
-    setCollapsed(prev => ({ ...prev, [glyph]: !prev[glyph] }));
+    setCollapsedSet(prev => {
+      const next = new Set(prev);
+      if (next.has(glyph)) next.delete(glyph);
+      else next.add(glyph);
+      return next;
+    });
   };
 
   const removeLayer = async (entry) => {
@@ -167,7 +177,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
 
       {orderedGlyphs.map(glyphName => {
         const glyphLayers = byGlyph.get(glyphName) || [];
-        const isCollapsed = !!collapsed[glyphName];
+        const isCollapsed = collapsedSet.has(glyphName);
         const coverage = classifyGlyphCoverage(glyphLayers);
         const needsAttention = !coverage.ok;
         // The "pin to extremes" affordance only helps when there's a

@@ -37,7 +37,18 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     if (!isOpen) return;
     if (editLayer) {
       setGlyphsInput(editLayer.glyph || '');
-      setPins({ ...(editLayer.location || {}) });
+      // Edit mode: prefill EVERY axis. The stored sidecar dict is
+      // sparse (only non-default keys persist), but the brace layer
+      // is a full N-D point — show all axes pinned with their
+      // effective value (stored or axis-default) so the designer
+      // can see/edit them all instead of seeing unrelated axes
+      // greyed out.
+      const fullPins = {};
+      for (const ax of (allAxes || [])) {
+        const stored = (editLayer.location || {})[ax.tag];
+        fullPins[ax.tag] = stored !== undefined ? Number(stored) : Number(ax.default);
+      }
+      setPins(fullPins);
     } else {
       setGlyphsInput(prefillGlyphs || '');
       const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
@@ -106,10 +117,17 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       setError(`Pin ${axisTag} to something other than its default (${axisDefault})`);
       return;
     }
+    // Keep sidecar storage sparse: only persist axes whose value
+    // differs from the axis default. The control axis is always
+    // persisted (it's the whole point of the brace layer).
+    const axisDefaultsByTag = new Map((allAxes || []).map(a => [a.tag, Number(a.default)]));
     const cleanPins = {};
     for (const [t, v] of Object.entries(pins)) {
       const n = Number(v);
-      if (Number.isFinite(n)) cleanPins[t] = n;
+      if (!Number.isFinite(n)) continue;
+      const def = axisDefaultsByTag.get(t);
+      if (t !== axisTag && def !== undefined && n === def) continue;
+      cleanPins[t] = n;
     }
     const entries = parsedGlyphs.map(g => ({ glyph: g, location: cleanPins }));
     setSubmitting(true);
