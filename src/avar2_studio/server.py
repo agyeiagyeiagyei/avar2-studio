@@ -2674,12 +2674,61 @@ _atexit.register(_stop_fontra)
 #            so it lands here, not on Fontra's port directly.)
 
 
-# Focused-UI CSS for the embedded Fontra editor. Rolled back to
-# empty for now — the user is still validating basic navigation
-# (does the right glyph open in the text view) and panel hiding
-# is just visual noise on top of that. Re-enable by populating
-# this string; injection wiring stays in place.
-_FONTRA_FOCUSED_CSS = ""
+# Focused-UI CSS for the embedded Fontra editor. Hides the
+# sidebar panels + edit tools that aren't useful for a
+# brace-layer edit. Selectors map to Fontra's own DOM:
+#   - Sidebar tabs use ``.sidebar-tab[data-sidebar-name="..."]``
+#     keyed by the panel class's ``identifier`` property
+#     (views-editor/src/panel-*.js).
+#   - Edit tools use ``[data-tool="..."]`` from
+#     edit-tools-*.js identifier properties.
+#   - Selectors are paired with their .sidebar-content / wrapper
+#     equivalents so the panel disappears whether it was the
+#     currently-open panel or not.
+#
+# If Fontra renames panels/tools we'll have to update; these are
+# documented in their identifier properties so changes are easy
+# to track.
+_FONTRA_FOCUSED_CSS = """
+<style id="avar2-studio-fontra-focus">
+  /* Panels the designer doesn't need for a control-axis brace
+     edit. Kept: text-entry, selection-info, glyph axes (so they
+     can confirm the location). */
+  .sidebar-tab[data-sidebar-name="designspace-navigation"],
+  .sidebar-tab[data-sidebar-name="reference-font"],
+  .sidebar-tab[data-sidebar-name="glyph-search"],
+  .sidebar-tab[data-sidebar-name="selection-transformation"],
+  .sidebar-tab[data-sidebar-name="glyph-note"],
+  .sidebar-tab[data-sidebar-name="related-glyphs"],
+  .sidebar-tab[data-sidebar-name="characters-glyphs"],
+  .sidebar-content[data-sidebar-name="designspace-navigation"],
+  .sidebar-content[data-sidebar-name="reference-font"],
+  .sidebar-content[data-sidebar-name="glyph-search"],
+  .sidebar-content[data-sidebar-name="selection-transformation"],
+  .sidebar-content[data-sidebar-name="glyph-note"],
+  .sidebar-content[data-sidebar-name="related-glyphs"],
+  .sidebar-content[data-sidebar-name="characters-glyphs"] {
+    display: none !important;
+  }
+
+  /* Edit tools — hide drawing tools, knife, shapes. Keep:
+     pointer-tools (selection + drag), power-ruler-tool
+     (measure), metrics-tool (sidebearings — kerning sub-tool
+     stays visible inside the group), hand-tool (pan), and the
+     entire zoom-tools group. */
+  #edit-tools > .tool-button[data-tool="pen-tool"],
+  #edit-tools > .tool-button[data-tool="pen-tool-cubic"],
+  #edit-tools > .tool-button[data-tool="pen-tool-quad"],
+  #edit-tools > .tool-button[data-tool="knife-tool"],
+  #edit-tools > .tool-button[data-tool="shape-tool"],
+  #edit-tools > .tool-button[data-tool="shape-tool-rectangle"],
+  #edit-tools > .tool-button[data-tool="shape-tool-ellipse"],
+  .tool-button.multi-tool[data-tool="pen-tool"],
+  .tool-button.multi-tool[data-tool="shape-tool"] {
+    display: none !important;
+  }
+</style>
+"""
 
 
 def _is_html_response(headers) -> bool:
@@ -2726,17 +2775,21 @@ def _rewrite_css_paths(body: bytes) -> bytes:
     return text.encode("utf-8")
 
 
-@app.route('/fontra/', defaults={'subpath': ''}, methods=['GET', 'POST', 'PUT', 'DELETE'])
-@app.route('/fontra/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def fontra_http_proxy(subpath: str):
-    """Proxy HTTP requests under /fontra/* to the running Fontra server."""
+def _proxy_to_fontra(upstream_path: str):
+    """Shared proxy mechanic — forward an HTTP request to Fontra and
+    return its response, rewriting HTML/CSS path references and
+    injecting focused-UI CSS into HTML on the way back. Called from
+    every route that forwards to Fontra: /fontra/* and the
+    root-level runtime-fetch paths Fontra needs (/lang, /data,
+    /images, /webfonts, /projectlist, /serverinfo, /api/*).
+    """
     if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
         return jsonify({"error": "Fontra subprocess is not running"}), 503
 
     import urllib.request
     import urllib.error
 
-    upstream = f"http://127.0.0.1:{FONTRA_PORT}/{subpath}"
+    upstream = f"http://127.0.0.1:{FONTRA_PORT}{upstream_path}"
     if request.query_string:
         upstream += "?" + request.query_string.decode("utf-8")
 
@@ -2775,6 +2828,63 @@ def fontra_http_proxy(subpath: str):
         headers.pop(h, None)
 
     return Response(body, status=upstream_resp.status, headers=headers)
+
+
+@app.route('/fontra/', defaults={'subpath': ''}, methods=['GET', 'POST', 'PUT', 'DELETE'])
+@app.route('/fontra/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def fontra_http_proxy(subpath: str):
+    """Main Fontra proxy. Iframe loads /fontra/editor.html?... and
+    everything resolves under this prefix via the HTML/CSS path
+    rewrites injected on the way back."""
+    return _proxy_to_fontra("/" + subpath)
+
+
+# Fontra's frontend issues runtime fetches against root paths the
+# importmap rewrite can't reach (the bundle calls things like
+# ``fetch("/lang/en.js")`` directly). Each of those needs to
+# resolve through our origin to keep Fontra same-origin with the
+# iframe parent. The collision-prone /api/* is handled by the
+# catch-all below — Flask routes specific avar2-studio /api paths
+# first and only falls through to the catch-all when nothing else
+# matches.
+@app.route('/lang/<path:subpath>', methods=['GET'])
+def fontra_lang_proxy(subpath: str):
+    return _proxy_to_fontra(f"/lang/{subpath}")
+
+
+@app.route('/data/<path:subpath>', methods=['GET'])
+def fontra_data_proxy(subpath: str):
+    return _proxy_to_fontra(f"/data/{subpath}")
+
+
+@app.route('/images/<path:subpath>', methods=['GET'])
+def fontra_images_proxy(subpath: str):
+    return _proxy_to_fontra(f"/images/{subpath}")
+
+
+@app.route('/webfonts/<path:subpath>', methods=['GET'])
+def fontra_webfonts_proxy(subpath: str):
+    return _proxy_to_fontra(f"/webfonts/{subpath}")
+
+
+@app.route('/projectlist', methods=['GET'])
+def fontra_projectlist_proxy():
+    return _proxy_to_fontra("/projectlist")
+
+
+@app.route('/serverinfo', methods=['GET'])
+def fontra_serverinfo_proxy():
+    return _proxy_to_fontra("/serverinfo")
+
+
+# Catch-all for /api/<anything> that doesn't match an avar2-studio
+# route. Flask's routing prefers more-specific rules, so
+# /api/glyph-coverage / /api/control-axes/<tag> / etc. match
+# before this catch-all and stay on avar2-studio. Anything Fontra
+# requests through /api/ (export, etc.) falls through here.
+@app.route('/api/<path:rest>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def fontra_api_fallthrough(rest: str):
+    return _proxy_to_fontra(f"/api/{rest}")
 
 
 @sock.route('/websocket')
