@@ -449,12 +449,22 @@ function App() {
         // layer.location on top of each axis's default. Pass
         // every axis the source declares so Fontra's location
         // matches a real brace layer point.
+        //
+        // KEY: Fontra-glyphs builds its location dicts keyed by
+        // ``axis.name`` (the display name — "Crossbar",
+        // "X-Transparency") rather than ``axis.tag`` (the 4-char
+        // OT code). Our internal layer.location uses tags; we
+        // translate at the URL-fragment boundary so Fontra's
+        // ``fontLocationUser`` setting matches its own
+        // brace-layer locations and the editor navigates there.
         if (layerLocation && axes && axes.length > 0) {
           const fullLocation = {};
           for (const axis of axes) {
-            fullLocation[axis.tag] = (layerLocation[axis.tag] !== undefined)
+            const value = (layerLocation[axis.tag] !== undefined)
               ? Number(layerLocation[axis.tag])
               : Number(axis.default);
+            // Use the axis's display name, not the tag.
+            fullLocation[axis.name || axis.tag] = value;
           }
           viewInfo.location = fullLocation;
         }
