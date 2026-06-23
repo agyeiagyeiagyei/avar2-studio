@@ -2887,6 +2887,27 @@ def fontra_api_fallthrough(rest: str):
     return _proxy_to_fontra(f"/api/{rest}")
 
 
+# Root-level catch-all. Fontra's client bundle ships chunk JS
+# (``230.chunk.js``) and WASM modules (``<hash>.wasm``,
+# ``<hash>.module.wasm``) at the root of its content tree —
+# these are dynamically imported by the editor and aren't
+# referenced from the editor.html we rewrite. Without this
+# fall-through they 404 against avar2-studio's root, the editor
+# fails to init HarfBuzz / lazy chunks, and the canvas comes up
+# blank.
+#
+# Flask/Werkzeug routes by specificity: all specific avar2-studio
+# routes (``/``, ``/static/<path>``, ``/manifest.json``,
+# ``/favicon.ico``, every ``/api/*``, ``/fontra/*``, ``/lang/*``,
+# ``/data/*``, ``/images/*``, ``/webfonts/*``, ``/projectlist``,
+# ``/serverinfo``) match first. Only paths none of those claim
+# fall through here — i.e. exactly the Fontra runtime files we
+# want to forward.
+@app.route('/<path:rest>', methods=['GET'])
+def fontra_root_fallthrough(rest: str):
+    return _proxy_to_fontra(f"/{rest}")
+
+
 @sock.route('/websocket')
 def fontra_ws_proxy(ws):
     """Proxy WebSocket traffic to Fontra. The frontend opens
