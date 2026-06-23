@@ -130,12 +130,18 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           const isExpanded = resolvedExpandedTags.has(ax.tag);
           const isDisabled = disabledAxes.has(ax.tag);
           const isStudio = ax.source === 'studio';
-          const kindBadge = ax.kind === 'partial'
-            ? <span className="kind-badge kind-partial" title="Most glyphs but not all — usually means the designer forgot to author a few glyphs at the alternate master.">partial</span>
-            : <span className="kind-badge kind-scoped" title={isStudio ? 'Designer-declared control axis. Coverage glyphs land in a later v2 slice.' : 'Glyph-scoped variation. Only the listed glyphs change as this axis moves.'}>scoped</span>;
+          // Studio-declared axes are glyph-scoped by construction, so
+          // the "studio" badge alone is enough — skip the redundant
+          // "scoped" tag. Source-derived axes still get scoped/partial
+          // since that's the meaningful signal there.
           const originBadge = isStudio
             ? <span className="kind-badge kind-studio" title="Declared in the studio (lives in <basename>-control.json). Not yet in the source file.">studio</span>
             : null;
+          const kindBadge = isStudio
+            ? null
+            : ax.kind === 'partial'
+              ? <span className="kind-badge kind-partial" title="Most glyphs but not all — usually means the designer forgot to author a few glyphs at the alternate master.">partial</span>
+              : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only the listed glyphs change as this axis moves.">scoped</span>;
 
           // Count glyphs whose layer set on THIS axis would
           // extrapolate at one or both extremes. Same logic as
