@@ -161,17 +161,17 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
     <div className="layers-editor">
       <div className="layers-editor-header">
         <span className="layers-editor-label">
-          Brace layers
+          Applicable glyphs
           <span className="layers-editor-hint">
-            every layer is explicit · click a row to open in Fontra
+            glyphs this axis changes · click one to see its layers
           </span>
         </span>
       </div>
 
       {orderedGlyphs.length === 0 && (
         <div className="layers-editor-empty">
-          No brace layers yet. <strong>+ Add brace layer</strong> below to
-          declare a layer at a specific axis location for one or more glyphs.
+          No glyphs yet. <strong>+ Add applicable glyphs</strong> below to
+          declare which glyphs this axis changes, and at what axis extreme.
         </div>
       )}
 
@@ -318,7 +318,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
             axisDefault: axis.default,
           })}
         >
-          + Add brace layer
+          + Add applicable glyphs
         </button>
       </div>
     </div>

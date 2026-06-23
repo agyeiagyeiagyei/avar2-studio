@@ -143,18 +143,29 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
 
   const isEdit = !!editLayer;
   const effectiveLockGlyphs = !!lockGlyphs || isEdit;
+  // Three modes, three titles. Edit: editing one existing layer's
+  // location. Per-glyph add (glyph locked): adding another extreme
+  // for that one glyph. Top-level add (glyph field open): widening
+  // which glyphs this axis is applicable to.
+  const title = isEdit
+    ? 'Edit layer location'
+    : effectiveLockGlyphs
+      ? `Add layer for ${prefillGlyphs || ''}`.trim()
+      : `Add applicable glyphs to ${axisTag}`;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="add-brace-location-modal" onClick={e => e.stopPropagation()}>
-        <h3>{isEdit ? 'Edit brace layer location' : `Add brace layer${parsedGlyphs.length > 1 ? 's' : ''}`}</h3>
+        <h3>{title}</h3>
         <p className="modal-help">
           {isEdit
-            ? 'Change the axis values for this brace layer. The outline data carries over — only the location changes.'
-            : <>One brace layer per glyph, all at the same axis location.
-              Type plain characters (<code>AEFH</code>) or
-              slash-named glyphs (<code>/idotless</code>). Mix and match
-              allowed. Whitespace / commas are optional separators.</>}
+            ? 'Change the axis values for this layer. The outline data carries over — only the location changes.'
+            : effectiveLockGlyphs
+              ? <>Add another axis-extreme layer for <code>{prefillGlyphs}</code>. Pin the axes that should define this stop.</>
+              : <>Declare which glyphs this axis applies to, and at what axis extreme.
+                Type plain characters (<code>AEFH</code>) or
+                slash-named glyphs (<code>/idotless</code>). Mix and match
+                allowed. Whitespace / commas are optional separators.</>}
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
@@ -262,7 +273,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 ? `${parsedGlyphs[0] || ''} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
                 : parsedGlyphs.length === 0
                   ? '(no glyphs)'
-                  : `${parsedGlyphs.length} brace layer${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
+                  : `${parsedGlyphs.length} glyph${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
             </code>
           </div>
 
@@ -277,7 +288,9 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 ? (isEdit ? 'Saving…' : 'Adding…')
                 : isEdit
                   ? 'Save changes'
-                  : `Add ${parsedGlyphs.length || ''} layer${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
+                  : effectiveLockGlyphs
+                    ? `Add layer for ${prefillGlyphs || ''}`.trim()
+                    : `Add ${parsedGlyphs.length || ''} glyph${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
             </button>
           </div>
         </form>
