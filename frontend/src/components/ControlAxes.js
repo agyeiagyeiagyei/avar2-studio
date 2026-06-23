@@ -113,6 +113,16 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
             ? <span className="kind-badge kind-studio" title="Declared in the studio (lives in <basename>-control.json). Not yet in the source file.">studio</span>
             : null;
 
+          // Count glyphs whose layer set on THIS axis would
+          // extrapolate at one or both extremes. Same logic as
+          // LayersEditor's classifyGlyphCoverage; rolled up so
+          // the warning is visible at the axis-row level even
+          // when the section's collapsed or the per-glyph blocks
+          // are out of view.
+          const extrapolateCount = isStudio
+            ? countExtrapolatingGlyphs(ax)
+            : 0;
+
           return (
             <div key={ax.tag} className={`control-axis-row ${isDisabled ? 'disabled' : ''}`}>
               <div
@@ -135,6 +145,14 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                 <span className="control-axis-count">
                   {ax.covers_count}/{ax.total_glyphs}
                 </span>
+                {extrapolateCount > 0 && (
+                  <span
+                    className="control-axis-extrapolate"
+                    title={extrapolateTooltip(ax)}
+                  >
+                    ⚠ {extrapolateCount} glyph{extrapolateCount === 1 ? '' : 's'} extrapolate{extrapolateCount === 1 ? 's' : ''}
+                  </span>
+                )}
                 <button
                   className={`control-axis-disable ${isDisabled ? 'on' : ''}`}
                   onClick={(e) => {
@@ -242,6 +260,56 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
       )}
     </div>
   );
+}
+
+/**
+ * Roll up per-glyph extrapolation diagnostics into one number for
+ * an axis. Mirrors LayersEditor's classifyGlyphCoverage logic.
+ * A glyph counts as "extrapolating" if any of:
+ *   - no layer below the axis default
+ *   - no layer above the axis default
+ *   - lowest below-default layer doesn't reach axis.min
+ *   - highest above-default layer doesn't reach axis.max
+ */
+function countExtrapolatingGlyphs(ax) {
+  if (!ax || !Array.isArray(ax.layers)) return 0;
+  return collectExtrapolating(ax).length;
+}
+
+function collectExtrapolating(ax) {
+  const tag = ax.tag;
+  const byGlyph = new Map();
+  for (const entry of ax.layers) {
+    if (!entry || !entry.glyph) continue;
+    if (!byGlyph.has(entry.glyph)) byGlyph.set(entry.glyph, []);
+    byGlyph.get(entry.glyph).push(entry);
+  }
+  const offenders = [];
+  for (const [glyph, entries] of byGlyph) {
+    let belowVal = null, aboveVal = null;
+    for (const e of entries) {
+      const v = e.location?.[tag];
+      if (v === undefined) continue;
+      if (v < ax.default && (belowVal === null || v < belowVal)) belowVal = v;
+      if (v > ax.default && (aboveVal === null || v > aboveVal)) aboveVal = v;
+    }
+    const hasBelow = belowVal !== null;
+    const hasAbove = aboveVal !== null;
+    const reachesMin = hasBelow && belowVal <= ax.min;
+    const reachesMax = hasAbove && aboveVal >= ax.max;
+    if (!hasBelow || !hasAbove || !reachesMin || !reachesMax) {
+      offenders.push(glyph);
+    }
+  }
+  return offenders;
+}
+
+function extrapolateTooltip(ax) {
+  const offenders = collectExtrapolating(ax);
+  if (offenders.length === 0) return '';
+  const shown = offenders.slice(0, 8).join(', ');
+  const more = offenders.length > 8 ? ` (+${offenders.length - 8} more)` : '';
+  return `Glyphs whose layers don't cover the full ${ax.tag} axis range, so the slider extrapolates at one or both extremes: ${shown}${more}. Expand the axis to see specifics and pin layers to ${ax.min} / ${ax.max}.`;
 }
 
 export default ControlAxes;

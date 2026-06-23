@@ -212,8 +212,8 @@ function LayersEditor({ tag, axis, layers, onChangeLayers, onOpenInEditor, onReq
                         <button
                           type="button"
                           className="layer-open-fontra"
-                          title="Open this glyph in Fontra to draw the outline."
-                          onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName)}
+                          title="Open this glyph in Fontra at this brace-layer location, in edit mode."
+                          onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, entry.location)}
                         >
                           ↗
                         </button>

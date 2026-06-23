@@ -414,6 +414,26 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             coords.append(default_value)
             master.axes = coords
 
+        # Pad EXISTING brace-layer coordinates with the new axis's
+        # default. Without this, every old brace in the source
+        # ships a shorter coords list than the (now-larger) axis
+        # count, and Glyphs/Fontra projects them onto the lower-D
+        # subspace — which collides with the brace layers we
+        # author at the same N-D projection. User-visible symptom:
+        # Fontra's Glyph Sources panel shows "locations must be
+        # unique" with multiple duplicate rows at master corners.
+        for glyph in font.glyphs:
+            for layer in glyph.layers:
+                attrs = getattr(layer, "attributes", None)
+                if attrs is None:
+                    continue
+                coords = attrs.get("coordinates") if hasattr(attrs, "get") else None
+                if not isinstance(coords, list):
+                    continue
+                while len(coords) < len(font.axes):
+                    coords.append(default_value)
+                attrs["coordinates"] = coords
+
     # Tag → axis-index map across the full final axis list. Used to
     # resolve sparse {axis_tag: value} dicts from the unified
     # ``layers`` list into full N-D coordinate vectors.

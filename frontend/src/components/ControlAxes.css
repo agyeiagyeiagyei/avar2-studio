@@ -252,6 +252,18 @@
   border: 1px solid #ece5f5;
 }
 
+.control-axis-extrapolate {
+  font-size: 0.6rem;
+  color: #6b3d00;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  cursor: help;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
 .control-axis-meta {
   display: flex;
   gap: 1rem;

@@ -14,6 +14,26 @@ import DeleteInstanceModal from './components/DeleteInstanceModal';
 // same reason.
 const DEFAULT_SAMPLE_TEXT = "The Quick Brown Fox Jumps Over The Lazy Dog 0123456789";
 
+/**
+ * Encode a viewInfo dict the way Fontra's ``dumpURLFragment``
+ * does: ``"#" + base64(zlib(JSON.stringify(obj)))``. Fontra's
+ * implementation uses ``fflate.zlibSync`` (RFC 1950 zlib wrapper)
+ * + a custom ``btoa(String.fromCodePoint(...bytes))``. We mirror
+ * both — ``CompressionStream('deflate')`` in the browser is the
+ * same zlib-wrapped output.
+ */
+async function encodeFontraFragment(viewInfo) {
+  const json = JSON.stringify(viewInfo);
+  const blob = new Blob([new TextEncoder().encode(json)]);
+  const stream = blob.stream().pipeThrough(new CompressionStream('deflate'));
+  const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+  let binString = '';
+  for (let i = 0; i < compressed.length; i++) {
+    binString += String.fromCharCode(compressed[i]);
+  }
+  return '#' + btoa(binString);
+}
+
 function App() {
   const [instances, setInstances] = useState([]);
   const [axes, setAxes] = useState([]);
@@ -394,42 +414,59 @@ function App() {
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
-  // CONTROL AXES — open the shadow in Fontra (v2 slice 5a / 6).
-  // ``url`` is the same-origin proxied path (Fontra served under
-  // /fontra/* with the importmap rewritten); ``direct_url`` is
-  // the raw cross-origin URL for the "Open in new tab" escape.
+  // CONTROL AXES — open the shadow in Fontra.
+  // ``url`` is the same-origin proxied path; ``direct_url`` is the
+  // raw cross-origin URL (the iframe currently uses direct_url to
+  // unblock runtime fetches that bypass the HTML rewriter).
   //
-  // For glyph navigation we pass ONLY the ``text`` viewInfo param,
-  // which Fontra parses into its text view. Single-character glyph
-  // names go in literally (so the renderer sees the character);
-  // multi-character glyph names need Fontra's ``/name`` syntax.
+  // When a layer's location is provided, we build a Fontra
+  // viewInfo dict and encode it as a URL FRAGMENT — the canonical
+  // way Fontra's editor.js loads bookmarked state. Query params
+  // race against async state hydration; the fragment goes through
+  // ``loadURLFragment`` which feeds ``updateSceneSettingsFromViewInfo``
+  // with proper waitKeyBefore/waitKeyAfter barriers (text waits
+  // for characterLines, selection waits for positionedLines, etc).
   //
-  // We previously also passed selectedGlyph + selectedGlyphName to
-  // jump straight into edit mode. selectedGlyphName isn't in
-  // Fontra's persistentSceneSettings (silently ignored) and
-  // selectedGlyph may fire before characterLines is populated,
-  // leaving the editor with a selection pointing at nothing.
-  // Until we have a reliable jump-to-edit path the designer can
-  // double-click the glyph in the text view to enter edit mode.
-  const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName) => {
+  // viewInfo dict shape:
+  //   - text:         "e" or "/e" — what to render in the text view
+  //   - location:     full {axis_tag: value} for the brace layer
+  //                   (sparse pins overlaid on source axis defaults)
+  //   - selectedGlyph: {lineIndex:0, glyphIndex:0, isEditing:true}
+  //                   — drops the editor into edit mode on cell 0
+  const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName, layerLocation) => {
     try {
       setError(null);
       const data = await api.openControlAxisInEditor(tag);
       let url = data.url;
       let directUrl = data.direct_url;
       if (glyphName) {
-        // Fontra renders single-char glyph names as their literal
-        // character. Multi-char names need the /name syntax.
         const textValue = glyphName.length === 1 ? glyphName : '/' + glyphName;
-        const param = `text=${encodeURIComponent(JSON.stringify(textValue))}`;
-        url = `${url}&${param}`;
-        directUrl = `${directUrl}&${param}`;
+        const viewInfo = {
+          text: textValue,
+          selectedGlyph: { lineIndex: 0, glyphIndex: 0, isEditing: true },
+        };
+        // Build the FULL location vector by overlaying the sparse
+        // layer.location on top of each axis's default. Pass
+        // every axis the source declares so Fontra's location
+        // matches a real brace layer point.
+        if (layerLocation && axes && axes.length > 0) {
+          const fullLocation = {};
+          for (const axis of axes) {
+            fullLocation[axis.tag] = (layerLocation[axis.tag] !== undefined)
+              ? Number(layerLocation[axis.tag])
+              : Number(axis.default);
+          }
+          viewInfo.location = fullLocation;
+        }
+        const fragment = await encodeFontraFragment(viewInfo);
+        url = url + fragment;
+        directUrl = directUrl + fragment;
       }
       setFontraEditor({ url, directUrl, tag, glyphName });
     } catch (err) {
       setError(err.message || `Failed to open Fontra for "${tag}"`);
     }
-  }, []);
+  }, [axes]);
 
   // Close the Fontra modal and rebuild the font so the studio
   // preview reflects whatever the designer drew. Fontra writes to
