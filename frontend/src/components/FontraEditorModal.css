@@ -1,20 +1,51 @@
+/* Side-drawer flyout. Pinned to the right edge of the viewport,
+   takes 60vw by default (min 600px so Fontra has room to be
+   useful), leaving the left portion of avar2-studio visible. The
+   designer can still operate the sidebar / add layers / open
+   another glyph while Fontra is up.
+
+   Resize handle on the left edge lets the designer drag the
+   drawer wider/narrower. */
 .fontra-editor-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--fontra-drawer-width, 60vw);
+  min-width: 600px;
   background: white;
   z-index: 10000;
   display: flex;
   flex-direction: column;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  border-left: 1px solid #ccc;
+}
+
+.fontra-editor-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  bottom: 0;
+  cursor: ew-resize;
+  z-index: 1;
+  background: transparent;
+}
+
+.fontra-editor-resize:hover,
+.fontra-editor-resize.dragging {
+  background: rgba(44, 90, 160, 0.25);
 }
 
 .fontra-editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.6rem 1rem;
+  padding: 0.5rem 0.75rem;
   background: #f5f5f5;
   border-bottom: 1px solid #ddd;
   flex-shrink: 0;
+  gap: 0.5rem;
 }
 
 .fontra-editor-title {
