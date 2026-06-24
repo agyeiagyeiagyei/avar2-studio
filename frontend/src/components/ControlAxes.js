@@ -88,15 +88,11 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           aria-expanded={sectionOpen}
         >
           <h3 className="control-axes-title">CONTROL AXES</h3>
-          <span className="control-axes-count">{controlLikeAxes.length}</span>
           {disabledCount > 0 && (
             <span className="control-axes-disabled-count" title={`${disabledCount} disabled in preview`}>
               {disabledCount} off
             </span>
           )}
-          <span className="control-axes-subtitle">
-            glyph-scoped
-          </span>
         </button>
         {canDeclare && (
           <button
