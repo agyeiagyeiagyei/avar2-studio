@@ -39,11 +39,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
     const merged = [...(ax.layers || []), ...newEntries];
     await onSetLayers(ax.tag, merged);
   };
-  // Section folds closed by default — Roboto Delta has 9 control axes
-  // and that's a lot of vertical space if always-open. The header
-  // shows a count so the user knows how many are hiding behind the
-  // toggle.
-  const [sectionOpen, setSectionOpen] = useState(false);
+  // Section opens by default — control axes are the primary editing
+  // surface in v1, and per-axis rows are now collapsible themselves,
+  // so even with 9 axes (Roboto Delta) the section stays scannable.
+  // Designer can still fold the whole section if they want it out
+  // of the way.
+  const [sectionOpen, setSectionOpen] = useState(true);
 
   // Filter to scoped + partial. Universal axes are master-driven
   // and belong under AVAR2 MAPPINGS / parametric, not here.
