@@ -63,11 +63,24 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
     const hasAbove = aboveVal !== null;
     const reachesMin = hasBelow && belowVal <= axisMin;
     const reachesMax = hasAbove && aboveVal >= axisMax;
+    // Only the sides of the default that actually have axis travel can
+    // have a coverage problem. When the default sits ON an extreme
+    // (e.g. a 0…40 axis with default 0), there's no "below default"
+    // region — the master already defines that endpoint — so a missing
+    // below-layer is not a defect. Guarding on these prevents the
+    // nonsensical "no layer below default" warning when there's no room
+    // below it in the first place.
+    const hasBelowRoom = axisMin < axisDefault;
+    const hasAboveRoom = axisMax > axisDefault;
     const issues = [];
-    if (!hasBelow) issues.push({ kind: 'no-below' });
-    else if (!reachesMin) issues.push({ kind: 'extrapolates-below', at: belowVal });
-    if (!hasAbove) issues.push({ kind: 'no-above' });
-    else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
+    if (hasBelowRoom) {
+      if (!hasBelow) issues.push({ kind: 'no-below' });
+      else if (!reachesMin) issues.push({ kind: 'extrapolates-below', at: belowVal });
+    }
+    if (hasAboveRoom) {
+      if (!hasAbove) issues.push({ kind: 'no-above' });
+      else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
+    }
     return {
       ok: issues.length === 0,
       issues,

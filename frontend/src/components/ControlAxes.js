@@ -282,11 +282,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onEditAx
 /**
  * Roll up per-glyph extrapolation diagnostics into one number for
  * an axis. Mirrors LayersEditor's classifyGlyphCoverage logic.
- * A glyph counts as "extrapolating" if any of:
- *   - no layer below the axis default
- *   - no layer above the axis default
- *   - lowest below-default layer doesn't reach axis.min
- *   - highest above-default layer doesn't reach axis.max
+ * A glyph counts as "extrapolating" if, on a side of the default
+ * that actually has axis travel (min < default, or max > default):
+ *   - there's no layer on that side, OR
+ *   - the outermost layer on that side doesn't reach the extreme.
+ * A side where the default sits on the extreme (no travel) is never
+ * a defect — the master owns that endpoint.
  */
 function countExtrapolatingGlyphs(ax) {
   if (!ax || !Array.isArray(ax.layers)) return 0;
@@ -314,7 +315,14 @@ function collectExtrapolating(ax) {
     const hasAbove = aboveVal !== null;
     const reachesMin = hasBelow && belowVal <= ax.min;
     const reachesMax = hasAbove && aboveVal >= ax.max;
-    if (!hasBelow || !hasAbove || !reachesMin || !reachesMax) {
+    // Mirror LayersEditor: a side of the default with no axis travel
+    // (default sits on that extreme) can't be a coverage defect — the
+    // master owns that endpoint. Only flag sides that actually move.
+    const hasBelowRoom = ax.min < ax.default;
+    const hasAboveRoom = ax.max > ax.default;
+    const belowBad = hasBelowRoom && (!hasBelow || !reachesMin);
+    const aboveBad = hasAboveRoom && (!hasAbove || !reachesMax);
+    if (belowBad || aboveBad) {
       offenders.push(glyph);
     }
   }

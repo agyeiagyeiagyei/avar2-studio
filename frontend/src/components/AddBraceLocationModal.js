@@ -52,12 +52,25 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     } else {
       setGlyphsInput(prefillGlyphs || '');
       const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
-      setPins(controlAxis ? { [axisTag]: controlAxis.min } : {});
+      // Seed the control pin to a NON-default value so the modal
+      // opens valid. Using axis.min blindly breaks when min == default
+      // (e.g. an axis edited to 0…40 with default 0): the seed would
+      // land on the default and the designer would hit the "pin to
+      // non-default" error before touching anything.
+      setPins(controlAxis ? { [axisTag]: seedControlValue(controlAxis) } : {});
     }
     setBaseInstance('');
     setError(null);
     setSubmitting(false);
   }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer]);
+
+  // Clear any stale validation / submit error the moment the designer
+  // edits the glyphs or pins — the banner shouldn't linger after the
+  // underlying problem is fixed (submit doesn't touch these, so a real
+  // submit error stays visible until the next edit).
+  useEffect(() => {
+    setError(null);
+  }, [glyphsInput, pins]);
 
   // Pick an instance as the baseline location. Fills in pins for
   // every parametric axis the instance declares; control axis stays
@@ -297,6 +310,22 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       </div>
     </div>
   );
+}
+
+/**
+ * Pick a non-default seed value for the control-axis pin so the modal
+ * opens in a valid state. A brace layer at the axis default collides
+ * with the master, so the default is forbidden — seed to whichever
+ * extreme differs from the default. Prefer min; fall back to max when
+ * the default sits at the min (e.g. a 0…40 axis with default 0).
+ */
+function seedControlValue(ax) {
+  const def = Number(ax.default);
+  const min = Number(ax.min);
+  const max = Number(ax.max);
+  if (min !== def) return min;
+  if (max !== def) return max;
+  return def; // degenerate axis (min == max == default) — no valid pin exists
 }
 
 /**
