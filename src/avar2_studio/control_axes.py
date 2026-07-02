@@ -144,6 +144,81 @@ def add_axis(
     return entry
 
 
+def update_axis(
+    source_path: Path,
+    tag: str,
+    *,
+    display_name: Optional[str] = None,
+    default: Optional[float] = None,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> Dict:
+    """Edit an existing control-axis declaration. Tag is immutable —
+    renames require delete + re-add (the tag threads through every
+    brace layer's location dict, so a rename would need to migrate
+    every layer too — not worth the complexity for v1).
+
+    Any field left as ``None`` is left unchanged. Validates that
+    every existing layer's value on this axis still falls inside
+    the new [min, max] before persisting.
+
+    Returns the updated axis dict. Raises ``ValueError`` on
+    validation failure — caller (HTTP layer) surfaces as 400.
+    """
+    tag_norm = (tag or "").strip().lower()
+    if not tag_norm:
+        raise ValueError("tag is required")
+    data = load(source_path)
+    entry = None
+    for ax in data["axes"]:
+        if str(ax.get("tag", "")).lower() == tag_norm:
+            entry = ax
+            break
+    if entry is None:
+        raise ValueError(f"control axis '{tag_norm}' not found")
+
+    new_name = entry["display_name"] if display_name is None else display_name
+    if display_name is not None:
+        if not new_name or not new_name.strip():
+            raise ValueError("display_name is required")
+        new_name = new_name.strip()
+
+    def _num(v, label):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} must be numeric")
+
+    new_min = _num(min_value, "min") if min_value is not None else float(entry["min"])
+    new_max = _num(max_value, "max") if max_value is not None else float(entry["max"])
+    new_default = _num(default, "default") if default is not None else float(entry["default"])
+    if not (new_min < new_max):
+        raise ValueError(f"min ({new_min}) must be strictly less than max ({new_max})")
+    if not (new_min <= new_default <= new_max):
+        raise ValueError(
+            f"default ({new_default}) must lie within [min, max] = [{new_min}, {new_max}]"
+        )
+
+    for layer in entry.get("layers", []) or []:
+        loc = layer.get("location") or {}
+        v = loc.get(tag_norm)
+        if v is None:
+            continue
+        if not (new_min <= float(v) <= new_max):
+            raise ValueError(
+                f"layer for glyph '{layer.get('glyph', '?')}' sits at "
+                f"{tag_norm}={v}, outside the new range [{new_min}, {new_max}]. "
+                "Delete or move that layer before narrowing the range."
+            )
+
+    entry["display_name"] = new_name
+    entry["min"] = new_min
+    entry["max"] = new_max
+    entry["default"] = new_default
+    _save(source_path, data)
+    return entry
+
+
 def remove_axis(source_path: Path, tag: str) -> bool:
     """Delete a control-axis declaration. Returns True if a row was
     removed, False if no axis matched the tag."""

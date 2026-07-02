@@ -3066,6 +3066,45 @@ def set_control_axis_layers(tag: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/control-axes/<tag>', methods=['PATCH'])
+def update_control_axis(tag: str):
+    """Edit an existing control axis's display_name / min / max /
+    default. Tag is immutable — a rename would need to migrate every
+    layer's location dict. Any field left absent from the body is
+    left unchanged. Regenerates the shadow after a successful edit
+    so the preview reflects the new range immediately."""
+    global VARIABLE_FONT_PATH
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        entry = _control_axes.update_axis(
+            ORIGINAL_PATH,
+            tag,
+            display_name=data.get("display_name"),
+            default=data.get("default"),
+            min_value=data.get("min"),
+            max_value=data.get("max"),
+        )
+        try:
+            _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            VARIABLE_FONT_PATH = None
+            try:
+                trigger_build()
+            except Exception as build_exc:
+                print(f"Warning: rebuild after axis update failed: {build_exc}", file=sys.stderr)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow refresh after update failed: {shadow_exc}", file=sys.stderr)
+        return jsonify({"success": True, "axis": entry})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        print(f"Error updating control axis: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/control-axes/<tag>', methods=['DELETE'])
 def delete_control_axis(tag: str):
     """Remove a control-axis declaration from the sidecar. If the

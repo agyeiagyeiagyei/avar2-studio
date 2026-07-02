@@ -10,11 +10,12 @@ import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onOpenControlAxisInEditor }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onOpenControlAxisInEditor }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.
   const [showAddControlAxisModal, setShowAddControlAxisModal] = useState(false);
+  const [editingControlAxis, setEditingControlAxis] = useState(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showNewInstanceModal, setShowNewInstanceModal] = useState(false);
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
@@ -215,15 +216,21 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}
+        onEditAxis={onUpdateControlAxis ? (ax) => setEditingControlAxis(ax) : undefined}
         onDeleteAxis={onDeleteControlAxis}
         onSetLayers={onSetControlAxisLayers}
         onOpenInEditor={onOpenControlAxisInEditor}
       />
-      {onCreateControlAxis && (
+      {(onCreateControlAxis || onUpdateControlAxis) && (
         <AddControlAxisModal
-          isOpen={showAddControlAxisModal}
-          onClose={() => setShowAddControlAxisModal(false)}
+          isOpen={showAddControlAxisModal || !!editingControlAxis}
+          onClose={() => {
+            setShowAddControlAxisModal(false);
+            setEditingControlAxis(null);
+          }}
           onCreate={onCreateControlAxis}
+          onUpdate={onUpdateControlAxis}
+          editAxis={editingControlAxis}
           existingTags={(glyphCoverageAxes || []).map(a => a.tag)}
         />
       )}

@@ -22,7 +22,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -170,6 +170,18 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
                 >
                   {isDisabled ? '👁‍🗨' : '👁'}
                 </button>
+                {isStudio && typeof onEditAxis === 'function' && (
+                  <button
+                    className="control-axis-edit"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditAxis(ax);
+                    }}
+                    title="Edit this axis's display name, range, or default. Tag stays the same."
+                  >
+                    ✎
+                  </button>
+                )}
                 {isStudio && typeof onDeleteAxis === 'function' && (
                   <button
                     className="control-axis-delete"

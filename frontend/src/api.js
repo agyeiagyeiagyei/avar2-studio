@@ -334,6 +334,19 @@ export const api = {
     return parseJSON(response);
   },
 
+  async updateControlAxis(tag, patch) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to update control axis: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async deleteControlAxis(tag) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}`, {
       method: 'DELETE',

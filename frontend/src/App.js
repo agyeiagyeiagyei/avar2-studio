@@ -390,6 +390,16 @@ function App() {
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
+  const handleUpdateControlAxis = useCallback(async (axis) => {
+    await api.updateControlAxis(axis.tag, {
+      display_name: axis.display_name,
+      default: axis.default,
+      min: axis.min,
+      max: axis.max,
+    });
+    await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
+
   const handleDeleteControlAxis = useCallback(async (tag) => {
     try {
       await api.deleteControlAxis(tag);
@@ -1832,6 +1842,7 @@ function App() {
             disabledControlAxes={disabledControlAxes}
             onToggleDisableControlAxis={handleToggleDisableControlAxis}
             onCreateControlAxis={handleCreateControlAxis}
+            onUpdateControlAxis={handleUpdateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
             onSetControlAxisLayers={handleSetControlAxisLayers}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}

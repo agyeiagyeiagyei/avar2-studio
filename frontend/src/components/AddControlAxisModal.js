@@ -19,7 +19,8 @@ import './AddControlAxisModal.css';
  *                  before the API call so the user gets immediate
  *                  feedback instead of a round-trip 400.
  */
-function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
+function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, existingTags = [] }) {
+  const isEdit = !!editAxis;
   const [tag, setTag] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [defaultValue, setDefaultValue] = useState('0');
@@ -29,37 +30,55 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const tagInputRef = useRef(null);
+  const nameInputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
-      setTag('');
-      setDisplayName('');
-      setDefaultValue('0');
-      setMinValue('-100');
-      setMaxValue('100');
+      if (isEdit) {
+        setTag(editAxis.tag || '');
+        setDisplayName(editAxis.name || editAxis.display_name || '');
+        setDefaultValue(String(editAxis.default ?? 0));
+        setMinValue(String(editAxis.min ?? -100));
+        setMaxValue(String(editAxis.max ?? 100));
+      } else {
+        setTag('');
+        setDisplayName('');
+        setDefaultValue('0');
+        setMinValue('-100');
+        setMaxValue('100');
+      }
       setErrors({});
       setSubmitError(null);
       setSubmitting(false);
-      // Focus the tag input after the modal mounts.
+      // Focus the first editable input after mount — tag in create,
+      // display name in edit (since tag is locked).
       setTimeout(() => {
-        tagInputRef.current && tagInputRef.current.focus();
+        if (isEdit) {
+          nameInputRef.current && nameInputRef.current.focus();
+        } else {
+          tagInputRef.current && tagInputRef.current.focus();
+        }
       }, 50);
     }
-  }, [isOpen]);
+  }, [isOpen, isEdit, editAxis]);
 
   if (!isOpen) return null;
 
   const validate = () => {
     const next = {};
     const tagTrim = tag.trim().toLowerCase();
-    if (!tagTrim) {
-      next.tag = 'Required';
-    } else if (tagTrim.length !== 4) {
-      next.tag = 'Must be exactly 4 characters';
-    } else if (!/^[a-z0-9_-]{4}$/.test(tagTrim)) {
-      next.tag = 'Use lowercase letters, digits, _ or -';
-    } else if (existingTags.some(t => String(t).toLowerCase() === tagTrim)) {
-      next.tag = 'Tag already used by another axis';
+    // In edit mode the tag is locked so we don't re-validate it; only
+    // create mode enforces uniqueness + shape.
+    if (!isEdit) {
+      if (!tagTrim) {
+        next.tag = 'Required';
+      } else if (tagTrim.length !== 4) {
+        next.tag = 'Must be exactly 4 characters';
+      } else if (!/^[a-z0-9_-]{4}$/.test(tagTrim)) {
+        next.tag = 'Use lowercase letters, digits, _ or -';
+      } else if (existingTags.some(t => String(t).toLowerCase() === tagTrim)) {
+        next.tag = 'Tag already used by another axis';
+      }
     }
     if (!displayName.trim()) {
       next.displayName = 'Required';
@@ -86,16 +105,26 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await onCreate({
-        tag: tag.trim().toLowerCase(),
-        display_name: displayName.trim(),
-        default: parseFloat(defaultValue),
-        min: parseFloat(minValue),
-        max: parseFloat(maxValue),
-      });
+      if (isEdit) {
+        await onUpdate({
+          tag: editAxis.tag,
+          display_name: displayName.trim(),
+          default: parseFloat(defaultValue),
+          min: parseFloat(minValue),
+          max: parseFloat(maxValue),
+        });
+      } else {
+        await onCreate({
+          tag: tag.trim().toLowerCase(),
+          display_name: displayName.trim(),
+          default: parseFloat(defaultValue),
+          min: parseFloat(minValue),
+          max: parseFloat(maxValue),
+        });
+      }
       onClose();
     } catch (err) {
-      setSubmitError(err.message || 'Failed to create control axis');
+      setSubmitError(err.message || (isEdit ? 'Failed to update control axis' : 'Failed to create control axis'));
     } finally {
       setSubmitting(false);
     }
@@ -104,15 +133,17 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="add-control-axis-modal" onClick={e => e.stopPropagation()}>
-        <h3>New control axis</h3>
+        <h3>{isEdit ? `Edit control axis · ${editAxis.tag}` : 'New control axis'}</h3>
         <p className="modal-help">
-          Declares an axis the designer controls — separate from AVAR2
-          MAPPINGS. Coverage glyphs + brace-layer drawings arrive in
-          later v2 slices; for now this just records the axis range.
+          {isEdit
+            ? 'Change the display name, range, or default. Tag is immutable — every applicable glyph\'s brace-layer location is keyed by it. Narrowing min/max is refused if any existing layer would fall outside the new range.'
+            : 'Declares an axis the designer controls — separate from AVAR2 MAPPINGS. Coverage glyphs + brace-layer drawings arrive in later v2 slices; for now this just records the axis range.'}
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
-            <label htmlFor="ctl-tag">Tag <span className="hint">(4 chars, e.g. <code>crbr</code>)</span></label>
+            <label htmlFor="ctl-tag">
+              Tag <span className="hint">{isEdit ? '(immutable)' : '(4 chars, e.g. '}{!isEdit && <code>crbr</code>}{!isEdit && ')'}</span>
+            </label>
             <input
               ref={tagInputRef}
               id="ctl-tag"
@@ -123,12 +154,14 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
               className={errors.tag ? 'has-error' : ''}
               autoComplete="off"
               spellCheck={false}
+              readOnly={isEdit}
             />
             {errors.tag && <span className="field-error">{errors.tag}</span>}
           </div>
           <div className="form-row">
             <label htmlFor="ctl-name">Display name</label>
             <input
+              ref={nameInputRef}
               id="ctl-name"
               type="text"
               value={displayName}
@@ -181,7 +214,9 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, existingTags = [] }) {
               Cancel
             </button>
             <button type="submit" className="btn btn-confirm" disabled={submitting}>
-              {submitting ? 'Creating…' : 'Create'}
+              {submitting
+                ? (isEdit ? 'Saving…' : 'Creating…')
+                : (isEdit ? 'Save changes' : 'Create')}
             </button>
           </div>
         </form>
