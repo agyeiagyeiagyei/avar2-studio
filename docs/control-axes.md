@@ -1,11 +1,18 @@
 # Control axes — design notes
 
-> **Status:** Design / not yet implemented. v1 ships read-only
-> visualisation of any glyph-scoped variation that already exists in
-> the source. v2 adds authoring through a shadow source file with a
-> sidecar-as-source-of-truth staging model. v3 (aspirational)
-> embeds [Fontra](https://github.com/fontra/fontra) so brace-layer
-> drawing happens inline instead of round-tripping through Glyphs.app.
+> **Status:** Partly shipped; this doc is part spec, part design
+> notes, and has drifted from the implementation in places (flagged
+> inline where known). What's shipped: read-only coverage
+> visualisation, `+ Add Control Axis`, applicable-glyphs / brace-layer
+> authoring on `.glyphs` via the `-control.json` sidecar + shadow
+> source, and inline editing through an embedded
+> [Fontra](https://github.com/fontra/fontra) drawer (integration Path
+> 2 below). Still design-only: `.designspace` authoring, push-to-source
+> / demote sync, interpolation-compatibility validation, and the
+> axis-aware context rendering in §"Editing context". The
+> **"Applicable glyphs, coverage & extrapolation"** section below
+> reflects shipped behaviour; treat the deeper v2/v3 sections as
+> forward-looking.
 
 ## Vocabulary
 
@@ -29,6 +36,86 @@ MAPPINGS axes:
 
 An axis is exactly one of: parametric (source-backed, full glyph
 coverage), AVAR2 MAPPINGS, or CONTROL AXES. No hybrids in v2.
+
+## Applicable glyphs, coverage & extrapolation (shipped)
+
+This is the mental model a designer needs when authoring a control
+axis. It's the part that's easy to get wrong, so it's spelled out
+here in full.
+
+### A brace layer is an *alternate* outline at a *non-default* location
+
+Every glyph already has one outline: the **master** (its normal
+drawing), which lives at the axis **default**. A brace layer is an
+*additional* drawing pinned at some *other* location on the axis —
+"here's how `e` should look when `crbr` is all the way up."
+
+Consequence: **you cannot place a brace layer at the axis default.**
+The default is the master's territory; a layer there would collide
+with it. That's why the *Add applicable glyphs* modal requires the
+control-axis pin to be **non-default** — it's not an arbitrary rule,
+it's what makes the layer a brace layer instead of a duplicate master.
+
+### "Applicable glyphs" = the covered subset
+
+A control axis only deforms the glyphs you give it layers for — its
+**applicable glyphs** (a.k.a. coverage). Every other glyph stays
+static as the slider moves. The axis row lists these glyphs; each
+one expands to show its layers.
+
+### Between the master and your layer: interpolation. Past it: extrapolation.
+
+Take an axis and one glyph with one brace layer:
+
+```
+default (master)            your layer                axis max
+   │                            │                         │
+   ●────────────────────────────●·························?
+        interpolation ✓            extrapolation ✗
+     (bounded, well-behaved)   (unbounded, usually breaks)
+```
+
+- **Between** the master (at the default) and your outermost layer,
+  outlines **interpolate** — bounded, predictable.
+- **Beyond** your outermost layer, out to the axis extreme, there's
+  no authored drawing to interpolate *to*, so the renderer
+  **extrapolates** — projects the delta past your outline. This
+  usually overshoots and breaks the glyph.
+
+The studio flags this: a glyph shows **⚠ extrapolates** when, on a
+side of the default that has axis travel, its outermost layer doesn't
+reach the extreme.
+
+### What "good coverage" looks like depends on where the default sits
+
+The default's position on the axis decides how many layers a glyph
+needs. The master owns the default endpoint, so you never author a
+layer *there* — you anchor the *extremes that have travel*:
+
+| Axis | Default sits… | Layers a glyph needs to be fully defined |
+|---|---|---|
+| `-100…100`, default `0` | in the **interior** | one reaching `-100` **and** one reaching `+100`. Master handles `0`. |
+| `0…40`, default `0` | on the **min** (edge) | one reaching `40`. There's no travel below `0` — the master *is* the `0` end — so no "below" layer exists or is wanted. |
+| `0…40`, default `40` | on the **max** (edge) | one reaching `0`. Mirror of the above. |
+
+This is why, for an **edge-default axis**, a single layer at the far
+extreme fully defines the glyph and clears the warning — and why the
+studio does **not** warn about a "missing layer below the default"
+when the default is already at the bottom of the range. There is no
+below.
+
+### Fixing an extrapolation warning
+
+Two ways, both in the glyph's tray:
+
+- **Pin layers to axis extremes** — moves your outermost layer(s) out
+  to the axis min / max. The outline data carries over; only the
+  location changes. Fastest fix when your layer is already the right
+  shape, just at the wrong coordinate.
+- **+ Add layer for `<glyph>`** at the extreme — keeps your existing
+  layer as an intermediate and adds a new anchor at the extreme. Use
+  when you want a distinct drawing at the extreme, not just a moved
+  copy of the intermediate.
 
 ## The shadow source file
 
@@ -389,9 +476,17 @@ glyph-scoped variation that already exists in the source file.
     ]
   }
   ```
-  - `kind: "universal"` → axis stays under AVAR2 MAPPINGS / parametric
-  - `kind: "scoped"` → axis surfaces under CONTROL AXES
-  - `kind: "partial"` → most glyphs but not all — flagged as a smell
+  - `kind: "universal"` → full coverage; axis stays under AVAR2
+    MAPPINGS / parametric
+  - `kind: "scoped"` → anything less than full; axis surfaces under
+    CONTROL AXES
+
+  (An earlier draft had a third `kind: "partial"` for 80–100%
+  coverage, flagged as a smell. That was dropped — the 80% threshold
+  was arbitrary and couldn't reliably tell a deliberate near-full
+  scope from an accidental gap. The classifier is now just
+  universal-vs-scoped; the designer inspects the covered glyph list
+  to judge intent.)
 
 ### Frontend
 
