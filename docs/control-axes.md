@@ -1,43 +1,70 @@
-# Control axes — design notes
+# Control axes — design + implementation notes
 
-> **Status:** Partly shipped; this doc is part spec, part design
-> notes, and has drifted from the implementation in places (flagged
-> inline where known). What's shipped: read-only coverage
-> visualisation, `+ Add Control Axis`, applicable-glyphs / brace-layer
-> authoring on `.glyphs` via the `-control.json` sidecar + shadow
-> source, and inline editing through an embedded
-> [Fontra](https://github.com/fontra/fontra) drawer (integration Path
-> 2 below). Still design-only: `.designspace` authoring, push-to-source
-> / demote sync, interpolation-compatibility validation, and the
-> axis-aware context rendering in §"Editing context". The
-> **"Applicable glyphs, coverage & extrapolation"** section below
-> reflects shipped behaviour; treat the deeper v2/v3 sections as
-> forward-looking.
+> **Status:** Partly shipped. This doc is part reference for what's
+> built and part design notes for what isn't; every section is tagged
+> **`SHIPPED`** or **`DESIGN-ONLY`** so the two don't blur.
+>
+> **Shipped:** read-only coverage visualisation; `+ Add` / edit /
+> delete of studio-declared control axes; applicable-glyph &
+> brace-layer authoring on `.glyphs` via the `-control.json` sidecar +
+> a shadow source file; inline outline editing through an embedded
+> [Fontra](https://github.com/fontra/fontra) drawer (a same-origin
+> reverse proxy — integration Path 2, and then some); disable-in-preview.
+>
+> **Design-only:** push-to-source / demote sync and the red/orange/green
+> tri-state for control axes; `.designspace` authoring; capturing drawn
+> outlines back into the sidecar (true "model α"); mtime-driven shadow
+> regeneration; and the "editing context" trio (interpolation-compat
+> validation, context-string editing, axis-aware context rendering).
+>
+> Where the code and an older draft of this doc disagreed, the doc was
+> corrected against the code (July 2026 reconciliation). A few
+> known bugs surfaced during that pass are called out inline as
+> **`KNOWN GAP`**.
 
 ## Vocabulary
 
-A **control axis** is an axis the *designer* declares (not the source
-file) with a chosen min/max/default. Its effect is realised by
-**glyph-scoped variation** — brace layers in `.glyphs`, alternate UFO
-masters in `.designspace` — affecting only a named subset of glyphs.
-Glyphs without coverage stay static across the axis range.
+A **control axis** is an axis whose effect is constrained to a named
+subset of glyphs — realised by **glyph-scoped variation**: brace
+layers in `.glyphs`, alternate UFO masters in `.designspace`. Glyphs
+without coverage stay static across the axis range.
+
+Control axes have **two origins**, and both surface under the
+CONTROL AXES sidebar section:
+
+- **Source-derived** (`source: "source"`) — a scoped axis that already
+  exists in the source file, read out of its brace layers / alternate
+  masters. Read-only in the studio. Roboto Delta's case-split
+  `XOUC`/`YOUC`/`XTUC` are these.
+- **Studio-declared** (`source: "studio"`) — an axis the *designer*
+  declares in the studio with a chosen min/max/default, stored in the
+  `<basename>-control.json` sidecar. These carry the edit/delete
+  affordances and the brace-layer authoring flow.
 
 Control axes are **parallel to**, not a replacement for, AVAR2
 MAPPINGS axes:
 
-| | AVAR2 MAPPINGS axes (existing) | CONTROL AXES (new) |
+| | AVAR2 MAPPINGS axes | CONTROL AXES |
 |---|---|---|
-| Declared by | designer via **+ Add** modal | designer via **+ Add Control Axis** (v2) |
+| Declared by | designer via **+ Add** (AVAR2 modal) | designer via **+ Add** (control-axis modal), or read from source |
 | Effect | routed through `-avar.csv` to parametric output axes | brace layers / alternate UFO masters drive per-glyph variation |
-| Sidecar | `<basename>-avar.csv` | `<basename>-control.json` |
-| Source mutation | direct (instance flow) | indirect, via shadow file |
-| Sidebar section | AVAR2 MAPPINGS | CONTROL AXES (parallel) |
-| Hybrid? | no — an axis is one or the other |
+| Sidecar | `<basename>-avar.csv` | `<basename>-control.json` (studio-declared only) |
+| Source mutation | direct (instance flow) | indirect, via a shadow file (studio-declared) |
+| Sidebar section | AVAR2 MAPPINGS | CONTROL AXES |
 
-An axis is exactly one of: parametric (source-backed, full glyph
-coverage), AVAR2 MAPPINGS, or CONTROL AXES. No hybrids in v2.
+There are **no hybrids** — but note there's no explicit "axis type"
+field. Routing is by **coverage**: `glyph_coverage._classify` labels
+an axis `universal` (100% of glyphs vary → stays under AVAR2 MAPPINGS /
+parametric) or `scoped` (anything less → CONTROL AXES). The frontend
+renders only `kind === 'scoped'` rows under CONTROL AXES. A tag that
+exists both source-derived *and* studio-declared is merged into one
+row, never split into a hybrid. (An earlier draft had a third
+`partial` kind for 80–100% coverage; it was dropped — the threshold
+was arbitrary and couldn't tell a deliberate near-full scope from an
+accidental gap. Some stale `partial` references still linger in
+frontend comments but the backend never emits it.)
 
-## Applicable glyphs, coverage & extrapolation (shipped)
+## Applicable glyphs, coverage & extrapolation `SHIPPED`
 
 This is the mental model a designer needs when authoring a control
 axis. It's the part that's easy to get wrong, so it's spelled out
@@ -61,7 +88,9 @@ it's what makes the layer a brace layer instead of a duplicate master.
 A control axis only deforms the glyphs you give it layers for — its
 **applicable glyphs** (a.k.a. coverage). Every other glyph stays
 static as the slider moves. The axis row lists these glyphs; each
-one expands to show its layers.
+one expands to show its layers. Coverage is **derived** from the
+unique glyph names in the axis's `layers` list — it is not stored
+separately.
 
 ### Between the master and your layer: interpolation. Past it: extrapolation.
 
@@ -117,54 +146,70 @@ Two ways, both in the glyph's tray:
   when you want a distinct drawing at the extreme, not just a moved
   copy of the intermediate.
 
-## The shadow source file
+## The shadow source file `SHIPPED` (with caveats)
 
-For authoring, the studio operates on a **shadow source file** —
-never the original. This makes control-axis experimentation cheap
-(designers can add/remove coverage glyphs many times before
-committing) and keeps the original safe.
+For studio-declared control-axis authoring, the studio operates on a
+**shadow source file** — never the original. This keeps
+experimentation cheap and the original safe.
 
 ```
 <source-dir>/
-  Crispy.glyphs                       ← original. Studio NEVER writes
-                                        to this directly. The designer
-                                        edits it freely for everything
-                                        outside control axes.
+  Crispy.glyphs                       ← original. The studio does not
+                                        write control-axis edits here.
+                                        The designer edits it freely
+                                        for everything else.
   Crispy-avar.csv                     ← AVAR2 MAPPINGS staging (existing).
-  Crispy-control.json                 ← CONTROL AXES sidecar — canonical
-                                        source of truth for declared
-                                        control axes + their per-glyph
-                                        outline overrides.
+  Crispy-control.json                 ← CONTROL AXES sidecar — declared
+                                        control axes + their brace-layer
+                                        LOCATIONS (not outlines).
   .avar2-studio/
     shadow/
-      Crispy.glyphs                   ← derived. Original + sidecar
-                                        applied. The preview always
-                                        builds from this.
+      Crispy.glyphs                   ← derived. Original + sidecar axes
+                                        + brace layers. The preview
+                                        builds from this once an axis
+                                        has layers.
     build/
 ```
 
-### Sidecar-as-source-of-truth (model α)
+### How `regenerate_shadow` works
 
-The sidecar is canonical; the shadow is derivable from
-`original + sidecar`. This means:
+On each control-axis action (and once at load), `regenerate_shadow`:
 
-- Blow away `.avar2-studio/` and the shadow regenerates from the
-  original + sidecar with no data loss.
-- When the designer edits the original (outlines, kerning, OT
-  features), the studio detects the mtime change, regenerates the
-  shadow from scratch, and re-applies the sidecar on top.
-- When the designer draws brace layers in Glyphs.app (on the
-  shadow), the studio captures the new outlines back into the
-  sidecar as glif/layer snippets. The shadow can then always be
-  re-derived.
+1. Copies the original source tree → `.avar2-studio/shadow/`.
+2. Appends any sidecar-declared axes missing from the shadow's axis
+   list, and pads every master's and existing brace layer's coordinate
+   vector to match.
+3. Seeds a brace layer for each `{glyph, location}` entry in the
+   sidecar. The seed outline is a **copy of the glyph's default-master
+   outline**, *or* — if a previous shadow already had a drawing at that
+   location — the **preserved prior-shadow outline** (via
+   `_extract_brace_outlines`).
 
-### Sidecar JSON shape
+`.designspace` is not handled: `regenerate_shadow` returns `None` for
+any non-`.glyphs` source (see "Source-format scope").
 
-Layers are stored per-glyph as an **array** keyed by location vector
-(not stringified — the location is a JSON object so axis-order
-quirks don't break lookups). The location is sparse: only axes the
-designer explicitly pinned appear; unspecified axes interpolate at
-build time.
+### Where outlines actually live — model β, not model α `DESIGN-ONLY` for α
+
+The **eventual** design goal is *model α*: the sidecar is canonical,
+drawn outlines are captured back into `-control.json` as glif
+snippets, and the shadow is fully re-derivable from `original +
+sidecar` with **no data loss**.
+
+**That is not what ships.** What ships is *model β, best-effort*:
+
+- The sidecar stores only axis declarations and brace-layer
+  **locations** — `{glyph, location}`. **No outline / glif XML is
+  ever written to the sidecar.**
+- Drawn outlines live **only in the shadow `.glyphs`**. They survive a
+  regeneration because `regenerate_shadow` reads them back out of the
+  *previous shadow*, not the sidecar.
+- **`KNOWN GAP` — wiping `.avar2-studio/` loses drawn outlines.**
+  With no glif in the sidecar and no prior shadow to read from, every
+  brace layer re-seeds as a no-op copy of the default master. The
+  older "blow away `.avar2-studio/` and regenerate with no data loss"
+  claim only becomes true once model α lands.
+
+### Sidecar JSON shape `SHIPPED`
 
 ```jsonc
 {
@@ -176,469 +221,340 @@ build time.
       "default": 0,
       "min": -100,
       "max": 100,
-      "coverage": ["A", "E", "F", "H", "e", "f", "t"],
-      "layers": {
-        "e": [
-          {
-            "location": { "crbr": -100 },
-            "glif": "<glyph>... raw glif XML ...</glyph>"
-          },
-          {
-            "location": { "crbr": 100 },
-            "glif": "..."
-          },
-          {
-            "location": { "crbr": -100, "XOPQ": 78 },
-            "glif": "..."        // short crossbar at Light specifically
-          },
-          {
-            "location": { "crbr": 100, "XOPQ": 407 },
-            "glif": "..."        // long crossbar at Bold specifically
-          }
-        ],
-        "f": [ /* … */ ]
-      }
+      "layers": [
+        { "glyph": "e", "location": { "crbr": -100 } },
+        { "glyph": "e", "location": { "crbr": 100 } },
+        { "glyph": "e", "location": { "crbr": -100, "XOPQ": 78 } },
+        { "glyph": "f", "location": { "crbr": 100 } }
+      ]
     }
   ]
 }
 ```
 
-Key choices:
+Key facts about the real shape:
 
-- **Per-glyph array, not object keyed by stringified location.**
-  Stringifying axis dicts is fragile — `{crbr:-100,XOPQ:78}` and
-  `{XOPQ:78,crbr:-100}` mean the same thing but produce different
-  string keys.
-- **`location` is sparse.** Only axes the designer pinned appear.
-  Other axes interpolate from masters / other brace layers at
-  preview / build time.
-- **`glif` is raw glif XML**, captured back from the editor on save.
-  Sidecar is the canonical store (model α); shadow regenerates from
-  `original + sidecar` on every original-mtime change.
+- **`layers` is a flat per-axis array of `{glyph, location}`** — *not*
+  a per-glyph object keyed by glyph name. Grouping-by-glyph is a
+  frontend display concern (`LayersEditor` builds a `byGlyph` Map);
+  it isn't the storage shape.
+- **No `glif` / outline field.** Entries are `{glyph, location}` only.
+- **No `coverage` field.** Coverage is derived from the unique glyph
+  names in `layers`. (`coverage` and `extra_locations` exist only as
+  *legacy* keys, migrated into `layers` on load and never re-emitted.)
+- **`location` is sparse**, a JSON object keyed by axis **tag** — only
+  the axes the designer pinned appear; the rest interpolate at build
+  time. It's a JSON object (not a stringified key) so axis-order
+  quirks don't break lookups.
 - **`version: 1`** so future tooling can read/write the format.
 
-### Lazy shadow creation
+### Lazy shadow creation `SHIPPED` (partial)
 
-The shadow is **only created on the first control-axis action**. If
-a font has zero control axes declared in `-control.json`, the shadow
-directory doesn't exist and the preview builds from the original.
-The moment the user clicks **+ Add Control Axis** (v2), the studio:
+The shadow is only created once a control axis exists:
+`regenerate_shadow` returns `None` when the sidecar has zero axes (and
+for non-`.glyphs` sources), so the shadow directory is absent until
+the first **+ Add**.
 
-1. Copies the original source tree → `.avar2-studio/shadow/`
-2. Applies the (empty) control axis declaration to the shadow's
-   axis list
-3. Switches the build path to point at the shadow
+**`KNOWN GAP` — the build path does not switch to the shadow on
+*add*.** `create_control_axis` deliberately keeps the build pointed at
+the original; the switch to the shadow happens only when
+`set_layers` writes the first brace layer (gated on the axis having
+`layers`). Worse, the load-time and delete-time swap is gated on a
+dead `ax.get("coverage")` key that the current sidecar never emits —
+so **after a restart the build can stay on the original and authored
+brace deltas drop out of the preview until the user re-saves a
+layer.** This is a bug, not a design choice; fixing the gate to test
+`layers` is the intended behaviour.
 
-This avoids paying the shadow-creation cost for users who only use
-AVAR2 MAPPINGS / instance editing.
+### Drift between original and shadow `DESIGN-ONLY`
 
-### Drift between original and shadow
+The intent is that the designer never thinks about syncing: edit the
+original for normal font work, the shadow for control-axis drawings,
+and the studio glues them together by watching the original's mtime
+and regenerating the shadow on change.
 
-The original is the source of truth for everything *except* the
-control-axis layer:
+**This auto-sync is not built.** In reality:
 
-- Outline edits, kerning, OT features, master coordinates → happen on
-  the original. The studio watches the original's mtime and
-  regenerates the shadow on change.
-- Control-axis layer (axis declarations + brace-layer outlines) →
-  lives in the sidecar. Survives shadow regeneration because the
-  shadow re-derives from `original + sidecar`.
+- There is **no mtime-driven shadow regeneration.** The file watcher's
+  handler only re-syncs the CSV and triggers a build; it never calls
+  `regenerate_shadow`. The shadow is refreshed only on explicit
+  control-axis actions (add / set-layers / update / delete) and once
+  at load.
+- When the shadow is the active build path, the watcher observes the
+  **shadow** directory, not the original — so edits to the original
+  aren't even detected. Runtime-loaded sources (`/api/load-source`)
+  get no watcher at all.
 
-The designer never has to think about syncing. They edit the
-original for normal font work and the shadow for control-axis
-drawings; the studio glues them together.
+So today, after editing the original outside the studio, you must
+trigger a control-axis action (or reload) to fold those changes into
+the shadow. Automatic drift-handling is a model-α-era goal.
 
-## Authoring round-trip (v2)
+## Authoring round-trip
 
-Control-axis editing in v2 looks like this:
+Where the 8-step loop stands today:
 
-1. **Declare** in the studio: `+ Add Control Axis` → modal captures
-   tag/display name/min/max/default. Saved to `-control.json`.
-2. **List coverage** in the studio: a text field per axis. Designer
-   types glyph names (one per line, optional `# group comments`).
-   Saved to `-control.json`.
-3. **Studio writes seed brace layers** to the shadow. Each coverage
-   glyph gets layers at axis-min and axis-max by default, **at the
-   interpolated outline for that location** (not the default master
-   copy). The preview now shows the axis as a slider that doesn't
-   visually deform anything yet (because the layers match what would
-   have been interpolated anyway).
-4. **Add layers at custom locations** — per-glyph "+ Add layer at
-   custom location…" button opens a modal with one input per axis
-   (parametric + AVAR2 MAPPINGS + control). Designer pins whichever
-   axes they want; control axis is required non-default. Studio
-   writes a seed layer at that full location vector. The "seed =
-   interpolated value at the location" rule means the layer is a
-   no-op visually until edited, which avoids surprise visual snaps.
-5. **Open shadow in editor** — a button per layer (per location).
-   Opens Fontra (Path 2 — iframe) navigated to that glyph at that
-   exact location. Designer draws the alternate outlines.
-6. **Studio captures back into sidecar.** When the shadow's mtime
-   changes (editor saved), the studio reads the brace-layer
-   outlines for the coverage glyphs and stores them as raw glif XML
-   in the sidecar's `layers` block, keyed by the location vector.
-   The shadow is now derivable from `original + updated sidecar`.
-7. **Iterate.** Steps 4–6 repeat as the designer refines outlines or
-   adds/removes layer locations.
-8. **Push to source** — explicit user action. The studio applies the
-   sidecar's axis declarations + brace layers to the original. After
-   a successful push the axis transitions from orange (in-sidecar
-   only) to green (in source). The sidecar entry can be cleared or
-   kept as a record.
+1. **Declare** — `SHIPPED`. **+ Add** → `POST /api/control-axes` →
+   `add_axis` writes the sidecar. Modal captures tag / display name /
+   min / max / default; tag is immutable, the rest are editable via
+   `PATCH`.
+2. **Coverage** — `SHIPPED, redesigned`. There is **no** per-axis
+   coverage textarea ("one per line / `# comments`"). That was
+   removed. Coverage is **derived** from the unique glyph names of the
+   explicit brace layers you add via the **+ Add applicable glyphs**
+   modal.
+3. **Auto-seeded min/max layers** — `NOT BUILT`. Brace layers are
+   explicit-only ("no auto seeding at axis-min/max"). And seeds are a
+   **copy of the default-master outline**, not "the interpolated
+   outline for that location" — so a freshly-added layer is a
+   duplicate of the master, not a visual no-op that matches
+   interpolation.
+4. **Add layers at custom locations** — `SHIPPED`. Per-glyph
+   "+ Add layer for `{glyph}`" and top-level "+ Add applicable glyphs"
+   open `AddBraceLocationModal` → `PUT /api/control-axes/<tag>/layers`
+   → `set_layers`. The designer pins whichever axes they want; the
+   control axis is required non-default.
+5. **Open in editor** — `SHIPPED`. The ↗ per-layer button →
+   `POST /api/control-axes/<tag>/open-editor` spawns Fontra on the
+   shadow and opens the glyph at that location, in edit mode, in a
+   right-side drawer (see "Editing in Fontra").
+6. **Capture back into sidecar** — `NOT BUILT`. Drawn outlines are
+   **not** captured into the sidecar (no glif field, no mtime capture
+   of Fontra saves). Closing the drawer just triggers a rebuild;
+   outlines persist only inside the shadow `.glyphs` (see model β
+   above).
+7. **Iterate** — steps 4–5 repeat.
+8. **Push to source** — `NOT BUILT`. There is no push-to-source
+   endpoint for control axes. Add/delete mutate only the sidecar; the
+   original is never written for control-axis work.
 
-Same tri-state sync semantics as instances:
+### Sync state `DESIGN-ONLY` for control axes
 
-| Dot | Sidecar | Original |
-|---|---|---|
-| 🔴 Red | edits in flight (modal open, unsaved coverage edit) | unchanged |
-| 🟠 Orange | axis declared + outlines captured | original doesn't know about this axis yet |
-| 🟢 Green | sidecar reflects what's already in the original | axis + brace layers present |
+The red/orange/green tri-state, the SRC badge, and the demote flow
+described in earlier drafts **exist only for instances**, not control
+axes. Control-axis rows carry just two badges: a `studio` tag on
+studio-authored layer rows, and the `scoped` kind badge on the axis
+row. A per-axis in-sidecar-vs-in-source tri-state (and the
+push/demote actions that would drive it) is future work that depends
+on step 8 landing first.
 
-Demote = "remove control axis from source": axis declaration + brace
-layers stripped from the original; sidecar entry kept; axis flips
-back to orange.
+## Source-format scope `SHIPPED` (.glyphs) / `DESIGN-ONLY` (.designspace)
 
-## Source-format scope for v2 authoring
-
-Brace-layer authoring is structurally very different across the two
-formats the studio supports:
+Brace-layer authoring differs structurally across the two formats.
 
 ### `.glyphs`
 
-Brace layers live inside each glyph's `<layers>` block. Adding a
-brace layer means appending one layer entry per coverage glyph,
-keyed by location. `glyphsLib` already round-trips this. The shadow
-file is a single `.glyphs` file copy; mutations are localised.
+Brace layers live inside each glyph's `<layers>` block. Adding one
+means appending a layer entry per applicable glyph, keyed by location.
+`glyphsLib` round-trips this; the shadow is a single `.glyphs` copy
+and mutations are localised. This is what ships.
 
 ### `.designspace`
 
-There are no brace layers as such — the equivalent is **a new UFO
-master at the brace location**, containing only the coverage glyphs.
-Other glyphs in that location interpolate from the existing masters
-since the new UFO doesn't carry entries for them. This is the Roboto
-Delta pattern.
+There are no brace layers — the equivalent is a **new UFO master at
+the brace location**, containing only the applicable glyphs (others
+interpolate from existing masters). This is the Roboto Delta pattern,
+and it's heavier: each unique location needs its own UFO directory,
+UFOs have to be *pooled* across glyphs sharing a location, and the
+`<sources>` block has to stay consistent.
 
-Heavier than `.glyphs` because:
+### `.glyphs` only for now
 
-- Each unique brace location requires its own UFO directory with
-  the minimum metadata files (`fontinfo.plist`, `metainfo.plist`,
-  `layercontents.plist`, etc.).
-- The studio has to **pool** UFOs across glyphs — if `e` and `f`
-  both have a brace layer at the same location, they go in the
-  same UFO, not two separate ones.
-- The `.designspace` `<sources>` block gains an entry per pooled
-  location; mutation has to keep that block consistent.
+Control-axis **authoring** works on `.glyphs` sources only.
+`regenerate_shadow` short-circuits (returns `None`) for any
+non-`.glyphs` suffix — that silent skip is where `.designspace`
+deferral is actually enforced.
 
-### v2 ships `.glyphs` authoring; `.designspace` defers to v2.5
+**`KNOWN GAP` — there is no `.designspace` guard-rail in the UI.**
+The **+ Add** button is *not* disabled for `.designspace` sources, and
+clicking it *succeeds*: `add_axis` writes the sidecar, `/api/axes`
+surfaces the new axis as a live-but-no-op slider, and only
+`regenerate_shadow` silently returns `None`. So a `.designspace` user
+can declare a control axis that can never be authored (no shadow, no
+"Open in editor"). A disabled button + explanatory tooltip is the
+intended design but is **not yet implemented**.
 
-v2 supports control-axis authoring on `.glyphs` sources only. The
-"+ Add Control Axis" button is disabled with a tooltip explaining
-why for `.designspace` sources. v1's read-only coverage panel still
-works on `.designspace` — Roboto Delta's existing case-split
-masters are visible there; users just can't author new ones in the
-studio yet.
+The v1 **read-only** coverage panel does work on `.designspace` —
+Roboto Delta's existing case-split masters show up there; users just
+can't author new ones yet.
 
-The deferral keeps v2 scope bounded. The UFO-pooling design + the
-extra mutation surface adds roughly another week of work and a
-class of edge cases (UFO naming conflicts, dedup logic) we'd
-rather hit in v2.5 after the `.glyphs` flow is proven.
+## Disable in preview `SHIPPED`
 
-## Editing context inside the embedded editor (for later)
+Each control-axis row has an **eye-icon toggle** (👁 enabled /
+👁‍🗨 disabled — an emoji with a tooltip; there's no text "disable"
+label and no keyboard shortcut). When toggled off:
 
-When Fontra is embedded for brace-layer editing (Path 2, v2),
-designers will need more than a single-glyph editor view. Three
-requirements parked here that v2's Fontra integration has to
-handle:
+- At render, a **derived** copy of the coordinates
+  (`previewCoordinates`) overrides that axis's value with its default
+  before building the `font-variation-settings` string. The slider /
+  edit state itself is untouched, so re-enabling instantly restores
+  the designer's value.
+- It's **frontend-only** — no backend call, no rebuild.
+- State is **session-local**: a plain React `Set`, not persisted to
+  localStorage or the sidecar. It's cleared on every source load /
+  swap and pruned when an axis is deleted.
+- The toggle renders for **all** control-like axes (source-derived and
+  studio-declared alike) and the override applies per instance-preview
+  row.
 
-### 1. Interpolation-compatibility validation
+It answers "what does my font look like *without* this control axis's
+deformation?" — useful for spotting regressions on non-coverage glyphs
+or comparing against a baseline. (Persisting the state is future work.)
 
-The hard rule of variable font masters: every drawing for a glyph
-must have the same number of contours, the same number of points
-per contour, and matching on-curve / off-curve types. A
-well-meaning edit in Fontra (adding a point to a brace layer, for
-example) can silently break interpolation.
+## Editing in Fontra `SHIPPED` (Path 2, and beyond the plan)
 
-The studio should validate compatibility on every Fontra save:
+Inline brace-layer editing is done through an **embedded Fontra**,
+implemented as **integration Path 2** below — but the shipped version
+materially exceeds the original "iframe Fontra" plan.
 
-- Read the just-saved brace layer's glif from the shadow.
-- Compare against the default master's outline structure for that
-  glyph (contour count, points-per-contour, point types).
-- On mismatch, raise a sidebar warning on the offending layer:
-  `⚠ e @ {crbr:-100} — 4 contours, default master has 3`.
-- Don't auto-revert. The designer might be mid-edit and adding a
-  point intentionally; they need to fix it on the default master
-  too, in which case the warning clears on next save.
+What ships:
 
-Likely implementation path: `fontTools.pens.RecordingPen` to walk
-each layer once and compare summaries.
+- **Subprocess lifecycle.** On the first "Open in editor",
+  `_ensure_fontra_running` launches `fontra --http-port 8001
+  filesystem <shadow>`, reuses the warm process when the content root
+  matches, waits for the port to bind, and tears it down via
+  `_stop_fontra` + an `atexit` hook.
+- **Same-origin reverse proxy, not a cross-origin iframe.** The drawer
+  loads `/fontra/editor.html?project=<name>` on avar2-studio's *own*
+  origin; a `/fontra/<path>` proxy forwards to `127.0.0.1:8001`,
+  rewriting absolute HTML/CSS/importmap paths. A `/websocket` leg is
+  proxied too, plus root-level runtime routes (`/lang`, `/data`,
+  `/images`, `/webfonts`, `/projectlist`, `/serverinfo`) and `/api` +
+  root catch-alls, so Fontra runs fully same-origin. This is what
+  makes the next item possible and sidesteps CORS entirely.
+- **Focused-UI CSS injection.** `_FONTRA_FOCUSED_CSS` is injected
+  before `</head>`, hiding Fontra's sidebar panels
+  (designspace-navigation, reference-font, glyph-search,
+  related-glyphs, …) and drawing tools (pen, knife, shape) — leaving a
+  trimmed brace-edit surface rather than the raw Fontra UI.
+- **Right-side drawer.** `FontraEditorModal` is a `position: fixed`
+  right drawer (60vw, min 600px) with a left-edge resize handle whose
+  width persists in localStorage. Not a modal, not the overview.
+- **Fragment-based navigation into edit mode.** Navigation uses a
+  base64 + zlib **URL fragment** (mirroring Fontra's
+  `dumpURLFragment`), not query params: the viewInfo carries the glyph
+  as `text`, `selectedGlyph: { …, isEditing: true }` (drops straight
+  into edit mode), and the full location vector overlaying the sparse
+  layer location on axis defaults — **keyed by axis display name**
+  (not tag) to match `fontra-glyphs`. An "Open in new tab" escape uses
+  the direct `:8001` URL.
 
-### 2. Context-string editing
+Together these resolve the two open unknowns the design flagged — CORS
+behaviour and jump-to-glyph navigation — both handled.
 
-Designers don't edit `e` in isolation — they edit it next to `T`,
-`h`, `qu`, `n`, etc. to see how the new crossbar reads in real
-text. The "Open in editor" affordance should:
+### Editing-context futures `DESIGN-ONLY`
 
-- Take a context string the designer types into the avar2-studio
-  panel (default: `Adhesion` or whatever sample-text the studio's
-  preview is using).
-- Pass it to Fontra so the embedded editor renders the focus glyph
-  surrounded by that context.
-- Fontra's text-editing view ("text" mode) already supports this;
-  we need URL params or a `postMessage` to drive it.
+Three deeper requirements are **not** built (the shipped viewInfo
+passes only the single focus glyph as `text`):
 
-### 3. Axis-aware context rendering
+1. **Interpolation-compatibility validation** — on each Fontra save,
+   compare the brace layer's contour/point structure against the
+   default master and warn on mismatch (e.g. via
+   `fontTools.pens.RecordingPen`). Not implemented.
+2. **Context-string editing** — render the focus glyph inside a
+   context string (`Adhesion`, `The quick…`) so the designer sees the
+   alternate in real text. Not implemented.
+3. **Axis-aware context rendering** — render the *focus* glyph at its
+   brace location while the *context* glyphs render at the studio
+   sliders' current values, exposing "does this alternate read at
+   Regular?" regressions. Not implemented; would need two location
+   vectors through the Fontra protocol.
 
-Context glyphs around the focus should render at **the axis
-parameters set in the avar2-studio UI** (the slider values the
-designer has dialled in the sidebar), NOT at the focus glyph's
-brace-layer location.
+## Fontra integration — paths considered
 
-So if the designer is editing `e @ {crbr:-100, XOPQ:78}` while the
-avar2-studio sliders are set to `XOPQ=187, XTRA=290, YOPQ=130,
-crbr=0`:
+For the record, the four integration paths evaluated. **Path 2 is
+what shipped** (above); the rest are `DESIGN-ONLY`.
 
-- The **focus glyph** (the `e` being edited) renders at its
-  brace-layer location: `{crbr:-100, XOPQ:78, XTRA=290, YOPQ=130}`
-  (other axes interpolating).
-- The **context glyphs** (`T`, `h`, etc.) render at the UI's
-  current settings: `{XOPQ=187, XTRA=290, YOPQ=130, crbr=0}`.
+| Path | Approach | Status |
+|---|---|---|
+| **1. Separate-tab Fontra** | Launch Fontra on its own port; "Open in editor" opens a new browser tab. | design-only |
+| **2. iframe / same-origin proxy** | Run Fontra alongside us and embed it. **Shipped as a same-origin reverse proxy + focused UI + drawer + fragment nav — beyond the original iframe sketch.** | **SHIPPED** |
+| **3. avar2-studio as a Fontra view plug-in** | Repackage our React app as a `fontra.views` entry-point; drop Flask; one server, one tab. | design-only (natural v3) |
+| **4. Fontra backends as a library dep** | Keep Flask; read via `fontra.backends` instead of `glyphsLib`/`designspaceLib`. | design-only |
 
-This lets the designer see how the alternate reads inside text the
-font typically renders at, not inside text frozen at the alternate
-location. It also exposes regressions: if the new crossbar makes
-`e` look out of place at Regular weight specifically, the
-designer sees that immediately.
+### What Fontra is
 
-Likely implementation: extension of the Fontra URL / message
-protocol to pass two location vectors — `focus_location` and
-`context_location`. Whether Fontra natively supports per-glyph
-location overrides in its text view is unverified; if not, we
-either contribute the support upstream or fall back to "focus
-glyph in isolation" with the context coming from a parallel
-avar2-studio preview pane.
+A web-based font editor structured like avar2-studio (Python server +
+JS client, default port 8000). Reads `.designspace`, `.ufo`, `.ttf`,
+`.otf`; pluggable backends for new formats. It exposes plug-in APIs
+(Project Manager, View, Filesystem backend, Static content) documented
+in [`docs/plugin-structure.md`](https://github.com/fontra/fontra/blob/main/docs/plugin-structure.md).
+The View plug-in is what would make Path 3 possible.
 
-These three requirements are not v2 day-one — the day-one v2 ships
-with the basic Fontra iframe and a single-glyph view. But the
-sidecar / URL / message protocol design should leave room for them
-so v2.x can land them additively.
+### Why not Path 3 / 4 yet
 
-## Disable in preview (v1)
+Path 3 (view plug-in) is the cleanest end-state but requires replacing
+our Flask server with Fontra's aiohttp one, restructuring the React
+build as a Python package, and adopting Fontra's project-manager /
+font-loading model — a project on its own; we'd risk shipping two
+half-products. Path 2 keeps scope bounded and proves the value first.
+Path 4 (Fontra backends as an internal lib) doesn't deliver the editor
+that motivates the exercise; it's a possible migration step toward
+Path 3, invisible to the user.
 
-Each control axis row has a small toggle — eye icon, "disable" label,
-keyboard shortcut TBD. When toggled off:
+### Sidecar-format implication for a future Path 3
 
-- The slider for that axis is forced to the axis's `default` value at
-  preview render time, regardless of any user-set value or CSV row.
-- Implementation: frontend-only. The font-variation-settings string
-  passed to the preview overrides the disabled axis's value with the
-  default before rendering.
-- The state is **session-local** (not persisted) in v1. v2 can
-  persist it in the sidecar if useful.
+If we ever migrate toward Path 3, the sidecar should stay simple
+enough that Fontra could be a second consumer: a stable `version`ed
+file format, no avar2-studio-specific metadata baked into per-axis
+records that Fontra couldn't interpret. (Note: capturing outlines into
+the sidecar — model α — is a prerequisite for Fontra reading drawings
+out of it; today outlines live in the shadow, not the sidecar.)
 
-The toggle answers "what does my font look like *without* this
-control axis's deformation?" — useful for sanity-checking that the
-axis isn't causing regressions on non-coverage glyphs, or for
-comparing against a baseline.
+## What v1 read-only delivered (backend shape)
 
-## What v1 actually delivers
+The read-only coverage surface that v1 shipped, still current:
 
-Strictly read-only. v1 makes the studio able to **show** any
-glyph-scoped variation that already exists in the source file.
-
-### Backend
-
-- New module `glyph_coverage.py` with two functions:
-  - `coverage_from_glyphs(font)` — walk each glyph's layers, collect
-    intermediate-position layers, return `{axis_tag: [glyph_name]}`.
-  - `coverage_from_designspace(ds)` — walk masters at non-default
-    locations, intersect their UFO glyph sets with the axis tags
-    that vary at that location.
-- New endpoint `GET /api/glyph-coverage`:
+- `glyph_coverage.compute_coverage(font)` dispatches to private
+  `_coverage_from_glyphs` / `_coverage_from_designspace` — walk each
+  glyph's intermediate-position layers (`.glyphs`) or masters at
+  non-default locations (`.designspace`), returning per-axis coverage.
+- `GET /api/glyph-coverage`:
   ```jsonc
   {
     "axes": [
-      {
-        "tag": "XOPQ",
-        "name": "X-Opacity",
-        "covers": ["A", "B", ..., "z"],
-        "covers_count": 245,
-        "total_glyphs": 245,
-        "kind": "universal"          // computed: full coverage
-      },
-      {
-        "tag": "CRBR",
-        "name": "Crossbar",
-        "covers": ["A", "E", "F", "H", "e", "f", "t"],
-        "covers_count": 7,
-        "total_glyphs": 245,
-        "kind": "scoped"             // small named subset → control-axis-shaped
-      }
+      { "tag": "XOPQ", "name": "X-Opacity",
+        "covers": ["A", "…", "z"], "covers_count": 245,
+        "total_glyphs": 245, "kind": "universal" },
+      { "tag": "crbr", "name": "Crossbar",
+        "covers": ["A","E","F","H","e","f","t"], "covers_count": 7,
+        "total_glyphs": 245, "kind": "scoped" }
     ]
   }
   ```
-  - `kind: "universal"` → full coverage; axis stays under AVAR2
-    MAPPINGS / parametric
-  - `kind: "scoped"` → anything less than full; axis surfaces under
-    CONTROL AXES
+  - `kind: "universal"` (full coverage) → stays under AVAR2 MAPPINGS /
+    parametric.
+  - `kind: "scoped"` (anything less) → surfaces under CONTROL AXES.
 
-  (An earlier draft had a third `kind: "partial"` for 80–100%
-  coverage, flagged as a smell. That was dropped — the 80% threshold
-  was arbitrary and couldn't reliably tell a deliberate near-full
-  scope from an accidental gap. The classifier is now just
-  universal-vs-scoped; the designer inspects the covered glyph list
-  to judge intent.)
-
-### Frontend
-
-- New `CONTROL AXES` section in the sidebar, sibling to AVAR2 MAPPINGS.
-- Each axis row: tag, display name, coverage count badge, expand
-  caret. Expanded view shows the glyph list (plain text for v1) and
-  the disable-in-preview toggle.
-- No editing affordances — no +Add, no coverage editor, no push to
-  source. v1 is pure read.
-
-### Out of v1
-
-- The `-control.json` sidecar
-- The shadow source file
-- `+ Add Control Axis` modal
-- Coverage editor
-- The "Open in editor" button
-- Push-to-source / demote flows
-- Persisted disable state
-
-## Fontra in v2 — scoping
-
-The most awkward part of v2 as drafted is step 4 of the authoring
-loop — the Glyphs.app round-trip. Switching apps to draw an outline,
-saving, then coming back to see the preview update is tolerable but
-not great. [Fontra](https://github.com/fontra/fontra) is a candidate
-to replace that round-trip with inline editing.
-
-### What Fontra actually is
-
-A web-based font editor structured the same way as avar2-studio: a
-Python server + JavaScript client. Default port 8000. Reads
-`.designspace`, `.ufo`, `.ttf`, `.otf` out of the box; pluggable
-backend system for new formats. Crucially, Fontra exposes four
-plug-in APIs via Python entry-points (documented in
-[`docs/plugin-structure.md`](https://github.com/fontra/fontra/blob/main/docs/plugin-structure.md)):
-
-| Plug-in API | Surface |
-|---|---|
-| **Project Manager** | controls how fonts are loaded + the project-pick UI |
-| **View** | bundles web assets (HTML/CSS/JS) as a Python package, registers a URL prefix |
-| **Filesystem backend** | handles a new source format |
-| **Static content** | adds a virtual web folder |
-
-The View plug-in mechanism is what makes embedding plausible — we
-register avar2-studio's React bundle as a view, Fontra serves it
-under a URL prefix alongside its own editor. One server, one tab.
-
-### Four integration paths, scoped
-
-| Path | Approach | Effort | Difficulty | UX win |
-|---|---|---|---|---|
-| **1. Separate-tab Fontra** | Launch Fontra on its own port; "Open in editor" opens Fontra in a new browser tab pointed at the shadow. Studio's mtime watcher picks up changes. | ~2 days | low | marginal — still a context switch, just to a tab |
-| **2. iframe Fontra inside avar2-studio** | Run Fontra alongside us; iframe it into a panel. Navigate via URL (`?glyph=e&location=crbr:-100`); communicate via `postMessage` if needed. | ~1 week | medium | inline editing in the same page |
-| **3. avar2-studio as a Fontra view plug-in** | Repackage avar2-studio as a Python package with a `fontra.views` entry-point. Bundle our React app under a URL prefix Fontra serves. Drop our Flask server; talk to Fontra's project manager. | ~3 weeks | high | one server, one tab, shared backend |
-| **4. Fontra's backends as a library dep** | Keep our Flask server; replace direct `glyphsLib` / `designspaceLib` reads with calls to `fontra.backends.designspace.DesignspaceBackend`. No UI change. | ~1 week | medium | invisible to user; sets up path 3 later |
-
-### Recommended for v2
-
-**Path 2 (iframe).** It's the smallest path that meaningfully beats
-the Glyphs.app round-trip. Concretely:
-
-1. Add Fontra as a Python dependency (`pip install fontra`).
-2. On first control-axis action, spawn the Fontra server as a
-   subprocess on port `8001` (or any free port), pointing it at the
-   shadow folder.
-3. The "Open in editor" button opens an iframe (or a side-drawer
-   modal) loading `http://127.0.0.1:8001/fontoverview?...` filtered
-   to the axis's coverage glyphs. Fontra navigates to a glyph in
-   response to URL query params; we use that for jump-to-glyph.
-4. mtime-watcher (already in the studio) picks up the shadow file's
-   saves and re-captures brace-layer outlines into the sidecar.
-5. Closing the iframe / drawer doesn't kill Fontra — keep it warm
-   for the next "Open in editor" click.
-
-### Risks and unknowns for Path 2
-
-- **Does Fontra accept jump-to-glyph URL params?** Likely yes (the
-  editor URL is its primary navigation surface), but worth verifying
-  before committing. If not, navigation is a `postMessage` away or
-  we just open Fontra's overview and let the user click in.
-- **Cross-origin iframe behaviour.** Both servers are on
-  `127.0.0.1`; default headers may need a CORS / `frame-ancestors`
-  loosen. Fontra is open-source and likely amenable to a config
-  flag, but not yet verified.
-- **postMessage protocol.** If we want bidirectional state
-  (clicking a coverage glyph in our panel → Fontra navigates to it),
-  we need a small message protocol. Fontra doesn't appear to
-  document one publicly; we'd be defining it. Fallback: pure URL
-  navigation, less interactive.
-- **Save flow.** Fontra writes to disk on save. Our mtime watcher
-  handles that, but two file-watchers (Fontra's + ours) can race on
-  the same file. Path 2 may need explicit save coordination.
-
-### Why not Path 3 in v2
-
-Path 3 (avar2-studio as a Fontra view plug-in) is the cleanest end
-state but requires:
-
-- Replacing our Flask server with Fontra's aiohttp-based one
-- Restructuring our React build output as a Python package
-- Adopting Fontra's project-manager and font-loading model — which
-  means rewriting `_apply_source_path`, `_get_avar2_csv_path`, and
-  most of the source-load plumbing
-- Living with Fontra's port and routing decisions
-
-That's a v2-sized project on its own. We'd be hosting both products
-in one v2 and likely shipping neither well. Path 2 keeps v2's scope
-bounded; Path 3 is the natural v3 if Path 2 proves the value.
-
-### Why not Path 4 either
-
-Path 4 (use Fontra's backends internally) doesn't deliver the editor
-that motivates the whole exercise. Useful as a future migration step
-toward Path 3 but invisible to the v2 user.
-
-### Design implications for v2 sidecar format
-
-If we expect to migrate toward Path 3 eventually, the sidecar
-schema should stay simple enough that Fontra could become a second
-consumer:
-
-- Keep the layer-snapshot format inside `-control.json` as raw glif
-  XML strings (Fontra's data model is close enough that a converter
-  is shallow).
-- Don't bake avar2-studio-specific metadata into the per-axis
-  records that Fontra would have no way to interpret.
-- Treat the sidecar as a stable file format with a `version` field,
-  so future tooling can read/write it.
+Everything the older "Out of v1" list marked as future has since
+**shipped**, except two items. Shipped since v1: the `-control.json`
+sidecar, the shadow source file, the **+ Add** control-axis modal
+(create *and* edit), the coverage editor (redesigned as the explicit
+`LayersEditor` brace-layer authoring UI), and the "Open in editor"
+button (the embedded Fontra drawer). **Still not built:**
+push-to-source / demote for control axes, and persisted disable state.
 
 ## What stays untouched
 
-- The existing AVAR2 MAPPINGS section, `-avar.csv`, and instance flow
-  all continue to work exactly as today. No shadow file is interposed
-  for instance editing; "Save to source file" continues to write
-  directly. The shadow strategy is reserved for control axes where
-  the iteration loop and structural risk justify it.
+The existing AVAR2 MAPPINGS section, `-avar.csv`, and instance flow
+work exactly as before. No shadow is interposed for instance editing;
+"Save to source file" still writes directly. The shadow strategy is
+reserved for control axes, where the iteration loop and structural
+risk justify it.
 
-## Open questions still
+## Open questions
 
-- **Coverage compute perf** — Roboto Delta full source has ~3000
-  glyphs × ~20 UFOs. Iterating every master's UFO at every font load
-  may be slow. Cache by `.designspace` mtime? Compute lazily when the
-  CONTROL AXES panel is expanded?
-- **Coverage editor text format** — newline-separated with `# group
-  comments` for v2? Regex / range support (`A-Z`, `[aeiou]`)?
-- **Composite-glyph inheritance** — when `e` covers the CRBR axis and
-  `é` is a composite referencing `e`, does `é` inherit coverage
-  automatically? At the gvar level yes, but should the studio's
-  coverage panel show it as covered directly, or just as
-  "inherited"?
-- **Push-to-source granularity** — push one control axis at a time,
-  or all at once? The instance flow pushes per row; control-axis push
-  might be naturally per-axis (an axis is the unit of
-  studio-declared-vs-in-source state).
+- **`.designspace` authoring** — the UFO-pooling design (a UFO per
+  pooled brace location, dedup, `<sources>` consistency) is unbuilt.
+- **Coverage-compute perf** — Roboto Delta's full source is ~3000
+  glyphs × ~20 UFOs; iterating every master at each load may be slow.
+  Cache by mtime? Compute lazily when the panel expands?
+- **Composite-glyph inheritance** — if `e` covers `crbr` and `é`
+  composes `e`, is `é` shown as covered directly, or "inherited"?
+- **Push-to-source granularity** — per-axis (likely) or all at once?
+  Unbuilt.
+- **Model α migration** — capturing drawn outlines into the sidecar so
+  `.avar2-studio/` is truly disposable, and so a future Fontra Path 3
+  could read outlines from the sidecar.
+- ~~Coverage-editor text format (newline / `# comments` / regex
+  ranges)~~ — resolved by supersession: the text-field approach was
+  dropped for explicit brace layers.
