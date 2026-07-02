@@ -125,20 +125,16 @@ what most designers think of when they say "the parametric axes."
 The studio treats them as the base designspace surface, and
 traditional axes get mapped *into* this space via avar2.
 
-**CONTROL AXES** — axes that only deform *some* glyphs. Three
+**CONTROL AXES** — axes that only deform *some* glyphs. Two
 badges disambiguate why:
 
-- `scoped` — coverage under 80%. The axis was authored to affect
-  a subset by design: Roboto Delta's case-split axes only touch
-  uppercase glyphs; a "crossbar" axis might only touch letters
+- `scoped` — the axis was authored to affect a subset of glyphs
+  rather than everything: Roboto Delta's case-split axes only
+  touch uppercase; a "crossbar" axis might only touch letters
   with crossbars (A, E, F, H, T, e, f, t, …); a figure-only axis
-  might only touch digits. Read this as intentional.
-
-- `partial` — coverage between 80% and 100%. Nearly-universal,
-  which usually means it *was* meant to be universal but a few
-  glyphs got missed when authoring the alternate master. Read this
-  as **check your source** — likely a bug, not a design choice.
-  If it *is* deliberate, the badge is harmless and can be ignored.
+  might only touch digits. Expand the row to see the exact
+  covered set — if it looks incomplete for what you intended,
+  that's a hint that a few glyphs are missing masters upstream.
 
 - `studio` — declared inside avar2-studio (via **+ Add** next to
   CONTROL AXES) rather than in the source file. Lives in the

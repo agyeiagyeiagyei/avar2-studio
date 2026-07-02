@@ -46,11 +46,9 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
   // of the way.
   const [sectionOpen, setSectionOpen] = useState(true);
 
-  // Filter to scoped + partial. Universal axes are master-driven
-  // and belong under AVAR2 MAPPINGS / parametric, not here.
-  const controlLikeAxes = (axes || []).filter(
-    ax => ax.kind === 'scoped' || ax.kind === 'partial'
-  );
+  // Filter to scoped. Universal axes are master-driven and belong
+  // under AVAR2 MAPPINGS / parametric, not here.
+  const controlLikeAxes = (axes || []).filter(ax => ax.kind === 'scoped');
 
   const resolvedExpandedTags = expandedTags;
 
@@ -122,9 +120,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onDelete
           // glyph-scoped, and the "studio" origin was redundant.
           const kindBadge = isStudio
             ? null
-            : ax.kind === 'partial'
-              ? <span className="kind-badge kind-partial" title="Most glyphs but not all — usually means the designer forgot to author a few glyphs at the alternate master.">partial</span>
-              : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only the listed glyphs change as this axis moves.">scoped</span>;
+            : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only some glyphs change as this axis moves.">scoped</span>;
 
           // Count glyphs whose layer set on THIS axis would
           // extrapolate at one or both extremes. Same logic as

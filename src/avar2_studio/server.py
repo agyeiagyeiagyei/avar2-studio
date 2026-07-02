@@ -2339,10 +2339,9 @@ def glyph_coverage():
     ``covers_count / total_glyphs`` + the ``kind`` classification to
     surface axes under the appropriate panel:
 
-      - ``"universal"`` (full coverage) → stays under AVAR2 MAPPINGS /
+      - ``"universal"`` (100% coverage) → stays under AVAR2 MAPPINGS /
                                           parametric.
-      - ``"scoped"``    (small subset)  → CONTROL AXES.
-      - ``"partial"``   (in between)    → CONTROL AXES with smell badge.
+      - ``"scoped"``    (anything less) → CONTROL AXES.
 
     Response shape::
 
@@ -2457,8 +2456,8 @@ def glyph_coverage():
             print(f"Warning: failed to merge control-axes sidecar: {e}", file=sys.stderr)
 
         # Stable ordering: universal first (least interesting), then
-        # scoped, then partial. Within each bucket, by tag.
-        kind_order = {"universal": 0, "scoped": 1, "partial": 2}
+        # scoped. Within each bucket, by tag.
+        kind_order = {"universal": 0, "scoped": 1}
         out.sort(key=lambda a: (kind_order.get(a["kind"], 99), a["tag"]))
         return jsonify({"axes": out})
     except Exception as e:

@@ -9,13 +9,14 @@ contribute variation along that axis.
 The frontend uses ``covers_count / total_glyphs`` to classify each
 axis:
 
-  - ``"universal"`` (~100% coverage)  — stays under AVAR2 MAPPINGS /
-                                         parametric.
-  - ``"scoped"``    (small subset)    — surfaces under CONTROL AXES.
-  - ``"partial"``   (in between)      — flagged as a smell — usually
-                                         the designer forgot to
-                                         author a few glyphs at the
-                                         alternate master.
+  - ``"universal"`` (100% coverage)      — stays under AVAR2 MAPPINGS /
+                                            parametric.
+  - ``"scoped"``    (anything less)       — surfaces under CONTROL AXES.
+
+Anything under 100% is "some glyphs, not all" — whether that's a
+deliberate case-split (Roboto Delta's XOUC) or an accidental
+authoring gap is a designer judgment call, not something a
+threshold on this side can decide reliably.
 
 v2 builds authoring on top of this read; the read API itself stays
 stable.
@@ -46,7 +47,7 @@ def compute_coverage(font: object) -> Dict[str, Dict[str, object]]:
             "covers": ["A", "B", ..., "z"],     # sorted glyph names
             "covers_count": 245,
             "total_glyphs": 245,
-            "kind": "universal" | "scoped" | "partial",
+            "kind": "universal" | "scoped",
           },
           ...
         }
@@ -363,21 +364,11 @@ def _shape_result(
 
 
 def _classify(count: int, total: int) -> str:
-    """``universal`` = full coverage. ``scoped`` = a named subset
-    (case-split, figure-only, crossbar-bearing letters etc.).
-    ``partial`` = nearly full but with gaps — almost always a smell
-    (designer forgot to author a few glyphs at the alternate master).
-
-    Threshold tuned against the Roboto Delta Mini fixture: case-split
-    axes there cover ~26 / 67 glyphs (~40%) and read as scoped to a
-    designer's eye. Anything above 80% is "almost universal" and
-    almost always a missed-glyph bug rather than a designed subset.
+    """``universal`` = 100% coverage. ``scoped`` = anything less
+    (case-split axis, figure-only axis, crossbar-bearing letters,
+    declared-but-unused, or an accidental authoring gap — the
+    classifier can't reliably distinguish those and doesn't try).
     """
     if total == 0 or count == total:
         return "universal"
-    if count == 0:
-        return "scoped"  # declared but unused — surface in CONTROL AXES
-    fraction = count / total
-    if fraction >= 0.8:
-        return "partial"   # close to full — likely a coverage gap
     return "scoped"
