@@ -116,25 +116,44 @@ tool-managed and should be added to your project's `.gitignore`.
 
 ## Axis surface — where each axis appears in the sidebar
 
-The sidebar groups every axis into one of two sections based on how
-many glyphs actually vary along it:
+Every axis lands in one of two sidebar sections. The tool decides by
+looking at how many glyphs actually deform when that axis moves:
 
-| Coverage of glyphs varying | Section | Meaning |
-|---|---|---|
-| 100% | CORE / PARAMETRIC AXES | Every glyph moves with this axis. The universal parametric-designspace surface. |
-| ≥ 80% but < 100% | CONTROL AXES · `partial` badge | Nearly-universal, likely a coverage gap. Usually a smell — designer forgot to author a few glyphs at an alternate master. |
-| < 80% (or 0%) | CONTROL AXES · `scoped` badge | Glyph-scoped by design — only a subset of glyphs varies (case-split, digit-only, crossbar-bearing letters, etc.). |
-| Studio-declared | CONTROL AXES · `studio` badge | New control axis you declared in the studio. Lives in the sidecar until you build. |
+**CORE / PARAMETRIC AXES** — axes that deform *every* glyph in the
+font (100% coverage). These are the "universal" parametric handles —
+what most designers think of when they say "the parametric axes."
+The studio treats them as the base designspace surface, and
+traditional axes get mapped *into* this space via avar2.
 
-This is why the two example fixtures look different in the sidebar:
+**CONTROL AXES** — axes that only deform *some* glyphs. Three
+badges disambiguate why:
 
-- **crispy-mini** — its parametric axes (`XOPQ`/`YOPQ`/`XTRA`) vary
-  every glyph, so they all land under CORE / PARAMETRIC AXES.
-- **roboto-delta-mini** — its parametric axes (`XOUC`/`YOUC`/`XTUC`)
-  only vary the uppercase glyphs by design (Roboto Delta uses
-  case-split axes), so they land under CONTROL AXES with a `scoped`
-  badge. That's the classifier reading Roboto Delta's actual
-  authored surface, not a misclassification.
+- `scoped` — coverage under 80%. The axis was authored to affect
+  a subset by design: Roboto Delta's case-split axes only touch
+  uppercase glyphs; a "crossbar" axis might only touch letters
+  with crossbars (A, E, F, H, T, e, f, t, …); a figure-only axis
+  might only touch digits. Read this as intentional.
+
+- `partial` — coverage between 80% and 100%. Nearly-universal,
+  which usually means it *was* meant to be universal but a few
+  glyphs got missed when authoring the alternate master. Read this
+  as **check your source** — likely a bug, not a design choice.
+  If it *is* deliberate, the badge is harmless and can be ignored.
+
+- `studio` — declared inside avar2-studio (via **+ Add** next to
+  CONTROL AXES) rather than in the source file. Lives in the
+  sibling sidecar (`<basename>-control.json`) until a build writes
+  it into the source. Use this to prototype new axes without
+  editing the .glyphs / .designspace directly.
+
+**The two example fixtures show this in action:**
+
+- **crispy-mini** — `XOPQ` / `YOPQ` / `XTRA` deform every glyph, so
+  they surface under CORE / PARAMETRIC AXES with no badge.
+- **roboto-delta-mini** — `XOUC` / `YOUC` / `XTUC` only touch the
+  uppercase glyphs (Roboto Delta's case-split design), so they
+  surface under CONTROL AXES with a `scoped` badge. Nothing wrong;
+  the classifier is reading Roboto Delta's actual authored coverage.
 
 Classifier logic: [glyph_coverage.py `_classify()`](./src/avar2_studio/glyph_coverage.py).
 
