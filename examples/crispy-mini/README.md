@@ -18,6 +18,15 @@ alongside the matching Roboto Delta walkthrough.
 avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
 ```
 
+**What you'll see in the sidebar:** `XTRA` / `XOPQ` / `YOPQ` land
+under **CORE / PARAMETRIC AXES** — every glyph varies along them, so
+the studio's classifier treats them as universal. Contrast with
+[`roboto-delta-mini`](../roboto-delta-mini/), whose parametric axes
+are uppercase-scoped and appear under CONTROL AXES instead. See the
+[top-level README's "Axis surface"
+section](../../README.md#axis-surface--where-each-axis-appears-in-the-sidebar)
+for the classification rules.
+
 ## Why this exists alongside `roboto-delta-mini`
 
 These two fixtures pair to demonstrate the two main parametric-axis

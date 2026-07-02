@@ -71,11 +71,24 @@ cd avar2-studio
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cd frontend && npm ci && npm run build && cd ..
-avar2-studio /path/to/MyFont.glyphs
+```
+
+Then launch against either bundled example fixture to try it without
+supplying your own source:
+
+```bash
+# .glyphs source, unified parametric axes (all glyphs vary along XOPQ/YOPQ/XTRA)
+avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
+
+# .designspace source, case-split parametric axes (only uppercase varies)
+avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
 ```
 
 The server prints a URL (default `http://localhost:5001`). Open it in
-a browser.
+a browser. First launch takes ~10s while the initial font build runs.
+The two fixtures surface different axis layouts in the sidebar — see
+[Axis surface](#axis-surface--where-each-axis-appears-in-the-sidebar)
+below for why.
 
 ## Usage
 
@@ -100,6 +113,30 @@ file:
 `MyFont-avar.csv` is the designer's authored artifact and should be
 committed alongside the `.glyphs` file. `.avar2-studio/` is
 tool-managed and should be added to your project's `.gitignore`.
+
+## Axis surface — where each axis appears in the sidebar
+
+The sidebar groups every axis into one of two sections based on how
+many glyphs actually vary along it:
+
+| Coverage of glyphs varying | Section | Meaning |
+|---|---|---|
+| 100% | CORE / PARAMETRIC AXES | Every glyph moves with this axis. The universal parametric-designspace surface. |
+| ≥ 80% but < 100% | CONTROL AXES · `partial` badge | Nearly-universal, likely a coverage gap. Usually a smell — designer forgot to author a few glyphs at an alternate master. |
+| < 80% (or 0%) | CONTROL AXES · `scoped` badge | Glyph-scoped by design — only a subset of glyphs varies (case-split, digit-only, crossbar-bearing letters, etc.). |
+| Studio-declared | CONTROL AXES · `studio` badge | New control axis you declared in the studio. Lives in the sidecar until you build. |
+
+This is why the two example fixtures look different in the sidebar:
+
+- **crispy-mini** — its parametric axes (`XOPQ`/`YOPQ`/`XTRA`) vary
+  every glyph, so they all land under CORE / PARAMETRIC AXES.
+- **roboto-delta-mini** — its parametric axes (`XOUC`/`YOUC`/`XTUC`)
+  only vary the uppercase glyphs by design (Roboto Delta uses
+  case-split axes), so they land under CONTROL AXES with a `scoped`
+  badge. That's the classifier reading Roboto Delta's actual
+  authored surface, not a misclassification.
+
+Classifier logic: [glyph_coverage.py `_classify()`](./src/avar2_studio/glyph_coverage.py).
 
 ## Frontend hot-reload (optional)
 

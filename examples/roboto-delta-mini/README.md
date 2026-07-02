@@ -102,6 +102,16 @@ for figures.)
    avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
    ```
 
+   **What you'll see in the sidebar:** `XOUC` / `YOUC` / `XTUC` appear
+   under **CONTROL AXES** with a `scoped` badge, not under CORE /
+   PARAMETRIC AXES. That's not a bug — those axes only vary the
+   uppercase glyphs by design (Roboto Delta is case-split), so their
+   coverage is < 100% and the studio's classifier surfaces them as
+   glyph-scoped. `wght` shows as an AVAR2 MAPPING target since it has
+   no master coverage. See the [top-level README's "Axis surface"
+   section](../../README.md#axis-surface--where-each-axis-appears-in-the-sidebar)
+   for the full classification rules.
+
 3. In the UI, create a few studio-only instances — e.g. `Thin`, `Bold`,
    `Black` — at increasing XOUC/YOUC values. Each row lands in
    `RobotoDeltaMini-avar.csv`, not in the designspace itself.
