@@ -138,8 +138,8 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
   const isUnsynced = syncStatus && !syncStatus.synced;
 
   return (
-    <div className="build-avar2-modal-overlay" onClick={onClose}>
-      <div className="build-avar2-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="build-avar2-modal-overlay">
+      <div className="build-avar2-modal">
         <div className="build-avar2-modal-header">
           <h2>Build Avar2 Font</h2>
           <button className="close-button" onClick={onClose} disabled={building}>×</button>

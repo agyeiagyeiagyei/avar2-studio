@@ -23,8 +23,8 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
   const isDisabled = deleteFromGlyphs && glyphsFileHasUnsavedChanges;
 
   return (
-    <div className="modal-overlay" onClick={handleCancel}>
-      <div className="delete-instance-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="delete-instance-modal">
         <h3>Delete instance</h3>
         <p className="delete-instance-message">
           {deleteFromGlyphs

@@ -154,8 +154,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       : `Add applicable glyphs to ${axisTag}`;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="add-brace-location-modal" onClick={e => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="add-brace-location-modal">
         <h3>{title}</h3>
         <p className="modal-help">
           {isEdit

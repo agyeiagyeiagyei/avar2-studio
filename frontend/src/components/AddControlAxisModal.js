@@ -131,8 +131,8 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="add-control-axis-modal" onClick={e => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="add-control-axis-modal">
         <h3>{isEdit ? `Edit control axis · ${editAxis.tag}` : 'New control axis'}</h3>
         <p className="modal-help">
           {isEdit
