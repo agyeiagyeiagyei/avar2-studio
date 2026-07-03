@@ -33,17 +33,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
   // needs: which axis, what to pre-fill, whether the glyph field is
   // locked (per-glyph add) or open (top-level bulk add).
   const [addLocationFor, setAddLocationFor] = useState(null);
-  // Custom hover tooltip { text, x, y }. Replaces the native `title`
-  // for the extrapolation chip — native titles have a ~1s delay and
-  // are easy to miss, and this is an important diagnostic. Positioned
-  // fixed so the sidebar's overflow doesn't clip it.
-  const [tip, setTip] = useState(null);
-  const showTip = (e, text) => {
-    if (!text) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    setTip({ text, x: r.left, y: r.bottom + 6 });
-  };
-  const hideTip = () => setTip(null);
 
   // Append a batch of new {glyph, location} entries to an axis's
   // ``layers`` list and round-trip through the API.
@@ -136,16 +125,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           const kindBadge = isStudio
             ? null
             : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only some glyphs change as this axis moves.">scoped</span>;
-
-          // Count glyphs whose layer set on THIS axis would
-          // extrapolate at one or both extremes. Same logic as
-          // LayersEditor's classifyGlyphCoverage; rolled up so
-          // the warning is visible at the axis-row level even
-          // when the section's collapsed or the per-glyph blocks
-          // are out of view.
-          const extrapolateCount = isStudio
-            ? countExtrapolatingGlyphs(ax)
-            : 0;
 
           return (
             <div key={ax.tag} className={`control-axis-row ${isDisabled ? 'disabled' : ''}`}>
@@ -276,76 +255,8 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           }}
         />
       )}
-
-      {tip && (
-        <div
-          className="control-axis-tip"
-          style={{ left: tip.x, top: tip.y }}
-          role="tooltip"
-        >
-          {tip.text}
-        </div>
-      )}
     </div>
   );
-}
-
-/**
- * Roll up per-glyph extrapolation diagnostics into one number for
- * an axis. Mirrors LayersEditor's classifyGlyphCoverage logic.
- * A glyph counts as "extrapolating" if, on a side of the default
- * that actually has axis travel (min < default, or max > default):
- *   - there's no layer on that side, OR
- *   - the outermost layer on that side doesn't reach the extreme.
- * A side where the default sits on the extreme (no travel) is never
- * a defect — the master owns that endpoint.
- */
-function countExtrapolatingGlyphs(ax) {
-  if (!ax || !Array.isArray(ax.layers)) return 0;
-  return collectExtrapolating(ax).length;
-}
-
-function collectExtrapolating(ax) {
-  const tag = ax.tag;
-  const byGlyph = new Map();
-  for (const entry of ax.layers) {
-    if (!entry || !entry.glyph) continue;
-    if (!byGlyph.has(entry.glyph)) byGlyph.set(entry.glyph, []);
-    byGlyph.get(entry.glyph).push(entry);
-  }
-  const offenders = [];
-  for (const [glyph, entries] of byGlyph) {
-    let belowVal = null, aboveVal = null;
-    for (const e of entries) {
-      const v = e.location?.[tag];
-      if (v === undefined) continue;
-      if (v < ax.default && (belowVal === null || v < belowVal)) belowVal = v;
-      if (v > ax.default && (aboveVal === null || v > aboveVal)) aboveVal = v;
-    }
-    const hasBelow = belowVal !== null;
-    const hasAbove = aboveVal !== null;
-    const reachesMin = hasBelow && belowVal <= ax.min;
-    const reachesMax = hasAbove && aboveVal >= ax.max;
-    // Mirror LayersEditor: a side of the default with no axis travel
-    // (default sits on that extreme) can't be a coverage defect — the
-    // master owns that endpoint. Only flag sides that actually move.
-    const hasBelowRoom = ax.min < ax.default;
-    const hasAboveRoom = ax.max > ax.default;
-    const belowBad = hasBelowRoom && (!hasBelow || !reachesMin);
-    const aboveBad = hasAboveRoom && (!hasAbove || !reachesMax);
-    if (belowBad || aboveBad) {
-      offenders.push(glyph);
-    }
-  }
-  return offenders;
-}
-
-function extrapolateTooltip(ax) {
-  const offenders = collectExtrapolating(ax);
-  if (offenders.length === 0) return '';
-  const shown = offenders.slice(0, 8).join(', ');
-  const more = offenders.length > 8 ? ` (+${offenders.length - 8} more)` : '';
-  return `Glyphs whose layers don't cover the full ${ax.tag} axis range, so the slider extrapolates at one or both extremes: ${shown}${more}. Expand the axis to see specifics and pin layers to ${ax.min} / ${ax.max}.`;
 }
 
 export default ControlAxes;
