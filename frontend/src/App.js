@@ -492,7 +492,10 @@ function App() {
         url = url + fragment;
         directUrl = directUrl + fragment;
       }
-      setFontraEditor({ url, directUrl, tag, glyphName });
+      const controlValue = (layerLocation && layerLocation[tag] !== undefined)
+        ? Number(layerLocation[tag]) : null;
+      const axisName = ((axes || []).find(a => a.tag === tag) || {}).name || tag;
+      setFontraEditor({ url, directUrl, tag, glyphName, controlValue, axisName });
     } catch (err) {
       setError(err.message || `Failed to open Fontra for "${tag}"`);
     }

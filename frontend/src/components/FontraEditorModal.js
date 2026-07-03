@@ -85,9 +85,10 @@ function FontraEditorModal({ editor, onClose }) {
       />
       <div className="fontra-editor-header">
         <div className="fontra-editor-title">
-          Editing <code>{editor.tag}</code> coverage in Fontra
+          Editing <code>{editor.tag}{editor.controlValue !== null && editor.controlValue !== undefined ? `=${editor.controlValue}` : ''}</code>
+          {editor.glyphName ? <> — glyph <code>{editor.glyphName}</code></> : null}
           <span className="fontra-editor-subtitle">
-            edits land in the shadow .glyphs · close to refresh preview
+            Draw the {editor.axisName || editor.tag} change here. Close to update the preview.
           </span>
         </div>
         <div className="fontra-editor-actions">
