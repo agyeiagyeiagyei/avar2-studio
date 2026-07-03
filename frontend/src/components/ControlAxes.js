@@ -33,6 +33,17 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
   // needs: which axis, what to pre-fill, whether the glyph field is
   // locked (per-glyph add) or open (top-level bulk add).
   const [addLocationFor, setAddLocationFor] = useState(null);
+  // Custom hover tooltip { text, x, y }. Replaces the native `title`
+  // for the extrapolation chip — native titles have a ~1s delay and
+  // are easy to miss, and this is an important diagnostic. Positioned
+  // fixed so the sidebar's overflow doesn't clip it.
+  const [tip, setTip] = useState(null);
+  const showTip = (e, text) => {
+    if (!text) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ text, x: r.left, y: r.bottom + 6 });
+  };
+  const hideTip = () => setTip(null);
 
   // Append a batch of new {glyph, location} entries to an axis's
   // ``layers`` list and round-trip through the API.
@@ -155,7 +166,8 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                 {extrapolateCount > 0 && (
                   <span
                     className="control-axis-extrapolate"
-                    title={extrapolateTooltip(ax)}
+                    onMouseEnter={(e) => showTip(e, extrapolateTooltip(ax))}
+                    onMouseLeave={hideTip}
                   >
                     ⚠ {extrapolateCount} glyph{extrapolateCount === 1 ? '' : 's'} extrapolate{extrapolateCount === 1 ? 's' : ''}
                   </span>
@@ -278,6 +290,16 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
             }
           }}
         />
+      )}
+
+      {tip && (
+        <div
+          className="control-axis-tip"
+          style={{ left: tip.x, top: tip.y }}
+          role="tooltip"
+        >
+          {tip.text}
+        </div>
       )}
     </div>
   );
