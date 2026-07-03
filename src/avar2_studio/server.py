@@ -2723,6 +2723,16 @@ _FONTRA_FOCUSED_CSS = """
     display: none !important;
   }
 
+  /* Inside the designspace-navigation panel, hide the Font axes and
+     Glyph axes accordion sections — the designer edits outlines at
+     the control-axis sources, never the axes themselves. Keep Glyph
+     sources (to pick which source to edit) and Source layers. The
+     accordion items render as elements with id={item-id}. */
+  #font-axes,
+  #glyph-axes {
+    display: none !important;
+  }
+
   /* Edit tools — hide drawing tools, knife, shapes. Keep:
      pointer-tools (selection + drag), power-ruler-tool
      (measure), metrics-tool (sidebearings — kerning sub-tool
