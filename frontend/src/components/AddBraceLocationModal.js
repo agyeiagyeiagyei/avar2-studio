@@ -26,7 +26,7 @@ import './AddBraceLocationModal.css';
  *   lockGlyphs         — if true, the glyph field is read-only
  *                        (per-glyph "+ Add layer for X" sets this)
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, vfFamilyId, fontLoaded }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});           // edit mode: the single location
   const [controlValue, setControlValue] = useState(0);  // add mode: the crbr value
@@ -221,26 +221,29 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 slash-named (<code>/idotless</code>).</>}
         </p>
         <form onSubmit={handleSubmit}>
-          <div className="form-row">
-            <label htmlFor="brace-glyphs">
-              Glyph{parsedGlyphs.length > 1 ? 's' : ''}
-              {parsedGlyphs.length > 0 && (
-                <span className="glyphs-preview">
-                  → {parsedGlyphs.join(', ')}
-                </span>
-              )}
-            </label>
-            <input
-              id="brace-glyphs"
-              type="text"
-              value={glyphsInput}
-              onChange={e => setGlyphsInput(e.target.value)}
-              readOnly={effectiveLockGlyphs}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="e.g. AEFH or /idotless or A E F H"
-            />
-          </div>
+          {/* Glyph field only when it's editable — in the locked modes
+              (per-glyph add, edit) the title already names the glyph. */}
+          {!effectiveLockGlyphs && (
+            <div className="form-row">
+              <label htmlFor="brace-glyphs">
+                Glyph{parsedGlyphs.length > 1 ? 's' : ''}
+                {parsedGlyphs.length > 0 && (
+                  <span className="glyphs-preview">
+                    → {parsedGlyphs.join(', ')}
+                  </span>
+                )}
+              </label>
+              <input
+                id="brace-glyphs"
+                type="text"
+                value={glyphsInput}
+                onChange={e => setGlyphsInput(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. AEFH or /idotless or A E F H"
+              />
+            </div>
+          )}
 
           {isEdit ? (
             /* Edit mode: edit this one layer's exact axis values. */
@@ -321,6 +324,47 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   </div>
                 )}
               </div>
+
+              {/* Live preview — the glyph's starting shape at each
+                  picked location, rendered from the built VF at crbr=0
+                  (there's no brace yet, so crbr doesn't change it). This
+                  is exactly what the seeded layer opens on in Fontra. */}
+              {fontLoaded && vfFamilyId && parsedGlyphs[0] && (() => {
+                const items = [];
+                for (const m of (allMasters || [])) {
+                  if (selectedCorners.has(m.name)) items.push({ label: m.name, coords: m.coordinates });
+                }
+                if (customOn) {
+                  const coords = {};
+                  for (const a of parametricAxes) coords[a.tag] = customPins[a.tag] ?? a.default;
+                  items.push({ label: 'custom', coords });
+                }
+                if (items.length === 0) return null;
+                const fvs = (coords) => Object.entries(coords || {})
+                  .map(([t, v]) => `"${t}" ${t === axisTag ? 0 : Number(v)}`)
+                  .join(', ');
+                return (
+                  <div className="corner-previews">
+                    <div className="location-pins-header">Starting shape · {parsedGlyphs[0]} at each corner</div>
+                    <div className="corner-preview-row">
+                      {items.map((it, i) => (
+                        <div key={i} className="corner-preview-item">
+                          <span
+                            className="corner-preview-glyph"
+                            style={{
+                              fontFamily: `"${vfFamilyId}", sans-serif`,
+                              fontVariationSettings: fvs(it.coords),
+                            }}
+                          >
+                            {parsedGlyphs[0]}
+                          </span>
+                          <span className="corner-preview-label">{it.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           )}
 

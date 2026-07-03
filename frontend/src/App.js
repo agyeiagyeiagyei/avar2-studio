@@ -1872,6 +1872,8 @@ function App() {
             getInstanceSyncStatus={getInstanceSyncStatus}
             instances={instances}
             masters={masters}
+            vfFamilyId={vfFamilyId}
+            fontLoaded={fontLoaded}
             building={building}
           />
           <InstanceRows
