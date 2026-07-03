@@ -474,6 +474,9 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     # Each control axis's index in the eventual axis list (so we can
     # find the right slot when writing brace-layer coordinates).
     axis_index_by_tag: Dict[str, int] = {}
+    # Newly-declared control axes needing a Virtual Master so glyphsLib
+    # gives them a real range (see the Virtual Master block below).
+    new_control_axes: List[Dict] = []
 
     for spec in axes_to_add:
         tag = (spec.get("tag") or "").strip().lower()
@@ -496,6 +499,13 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
         existing_tags.add(tag)
 
         default_value = float(spec.get("default", 0))
+        new_control_axes.append({
+            "name": new_axis.name,
+            "index": axis_index_by_tag[tag],
+            "min": float(spec.get("min", default_value)),
+            "max": float(spec.get("max", default_value)),
+            "default": default_value,
+        })
         for master in font.masters:
             coords = list(getattr(master, "axes", None) or [])
             coords.append(default_value)
@@ -520,6 +530,46 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                 while len(coords) < len(font.axes):
                     coords.append(default_value)
                 attrs["coordinates"] = coords
+
+    # Virtual Masters — the crux of making a control axis EDITABLE in
+    # Fontra. A control axis only varies via brace layers; no master
+    # spans it (every master sits at the axis default). glyphsLib
+    # derives axis ranges from master coordinates, so such an axis
+    # comes out as [default, default] — zero width — and fontra-glyphs
+    # then DROPS it. With the axis gone, brace coordinates mis-map and
+    # several layers collapse onto the same location, which Fontra
+    # demotes to non-editable *background* layers and flags as
+    # "locations must be unique". A Virtual Master declares the axis
+    # extreme(s) without a full master, giving glyphsLib a real range
+    # so the axis survives into Fontra and each brace becomes a
+    # distinct, editable source. One VM per extreme that differs from
+    # the axis default (edge-default axes need only the far extreme;
+    # interior-default axes need both). fontc reads the range from the
+    # axis declaration directly, so the preview build is unaffected.
+    if font.masters and new_control_axes:
+        from glyphsLib.classes import GSCustomParameter
+        base_coords = list(getattr(font.masters[0], "axes", None) or [])
+        axis_labels = [
+            str(getattr(a, "name", "") or getattr(a, "axisTag", "")) for a in font.axes
+        ]
+        for cax in new_control_axes:
+            idx = cax["index"]
+            extremes = []
+            if cax["min"] < cax["default"]:
+                extremes.append(cax["min"])
+            if cax["max"] > cax["default"]:
+                extremes.append(cax["max"])
+            for extreme in extremes:
+                point = list(base_coords)
+                if idx < len(point):
+                    point[idx] = extreme
+                value = [
+                    {"Axis": axis_labels[i], "Location": point[i]}
+                    for i in range(min(len(axis_labels), len(point)))
+                ]
+                font.customParameters.append(
+                    GSCustomParameter("Virtual Master", value)
+                )
 
     # Tag → axis-index map across the full final axis list. Used to
     # resolve sparse {axis_tag: value} dicts from the unified

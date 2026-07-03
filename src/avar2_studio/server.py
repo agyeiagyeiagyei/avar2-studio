@@ -2592,15 +2592,14 @@ def _ensure_fontra_running(content_root: Path) -> int:
     # Different root or dead process — kill + restart.
     _stop_fontra()
 
-    fontra_bin = Path(sys.executable).parent / "fontra"
-    if not fontra_bin.exists():
-        raise RuntimeError(
-            f"fontra command not found at {fontra_bin}. "
-            "Is the fontra package installed in this venv?"
-        )
-
+    # Launch Fontra through our own module so the fontra-glyphs
+    # monkeypatch (control-axis brace-layer editability, see
+    # _fontra_patch) is applied before Fontra reads any font. This
+    # replaces invoking the bare ``fontra`` console script; the CLI
+    # args are identical.
     cmd = [
-        str(fontra_bin),
+        sys.executable,
+        "-m", "avar2_studio._fontra_launch",
         "--http-port", str(FONTRA_PORT),
         "filesystem", str(content_root),
     ]
