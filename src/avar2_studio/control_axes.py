@@ -43,6 +43,7 @@ regen) is future work. See docs/control-axes.md.
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -610,6 +611,88 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             return f"{corner} · {ctrl}"
         return ctrl or (corner or "")
 
+    # Parametric interpolation model. A seeded brace should start as the
+    # glyph's NATURAL shape at its parametric location — not a copy of
+    # the default master. Without this, a brace at a non-default
+    # parametric corner shows the (thin) default-master outline, which
+    # reads as "same as default" in Fontra until edited. We build a
+    # variation model over the real masters' parametric coordinates
+    # (control axes excluded — no masters span them) and interpolate
+    # node positions at the brace's location. Exact at a master corner;
+    # interpolated in between.
+    from fontTools.varLib.models import VariationModel, normalizeLocation
+
+    param_axis_indices = [
+        i for i in range(len(font.axes)) if i not in control_axis_indices
+    ]
+    _param_triples = {}
+    for i in param_axis_indices:
+        vals = [
+            float(m.axes[i])
+            for m in font.masters
+            if i < len(getattr(m, "axes", None) or [])
+        ]
+        if vals:
+            _param_triples[i] = (min(vals), float(font.masters[0].axes[i]), max(vals))
+
+    def _param_norm(coords):
+        loc = {}
+        for i in param_axis_indices:
+            lo, dflt, hi = _param_triples.get(i, (0.0, 0.0, 0.0))
+            v = float(coords[i]) if i < len(coords) else dflt
+            loc[str(i)] = (
+                0.0 if hi == lo
+                else normalizeLocation({str(i): v}, {str(i): (lo, dflt, hi)})[str(i)]
+            )
+        return loc
+
+    try:
+        _interp_model = VariationModel(
+            [_param_norm(list(getattr(m, "axes", None) or [])) for m in font.masters]
+        )
+    except Exception:
+        _interp_model = None
+
+    def _interpolated_seed(glyph, location):
+        """(paths, width) interpolated for a brace at ``location``, or
+        None if the masters aren't outline-compatible for this glyph."""
+        if _interp_model is None:
+            return None
+        mlayers = []
+        for m in font.masters:
+            ml = next(
+                (
+                    l for l in glyph.layers
+                    if l.associatedMasterId == m.id
+                    and not (dict(getattr(l, "attributes", None) or {}).get("coordinates"))
+                ),
+                None,
+            )
+            if ml is None:
+                return None
+            mlayers.append(ml)
+        ref_paths = list(mlayers[0].paths or [])
+        for ml in mlayers:
+            mps = list(ml.paths or [])
+            if len(mps) != len(ref_paths):
+                return None
+            for rp, mp in zip(ref_paths, mps):
+                if len(rp.nodes) != len(mp.nodes):
+                    return None
+        loc = _param_norm(location)
+        new_paths = copy.deepcopy(ref_paths)
+        for pi, rp in enumerate(new_paths):
+            for ni in range(len(rp.nodes)):
+                xs = [float(mlayers[mi].paths[pi].nodes[ni].position.x) for mi in range(len(mlayers))]
+                ys = [float(mlayers[mi].paths[pi].nodes[ni].position.y) for mi in range(len(mlayers))]
+                rp.nodes[ni].position = (
+                    _interp_model.interpolateFromMasters(loc, xs),
+                    _interp_model.interpolateFromMasters(loc, ys),
+                )
+        widths = [float(ml.width) for ml in mlayers]
+        width = _interp_model.interpolateFromMasters(loc, widths)
+        return new_paths, width
+
     # Seed brace layers from the unified ``layers`` list (v2.7).
     # Every brace layer is explicit — auto-seeds at axis-min/max are
     # gone. Designer authored each location through the
@@ -684,20 +767,37 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             preserved = preserved_layers.get(
                 (glyph_name, tuple(float(v) for v in location))
             )
-            if preserved is not None:
+            # Keep a preserved outline only if it's a genuine EDIT — i.e.
+            # it differs from the default master. Old seeds (and this
+            # loop's own fallback) copied the default master, so a
+            # preserved outline that's byte-identical to it is an
+            # unedited seed we should re-interpolate to the glyph's
+            # natural shape at this location. A drawn outline differs
+            # from the master and is preserved.
+            preserved_is_edit = (
+                preserved is not None
+                and _paths_sig(preserved.get("paths")) != _paths_sig(default_layer.paths)
+            )
+            if preserved_is_edit:
                 layer_paths = preserved["paths"]
                 layer_components = preserved["components"]
                 layer_anchors = preserved["anchors"]
                 layer_width = preserved["width"]
             else:
-                layer_paths = list(default_layer.paths) if default_layer.paths else []
+                interp = _interpolated_seed(glyph, location)
+                if interp is not None:
+                    layer_paths, layer_width = interp
+                else:
+                    # Fallback: masters not outline-compatible for this
+                    # glyph — copy the default master.
+                    layer_paths = list(default_layer.paths) if default_layer.paths else []
+                    layer_width = default_layer.width
                 layer_components = (
                     list(default_layer.components) if default_layer.components else []
                 )
                 layer_anchors = (
                     list(default_layer.anchors) if default_layer.anchors else []
                 )
-                layer_width = default_layer.width
 
             brace = GSLayer()
             brace.associatedMasterId = default_master_id
@@ -722,6 +822,17 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
 
     font.save(str(shadow_path))
     return shadow_path
+
+
+def _paths_sig(paths):
+    """A comparable signature of an outline's node positions — used to
+    tell an unedited seed (identical to the default master) from a
+    genuinely drawn outline."""
+    return tuple(
+        (round(float(n.position.x), 2), round(float(n.position.y), 2))
+        for p in (paths or [])
+        for n in (getattr(p, "nodes", None) or [])
+    )
 
 
 def _fmt_coord(value: float) -> str:
