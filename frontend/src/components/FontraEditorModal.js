@@ -91,15 +91,6 @@ function FontraEditorModal({ editor, onClose }) {
           </span>
         </div>
         <div className="fontra-editor-actions">
-          <a
-            href={editor.directUrl || editor.url}
-            target="_blank"
-            rel="noreferrer"
-            className="fontra-editor-popout"
-            title="Open Fontra in a new tab (raw URL, no focused-UI overlay)"
-          >
-            Open in new tab ↗
-          </a>
           <button
             type="button"
             className="fontra-editor-close"

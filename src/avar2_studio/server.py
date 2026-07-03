@@ -2734,6 +2734,7 @@ _FONTRA_FOCUSED_CSS = """
      its light-DOM container instead. */
   .sidebar-tab[data-sidebar-name="text-entry"],
   .sidebar-tab[data-sidebar-name="designspace-navigation"],
+  .sidebar-tab[data-sidebar-name="selection-info"],
   .sidebar-tab[data-sidebar-name="reference-font"],
   .sidebar-tab[data-sidebar-name="glyph-search"],
   .sidebar-tab[data-sidebar-name="selection-transformation"],
@@ -2742,6 +2743,7 @@ _FONTRA_FOCUSED_CSS = """
   .sidebar-tab[data-sidebar-name="characters-glyphs"],
   .sidebar-content[data-sidebar-name="text-entry"],
   .sidebar-content[data-sidebar-name="designspace-navigation"],
+  .sidebar-content[data-sidebar-name="selection-info"],
   .sidebar-content[data-sidebar-name="reference-font"],
   .sidebar-content[data-sidebar-name="glyph-search"],
   .sidebar-content[data-sidebar-name="selection-transformation"],
@@ -2759,6 +2761,7 @@ _FONTRA_FOCUSED_CSS = """
      sidebar, so they survive. Leaves just the canvas + tools. */
   .top-bar-container,
   .sidebar-container.left,
+  .sidebar-container.right,
   menu-bar {
     display: none !important;
   }
