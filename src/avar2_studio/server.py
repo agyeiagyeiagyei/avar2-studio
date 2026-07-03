@@ -2702,16 +2702,19 @@ _atexit.register(_stop_fontra)
 _FONTRA_FOCUSED_CSS = """
 <style id="avar2-studio-fontra-focus">
   /* Panels the designer doesn't need for a control-axis brace
-     edit. Kept: text-entry, selection-info, glyph axes (so they
-     can confirm the location). */
-  .sidebar-tab[data-sidebar-name="designspace-navigation"],
+     edit. Kept: text-entry, selection-info, and — critically —
+     designspace-navigation, which holds the axis-location sliders
+     AND the glyph sources / layers list. Without it there's no way
+     to move between the default master and a brace layer or to
+     target which source an edit lands on, so it must stay visible
+     even though it also surfaces the source's own (Glyphs.app)
+     brace layers. */
   .sidebar-tab[data-sidebar-name="reference-font"],
   .sidebar-tab[data-sidebar-name="glyph-search"],
   .sidebar-tab[data-sidebar-name="selection-transformation"],
   .sidebar-tab[data-sidebar-name="glyph-note"],
   .sidebar-tab[data-sidebar-name="related-glyphs"],
   .sidebar-tab[data-sidebar-name="characters-glyphs"],
-  .sidebar-content[data-sidebar-name="designspace-navigation"],
   .sidebar-content[data-sidebar-name="reference-font"],
   .sidebar-content[data-sidebar-name="glyph-search"],
   .sidebar-content[data-sidebar-name="selection-transformation"],
