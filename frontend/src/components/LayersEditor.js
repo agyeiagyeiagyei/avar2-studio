@@ -19,7 +19,7 @@ import React, { useState } from 'react';
  *   onOpenInEditor     — (tag, glyphName?) => void
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
  */
-function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEditor, onRequestAddModal }) {
+function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -206,6 +206,17 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
                         })}
                         title="Click to edit this brace layer's axis values."
                       >
+                        {fontLoaded && vfFamilyId && (
+                          <span
+                            className="layer-thumb"
+                            style={{
+                              fontFamily: `"${vfFamilyId}", sans-serif`,
+                              fontVariationSettings: fullLoc.map(a => `"${a.tag}" ${a.value}`).join(', '),
+                            }}
+                          >
+                            {glyphName}
+                          </span>
+                        )}
                         <div className="layer-coords">
                           <div className="layer-coords-control">
                             <span

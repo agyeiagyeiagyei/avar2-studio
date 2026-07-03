@@ -194,6 +194,8 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       onChangeLayers={onSetLayers}
                       onOpenInEditor={onOpenInEditor}
                       onRequestAddModal={setAddLocationFor}
+                      vfFamilyId={vfFamilyId}
+                      fontLoaded={fontLoaded}
                     />
                   ) : (
                     <div className="control-axis-glyphs">

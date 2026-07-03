@@ -809,6 +809,27 @@
   transition: background-color 0.12s;
 }
 
+.layer-thumb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 26px;
+  line-height: 1;
+  border: 1px solid #eee;
+  border-radius: 3px;
+  background: #fff;
+  overflow: hidden;
+  color: #333;
+}
+
+.layer-row .layer-coords {
+  flex: 1;
+  min-width: 0;
+}
+
 .layer-row:hover {
   background-color: #f5f8ff;
 }
