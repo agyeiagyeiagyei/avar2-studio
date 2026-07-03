@@ -2719,41 +2719,33 @@ _atexit.register(_stop_fontra)
 # to track.
 _FONTRA_FOCUSED_CSS = """
 <style id="avar2-studio-fontra-focus">
-  /* Panels the designer doesn't need for a control-axis brace
-     edit. Kept: text-entry, selection-info, and — critically —
-     designspace-navigation, which holds the axis-location sliders
-     AND the glyph sources / layers list. Without it there's no way
-     to move between the default master and a brace layer or to
-     target which source an edit lands on, so it must stay visible
-     even though it also surfaces the source's own (Glyphs.app)
-     brace layers. */
+  /* Hide every sidebar panel — Fontra is a pure outline canvas.
+     avar2-studio seeds and manages the control-axis layers (the
+     "Applicable glyphs" section) and navigates Fontra to the exact
+     layer to edit via the ↗ button, so none of Fontra's panels are
+     needed: not the axis sliders, glyph sources, or source layers
+     (designspace-navigation), nor reference-font / glyph-search /
+     transformation / notes / related / characters. The layers still
+     exist and stay editable at the navigated location.
+
+     NOTE: the accordion SECTIONS inside designspace-navigation (the
+     #font-axes / #glyph-sources items) live in a shadow DOM that
+     injected global CSS can't reach — so we hide the whole panel by
+     its light-DOM container instead. */
+  .sidebar-tab[data-sidebar-name="designspace-navigation"],
   .sidebar-tab[data-sidebar-name="reference-font"],
   .sidebar-tab[data-sidebar-name="glyph-search"],
   .sidebar-tab[data-sidebar-name="selection-transformation"],
   .sidebar-tab[data-sidebar-name="glyph-note"],
   .sidebar-tab[data-sidebar-name="related-glyphs"],
   .sidebar-tab[data-sidebar-name="characters-glyphs"],
+  .sidebar-content[data-sidebar-name="designspace-navigation"],
   .sidebar-content[data-sidebar-name="reference-font"],
   .sidebar-content[data-sidebar-name="glyph-search"],
   .sidebar-content[data-sidebar-name="selection-transformation"],
   .sidebar-content[data-sidebar-name="glyph-note"],
   .sidebar-content[data-sidebar-name="related-glyphs"],
   .sidebar-content[data-sidebar-name="characters-glyphs"] {
-    display: none !important;
-  }
-
-  /* Empty out the designspace-navigation panel — Fontra is a pure
-     outline canvas. avar2-studio seeds and manages the control-axis
-     layers (the "Applicable glyphs" section) and navigates Fontra to
-     the exact layer to edit via the ↗ button, so no axis sliders and
-     no source/layer list are needed here. Hides all four accordion
-     sections (they render as elements with id={item-id}); the layers
-     still exist and stay editable at the location the studio
-     navigated to. */
-  #font-axes,
-  #glyph-axes,
-  #glyph-sources,
-  #glyph-source-layers {
     display: none !important;
   }
 
