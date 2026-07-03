@@ -223,19 +223,18 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
             </div>
             {!isCollapsed && (
               <>
-                {needsAttention && (
+                {needsAttention && canPinExtremes && (
                   <div className="layers-glyph-diagnostic">
-                    <div className="diagnostic-text">{describeIssues(coverage)}</div>
-                    {canPinExtremes && (
-                      <button
-                        type="button"
-                        className="diagnostic-pin"
-                        onClick={() => pinExtremesForGlyph(glyphName)}
-                        title={`Push the lowest layer to ${tag}=${axisMin}${coverage.aboveVal !== null && coverage.aboveVal < axisMax ? ` and the highest to ${tag}=${axisMax}` : ''}. Outline data carries over; only the location changes.`}
-                      >
-                        Pin layers to axis extremes
-                      </button>
-                    )}
+                    {/* The explanation lives on the "⚠ extrapolates"
+                        badge tooltip; here we only surface the fix. */}
+                    <button
+                      type="button"
+                      className="diagnostic-pin"
+                      onClick={() => pinExtremesForGlyph(glyphName)}
+                      title={describeIssues(coverage)}
+                    >
+                      Pin layers to axis extremes
+                    </button>
                   </div>
                 )}
                 <ul className="layers-glyph-list">
