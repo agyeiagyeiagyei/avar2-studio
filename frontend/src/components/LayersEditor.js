@@ -102,30 +102,6 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
     }).filter(Boolean).join(' ');
   };
 
-  // "Pin layers to axis extremes" — when a glyph has layers that
-  // don't reach axis-min / axis-max, move the lowest layer to
-  // axis-min and the highest to axis-max. Outlines come along
-  // with the location change; intermediate layers untouched.
-  const pinExtremesForGlyph = async (glyphName) => {
-    if (typeof onChangeLayers !== 'function') return;
-    const cov = classifyGlyphCoverage(byGlyph.get(glyphName) || []);
-    const next = (layers || []).map(entry => {
-      if (entry.glyph !== glyphName) return entry;
-      const v = entry.location[tag];
-      if (v === undefined) return entry;
-      // Lowest layer on the below side → axis.min.
-      if (cov.belowVal !== null && v === cov.belowVal && v > axisMin) {
-        return { ...entry, location: { ...entry.location, [tag]: axisMin } };
-      }
-      // Highest layer on the above side → axis.max.
-      if (cov.aboveVal !== null && v === cov.aboveVal && v < axisMax) {
-        return { ...entry, location: { ...entry.location, [tag]: axisMax } };
-      }
-      return entry;
-    });
-    await onChangeLayers(tag, next);
-  };
-
   const toggleCollapsed = (glyph) => {
     setExpandedSet(prev => {
       const next = new Set(prev);
@@ -193,14 +169,6 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
         const isCollapsed = !expandedSet.has(glyphName);
         const coverage = classifyGlyphCoverage(glyphLayers);
         const needsAttention = !coverage.ok;
-        // The "pin to extremes" affordance only helps when there's a
-        // layer to push — i.e. one or both sides authored but not at
-        // the extreme. A missing side entirely can't be pinned (no
-        // layer to move); designer adds a new one instead.
-        const canPinExtremes = (
-          (coverage.belowVal !== null && coverage.belowVal > axisMin) ||
-          (coverage.aboveVal !== null && coverage.aboveVal < axisMax)
-        );
         return (
           <div key={glyphName} className={`layers-glyph-block ${needsAttention ? 'needs-more' : ''}`}>
             <div
@@ -223,20 +191,6 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
             </div>
             {!isCollapsed && (
               <>
-                {needsAttention && canPinExtremes && (
-                  <div className="layers-glyph-diagnostic">
-                    {/* The explanation lives on the "⚠ extrapolates"
-                        badge tooltip; here we only surface the fix. */}
-                    <button
-                      type="button"
-                      className="diagnostic-pin"
-                      onClick={() => pinExtremesForGlyph(glyphName)}
-                      title={describeIssues(coverage)}
-                    >
-                      Pin layers to axis extremes
-                    </button>
-                  </div>
-                )}
                 <ul className="layers-glyph-list">
                   {glyphLayers.map((entry, i) => {
                     const fullLoc = buildFullLocation(entry.location);
