@@ -2752,8 +2752,13 @@ _FONTRA_FOCUSED_CSS = """
   }
 
   /* Top-level menu bar (File / Edit / View / Font / Glyph / Help).
-     Not needed — the studio drives the editor. ``menu-bar`` is a
-     custom element in the light DOM, so the tag selector reaches it. */
+     Not needed — the studio drives the editor. Hide the whole
+     top-bar strip (its dark background + the menu bar) and the left
+     sidebar container (now empty since all its panels are hidden).
+     The edit tools live in a floating #edit-tools overlay, not a
+     sidebar, so they survive. Leaves just the canvas + tools. */
+  .top-bar-container,
+  .sidebar-container.left,
   menu-bar {
     display: none !important;
   }

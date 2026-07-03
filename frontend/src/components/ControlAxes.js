@@ -163,15 +163,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     {ax.min}…{ax.max}
                   </span>
                 )}
-                {extrapolateCount > 0 && (
-                  <span
-                    className="control-axis-extrapolate"
-                    onMouseEnter={(e) => showTip(e, extrapolateTooltip(ax))}
-                    onMouseLeave={hideTip}
-                  >
-                    ⚠ {extrapolateCount} glyph{extrapolateCount === 1 ? '' : 's'} extrapolate{extrapolateCount === 1 ? 's' : ''}
-                  </span>
-                )}
                 <button
                   className={`control-axis-disable ${isDisabled ? 'on' : ''}`}
                   onClick={(e) => {
@@ -215,12 +206,6 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
               </div>
               {isExpanded && (
                 <div className="control-axis-body">
-                  {isStudio && (
-                    <div className="control-axis-meta">
-                      <span><strong>Range:</strong> {ax.min} … {ax.max}</span>
-                      <span><strong>Default:</strong> {ax.default}</span>
-                    </div>
-                  )}
                   {isStudio && typeof onSetLayers === 'function' ? (
                     <LayersEditor
                       tag={ax.tag}
