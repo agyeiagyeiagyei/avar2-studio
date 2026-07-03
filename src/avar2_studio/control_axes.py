@@ -560,12 +560,12 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                         continue
                 if not pinned_any:
                     continue
-                seed_jobs.append((glyph_name, location))
+                seed_jobs.append((glyph_name, location, dict(pinned)))
 
         # De-duplicate seed jobs — same (glyph, location) added by
         # multiple paths only needs writing once.
         seen_jobs: set = set()
-        for glyph_name, location in seed_jobs:
+        for glyph_name, location, pinned in seed_jobs:
             job_key = (glyph_name, tuple(location))
             if job_key in seen_jobs:
                 continue
@@ -625,6 +625,28 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             brace.anchors = layer_anchors
             brace.width = layer_width
             brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
+
+            # Fontra sidebar label. fontra-glyphs prefers
+            # userData["xyz.fontra.source-name"] over the positional
+            # "{...}" name, so the Glyph-sources list reads "crbr = 20"
+            # instead of "<master> / {94, 2, 2, 20}". Two wins: it's
+            # short (no truncation in Fontra's narrow source column) and
+            # front-loads the axes that actually vary — matching the
+            # studio's own layer-row label and standing out from the
+            # source's native parametric-coordinate master names. Only
+            # the pinned (non-default) axes appear; ordered by axis
+            # index for stable output. The "{...}" name stays for
+            # Glyphs.app / glyphsLib brace recognition.
+            pin_label = ", ".join(
+                f"{t} = {_fmt_coord(float(v))}"
+                for t, v in sorted(
+                    pinned.items(),
+                    key=lambda kv: full_axis_index_by_tag.get(str(kv[0]).lower(), 1_000_000),
+                )
+            )
+            if pin_label:
+                brace.userData["xyz.fontra.source-name"] = pin_label
+
             glyph.layers.append(brace)
 
     font.save(str(shadow_path))
