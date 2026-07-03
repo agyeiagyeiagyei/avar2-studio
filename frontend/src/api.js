@@ -47,6 +47,14 @@ export const api = {
     return parseJSON(response);
   },
 
+  async getMasters() {
+    const response = await fetch(`${API_BASE}/masters`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch masters: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
   async getAxes() {
     const response = await fetch(`${API_BASE}/axes`);
     if (!response.ok) {

@@ -24,7 +24,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allMasters }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -275,7 +275,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           lockGlyphs={addLocationFor.lockGlyphs}
           editLayer={addLocationFor.editLayer}
           allAxes={allAxes || []}
-          allInstances={allInstances || []}
+          allMasters={allMasters || []}
           onCreate={async (entries) => {
             // Edit flow: the LayersEditor row supplied a
             // ``replaceLayer`` callback that swaps the single

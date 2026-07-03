@@ -10,7 +10,7 @@ import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], building = false, glyphCoverageAxes = [], disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.
@@ -212,7 +212,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
       <ControlAxes
         axes={glyphCoverageAxes}
         allAxes={axes}
-        allInstances={instances}
+        allMasters={masters}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}

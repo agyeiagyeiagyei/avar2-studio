@@ -36,6 +36,9 @@ async function encodeFontraFragment(viewInfo) {
 
 function App() {
   const [instances, setInstances] = useState([]);
+  // Parametric master corners — pre-listed in the control-axis brace
+  // flow so the designer places a crbr view at a specific corner.
+  const [masters, setMasters] = useState([]);
   const [axes, setAxes] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [editingCoordinates, setEditingCoordinates] = useState({});
@@ -276,12 +279,14 @@ function App() {
         }
       }
       
-      const [instancesData, axesData] = await Promise.all([
+      const [instancesData, axesData, mastersData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
+        api.getMasters().catch(() => ({ masters: [] })),
       ]);
 
       setInstances(instancesData.instances);
+      setMasters(mastersData.masters || []);
       setAxes(axesData.axes || []);
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
@@ -1863,6 +1868,7 @@ function App() {
             glyphsFileHasUnsavedChanges={glyphsFileHasUnsavedChanges}
             getInstanceSyncStatus={getInstanceSyncStatus}
             instances={instances}
+            masters={masters}
             building={building}
           />
           <InstanceRows

@@ -186,6 +186,50 @@ def get_source_instances(font: object) -> List[Dict]:
     raise TypeError(f"Unexpected font type: {type(font).__name__}")
 
 
+def get_masters(font: object) -> List[Dict]:
+    """Return the source's masters — the parametric design corners.
+
+    Each entry: ``{name, coordinates: {tag: value}}``. The control-axis
+    brace flow pre-lists these so the designer places a crbr layer at a
+    specific corner (narrowest, widest, …). A brace layer is always a
+    full point: a parametric corner × the control-axis value.
+    """
+    if isinstance(font, GSFont):
+        return _masters_from_glyphs(font)
+    if isinstance(font, DesignSpaceDocument):
+        return _masters_from_designspace(font)
+    raise TypeError(f"Unexpected font type: {type(font).__name__}")
+
+
+def _masters_from_glyphs(font: GSFont) -> List[Dict]:
+    axes = font.axes or []
+    out: List[Dict] = []
+    for master in font.masters:
+        coords: Dict[str, float] = {}
+        maxes = list(getattr(master, "axes", None) or [])
+        for i, axis in enumerate(axes):
+            if i < len(maxes):
+                coords[axis.axisTag] = float(maxes[i])
+        out.append({"name": master.name or "Master", "coordinates": coords})
+    return out
+
+
+def _masters_from_designspace(doc: DesignSpaceDocument) -> List[Dict]:
+    name_to_tag = {ax.name: ax.tag for ax in doc.axes}
+    out: List[Dict] = []
+    for src in doc.sources:
+        coords: Dict[str, float] = {}
+        for axis_name, value in (src.location or {}).items():
+            tag = name_to_tag.get(axis_name)
+            if tag is not None:
+                coords[tag] = float(value)
+        out.append({
+            "name": src.name or src.styleName or "Source",
+            "coordinates": coords,
+        })
+    return out
+
+
 def _instances_from_glyphs(font: GSFont) -> List[Dict]:
     axes = font.axes or []
     out: List[Dict] = []

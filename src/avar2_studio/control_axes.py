@@ -577,6 +577,38 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     full_axis_index_by_tag: Dict[str, int] = {}
     for i, ax in enumerate(font.axes):
         full_axis_index_by_tag[str(getattr(ax, "axisTag", "")).lower()] = i
+    tag_by_index = {i: t for t, i in full_axis_index_by_tag.items()}
+
+    # A brace layer is a full point: a parametric master corner × the
+    # control-axis value. Label it by that corner + value, so Fontra
+    # reads "XTRA3330-XOPQ2-YOPQ2 · crbr 20" — the corner design at
+    # crbr=20 — not a generic "crbr = 20".
+    control_axis_indices = set()
+    for spec in axes_to_add:
+        t = str(spec.get("tag") or "").strip().lower()
+        if t in full_axis_index_by_tag:
+            control_axis_indices.add(full_axis_index_by_tag[t])
+    corner_name_by_parametric: Dict[tuple, str] = {}
+    for master in font.masters:
+        maxes = list(getattr(master, "axes", None) or [])
+        param_key = tuple(
+            maxes[i] for i in range(len(maxes)) if i not in control_axis_indices
+        )
+        corner_name_by_parametric[param_key] = master.name
+
+    def _brace_source_label(loc):
+        param_key = tuple(
+            loc[i] for i in range(len(loc)) if i not in control_axis_indices
+        )
+        corner = corner_name_by_parametric.get(param_key)
+        ctrl = ", ".join(
+            f"{tag_by_index.get(i, i)} {_fmt_coord(loc[i])}"
+            for i in sorted(control_axis_indices)
+            if i < len(loc)
+        )
+        if corner and ctrl:
+            return f"{corner} · {ctrl}"
+        return ctrl or (corner or "")
 
     # Seed brace layers from the unified ``layers`` list (v2.7).
     # Every brace layer is explicit — auto-seeds at axis-min/max are
@@ -676,26 +708,15 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             brace.width = layer_width
             brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
 
-            # Fontra sidebar label. fontra-glyphs prefers
+            # Fontra sidebar label: the parametric corner this view
+            # edits + the control-axis value ("XTRA3330-XOPQ2-YOPQ2 ·
+            # crbr 20"). fontra-glyphs prefers
             # userData["xyz.fontra.source-name"] over the positional
-            # "{...}" name, so the Glyph-sources list reads "crbr = 20"
-            # instead of "<master> / {94, 2, 2, 20}". Two wins: it's
-            # short (no truncation in Fontra's narrow source column) and
-            # front-loads the axes that actually vary — matching the
-            # studio's own layer-row label and standing out from the
-            # source's native parametric-coordinate master names. Only
-            # the pinned (non-default) axes appear; ordered by axis
-            # index for stable output. The "{...}" name stays for
-            # Glyphs.app / glyphsLib brace recognition.
-            pin_label = ", ".join(
-                f"{t} = {_fmt_coord(float(v))}"
-                for t, v in sorted(
-                    pinned.items(),
-                    key=lambda kv: full_axis_index_by_tag.get(str(kv[0]).lower(), 1_000_000),
-                )
-            )
-            if pin_label:
-                brace.userData["xyz.fontra.source-name"] = pin_label
+            # "{...}" name; the "{...}" name stays for glyphsLib brace
+            # recognition.
+            source_label = _brace_source_label(location)
+            if source_label:
+                brace.userData["xyz.fontra.source-name"] = source_label
 
             glyph.layers.append(brace)
 

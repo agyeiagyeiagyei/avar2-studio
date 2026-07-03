@@ -562,6 +562,25 @@ def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates
         return False
 
 
+@app.route('/api/masters', methods=['GET'])
+def get_masters():
+    """Return the source's masters — the parametric design corners.
+
+    Pre-listed in the control-axis brace flow so the designer places a
+    crbr layer at a specific corner. Read from the active source
+    (shadow when control axes are live); master parametric coordinates
+    are identical either way.
+    """
+    if GLYPHS_PATH is None:
+        return jsonify({"masters": []})
+    try:
+        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        return jsonify({"masters": _source_font.get_masters(font)})
+    except Exception as e:
+        print(f"Error reading masters: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/instances', methods=['GET'])
 def get_instances():
     """Return source-defined + studio-only instances with origin tags.

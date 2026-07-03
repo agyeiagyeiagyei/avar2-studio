@@ -26,12 +26,19 @@ import './AddBraceLocationModal.css';
  *   lockGlyphs         — if true, the glyph field is read-only
  *                        (per-glyph "+ Add layer for X" sets this)
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allInstances, prefillGlyphs, lockGlyphs, editLayer }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer }) {
   const [glyphsInput, setGlyphsInput] = useState('');
-  const [pins, setPins] = useState({});
-  const [baseInstance, setBaseInstance] = useState('');  // instance name or '' (no baseline)
+  const [pins, setPins] = useState({});           // edit mode: the single location
+  const [controlValue, setControlValue] = useState(0);  // add mode: the crbr value
+  const [selectedCorners, setSelectedCorners] = useState(() => new Set()); // master names
+  const [customOn, setCustomOn] = useState(false); // add a custom (non-corner) location
+  const [customPins, setCustomPins] = useState({}); // parametric coords for the custom point
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Parametric axes (everything except the control axis) — the corner
+  // picker fixes these; the custom-location sliders edit them.
+  const parametricAxes = (allAxes || []).filter(a => a.tag !== axisTag);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -52,46 +59,66 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     } else {
       setGlyphsInput(prefillGlyphs || '');
       const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
-      // Seed the control pin to a NON-default value so the modal
-      // opens valid. Using axis.min blindly breaks when min == default
-      // (e.g. an axis edited to 0…40 with default 0): the seed would
-      // land on the default and the designer would hit the "pin to
-      // non-default" error before touching anything.
-      setPins(controlAxis ? { [axisTag]: seedControlValue(controlAxis) } : {});
+      // Seed the control value to a NON-default value so the modal
+      // opens valid (using axis.min breaks when min == default).
+      setControlValue(controlAxis ? seedControlValue(controlAxis) : 0);
+      setPins({});
     }
-    setBaseInstance('');
+    setSelectedCorners(new Set());
+    setCustomOn(false);
+    // Custom point starts at each parametric axis's default.
+    const cp = {};
+    for (const a of (allAxes || [])) {
+      if (a.tag !== axisTag) cp[a.tag] = Number(a.default);
+    }
+    setCustomPins(cp);
     setError(null);
     setSubmitting(false);
   }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer]);
 
-  // Clear any stale validation / submit error the moment the designer
-  // edits the glyphs or pins — the banner shouldn't linger after the
-  // underlying problem is fixed (submit doesn't touch these, so a real
-  // submit error stays visible until the next edit).
+  // Clear any stale error the moment the designer changes an input.
   useEffect(() => {
     setError(null);
-  }, [glyphsInput, pins]);
+  }, [glyphsInput, controlValue, selectedCorners, customOn, customPins, pins]);
 
-  // Pick an instance as the baseline location. Fills in pins for
-  // every parametric axis the instance declares; control axis stays
-  // at whatever the designer set (axis-min by default). User-friendly
-  // mental model: "give me a brace AT THE BOLD INSTANCE, with crbr=-100"
-  // instead of "give me a brace at (180, 300, 200, -100)."
-  const handlePickInstance = (instanceName) => {
-    setBaseInstance(instanceName);
-    if (!instanceName) return;
-    const inst = (allInstances || []).find(i => i.name === instanceName);
-    if (!inst || !inst.coordinates) return;
-    setPins(prev => {
-      const next = { ...prev };
-      for (const [tag, value] of Object.entries(inst.coordinates)) {
-        // Don't override the control axis from an instance — its
-        // value comes from the designer's intent for this brace.
-        if (tag === axisTag) continue;
-        next[tag] = Number(value);
-      }
+  const isEdit = !!editLayer;
+
+  // Add mode: toggle a master corner in/out of the selection.
+  const toggleCorner = (name) => {
+    setSelectedCorners(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
       return next;
     });
+  };
+  const setCustomPinValue = (tag, value) => {
+    setCustomPins(prev => ({ ...prev, [tag]: parseFloat(value) }));
+  };
+
+  // Add mode: the parametric locations to create a view at — each
+  // ticked corner, plus the custom point if enabled. A brace layer is
+  // a full point: this parametric location × the control-axis value.
+  const buildLocations = () => {
+    const locs = [];
+    for (const m of (allMasters || [])) {
+      if (!selectedCorners.has(m.name)) continue;
+      const parametric = {};
+      for (const [tag, v] of Object.entries(m.coordinates || {})) {
+        if (tag === axisTag) continue;
+        parametric[tag] = Number(v);
+      }
+      locs.push(parametric);
+    }
+    if (customOn) {
+      const parametric = {};
+      for (const [tag, v] of Object.entries(customPins)) {
+        const n = Number(v);
+        if (Number.isFinite(n)) parametric[tag] = n;
+      }
+      locs.push(parametric);
+    }
+    return locs;
   };
 
   if (!isOpen) return null;
@@ -122,39 +149,52 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       setError('Enter at least one glyph');
       return;
     }
-    if (!(axisTag in pins)) {
-      setError(`Pin ${axisTag} — the control axis must be non-default`);
+
+    if (isEdit) {
+      // Edit mode keeps the single-location pin editor.
+      if (!(axisTag in pins) || Number(pins[axisTag]) === Number(axisDefault)) {
+        setError(`Set ${axisTag} to a non-default value (not ${axisDefault})`);
+        return;
+      }
+      const loc = {};
+      for (const [t, v] of Object.entries(pins)) {
+        const n = Number(v);
+        if (Number.isFinite(n)) loc[t] = n;
+      }
+      const entries = parsedGlyphs.map(g => ({ glyph: g, location: loc }));
+      setSubmitting(true);
+      try { await onCreate(entries); onClose(); }
+      catch (err) { setError(err.message || 'Failed to update layer'); }
+      finally { setSubmitting(false); }
       return;
     }
-    if (Number(pins[axisTag]) === Number(axisDefault)) {
-      setError(`Pin ${axisTag} to something other than its default (${axisDefault})`);
+
+    // Add mode: control value must be non-default, and at least one
+    // parametric location (corner or custom) is required.
+    if (Number(controlValue) === Number(axisDefault)) {
+      setError(`Set ${axisTag} to a non-default value (not ${axisDefault})`);
       return;
     }
-    // Keep sidecar storage sparse: only persist axes whose value
-    // differs from the axis default. The control axis is always
-    // persisted (it's the whole point of the brace layer).
-    const axisDefaultsByTag = new Map((allAxes || []).map(a => [a.tag, Number(a.default)]));
-    const cleanPins = {};
-    for (const [t, v] of Object.entries(pins)) {
-      const n = Number(v);
-      if (!Number.isFinite(n)) continue;
-      const def = axisDefaultsByTag.get(t);
-      if (t !== axisTag && def !== undefined && n === def) continue;
-      cleanPins[t] = n;
+    const locations = buildLocations();
+    if (locations.length === 0) {
+      setError('Pick at least one master corner (or add a custom location)');
+      return;
     }
-    const entries = parsedGlyphs.map(g => ({ glyph: g, location: cleanPins }));
+    // One brace layer per glyph × location: the parametric point + the
+    // control-axis value. Stored as a full location so it lands exactly
+    // at the chosen corner.
+    const entries = [];
+    for (const g of parsedGlyphs) {
+      for (const parametric of locations) {
+        entries.push({ glyph: g, location: { ...parametric, [axisTag]: Number(controlValue) } });
+      }
+    }
     setSubmitting(true);
-    try {
-      await onCreate(entries);
-      onClose();
-    } catch (err) {
-      setError(err.message || (editLayer ? 'Failed to update layer' : 'Failed to add layers'));
-    } finally {
-      setSubmitting(false);
-    }
+    try { await onCreate(entries); onClose(); }
+    catch (err) { setError(err.message || 'Failed to add layers'); }
+    finally { setSubmitting(false); }
   };
 
-  const isEdit = !!editLayer;
   const effectiveLockGlyphs = !!lockGlyphs || isEdit;
   // Three modes, three titles. Edit: editing one existing layer's
   // location. Per-glyph add (glyph locked): adding another extreme
@@ -174,11 +214,11 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
           {isEdit
             ? 'Change the axis values for this layer. The outline data carries over — only the location changes.'
             : effectiveLockGlyphs
-              ? <>Add another axis-extreme layer for <code>{prefillGlyphs}</code>. Pin the axes that should define this stop.</>
-              : <>Declare which glyphs this axis applies to, and at what axis extreme.
-                Type plain characters (<code>AEFH</code>) or
-                slash-named glyphs (<code>/idotless</code>). Mix and match
-                allowed. Whitespace / commas are optional separators.</>}
+              ? <>Add {axisTag} views for <code>{prefillGlyphs}</code> — one editable layer per master corner you tick.</>
+              : <>Each view is one editable layer: a master corner × the {axisTag} value.
+                Set the {axisTag} value, tick the corners to define it at, then edit
+                each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>) or
+                slash-named (<code>/idotless</code>).</>}
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
@@ -202,91 +242,103 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             />
           </div>
 
-          {(allInstances || []).length > 0 && (
-            <div className="form-row">
-              <label htmlFor="base-instance">
-                Base on existing instance
-                <span className="form-row-hint">
-                  optional · pre-fills parametric axes from an instance's coordinates
-                </span>
-              </label>
-              <select
-                id="base-instance"
-                value={baseInstance}
-                onChange={e => handlePickInstance(e.target.value)}
-              >
-                <option value="">— none (set axes manually) —</option>
-                {(allInstances || []).map(inst => (
-                  <option key={inst.name} value={inst.name}>
-                    {inst.name}
-                    {inst.origin === 'studio' ? ' · studio' : ''}
-                  </option>
-                ))}
-              </select>
+          {isEdit ? (
+            /* Edit mode: edit this one layer's exact axis values. */
+            <div className="location-pins">
+              <div className="location-pins-header">Axis values</div>
+              {(allAxes || []).map(axis => {
+                const isPinned = axis.tag in pins;
+                const isControlAxis = axis.tag === axisTag;
+                const currentValue = isPinned ? pins[axis.tag] : axis.default;
+                const step = (axis.max - axis.min) / 1000;
+                return (
+                  <div key={axis.tag} className={`location-pin-row ${isPinned ? 'pinned' : ''} ${isControlAxis ? 'control-axis' : ''}`}>
+                    <label className="pin-toggle">
+                      <input type="checkbox" checked={isPinned} onChange={() => togglePin(axis)} disabled={isControlAxis} />
+                      <span className="pin-tag">{axis.tag}</span>
+                    </label>
+                    <div className="pin-slider-wrap">
+                      <input type="range" className="pin-slider" disabled={!isPinned} min={axis.min} max={axis.max} step={step > 0 ? step : 0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
+                      <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
+                    </div>
+                    <input type="number" className="pin-value" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
+                  </div>
+                );
+              })}
             </div>
-          )}
-
-          <div className="location-pins">
-            <div className="location-pins-header">Axis pins</div>
-            {(allAxes || []).map(axis => {
-              const isPinned = axis.tag in pins;
-              const isControlAxis = axis.tag === axisTag;
-              const currentValue = isPinned ? pins[axis.tag] : axis.default;
-              const step = (axis.max - axis.min) / 1000;
-              return (
-                <div
-                  key={axis.tag}
-                  className={`location-pin-row ${isPinned ? 'pinned' : ''} ${isControlAxis ? 'control-axis' : ''}`}
-                >
-                  <label className="pin-toggle">
-                    <input
-                      type="checkbox"
-                      checked={isPinned}
-                      onChange={() => togglePin(axis)}
-                      disabled={isControlAxis}
-                      title={isControlAxis ? 'Required — pinning the control axis is what makes this a brace layer.' : ''}
-                    />
-                    <span className="pin-tag">{axis.tag}</span>
-                  </label>
-                  <div className="pin-slider-wrap">
-                    <input
-                      type="range"
-                      className="pin-slider"
-                      disabled={!isPinned}
-                      min={axis.min}
-                      max={axis.max}
-                      step={step > 0 ? step : 0.1}
-                      value={currentValue}
-                      onChange={e => setPinValue(axis.tag, e.target.value)}
-                    />
-                    <div className="pin-slider-ticks">
-                      <span>{axis.min}</span>
-                      <span>{axis.max}</span>
+          ) : (
+            <>
+              {/* Add mode: control-axis value, then the master corners
+                  to create a view at (each ticked corner + optional
+                  custom location = one editable brace layer). */}
+              {(() => {
+                const ctrl = (allAxes || []).find(a => a.tag === axisTag) || { min: 0, max: 0 };
+                const step = (ctrl.max - ctrl.min) / 1000;
+                return (
+                  <div className="form-row">
+                    <label>
+                      {axisTag} value
+                      <span className="form-row-hint">the control-axis position these views define</span>
+                    </label>
+                    <div className="control-value-row">
+                      <input type="range" min={ctrl.min} max={ctrl.max} step={step > 0 ? step : 0.1} value={controlValue} onChange={e => setControlValue(parseFloat(e.target.value))} />
+                      <input type="number" className="pin-value" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(parseFloat(e.target.value))} />
                     </div>
                   </div>
-                  <input
-                    type="number"
-                    className="pin-value"
-                    disabled={!isPinned}
-                    min={axis.min}
-                    max={axis.max}
-                    step={0.1}
-                    value={currentValue}
-                    onChange={e => setPinValue(axis.tag, e.target.value)}
-                  />
+                );
+              })()}
+
+              <div className="corner-picker">
+                <div className="location-pins-header">Master corners · one view per corner</div>
+                <div className="corner-list">
+                  {(allMasters || []).map(m => (
+                    <label key={m.name} className={`corner-item ${selectedCorners.has(m.name) ? 'selected' : ''}`}>
+                      <input type="checkbox" checked={selectedCorners.has(m.name)} onChange={() => toggleCorner(m.name)} />
+                      <span className="corner-name">{m.name}</span>
+                    </label>
+                  ))}
+                  {(allMasters || []).length === 0 && (
+                    <div className="corner-empty">No masters found — use a custom location below.</div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
+                <label className={`corner-item corner-custom ${customOn ? 'selected' : ''}`}>
+                  <input type="checkbox" checked={customOn} onChange={() => setCustomOn(v => !v)} />
+                  <span className="corner-name">Custom location…</span>
+                </label>
+                {customOn && (
+                  <div className="location-pins">
+                    {parametricAxes.map(axis => {
+                      const step = (axis.max - axis.min) / 1000;
+                      const val = customPins[axis.tag] ?? axis.default;
+                      return (
+                        <div key={axis.tag} className="location-pin-row pinned">
+                          <span className="pin-tag">{axis.tag}</span>
+                          <div className="pin-slider-wrap">
+                            <input type="range" className="pin-slider" min={axis.min} max={axis.max} step={step > 0 ? step : 0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
+                            <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
+                          </div>
+                          <input type="number" className="pin-value" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           <div className="location-preview">
             <strong>{isEdit ? 'New location:' : 'Will create:'}</strong>{' '}
             <code>
               {isEdit
                 ? `${parsedGlyphs[0] || ''} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
-                : parsedGlyphs.length === 0
-                  ? '(no glyphs)'
-                  : `${parsedGlyphs.length} glyph${parsedGlyphs.length === 1 ? '' : 's'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`}
+                : (() => {
+                    const nLoc = selectedCorners.size + (customOn ? 1 : 0);
+                    const nViews = parsedGlyphs.length * nLoc;
+                    if (parsedGlyphs.length === 0) return '(no glyphs)';
+                    if (nLoc === 0) return '(pick a corner)';
+                    return `${nViews} view${nViews === 1 ? '' : 's'} @ ${axisTag}=${controlValue} · ${nLoc} corner${nLoc === 1 ? '' : 's'} × ${parsedGlyphs.length} glyph${parsedGlyphs.length === 1 ? '' : 's'}`;
+                  })()}
             </code>
           </div>
 
@@ -301,9 +353,10 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 ? (isEdit ? 'Saving…' : 'Adding…')
                 : isEdit
                   ? 'Save changes'
-                  : effectiveLockGlyphs
-                    ? `Add layer for ${prefillGlyphs || ''}`.trim()
-                    : `Add ${parsedGlyphs.length || ''} glyph${parsedGlyphs.length === 1 ? '' : 's'}`.trim()}
+                  : (() => {
+                      const nViews = parsedGlyphs.length * (selectedCorners.size + (customOn ? 1 : 0));
+                      return `Add ${nViews || ''} view${nViews === 1 ? '' : 's'}`.trim();
+                    })()}
             </button>
           </div>
         </form>
