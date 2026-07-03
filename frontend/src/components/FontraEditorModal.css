@@ -64,6 +64,31 @@
   border-radius: 3px;
 }
 
+/* One-line layer label, styled like the sidebar's "crbr = 40". */
+.fontra-editor-layer {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #5b3a8f;
+}
+.fontra-editor-layer .fel-glyph {
+  font-weight: 700;
+}
+.fontra-editor-layer .fel-sep {
+  color: #b9a7d6;
+}
+.fontra-editor-layer .fel-tag {
+  font-weight: 700;
+}
+.fontra-editor-layer .fel-eq {
+  color: #888;
+}
+.fontra-editor-layer .fel-val {
+  font-weight: 600;
+}
+
 .fontra-editor-subtitle {
   font-size: 0.65rem;
   color: #888;

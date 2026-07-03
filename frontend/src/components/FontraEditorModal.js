@@ -85,8 +85,19 @@ function FontraEditorModal({ editor, onClose }) {
       />
       <div className="fontra-editor-header">
         <div className="fontra-editor-title">
-          Editing <code>{editor.tag}{editor.controlValue !== null && editor.controlValue !== undefined ? `=${editor.controlValue}` : ''}</code>
-          {editor.glyphName ? <> — glyph <code>{editor.glyphName}</code></> : null}
+          <span className="fontra-editor-layer">
+            {editor.glyphName && <span className="fel-glyph">{editor.glyphName}</span>}
+            {editor.glyphName && editor.controlValue !== null && editor.controlValue !== undefined && (
+              <span className="fel-sep">•</span>
+            )}
+            {editor.controlValue !== null && editor.controlValue !== undefined && (
+              <>
+                <span className="fel-tag">{editor.tag}</span>
+                <span className="fel-eq">=</span>
+                <span className="fel-val">{editor.controlValue}</span>
+              </>
+            )}
+          </span>
           <span className="fontra-editor-subtitle">
             Draw the {editor.axisName || editor.tag} change here. Close to update the preview.
           </span>
