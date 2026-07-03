@@ -2732,6 +2732,7 @@ _FONTRA_FOCUSED_CSS = """
      #font-axes / #glyph-sources items) live in a shadow DOM that
      injected global CSS can't reach — so we hide the whole panel by
      its light-DOM container instead. */
+  .sidebar-tab[data-sidebar-name="text-entry"],
   .sidebar-tab[data-sidebar-name="designspace-navigation"],
   .sidebar-tab[data-sidebar-name="reference-font"],
   .sidebar-tab[data-sidebar-name="glyph-search"],
@@ -2739,6 +2740,7 @@ _FONTRA_FOCUSED_CSS = """
   .sidebar-tab[data-sidebar-name="glyph-note"],
   .sidebar-tab[data-sidebar-name="related-glyphs"],
   .sidebar-tab[data-sidebar-name="characters-glyphs"],
+  .sidebar-content[data-sidebar-name="text-entry"],
   .sidebar-content[data-sidebar-name="designspace-navigation"],
   .sidebar-content[data-sidebar-name="reference-font"],
   .sidebar-content[data-sidebar-name="glyph-search"],
@@ -2746,6 +2748,13 @@ _FONTRA_FOCUSED_CSS = """
   .sidebar-content[data-sidebar-name="glyph-note"],
   .sidebar-content[data-sidebar-name="related-glyphs"],
   .sidebar-content[data-sidebar-name="characters-glyphs"] {
+    display: none !important;
+  }
+
+  /* Top-level menu bar (File / Edit / View / Font / Glyph / Help).
+     Not needed — the studio drives the editor. ``menu-bar`` is a
+     custom element in the light DOM, so the tag selector reaches it. */
+  menu-bar {
     display: none !important;
   }
 
