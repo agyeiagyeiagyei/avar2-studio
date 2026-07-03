@@ -51,6 +51,9 @@ function App() {
   const [sampleText, setSampleText] = useState(DEFAULT_SAMPLE_TEXT);
   const [fontSize, setFontSize] = useState(2); // Default 2rem
   const [familyName, setFamilyName] = useState(null);
+  // "glyphs" | "designspace" | null — from /api/health. Gates
+  // control-axis authoring, which is .glyphs-only for now.
+  const [sourceFormat, setSourceFormat] = useState(null);
   // Font family used for FontFace registration; comes from /api/health so the
   // tool works on any .glyphs file, not just Crispy.
   const [vfFamilyId, setVfFamilyId] = useState(null);
@@ -252,6 +255,7 @@ function App() {
       if (!health.glyphs_path) {
         setFontLoaded(false);
         setFamilyName(null);
+        setSourceFormat(null);
         setInstances([]);
         setAxes([]);
         setLoading(false);
@@ -281,6 +285,7 @@ function App() {
       setAxes(axesData.axes || []);
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
+      setSourceFormat(health.source_format || null);
       setVfFamilyId(health.vf_family_id || (health.family_name ? `${health.family_name}-VF` : null));
       setBuiltFontFilename(health.built_font_filename || null);
       setLastBuildTime(health.last_build_time || null);
@@ -340,10 +345,10 @@ function App() {
     }
   };
 
-  // CONTROL AXES — v1 read-only fetch. Categorised server-side as
-  // universal / scoped / partial; the Sidebar's ControlAxes component
-  // filters to scoped + partial and hides the section if neither
-  // exists. Reloaded whenever the source changes (load-source swap).
+  // CONTROL AXES — coverage fetch. Categorised server-side as
+  // universal / scoped; the Sidebar's ControlAxes component filters
+  // to scoped and hides the section if none exist (and there's no
+  // declare affordance). Reloaded whenever the source changes.
   const loadGlyphCoverage = async () => {
     try {
       const data = await api.getGlyphCoverage();
@@ -1844,6 +1849,11 @@ function App() {
             onCreateControlAxis={handleCreateControlAxis}
             onUpdateControlAxis={handleUpdateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
+            controlAxisAuthoringDisabledReason={
+              sourceFormat && sourceFormat !== 'glyphs'
+                ? 'Control-axis authoring is only supported for .glyphs sources right now. .designspace brace-layer authoring is not yet implemented.'
+                : null
+            }
             onSetControlAxisLayers={handleSetControlAxisLayers}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}

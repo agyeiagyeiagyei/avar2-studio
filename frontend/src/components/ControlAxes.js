@@ -4,16 +4,18 @@ import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
 
 /**
- * CONTROL AXES panel — v1 read-only.
+ * CONTROL AXES panel.
  *
  * Renders the axes the backend's /api/glyph-coverage endpoint
- * classified as ``scoped`` or ``partial`` (glyph-scoped variation,
- * not universal-via-masters). Each row is expandable to show the
- * coverage glyph list and per-axis preview-disable toggle.
+ * classified as ``scoped`` (glyph-scoped variation, not
+ * universal-via-masters). Source-derived scoped axes are read-only;
+ * studio-declared ones get add/edit/delete + brace-layer authoring.
+ * Each row expands to show its applicable glyphs and a per-axis
+ * preview-disable toggle.
  *
- * Hidden entirely when there are no scoped/partial axes — most
- * fonts (pure-parametric Crispy etc.) shouldn't see this section
- * at all.
+ * Hidden entirely when there are no scoped axes and no declare
+ * affordance — pure-parametric fonts (Crispy etc.) shouldn't see
+ * this section at all.
  *
  * Props:
  *   axes            — full array from /api/glyph-coverage
@@ -22,7 +24,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allInstances }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -96,13 +98,15 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onEditAx
           <button
             type="button"
             className="control-axes-add-btn"
+            disabled={!!addDisabledReason}
             onClick={(e) => {
               e.stopPropagation();
+              if (addDisabledReason) return;
               onAddClick();
               // Open the section so the new axis is visible after creation.
               setSectionOpen(true);
             }}
-            title="Declare a new control axis (designer-named axis with min/max). Coverage glyphs and brace-layer authoring arrive in later v2 slices."
+            title={addDisabledReason || 'Declare a new control axis (designer-named axis with a chosen min/max/default). Author its applicable glyphs + brace layers after creating it.'}
           >
             + Add
           </button>
@@ -114,7 +118,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, onEditAx
           const isExpanded = resolvedExpandedTags.has(ax.tag);
           const isDisabled = disabledAxes.has(ax.tag);
           const isStudio = ax.source === 'studio';
-          // Source-derived axes keep scoped/partial — that's the
+          // Source-derived axes keep the "scoped" badge — the
           // meaningful "does it vary all glyphs or a subset?" signal.
           // Studio axes show no kind badge: by construction they're
           // glyph-scoped, and the "studio" origin was redundant.

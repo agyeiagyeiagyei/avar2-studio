@@ -1,11 +1,9 @@
-"""Control axes — sidecar JSON I/O (v2 slice 1).
+"""Control axes — sidecar JSON I/O.
 
 A **control axis** is one the designer declares in the studio (not in
 the source file) with their own min/max/default. The declaration
 lives in a sibling JSON file, ``<basename>-control.json``, parallel
-to ``<basename>-avar.csv``. Coverage glyphs + brace-layer outline
-snapshots arrive in later v2 slices; v2.0 only handles the axis
-declaration itself.
+to ``<basename>-avar.csv``.
 
 Schema (versioned)::
 
@@ -18,15 +16,29 @@ Schema (versioned)::
           "default": 0,
           "min": -100,
           "max": 100,
-          "coverage": [],     // empty in v2.0; populated in v2.1
-          "layers": {}        // empty in v2.0; populated by Fontra captures
+          "layers": [                          // flat list, one per brace layer
+            {"glyph": "e", "location": {"crbr": -100}},
+            {"glyph": "e", "location": {"crbr": 100}},
+            {"glyph": "f", "location": {"crbr": 100, "XOPQ": 78}}
+          ]
         }
       ]
     }
 
-Model α (from the design doc): the sidecar is **canonical**. The
-shadow source file (v2.x) is derived from ``original + sidecar``;
-wiping ``.avar2-studio/`` regenerates it.
+``layers`` is a flat per-axis list of ``{glyph, location}`` — NOT a
+per-glyph object, and it stores no outline/glif data. ``location`` is
+sparse (only pinned axes) and keyed by axis tag. Coverage is derived
+from the unique glyph names in ``layers``; it is not stored. (Legacy
+``coverage`` + ``extra_locations`` keys are migrated into ``layers``
+on load by ``_normalise`` and never re-emitted.)
+
+Outline storage is **model β, best-effort**, not the design doc's
+model α: drawn brace outlines live only in the shadow ``.glyphs`` and
+are preserved across regeneration by reading the previous shadow —
+they are never captured into this sidecar. Wiping ``.avar2-studio/``
+therefore loses drawn outlines (they re-seed as default-master
+copies). Model α (sidecar-canonical outlines, full no-data-loss
+regen) is future work. See docs/control-axes.md.
 """
 
 from __future__ import annotations

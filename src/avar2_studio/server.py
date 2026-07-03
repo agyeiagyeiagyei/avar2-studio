@@ -2510,6 +2510,17 @@ def create_control_axis():
     """
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
+    # Control-axis authoring is .glyphs-only for now. On a .designspace
+    # source ``regenerate_shadow`` silently returns None, so the axis
+    # would land in the sidecar as a no-op slider that can never be
+    # authored (no shadow, no "Open in editor"). Reject it up front
+    # with a clear message rather than let that dead state accrue.
+    if SOURCE_FORMAT and SOURCE_FORMAT != "glyphs":
+        return jsonify({
+            "error": "Control-axis authoring is only supported for .glyphs "
+                     "sources right now. .designspace brace-layer authoring "
+                     "(via pooled UFO masters) is not yet implemented.",
+        }), 400
     data = request.get_json(silent=True) or {}
     try:
         entry = _control_axes.add_axis(
@@ -3120,14 +3131,17 @@ def delete_control_axis(tag: str):
             return jsonify({"error": f"control axis '{tag}' not found"}), 404
 
         # Re-derive the shadow + build target. If the sidecar still
-        # has any axis with coverage, shadow stays active. Otherwise
-        # the shadow can be dropped and the build reverts to the
-        # original.
+        # has any axis with brace layers, the shadow stays active.
+        # Otherwise the shadow can be dropped and the build reverts to
+        # the original. (Gate on ``layers`` — the flat per-axis list
+        # of {glyph, location}; ``coverage`` is a legacy key the
+        # current sidecar never emits, so gating on it left the build
+        # stuck on the original.)
         try:
             remaining = _control_axes.list_axes(ORIGINAL_PATH)
             if remaining:
                 shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-                if shadow is not None and any(ax.get("coverage") for ax in remaining):
+                if shadow is not None and any(ax.get("layers") for ax in remaining):
                     GLYPHS_PATH = shadow
                 else:
                     GLYPHS_PATH = ORIGINAL_PATH
@@ -4534,16 +4548,22 @@ def _apply_source_path(path: Path) -> None:
     _stop_fontra()
 
     # CONTROL AXES — keep the shadow in sync on load. If any axis has
-    # coverage glyphs (= the shadow has real brace-layer deltas), swap
+    # brace layers (= the shadow carries real per-glyph deltas), swap
     # the active build path to the shadow so the compiled font
-    # actually carries the new axes. Axes with no coverage live
-    # dormant in the sidecar; the build stays on the original since
-    # the shadow would compile to the same thing.
+    # actually carries the new axes. Axes with no layers live dormant
+    # in the sidecar; the build stays on the original since the shadow
+    # would compile to the same thing.
+    #
+    # Gate on ``layers`` (the flat {glyph, location} list), NOT the
+    # legacy ``coverage`` key the current sidecar never emits — the
+    # old gate meant a restart left the build on the original and
+    # dropped authored brace deltas from the preview until the user
+    # re-saved a layer.
     try:
         sidecar_axes = _control_axes.list_axes(ORIGINAL_PATH)
         if sidecar_axes:
             shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-            if shadow is not None and any(ax.get("coverage") for ax in sidecar_axes):
+            if shadow is not None and any(ax.get("layers") for ax in sidecar_axes):
                 GLYPHS_PATH = shadow
     except Exception as exc:
         print(f"Warning: failed to regenerate control-axes shadow on load: {exc}", file=sys.stderr)

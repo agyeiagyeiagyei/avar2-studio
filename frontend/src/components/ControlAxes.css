@@ -37,8 +37,14 @@
   letter-spacing: 0.02em;
 }
 
-.control-axes-add-btn:hover {
+.control-axes-add-btn:hover:not(:disabled) {
   background: #eef3fb;
+}
+
+.control-axes-add-btn:disabled {
+  border-color: #ddd;
+  color: #aaa;
+  cursor: not-allowed;
 }
 
 .control-axes-header:hover .control-axes-title {
