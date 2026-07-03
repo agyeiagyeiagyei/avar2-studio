@@ -3394,6 +3394,35 @@ def get_avar2_axes():
                 hi = entry.get("max", 0.0) or 0.0
                 entry["default"] = (lo + hi) / 2.0
 
+        # Exclude control axes — they belong to the CONTROL AXES
+        # section, not AVAR2 MAPPINGS. A control axis has no master
+        # coverage (so it would otherwise be misclassified as a
+        # traditional/avar2 target), but it's neither parametric nor an
+        # avar2 mapping input; it's driven by brace layers.
+        control_tags_upper = set()
+        if ORIGINAL_PATH is not None:
+            try:
+                control_tags_upper = {
+                    str(a.get("tag", "")).upper()
+                    for a in _control_axes.list_axes(ORIGINAL_PATH)
+                    if a.get("tag")
+                }
+            except Exception:
+                control_tags_upper = set()
+        if control_tags_upper:
+            axes_with_metadata = {
+                k: v for k, v in axes_with_metadata.items()
+                if k.upper() not in control_tags_upper
+            }
+            in_cols = [
+                c for c in in_cols
+                if c.upper() not in control_tags_upper
+                and _csv_io.normalize_in_axis_name(c).upper() not in control_tags_upper
+            ]
+            traditional_axes = [
+                t for t in traditional_axes if t.upper() not in control_tags_upper
+            ]
+
         return jsonify({
             "traditional_axes": {
                 "columns": in_cols,
