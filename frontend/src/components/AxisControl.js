@@ -102,7 +102,6 @@ function AxisControl({ axis, value, onChange, disabled }) {
     >
       <div className="axis-header">
         <label className="axis-name">{axis.name}</label>
-        <span className="axis-tag">{axis.tag}</span>
         {axis.is_control_axis && (
           <span
             className="axis-control-badge"
@@ -111,6 +110,7 @@ function AxisControl({ axis, value, onChange, disabled }) {
             control
           </span>
         )}
+        <span className="axis-tag">{axis.tag}</span>
       </div>
       <div className="axis-slider-container">
         <input

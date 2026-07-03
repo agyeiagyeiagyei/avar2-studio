@@ -6,11 +6,12 @@
 
 .axis-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 0.35rem;
 }
 
 .axis-name {
+  flex: 1;                 /* pushes the control badge + tag to the right */
   font-weight: 500;
   font-size: 0.6375rem;
   font-family: monospace;
@@ -27,7 +28,6 @@
 }
 
 .axis-control-badge {
-  margin-left: 0.4rem;
   padding: 0.08rem 0.4rem;
   background: #f1eef9;
   color: #5b3a8f;
