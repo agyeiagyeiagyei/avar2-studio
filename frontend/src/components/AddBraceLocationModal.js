@@ -93,7 +93,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     });
   };
   const setCustomPinValue = (tag, value) => {
-    setCustomPins(prev => ({ ...prev, [tag]: parseFloat(value) }));
+    setCustomPins(prev => ({ ...prev, [tag]: round1(value) }));
   };
 
   // Add mode: the parametric locations to create a view at — each
@@ -138,7 +138,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   };
 
   const setPinValue = (tag, value) => {
-    setPins(prev => ({ ...prev, [tag]: parseFloat(value) }));
+    setPins(prev => ({ ...prev, [tag]: round1(value) }));
   };
 
   const handleSubmit = async (e) => {
@@ -250,7 +250,6 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 const isPinned = axis.tag in pins;
                 const isControlAxis = axis.tag === axisTag;
                 const currentValue = isPinned ? pins[axis.tag] : axis.default;
-                const step = (axis.max - axis.min) / 1000;
                 return (
                   <div key={axis.tag} className={`location-pin-row ${isPinned ? 'pinned' : ''} ${isControlAxis ? 'control-axis' : ''}`}>
                     <label className="pin-toggle">
@@ -258,7 +257,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="pin-tag">{axis.tag}</span>
                     </label>
                     <div className="pin-slider-wrap">
-                      <input type="range" className="pin-slider" disabled={!isPinned} min={axis.min} max={axis.max} step={step > 0 ? step : 0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
+                      <input type="range" className="pin-slider" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
                       <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                     </div>
                     <input type="number" className="pin-value" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
@@ -273,7 +272,6 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   custom location = one editable brace layer). */}
               {(() => {
                 const ctrl = (allAxes || []).find(a => a.tag === axisTag) || { min: 0, max: 0 };
-                const step = (ctrl.max - ctrl.min) / 1000;
                 return (
                   <div className="form-row">
                     <label>
@@ -281,8 +279,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="form-row-hint">the control-axis position these views define</span>
                     </label>
                     <div className="control-value-row">
-                      <input type="range" min={ctrl.min} max={ctrl.max} step={step > 0 ? step : 0.1} value={controlValue} onChange={e => setControlValue(parseFloat(e.target.value))} />
-                      <input type="number" className="pin-value" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(parseFloat(e.target.value))} />
+                      <input type="range" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
+                      <input type="number" className="pin-value" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
                     </div>
                   </div>
                 );
@@ -308,13 +306,12 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 {customOn && (
                   <div className="location-pins">
                     {parametricAxes.map(axis => {
-                      const step = (axis.max - axis.min) / 1000;
-                      const val = customPins[axis.tag] ?? axis.default;
+                            const val = customPins[axis.tag] ?? axis.default;
                       return (
                         <div key={axis.tag} className="location-pin-row pinned">
                           <span className="pin-tag">{axis.tag}</span>
                           <div className="pin-slider-wrap">
-                            <input type="range" className="pin-slider" min={axis.min} max={axis.max} step={step > 0 ? step : 0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
+                            <input type="range" className="pin-slider" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
                             <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                           </div>
                           <input type="number" className="pin-value" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
@@ -379,6 +376,14 @@ function seedControlValue(ax) {
   if (min !== def) return min;
   if (max !== def) return max;
   return def; // degenerate axis (min == max == default) — no valid pin exists
+}
+
+// Axis coordinates are held to one decimal place — the sliders step in
+// 0.1 and everything rounds here, so a drag never lands on a value like
+// 390.362 that the number input (and save) would reject.
+function round1(value) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0;
 }
 
 /**

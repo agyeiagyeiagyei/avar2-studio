@@ -2742,13 +2742,18 @@ _FONTRA_FOCUSED_CSS = """
     display: none !important;
   }
 
-  /* Inside the designspace-navigation panel, hide the Font axes and
-     Glyph axes accordion sections — the designer edits outlines, not
-     axes. KEEP Glyph sources + Source layers so the parametric master
-     sources stay visible and editable. Accordion items render as
-     elements with id={item-id}. */
+  /* Empty out the designspace-navigation panel — Fontra is a pure
+     outline canvas. avar2-studio seeds and manages the control-axis
+     layers (the "Applicable glyphs" section) and navigates Fontra to
+     the exact layer to edit via the ↗ button, so no axis sliders and
+     no source/layer list are needed here. Hides all four accordion
+     sections (they render as elements with id={item-id}); the layers
+     still exist and stay editable at the location the studio
+     navigated to. */
   #font-axes,
-  #glyph-axes {
+  #glyph-axes,
+  #glyph-sources,
+  #glyph-source-layers {
     display: none !important;
   }
 
