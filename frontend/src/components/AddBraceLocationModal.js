@@ -345,7 +345,6 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   .join(', ');
                 return (
                   <div className="corner-previews">
-                    <div className="location-pins-header">Starting shape · {parsedGlyphs[0]} at each corner</div>
                     <div className="corner-preview-row">
                       {items.map((it, i) => (
                         <div key={i} className="corner-preview-item">
