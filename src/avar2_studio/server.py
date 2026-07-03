@@ -134,6 +134,10 @@ ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at.
 FONTRA_PROCESS: Optional[object] = None
 FONTRA_PORT: int = 8001
 FONTRA_CONTENT_ROOT: Optional[Path] = None
+# mtime of the shadow .glyphs Fontra was spawned against. If the file
+# is rewritten (a layer edit regenerates the shadow), Fontra's backend
+# still serves the cached/old glyph, so we restart it on next open.
+FONTRA_SHADOW_MTIME: Optional[float] = None
 SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
 BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
@@ -2574,7 +2578,7 @@ def create_control_axis():
 # ----------------------------------------------------------------------
 
 
-def _ensure_fontra_running(content_root: Path) -> int:
+def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None) -> int:
     """Ensure a Fontra subprocess is running and serving the given
     folder as its filesystem project root. If a process is already
     running but pointed at a different folder, restart it.
@@ -2596,19 +2600,33 @@ def _ensure_fontra_running(content_root: Path) -> int:
     import subprocess
     import time
 
-    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT
+    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT, FONTRA_SHADOW_MTIME
 
     content_root = content_root.resolve()
 
-    # Already running at the right root — reuse.
+    # mtime of the shadow file Fontra serves, so we can tell whether a
+    # layer edit rewrote it since Fontra was spawned.
+    current_mtime = None
+    if watch_file is not None:
+        try:
+            current_mtime = watch_file.stat().st_mtime
+        except OSError:
+            current_mtime = None
+
+    # Already running at the right root AND the shadow hasn't changed —
+    # reuse. If the shadow was rewritten (current_mtime differs), fall
+    # through to restart so Fontra's backend reloads fresh glyph data
+    # instead of serving its cache.
     if (
         FONTRA_PROCESS is not None
         and FONTRA_PROCESS.poll() is None
         and FONTRA_CONTENT_ROOT == content_root
+        and (current_mtime is None or current_mtime == FONTRA_SHADOW_MTIME)
     ):
         return FONTRA_PORT
 
-    # Different root or dead process — kill + restart.
+    # Different root, dead process, or the shadow was rewritten — kill
+    # + restart.
     _stop_fontra()
 
     # Launch Fontra through our own module so the fontra-glyphs
@@ -2652,6 +2670,7 @@ def _ensure_fontra_running(content_root: Path) -> int:
 
     FONTRA_PROCESS = proc
     FONTRA_CONTENT_ROOT = content_root
+    FONTRA_SHADOW_MTIME = current_mtime
     print(f"Started Fontra on http://127.0.0.1:{FONTRA_PORT} (root={content_root})", file=sys.stderr)
     return FONTRA_PORT
 
@@ -3042,7 +3061,7 @@ def open_control_axis_in_editor(tag: str):
     content_root = shadow_path.parent  # the shadow/ directory
 
     try:
-        port = _ensure_fontra_running(content_root)
+        port = _ensure_fontra_running(content_root, watch_file=shadow_path)
     except Exception as exc:
         return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
 
