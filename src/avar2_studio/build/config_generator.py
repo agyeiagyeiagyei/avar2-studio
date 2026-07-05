@@ -250,32 +250,6 @@ def extract_axis_values_from_csv(csv_path: Path) -> Dict[str, List[int]]:
     return {k: sorted(v) for k, v in accumulators.items() if v}
 
 
-def extract_spac_range_from_csv(csv_path: Path) -> Optional[Tuple[float, float]]:
-    """Extract SPAC axis min/max values from CSV.
-    
-    Returns (min, max) tuple if SPAC column exists and has values, None otherwise.
-    """
-    spac_values = []
-    
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        if "SPAC" not in reader.fieldnames:
-            return None
-        
-        for row in reader:
-            spac_str = row.get("SPAC", "").strip()
-            if spac_str:
-                try:
-                    spac_values.append(float(spac_str))
-                except (ValueError, TypeError):
-                    continue
-    
-    if not spac_values:
-        return None
-    
-    return (min(spac_values), max(spac_values))
-
-
 def get_weight_name(value: int) -> str:
     """Map weight value to STAT name."""
     names = {

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import './AxisControl.css';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function AxisControl({ axis, value, onChange, disabled }) {
+function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef(null);
@@ -89,7 +89,11 @@ function AxisControl({ axis, value, onChange, disabled }) {
   // would do nothing visible if we let the user move it. Disable the
   // control entirely and surface a clear CTA telling the designer
   // what's missing.
-  const emptyAxis = axis.has_master_coverage === false;
+  //
+  // Exception: in the Preview tab (`treatEmptyAsActive`) an avar2-mapped
+  // user-facing axis legitimately has no direct coverage — it moves the
+  // parametric axes through the avar2 table — so it must stay draggable.
+  const emptyAxis = !treatEmptyAsActive && axis.has_master_coverage === false;
   const effectiveDisabled = disabled || emptyAxis;
   const emptyTooltip = emptyAxis
     ? `${axis.tag} has no master coverage. Add a master at an extreme value (in Glyphs.app or the .designspace) to enable this slider.`

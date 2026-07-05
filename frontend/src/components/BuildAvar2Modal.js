@@ -32,7 +32,6 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
 
   const [selectedTraditionalAxes, setSelectedTraditionalAxes] = useState(initialTraditionalAxes);
   const [selectedAvar2Axes, setSelectedAvar2Axes] = useState(initialParametricAxes);
-  const [includeSpac, setIncludeSpac] = useState(true);
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState(null);
 
@@ -86,7 +85,6 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
       await onBuild({
         traditionalAxes: selectedTraditional,
         avar2Axes: selectedAvar2,
-        includeSpac
       });
       onClose();
     } catch (err) {
@@ -199,19 +197,6 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
               </div>
             </div>
           )}
-
-          <div className="axis-selection-section">
-            <label className="axis-checkbox">
-              <input
-                type="checkbox"
-                checked={includeSpac}
-                onChange={(e) => setIncludeSpac(e.target.checked)}
-                disabled={building}
-              />
-              <span>Include SPAC axis (Spacing)</span>
-            </label>
-            <p className="axis-description">SPAC axis is added programmatically and is always available.</p>
-          </div>
 
           {error && (
             <div className="error-message">

@@ -22,8 +22,39 @@
 
 .main-content {
   display: flex;
+  flex-direction: column;
   flex: 1;
   overflow: hidden;
+}
+
+.main-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid #e5e5e5;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.main-tab {
+  border: none;
+  background: none;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #888;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.main-tab:hover {
+  color: #555;
+}
+
+.main-tab.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
 }
 
 .content-area {

@@ -11,11 +11,14 @@ import { api } from '../api';
 //     the shipped fixture stays clean.
 //   - "Upload .glyphs file…" opens a hidden file picker. The chosen
 //     file is sent as multipart/form-data to the same endpoint.
-function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy }) {
+function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
+                 transforms = [], onToggleTransform, onTransformParam }) {
   const [examples, setExamples] = useState([]);
   const [open, setOpen] = useState(false);
+  const [txOpen, setTxOpen] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState(null);
   const dropdownRef = useRef(null);
+  const transformsRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -35,6 +38,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
+
+  // Click-outside closes the transforms menu.
+  useEffect(() => {
+    if (!txOpen) return;
+    const onDocClick = (e) => {
+      if (transformsRef.current && !transformsRef.current.contains(e.target)) {
+        setTxOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [txOpen]);
+
+  const enabledCount = transforms.filter(t => t.enabled).length;
 
   const handleLoadExample = async (id, name) => {
     setOpen(false);
@@ -131,6 +148,60 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             onChange={handleFileChange}
           />
         </div>
+        {familyName && transforms.length > 0 && (
+          <div className="transforms-dropdown" ref={transformsRef}>
+            <button
+              className="btn btn-load-font"
+              onClick={() => setTxOpen(o => !o)}
+              disabled={busy}
+              title="Post-build transforms — run on the compiled font and rebuild. Off by default."
+            >
+              Transforms{enabledCount > 0 ? ` (${enabledCount})` : ''} ▾
+            </button>
+            {txOpen && (
+              <div className="load-font-menu transforms-menu">
+                <div className="load-font-section-label">Post-build transforms</div>
+                {transforms.map(t => (
+                  <div key={t.id} className="transform-row">
+                    <label className="transform-toggle" title={t.description}>
+                      <input
+                        type="checkbox"
+                        checked={!!t.enabled}
+                        disabled={busy}
+                        onChange={(e) => onToggleTransform && onToggleTransform(t.id, e.target.checked)}
+                      />
+                      <span className="transform-name">{t.name}</span>
+                    </label>
+                    {t.description && <div className="transform-desc">{t.description}</div>}
+                    {t.enabled && (t.params_schema || []).length > 0 && (
+                      <div className="transform-params">
+                        {(t.params_schema || []).map(p => (
+                          <label key={p.key} className="transform-param">
+                            <span className="transform-param-label">{p.label}</span>
+                            <input
+                              type="number"
+                              className="transform-param-input"
+                              value={t.params?.[p.key] ?? p.default}
+                              min={p.min ?? undefined}
+                              max={p.max ?? undefined}
+                              step={p.type === 'float' ? 0.1 : 1}
+                              disabled={busy}
+                              // Pass the RAW string so clearing the field or
+                              // typing a leading '-' isn't coerced to 0 — the
+                              // server coerces/clamps against the ParamSpec on
+                              // commit (empty → default).
+                              onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {fontLoaded !== undefined && familyName && (
           <button
             onClick={onBuildFont}

@@ -57,6 +57,7 @@ from . import source_font as _source_font
 from . import csv_io as _csv_io
 from . import glyph_coverage as _glyph_coverage
 from . import control_axes as _control_axes
+from . import transforms as _transforms
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -148,6 +149,11 @@ BUILDING: bool = False
 # the last-good font; the user's most recent edit didn't make it through).
 LAST_BUILD_STATUS: Optional[str] = None  # "ok" | "failed" | None
 LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
+# Set when an ENABLED post-build transform failed during the last build (the
+# base font still compiled, so LAST_BUILD_STATUS stays "ok", but the requested
+# transform — e.g. SPAC — was skipped). Surfaced in /api/health + the
+# transforms PUT so the UI can flag an enabled-but-failing transform.
+LAST_TRANSFORM_ERROR: Optional[str] = None
 OBSERVER: Optional[Observer] = None
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
@@ -457,18 +463,25 @@ def get_axes_from_built_font(font_path: Path) -> List[Dict]:
                 "wdth": "Width",
                 "opsz": "Optical Size",
                 "cntr": "Contrast",
+                "SPAC": "Spacing",
+                "slnt": "Slant",
                 "XOPQ": "X-Opacity",
                 "YOPQ": "Y-Opacity",
                 "XTRA": "X-Transparency",
             }
             name = axis_names.get(tag, tag)
-        
+
         axes.append({
             "tag": tag,
             "name": name,
             "min": float(axis.minValue),
             "max": float(axis.maxValue),
-            "default": float(axis.defaultValue)
+            "default": float(axis.defaultValue),
+            # Built-font axes carry real gvar deltas (parametric masters or
+            # transform-injected phantom-point deltas), so the slider does
+            # something — surface it as covered. Used by the built-font
+            # overlay in get_axes() for transform-injected axes like SPAC.
+            "has_master_coverage": True,
         })
     
     return axes
@@ -699,9 +712,82 @@ def get_axes():
             except Exception as overlay_exc:
                 print(f"Warning: control-axes overlay on /api/axes failed: {overlay_exc}", file=sys.stderr)
 
+        # BUILT-FONT overlay. Post-build transforms (e.g. SPAC) inject fvar
+        # axes that have no source master, so get_axes_from_glyphs can't see
+        # them. Read the built font's fvar and surface any tag not already
+        # present as a normal parametric slider (has_master_coverage=True →
+        # draggable; not a control axis → sits with XTRA/XOPQ/YOPQ).
+        if VARIABLE_FONT_PATH is not None and Path(VARIABLE_FONT_PATH).exists():
+            try:
+                have = {str(a.get("tag", "")).lower() for a in axes}
+                for b in get_axes_from_built_font(VARIABLE_FONT_PATH):
+                    if str(b.get("tag", "")).lower() in have:
+                        continue
+                    axes.append({
+                        "tag": b["tag"],
+                        "name": b.get("name", b["tag"]),
+                        "min": b["min"],
+                        "max": b["max"],
+                        "default": b["default"],
+                        "has_master_coverage": True,
+                    })
+            except Exception as built_exc:
+                print(f"Warning: built-font overlay on /api/axes failed: {built_exc}", file=sys.stderr)
+
         return jsonify({"axes": axes})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _build_context():
+    """Read-only build state handed to each transform's apply()."""
+    return _transforms.BuildContext(
+        build_dir=BUILD_DIR,
+        source_path=ORIGINAL_PATH,
+        glyphs_path=GLYPHS_PATH,
+        family=(GLYPHS_PATH.stem if GLYPHS_PATH else "font"),
+        log=lambda m: print(f"[transform] {m}", file=sys.stderr),
+    )
+
+
+def _apply_transform_chain(vf_path):
+    """Run the project's enabled post-build transforms (e.g. SPAC) over a
+    freshly-compiled VF, in order, and return the final font path. Applied at
+    the single point where each build promotes its output to
+    ``VARIABLE_FONT_PATH``, so it covers every build trigger. A transform
+    that raises — or returns a path that doesn't exist — is logged and
+    skipped, and the chain keeps the last GOOD font, so the preview degrades
+    gracefully instead of pointing VARIABLE_FONT_PATH at a missing file.
+    Per-transform failures are recorded in ``LAST_TRANSFORM_ERROR`` so the UI
+    can surface an enabled-but-failing transform instead of a silent no-op."""
+    global LAST_TRANSFORM_ERROR
+    LAST_TRANSFORM_ERROR = None
+    if vf_path is None or ORIGINAL_PATH is None:
+        return vf_path
+    _transforms.discover()
+    try:
+        chain = _transforms.active(ORIGINAL_PATH)
+    except Exception as e:  # noqa: BLE001
+        print(f"transforms: could not resolve active chain: {e}", file=sys.stderr)
+        return vf_path
+    out = Path(vf_path)
+    errors = []
+    for transform, params in chain:
+        try:
+            result = transform.apply(out, params, _build_context())
+            # Only adopt a returned path that actually exists — a transform
+            # (esp. a user script) that returns a bad/unwritten path must not
+            # overwrite the last-good font and blank the preview.
+            if result is not None and Path(result).exists():
+                out = Path(result)
+            elif result is not None:
+                raise RuntimeError(f"returned a path that does not exist: {result}")
+        except Exception as e:  # noqa: BLE001
+            print(f"transform '{transform.spec.id}' failed: {e}", file=sys.stderr)
+            errors.append(f"{transform.spec.name}: {e}")
+    if errors:
+        LAST_TRANSFORM_ERROR = "; ".join(errors)
+    return out
 
 
 def trigger_build():
@@ -735,7 +821,9 @@ def trigger_build():
     BUILDING = True
     try:
         print(f"Building font from {GLYPHS_PATH}...", file=sys.stderr)
-        VARIABLE_FONT_PATH = build_variable_font(GLYPHS_PATH, BUILD_DIR, use_fontc=USE_FONTC)
+        VARIABLE_FONT_PATH = _apply_transform_chain(
+            build_variable_font(GLYPHS_PATH, BUILD_DIR, use_fontc=USE_FONTC)
+        )
         LAST_BUILD_TIME = time.time()
         # The fallback succeeded — a working font is being served, so the
         # stale-banner state from the avar2 failure has to be cleared,
@@ -967,41 +1055,6 @@ def get_text_width():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/preview-font', methods=['GET'])
-def get_preview_font():
-    """Serve the preview font file (with SPAC axis if available)."""
-    preview_font_dir = _get_preview_font_dir()
-    if not preview_font_dir or not preview_font_dir.exists():
-        return jsonify({"error": "Preview font directory not found"}), 404
-    
-    # Look for font with SPAC in name first, then any .ttf file
-    family_name = GLYPHS_PATH.stem if GLYPHS_PATH else None
-    spac_font = preview_font_dir / f"{family_name}[SPAC].ttf" if family_name else None
-
-    if spac_font is not None and spac_font.exists():
-        font_path = spac_font
-    else:
-        # Fallback to any .ttf file in preview directory
-        ttf_files = list(preview_font_dir.glob("*.ttf"))
-        if not ttf_files:
-            return jsonify({"error": "Preview font not built yet"}), 404
-        font_path = ttf_files[0]  # Use first TTF file found
-    
-    response = send_file(
-        str(font_path),
-        mimetype='font/ttf',
-        as_attachment=False
-    )
-    # Add cache control headers to prevent browser caching
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    # Add ETag based on file modification time for cache validation
-    mtime = font_path.stat().st_mtime
-    response.headers['ETag'] = f'"{int(mtime)}"'
-    return response
-
-
 @app.route('/api/instance', methods=['POST'])
 def create_instance():
     """Create a new studio-only instance.
@@ -1115,35 +1168,15 @@ def create_instance():
         return jsonify({"error": f"Failed to create instance: {e}"}), 500
 
     # Trigger rebuild in background so the avar2 build picks up the new
-    # studio-only row. Same SPAC-aware path as the update flow.
+    # studio-only row.
     def rebuild_in_background():
         global BUILDING
         if BUILDING:
             print("Build already in progress, skipping rebuild after instance creation...", file=sys.stderr)
             return
 
-        spac_font_dir = _get_spac_font_dir()
-        if spac_font_dir:
-            spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-            if spac_font_path.exists():
-                print(f"Instance created, regenerating SPAC font...", file=sys.stderr)
-                BUILDING = True
-                try:
-                    if _regenerate_spac_font():
-                        BUILDING = False
-                    else:
-                        print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
-                        BUILDING = False
-                        trigger_build()
-                except Exception as e:
-                    print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
-                    BUILDING = False
-            else:
-                print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
-                trigger_build()
-        else:
-            print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
-            trigger_build()
+        print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
+        trigger_build()
 
     rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
     rebuild_thread.start()
@@ -1268,41 +1301,15 @@ def update_instance(instance_name: str):
                 print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
     
     # Trigger immediate rebuild after updating instance
-    # If SPAC font exists, regenerate it (designspace-based), otherwise rebuild regular font
     # Run rebuild in background thread to avoid blocking the response and file locking issues
     def rebuild_in_background():
         global BUILDING
         if BUILDING:
             print("Build already in progress, skipping rebuild after instance update...", file=sys.stderr)
             return
-        
-        spac_font_dir = _get_spac_font_dir()
-        if spac_font_dir:
-            spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-            if spac_font_path.exists():
-                # SPAC font exists - regenerate it using add-spac-axis-ufo.py
-                print(f"Instance updated, regenerating SPAC font...", file=sys.stderr)
-                BUILDING = True
-                try:
-                    if _regenerate_spac_font():
-                        # SPAC regeneration succeeded
-                        BUILDING = False
-                    else:
-                        # Fallback to regular build if regeneration fails
-                        print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
-                        BUILDING = False  # Reset before trigger_build (which sets it)
-                        trigger_build()
-                except Exception as e:
-                    print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
-                    BUILDING = False
-            else:
-                # No SPAC font - rebuild regular font
-                print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
-                trigger_build()
-        else:
-            # No SPAC font directory - rebuild regular font
-            print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
-            trigger_build()
+
+        print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
+        trigger_build()
     
     # Start rebuild in background thread (small delay to ensure file save completes)
     rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
@@ -1383,33 +1390,8 @@ def rename_instance(instance_name: str):
                     print("Build already in progress, skipping rebuild after rename...", file=sys.stderr)
                     return
                 
-                spac_font_dir = _get_spac_font_dir()
-                if spac_font_dir:
-                    spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-                    if spac_font_path.exists():
-                        # SPAC font exists - regenerate it using add-spac-axis-ufo.py
-                        print(f"Instance renamed, regenerating SPAC font...", file=sys.stderr)
-                        BUILDING = True
-                        try:
-                            if _regenerate_spac_font():
-                                # SPAC regeneration succeeded
-                                BUILDING = False
-                            else:
-                                # Fallback to regular build if regeneration fails
-                                print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
-                                BUILDING = False  # Reset before trigger_build (which sets it)
-                                trigger_build()
-                        except Exception as e:
-                            print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
-                            BUILDING = False
-                    else:
-                        # No SPAC font - rebuild regular font
-                        print(f"Instance renamed, triggering immediate rebuild...", file=sys.stderr)
-                        trigger_build()
-                else:
-                    # No SPAC font directory - rebuild regular font
-                    print(f"Instance renamed, triggering immediate rebuild...", file=sys.stderr)
-                    trigger_build()
+                print(f"Instance renamed, triggering immediate rebuild...", file=sys.stderr)
+                trigger_build()
             
             # Start rebuild in background thread (small delay to ensure file save completes)
             rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
@@ -1578,10 +1560,18 @@ def health():
             "font_built": VARIABLE_FONT_PATH.exists() if VARIABLE_FONT_PATH else False,
             "family_name": family_name,
             "vf_family_id": f"{family_name}-VF" if family_name else None,
-            "built_font_filename": _get_avar2_built_font_filename(),
+            # Report the ACTUAL served font's name (VARIABLE_FONT_PATH is what
+            # /api/font serves and the download saves) so a transform-injected
+            # name like ``…[SPAC].ttf`` matches the bytes. Fall back to the
+            # avar2-dir derivation before the first build completes.
+            "built_font_filename": (
+                VARIABLE_FONT_PATH.name if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists()
+                else _get_avar2_built_font_filename()
+            ),
             "last_build_time": LAST_BUILD_TIME,
             "last_build_status": LAST_BUILD_STATUS,
             "last_build_error": LAST_BUILD_ERROR,
+            "transform_error": LAST_TRANSFORM_ERROR,
             "building": BUILDING,
         })
     except Exception as e:
@@ -1704,143 +1694,6 @@ def _get_preview_config_path() -> Optional[Path]:
     return config_path
 
 
-def _get_preview_font_dir() -> Optional[Path]:
-    """Get the build output directory (.avar2-studio/build/)."""
-    workdir = _get_preview_dir()
-    if not workdir:
-        return None
-    font_dir = workdir / "build"
-    font_dir.mkdir(parents=True, exist_ok=True)
-    return font_dir
-
-
-def _regenerate_spac_font() -> bool:
-    """
-    Regenerate SPAC font using add-spac-axis-ufo.py.
-    This is called after Glyphs file updates to refresh the SPAC font.
-    
-    Returns True if successful, False otherwise.
-    """
-    if not GLYPHS_PATH or not GLYPHS_PATH.exists():
-        return False
-    
-    spac_font_dir = _get_spac_font_dir()
-    if not spac_font_dir:
-        return False
-    
-    family_name = GLYPHS_PATH.stem
-    spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-    
-    add_spac_script = Path(__file__).parent / "add-spac-axis-ufo.py"
-    if not add_spac_script.exists():
-        print(f"Warning: add-spac-axis-ufo.py not found at {add_spac_script}", file=sys.stderr)
-        return False
-    
-    # Run add-spac-axis-ufo.py to regenerate SPAC font
-    cmd = [
-        sys.executable,
-        str(add_spac_script),
-        str(GLYPHS_PATH),
-        "--output-dir", str(spac_font_dir),
-        "--compile",
-        "--fontc-output", str(spac_font_path)
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    
-    if result.returncode == 0 and spac_font_path.exists():
-        print(f"✓ Regenerated SPAC font: {spac_font_path}", file=sys.stderr)
-        return True
-    else:
-        print(f"Warning: SPAC font regeneration failed:", file=sys.stderr)
-        print(f"  stdout: {result.stdout}", file=sys.stderr)
-        print(f"  stderr: {result.stderr}", file=sys.stderr)
-        return False
-
-
-def _get_spac_font_dir() -> Optional[Path]:
-    """Get SPAC font directory (preview-app/preview-fonts/spac/)."""
-    preview_font_dir = _get_preview_font_dir()
-    if not preview_font_dir:
-        return None
-    spac_dir = preview_font_dir / "spac"
-    spac_dir.mkdir(parents=True, exist_ok=True)
-    return spac_dir
-
-
-def _ensure_spac_font_exists() -> Optional[Path]:
-    """
-    Ensure designspace-generated SPAC font exists.
-    If not, run add-spac-axis-ufo.py to generate it.
-    
-    Returns path to SPAC font if successful, None otherwise.
-    """
-    if not GLYPHS_PATH or not GLYPHS_PATH.exists():
-        return None
-    
-    spac_font_dir = _get_spac_font_dir()
-    if not spac_font_dir:
-        return None
-    
-    family_name = GLYPHS_PATH.stem
-    spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-    
-    # Check if font already exists
-    if spac_font_path.exists():
-        return spac_font_path
-    
-    # Check if designspace exists (indicates partial generation)
-    designspace_files = list(spac_font_dir.glob("*.designspace"))
-    designspace_path = designspace_files[0] if designspace_files else None
-    
-    # If designspace exists but font doesn't, just compile it
-    if designspace_path and designspace_path.exists():
-        print(f"Designspace found but font missing, compiling with fontc...", file=sys.stderr)
-        # Compile designspace with fontc
-        fontc_cmd = shutil.which("fontc")
-        if fontc_cmd:
-            cmd = [
-                fontc_cmd,
-                "--output-file", str(spac_font_path),
-                str(designspace_path.resolve())
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0 and spac_font_path.exists():
-                print(f"✓ Compiled SPAC font: {spac_font_path}", file=sys.stderr)
-                return spac_font_path
-            else:
-                print(f"Warning: fontc compilation failed: {result.stderr}", file=sys.stderr)
-    
-    # Generate SPAC font using add-spac-axis-ufo.py
-    print(f"Generating SPAC font...", file=sys.stderr)
-    add_spac_script = Path(__file__).parent / "add-spac-axis-ufo.py"
-    
-    if not add_spac_script.exists():
-        print(f"Warning: add-spac-axis-ufo.py not found at {add_spac_script}", file=sys.stderr)
-        return None
-    
-    # Run add-spac-axis-ufo.py
-    cmd = [
-        sys.executable,
-        str(add_spac_script),
-        str(GLYPHS_PATH),
-        "--output-dir", str(spac_font_dir),
-        "--compile",
-        "--fontc-output", str(spac_font_path)
-    ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    
-    if result.returncode == 0 and spac_font_path.exists():
-        print(f"✓ Generated SPAC font: {spac_font_path}", file=sys.stderr)
-        return spac_font_path
-    else:
-        print(f"Warning: SPAC font generation failed:", file=sys.stderr)
-        print(f"  stdout: {result.stdout}", file=sys.stderr)
-        print(f"  stderr: {result.stderr}", file=sys.stderr)
-        return None
-
-
 def _get_avar2_font_dir() -> Optional[Path]:
     """Get avar2 font directory (collapsed into the shared build dir)."""
     workdir = _get_preview_dir()
@@ -1927,14 +1780,6 @@ def _check_preview_csv_sync_status() -> Dict[str, any]:
             "glyphs_instances": [],
             "csv_instances": []
         }
-
-
-def _ensure_spac_column_in_csv(csv_path: Path) -> bool:
-    """SPAC support is deferred — see ``add-spac-axis-ufo.py`` removal
-    notes. This shim survives as a no-op so the few call sites in
-    server.py keep working without an SPAC column being auto-added.
-    """
-    return False
 
 
 def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
@@ -2057,47 +1902,6 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
         traceback.print_exc()
     
     return None
-
-
-def _check_spac_axis_in_font(font_path: Path) -> bool:
-    """Check if SPAC axis exists in font's fvar table."""
-    try:
-        font = TTFont(str(font_path))
-        if "fvar" not in font:
-            return False
-        
-        fvar = font["fvar"]
-        for axis in fvar.axes:
-            if axis.axisTag == "SPAC":
-                return True
-        return False
-    except Exception as e:
-        print(f"Error checking SPAC axis in font: {e}", file=sys.stderr)
-        return False
-
-
-def _get_spac_axis_range_from_font(font_path: Path) -> Optional[Dict[str, float]]:
-    """Get SPAC axis min/max/default values from font's fvar table.
-    
-    Returns dict with 'min', 'max', 'default' if SPAC axis exists, None otherwise.
-    """
-    try:
-        font = TTFont(str(font_path))
-        if "fvar" not in font:
-            return None
-        
-        fvar = font["fvar"]
-        for axis in fvar.axes:
-            if axis.axisTag == "SPAC":
-                return {
-                    "min": float(axis.minValue),
-                    "max": float(axis.maxValue),
-                    "default": float(axis.defaultValue)
-                }
-        return None
-    except Exception as e:
-        print(f"Error getting SPAC axis range from font: {e}", file=sys.stderr)
-        return None
 
 
 def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
@@ -2485,6 +2289,84 @@ def glyph_coverage():
         return jsonify({"axes": out})
     except Exception as e:
         print(f"Error in /api/glyph-coverage: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ----------------------------------------------------------------------
+# TRANSFORMS — post-build VF→VF steps (e.g. SPAC spacing axis)
+#
+# Available transforms are discovered globally (built-ins +
+# ~/.avar2-studio/transforms/); which are enabled + their params is
+# per-project state in ``<basename>-transforms.json``. Enabling one runs
+# it over the compiled font on every build (see _apply_transform_chain)
+# and, for axis-injecting transforms like SPAC, surfaces the new axis as
+# a parametric slider (see the built-font overlay in get_axes).
+# ----------------------------------------------------------------------
+
+
+@app.route('/api/transforms', methods=['GET'])
+def list_transforms():
+    """Return the available transforms merged with this project's enabled
+    state + params."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"transforms": []})
+    try:
+        _transforms.discover()
+        return jsonify({
+            "transforms": _transforms.available(ORIGINAL_PATH),
+            "sidecar_path": str(_transforms.sidecar_path_for(ORIGINAL_PATH)),
+        })
+    except Exception as e:
+        print(f"Error listing transforms: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/transforms', methods=['PUT'])
+def update_transforms():
+    """Replace the project's transform set. Body::
+
+        {"transforms": [
+            {"type": "spac", "enabled": true, "params": {"min": -20, "max": 40}}
+        ]}
+
+    Unknown types are dropped; params are coerced against each transform's
+    schema. Persists to the sidecar, then rebuilds so the preview + axes
+    reflect the new chain (transforms are VF post-processors — no shadow
+    rewrite needed)."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    entries = data.get("transforms")
+    if not isinstance(entries, list):
+        return jsonify({"error": "Body must include 'transforms' as a list."}), 400
+    try:
+        _transforms.discover()
+        try:
+            stored = _transforms.set_active(ORIGINAL_PATH, entries)
+        except ValueError as ve:
+            # Invalid config (e.g. SPAC min >= max) — reject with feedback
+            # instead of persisting an enabled-but-doomed transform.
+            return jsonify({"error": str(ve)}), 400
+        # NB: do NOT null VARIABLE_FONT_PATH here. trigger_build() reassigns it
+        # on any successful build and leaves it untouched on failure, so the
+        # last-good font keeps serving if the rebuild fails.
+        build_ok = False
+        try:
+            build_ok = trigger_build()
+        except Exception as build_exc:
+            print(f"Warning: rebuild after transforms update failed: {build_exc}", file=sys.stderr)
+        # A transform can fail even when the base font compiled fine — surface
+        # it so the UI doesn't show an enabled transform that silently no-op'd.
+        return jsonify({
+            "success": True,
+            "transforms": stored,
+            "build_ok": bool(build_ok),
+            "transform_error": LAST_TRANSFORM_ERROR,
+        })
+    except Exception as e:
+        print(f"Error updating transforms: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -3518,33 +3400,8 @@ def delete_instance(instance_name: str):
                 print("Build already in progress, skipping rebuild after instance deletion...", file=sys.stderr)
                 return
             
-            spac_font_dir = _get_spac_font_dir()
-            if spac_font_dir:
-                spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-                if spac_font_path.exists():
-                    # SPAC font exists - regenerate it using add-spac-axis-ufo.py
-                    print(f"Instance deleted, regenerating SPAC font...", file=sys.stderr)
-                    BUILDING = True
-                    try:
-                        if _regenerate_spac_font():
-                            # SPAC regeneration succeeded
-                            BUILDING = False
-                        else:
-                            # Fallback to regular build if regeneration fails
-                            print(f"SPAC regeneration failed, falling back to regular build...", file=sys.stderr)
-                            BUILDING = False  # Reset before trigger_build (which sets it)
-                            trigger_build()
-                    except Exception as e:
-                        print(f"Error during SPAC font regeneration: {e}", file=sys.stderr)
-                        BUILDING = False
-                else:
-                    # No SPAC font - rebuild regular font
-                    print(f"Instance deleted, triggering immediate rebuild...", file=sys.stderr)
-                    trigger_build()
-            else:
-                # No SPAC font directory - rebuild regular font
-                print(f"Instance deleted, triggering immediate rebuild...", file=sys.stderr)
-                trigger_build()
+            print(f"Instance deleted, triggering immediate rebuild...", file=sys.stderr)
+            trigger_build()
         
         # Start rebuild in background thread (small delay to ensure file save completes)
         rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
@@ -3922,416 +3779,6 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/spacing/init', methods=['POST'])
-def init_spac_axis():
-    """Initialize SPAC axis: add SPAC column to CSV (all instances = 0) and update config.yaml."""
-    try:
-        csv_path = _get_preview_csv_path()
-        config_path = _get_preview_config_path()
-        if not csv_path or not config_path:
-            return jsonify({"error": "Preview CSV or config not found"}), 404
-        
-        # Read CSV
-        rows = []
-        fieldnames = []
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames) if reader.fieldnames else []
-            for row in reader:
-                rows.append(row)
-        
-        # Check if SPAC column already exists
-        if "SPAC" in fieldnames:
-            return jsonify({
-                "success": True,
-                "message": "SPAC column already exists",
-                "initialized": False
-            })
-        
-        # Add SPAC column with 0 for all instances
-        fieldnames.append("SPAC")
-        for row in rows:
-            row["SPAC"] = "0"
-        
-        # Write updated CSV
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        
-        # Update modification time cache to prevent false "external edit" detection
-        _update_csv_modification_time(csv_path)
-        
-        # Update config.yaml to add spacingAxis section
-        if yaml:
-            with config_path.open("r", encoding="utf-8") as f:
-                config = yaml.safe_load(f) or {}
-            
-            config["spacingAxis"] = {
-                "min": -100,
-                "max": 100
-            }
-            
-            with config_path.open("w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        
-        return jsonify({
-            "success": True,
-            "initialized": True,
-            "message": "SPAC axis initialized"
-        })
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/spacing/check', methods=['GET'])
-def check_spac_axis():
-    """Check if SPAC axis exists in designspace font and return its range."""
-    try:
-        # Check designspace-generated font first (correct range 0-100)
-        spac_font_dir = _get_spac_font_dir()
-        if spac_font_dir:
-            spac_font_path = spac_font_dir / "Crispy-SPAC-VF.ttf"
-            if spac_font_path.exists():
-                has_spac = _check_spac_axis_in_font(spac_font_path)
-                spac_range = None
-                if has_spac:
-                    spac_range = _get_spac_axis_range_from_font(spac_font_path)
-                
-                result = {
-                    "exists": has_spac,
-                    "font_path": str(spac_font_path)
-                }
-                if spac_range:
-                    result["range"] = spac_range
-                
-                return jsonify(result)
-        
-        # Fallback to preview font directory
-        preview_font_dir = _get_preview_font_dir()
-        if not preview_font_dir:
-            return jsonify({"exists": False, "error": "Preview font directory not found"}), 404
-        
-        # Look for preview font files, prefer one with SPAC in filename
-        font_files = list(preview_font_dir.glob("*.ttf"))
-        if not font_files:
-            return jsonify({"exists": False})
-        
-        # Prefer font with SPAC in filename, otherwise use most recent
-        spac_font = None
-        for font_file in font_files:
-            if "SPAC" in font_file.name:
-                spac_font = font_file
-                break
-        
-        if not spac_font:
-            spac_font = max(font_files, key=lambda p: p.stat().st_mtime)
-        
-        has_spac = _check_spac_axis_in_font(spac_font)
-        spac_range = None
-        if has_spac:
-            spac_range = _get_spac_axis_range_from_font(spac_font)
-        
-        result = {
-            "exists": has_spac,
-            "font_path": str(spac_font)
-        }
-        if spac_range:
-            result["range"] = spac_range
-        
-        return jsonify(result)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/spacing/values', methods=['GET'])
-def get_spac_values():
-    """Get SPAC values for all instances from preview CSV.
-    
-    Handles duplicates by keeping the last value for each instance name.
-    """
-    try:
-        csv_path = _get_preview_csv_path()
-        if not csv_path or not csv_path.exists():
-            return jsonify({"error": "Preview CSV not found"}), 404
-        
-        # Use dict to handle duplicates - last value wins
-        instance_spac_map = {}
-        duplicate_instances = set()
-        
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                instance_name = row.get("Instance Name", "").strip()
-                spac_value = row.get("SPAC", "0").strip()
-                try:
-                    spac_float = float(spac_value) if spac_value else 0.0
-                except ValueError:
-                    spac_float = 0.0
-                
-                # Track duplicates
-                if instance_name in instance_spac_map:
-                    duplicate_instances.add(instance_name)
-                
-                # Last value wins (overwrites previous)
-                instance_spac_map[instance_name] = spac_float
-        
-        # Warn about duplicates (only if significant)
-        if duplicate_instances and len(duplicate_instances) > 0:
-            print(f"Warning: Found duplicate rows in CSV for {len(duplicate_instances)} instance(s)", file=sys.stderr)
-        
-        # Convert to list format
-        rows = [
-            {"instance_name": name, "spac": value}
-            for name, value in instance_spac_map.items()
-        ]
-        
-        return jsonify({"values": rows})
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/spacing/instance/<instance_name>', methods=['PUT'])
-def update_spac_value(instance_name: str):
-    """Update SPAC value for a specific instance."""
-    try:
-        csv_path = _get_preview_csv_path()
-        if not csv_path or not csv_path.exists():
-            return jsonify({"error": "Preview CSV not found"}), 404
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-        
-        new_value = data.get("value")
-        if new_value is None:
-            return jsonify({"error": "value is required"}), 400
-        
-        # Validate value
-        try:
-            float_value = float(new_value)
-            if float_value < -100 or float_value > 100:
-                return jsonify({"error": "SPAC value must be between -100 and 100"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "value must be a number"}), 400
-        
-        # Read CSV
-        rows = []
-        fieldnames = []
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames) if reader.fieldnames else []
-            for row in reader:
-                rows.append(row)
-        
-        # Ensure SPAC column exists
-        if "SPAC" not in fieldnames:
-            fieldnames.append("SPAC")
-            for row in rows:
-                if "SPAC" not in row:
-                    row["SPAC"] = "0"
-        
-        # Find and update instance
-        instance_found = False
-        for row in rows:
-            if row.get("Instance Name", "").strip() == instance_name:
-                row["SPAC"] = str(float_value)
-                instance_found = True
-                break
-        
-        if not instance_found:
-            return jsonify({"error": f"Instance '{instance_name}' not found"}), 404
-        
-        # Write updated CSV
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        
-        # Update modification time cache to prevent false "external edit" detection
-        _update_csv_modification_time(csv_path)
-        
-        # Update config.yaml spacingAxis min/max based on all SPAC values
-        _update_spacing_axis_range()
-        
-        return jsonify({
-            "success": True,
-            "instance_name": instance_name,
-            "spac": float_value
-        })
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-def _update_spacing_axis_range():
-    """Update config.yaml spacingAxis min/max to always be -100 to 100."""
-    if not yaml:
-        return
-    
-    csv_path = _get_preview_csv_path()
-    config_path = _get_preview_config_path()
-    if not csv_path or not csv_path.exists() or not config_path:
-        return
-    
-    try:
-        # Read config
-        with config_path.open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-        
-        # Always set spacingAxis to -100 to 100 (full range)
-        config["spacingAxis"] = {
-            "min": -100,
-            "max": 100
-        }
-        
-        # Write config back
-        with config_path.open("w", encoding="utf-8") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-    except Exception as e:
-        print(f"Error updating spacing axis range: {e}", file=sys.stderr)
-
-
-@app.route('/api/spacing/rebuild', methods=['POST'])
-def rebuild_preview_font_with_spac():
-    """Rebuild preview font with SPAC axis using minimal config and fontc."""
-    global BUILDING
-    
-    if BUILDING:
-        return jsonify({"error": "Build already in progress"}), 409
-    
-    try:
-        config_path = _get_preview_config_path()
-        preview_font_dir = _get_preview_font_dir()
-        if not config_path or not preview_font_dir:
-            return jsonify({"error": "Preview config or font directory not found"}), 404
-        
-        if not USE_FONTC:
-            return jsonify({"error": "fontc is required for preview font rebuild"}), 400
-        
-        # Check if fontc is available
-        fontc_path = shutil.which("fontc")
-        if not fontc_path:
-            return jsonify({"error": "fontc not found in PATH"}), 400
-        
-        BUILDING = True
-        
-        # Build preview font directly with fontc, then add SPAC axis
-        # Skip fix, BuildSTAT, and buildFvarInstances steps
-        project_root = GLYPHS_PATH.parent.parent if GLYPHS_PATH else Path.cwd()
-        
-        # Step 1: Build variable font with fontc (no post-processing)
-        temp_font = tempfile.NamedTemporaryFile(suffix=".ttf", delete=False)
-        temp_font_path = Path(temp_font.name)
-        temp_font.close()
-        
-        fontc_cmd = [
-            fontc_path,
-            "--output-file", str(temp_font_path),
-            str(GLYPHS_PATH.resolve()),
-            "--flatten-components",
-            "--decompose-transformed-components"
-        ]
-        
-        fontc_result = subprocess.run(
-            fontc_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        
-        if fontc_result.returncode != 0:
-            BUILDING = False
-            if temp_font_path.exists():
-                temp_font_path.unlink()
-            return jsonify({
-                "error": "fontc build failed",
-                "details": fontc_result.stderr
-            }), 500
-        
-        if not temp_font_path.exists():
-            BUILDING = False
-            return jsonify({"error": "fontc did not produce output file"}), 500
-        
-        # Step 2: Add SPAC axis using gftools-gen-spac
-        # Get spacingAxis min/max from config
-        spacing_min = -100
-        spacing_max = 100
-        if yaml and config_path.exists():
-            try:
-                with config_path.open("r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
-                    if "spacingAxis" in config:
-                        spacing_min = config["spacingAxis"].get("min", -100)
-                        spacing_max = config["spacingAxis"].get("max", 100)
-            except Exception as e:
-                print(f"Warning: Could not read spacingAxis from config: {e}", file=sys.stderr)
-        
-        # Step 2: Add SPAC axis using gftools-gen-spac (inplace to temp file, then copy)
-        # Use --inplace to modify temp file directly
-        spac_cmd = [
-            "gftools-gen-spac",
-            "--inplace",
-            str(temp_font_path),
-            str(int(spacing_min)),
-            str(int(spacing_max))
-        ]
-        
-        spac_result = subprocess.run(
-            spac_cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        BUILDING = False
-        
-        if spac_result.returncode != 0:
-            if temp_font_path.exists():
-                temp_font_path.unlink()
-            return jsonify({
-                "error": "SPAC axis addition failed",
-                "details": spac_result.stderr
-            }), 500
-        
-        # Generate preview font filename with SPAC
-        family_name = GLYPHS_PATH.stem
-        preview_font_path = preview_font_dir / f"{family_name}[SPAC].ttf"
-        
-        # Copy temp font to preview directory
-        shutil.copy2(temp_font_path, preview_font_path)
-        
-        # Clean up temp file
-        if temp_font_path.exists():
-            temp_font_path.unlink()
-        
-        final_font = preview_font_path
-        
-        has_spac = _check_spac_axis_in_font(final_font)
-        
-        return jsonify({
-            "success": True,
-            "font_path": str(final_font),
-            "has_spac": has_spac,
-            "output": f"fontc: {fontc_result.stdout}\ngftools-gen-spac: {spac_result.stdout}"
-        })
-    except subprocess.TimeoutExpired:
-        BUILDING = False
-        return jsonify({"error": "Build timeout"}), 500
-    except Exception as e:
-        BUILDING = False
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/api/check-sync-status', methods=['GET'])
 def check_sync_status():
     """Check if preview CSV is synced with Glyphs file."""
@@ -4453,11 +3900,11 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
         except OSError:
             pass
 
-        VARIABLE_FONT_PATH = font_file
+        VARIABLE_FONT_PATH = _apply_transform_chain(font_file)
         LAST_BUILD_TIME = time.time()
         LAST_BUILD_STATUS = "ok"
         LAST_BUILD_ERROR = None
-        return {"success": True, "font_path": str(font_file)}
+        return {"success": True, "font_path": str(VARIABLE_FONT_PATH)}
 
     finally:
         BUILDING = False

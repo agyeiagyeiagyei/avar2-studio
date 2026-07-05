@@ -211,3 +211,80 @@
 .load-font-item-upload .load-font-item-name {
   color: #0b4a8f;
 }
+
+/* ---- Transforms dropdown ---- */
+.transforms-dropdown {
+  position: relative;
+}
+
+.transforms-menu {
+  min-width: 300px;
+}
+
+.transform-row {
+  padding: 0.5rem 0.85rem;
+}
+
+.transform-row + .transform-row {
+  border-top: 1px solid #f0f0f0;
+}
+
+.transform-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.transform-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.transform-name {
+  font-size: 0.9rem;
+  color: #333;
+  font-weight: 500;
+}
+
+.transform-desc {
+  font-size: 0.72rem;
+  color: #888;
+  margin-top: 0.2rem;
+  margin-left: 1.4rem;
+  line-height: 1.35;
+}
+
+.transform-params {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  margin-left: 1.4rem;
+}
+
+.transform-param {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.transform-param-label {
+  font-size: 0.65rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transform-param-input {
+  width: 4.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+
+.transform-param-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
+}

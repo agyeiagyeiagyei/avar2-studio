@@ -84,12 +84,6 @@ export const api = {
     return `${API_BASE}/font?t=${timestamp}`;
   },
 
-  getPreviewFontUrl() {
-    // Add cache busting timestamp to force reload when font is rebuilt
-    const timestamp = Date.now();
-    return `${API_BASE}/preview-font?t=${timestamp}`;
-  },
-
   getAvar2FontUrl() {
     // Add cache busting timestamp to force reload when font is rebuilt
     const timestamp = Date.now();
@@ -286,10 +280,9 @@ export const api = {
     return parseJSON(response);
   },
 
-  // SPAC API methods (checkSpacAxis, getSpacValues, initSpacAxis,
-  // updateSpacValue, rebuildPreviewFont) were removed when SPAC support
-  // was deferred. The dormant backend endpoints under /api/spacing/*
-  // can be re-exposed here when the axis lands.
+  // SPAC now ships as a post-build transform — see getTransforms /
+  // updateTransforms above. Enabling it injects a SPAC axis into the built
+  // font, which then surfaces as a normal parametric slider.
 
   async registerEditingInstance(instanceName) {
     const response = await fetch(`${API_BASE}/instance/${encodeURIComponent(instanceName)}/editing`, {
@@ -325,6 +318,27 @@ export const api = {
     const response = await fetch(`${API_BASE}/control-axes`);
     if (!response.ok) {
       throw new Error(`Failed to list control axes: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async getTransforms() {
+    const response = await fetch(`${API_BASE}/transforms`);
+    if (!response.ok) {
+      throw new Error(`Failed to list transforms: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async updateTransforms(entries) {
+    const response = await fetch(`${API_BASE}/transforms`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transforms: entries }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to update transforms: ${response.status}`);
     }
     return parseJSON(response);
   },

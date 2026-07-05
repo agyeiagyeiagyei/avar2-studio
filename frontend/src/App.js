@@ -4,6 +4,7 @@ import { api } from './api';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
+import PreviewTab from './components/PreviewTab';
 import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
 
@@ -39,6 +40,9 @@ function App() {
   // Parametric master corners — pre-listed in the control-axis brace
   // flow so the designer places a crbr view at a specific corner.
   const [masters, setMasters] = useState([]);
+  // Post-build transforms (e.g. SPAC): available list merged with this
+  // project's enabled state + params, from GET /api/transforms.
+  const [transforms, setTransforms] = useState([]);
   const [axes, setAxes] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [editingCoordinates, setEditingCoordinates] = useState({});
@@ -53,6 +57,9 @@ function App() {
   const [building, setBuilding] = useState(false);
   const [sampleText, setSampleText] = useState(DEFAULT_SAMPLE_TEXT);
   const [fontSize, setFontSize] = useState(2); // Default 2rem
+  // Which top-level view is active: 'instances' (authoring) or
+  // 'preview' (free-form driving of the built font).
+  const [mainTab, setMainTab] = useState('instances');
   const [familyName, setFamilyName] = useState(null);
   // "glyphs" | "designspace" | null — from /api/health. Gates
   // control-axis authoring, which is .glyphs-only for now.
@@ -279,15 +286,17 @@ function App() {
         }
       }
       
-      const [instancesData, axesData, mastersData] = await Promise.all([
+      const [instancesData, axesData, mastersData, transformsData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
         api.getMasters().catch(() => ({ masters: [] })),
+        api.getTransforms().catch(() => ({ transforms: [] })),
       ]);
 
       setInstances(instancesData.instances);
       setMasters(mastersData.masters || []);
       setAxes(axesData.axes || []);
+      setTransforms(transformsData.transforms || []);
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
       setSourceFormat(health.source_format || null);
@@ -581,12 +590,12 @@ function App() {
     }
   };
 
-  const handleBuildAvar2Font = async ({ traditionalAxes, avar2Axes, includeSpac }) => {
+  const handleBuildAvar2Font = async ({ traditionalAxes, avar2Axes }) => {
     try {
       setBuilding(true);
       setError(null);
-      
-      const result = await api.buildAvar2Font(traditionalAxes, avar2Axes, includeSpac);
+
+      const result = await api.buildAvar2Font(traditionalAxes, avar2Axes);
       
       // Update sync status from response
       if (result.sync_status) {
@@ -669,8 +678,7 @@ function App() {
         setAvar2FontLoaded(false);
       }
     } else {
-      // Switch back to Default mode
-      // Use main font URL (serves designspace font from preview-fonts/spac)
+      // Switch back to Default mode — serve the main built font.
       setFontUrl(api.getFontUrl());
       setAvar2FontUrl(null);
       setAvar2FontLoaded(false);
@@ -695,6 +703,64 @@ function App() {
     } finally {
       setBuilding(false);
     }
+  };
+
+  // ---- Post-build transforms (e.g. SPAC) ----
+  const transformCommitTimer = useRef(null);
+
+  const _transformEntries = (list) =>
+    list.map(t => ({ type: t.id, enabled: !!t.enabled, params: { ...(t.params || {}) } }));
+
+  // PUT the transform set, then a FULL loadData(): a transform like SPAC
+  // adds/removes an fvar axis AND changes advances, so instances, axes and
+  // the preview font all need refreshing — not just getAxes. `prev` is the
+  // transforms state before the optimistic update, restored on failure so a
+  // rejected PUT (e.g. invalid range → 400) doesn't leave the toggle/inputs
+  // lying about what the server actually stored.
+  const commitTransforms = async (entries, prev) => {
+    try {
+      setBuilding(true);
+      setError(null);
+      const result = await api.updateTransforms(entries);
+      if (result.transforms) setTransforms(result.transforms);
+      await loadData();
+      // The base font can build while an enabled transform still failed
+      // (bad params, missing binary). Surface it rather than silently no-op.
+      if (result.transform_error) setError(`Transform: ${result.transform_error}`);
+    } catch (err) {
+      if (prev) setTransforms(prev);            // revert optimistic UI to last known-good
+      setError(err.message);
+      console.error('Transform update failed:', err);
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  const handleToggleTransform = (id, enabled) => {
+    if (transformCommitTimer.current) {
+      clearTimeout(transformCommitTimer.current);
+      transformCommitTimer.current = null;
+    }
+    const prev = transforms;
+    const next = transforms.map(t => (t.id === id ? { ...t, enabled } : t));
+    setTransforms(next);                          // immediate checkbox feedback
+    commitTransforms(_transformEntries(next), prev); // toggling is deliberate — rebuild now
+  };
+
+  const handleTransformParam = (id, key, value) => {
+    const prev = transforms;
+    const next = transforms.map(t =>
+      t.id === id ? { ...t, params: { ...(t.params || {}), [key]: value } } : t
+    );
+    setTransforms(next);                        // immediate input feedback, no rebuild yet
+    // Debounce the rebuild — a font recompile per keystroke is the expensive,
+    // dishonest path the old SPAC code was pulled for. Commit ~0.8s after the
+    // last edit.
+    if (transformCommitTimer.current) clearTimeout(transformCommitTimer.current);
+    transformCommitTimer.current = setTimeout(() => {
+      transformCommitTimer.current = null;
+      commitTransforms(_transformEntries(next), prev);
+    }, 800);
   };
 
   const [originalCoordinates, setOriginalCoordinates] = useState({});
@@ -1794,6 +1860,9 @@ function App() {
         familyName={familyName}
         onSourceLoaded={loadData}
         busy={building || loading}
+        transforms={transforms}
+        onToggleTransform={handleToggleTransform}
+        onTransformParam={handleTransformParam}
       />
 
       <DeleteInstanceModal
@@ -1832,6 +1901,24 @@ function App() {
             </p>
           </div>
         ) : (
+        <>
+        <div className="main-tabs">
+          <button
+            type="button"
+            className={`main-tab${mainTab === 'instances' ? ' active' : ''}`}
+            onClick={() => setMainTab('instances')}
+          >
+            Instances
+          </button>
+          <button
+            type="button"
+            className={`main-tab${mainTab === 'preview' ? ' active' : ''}`}
+            onClick={() => setMainTab('preview')}
+          >
+            Preview
+          </button>
+        </div>
+        {mainTab === 'instances' ? (
         <div className="content-area">
           <Sidebar
             axes={axes}
@@ -1902,6 +1989,20 @@ function App() {
             currentAdvanceWidth={currentAdvanceWidth}
           />
         </div>
+        ) : (
+          <PreviewTab
+            axes={axes}
+            vfFamilyId={vfFamilyId}
+            fontLoaded={fontLoaded}
+            fontUrl={fontUrl}
+            builtFontFilename={builtFontFilename}
+            sampleText={sampleText}
+            onSampleTextChange={setSampleText}
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
+          />
+        )}
+        </>
         )}
       </div>
     </div>
