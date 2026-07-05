@@ -161,13 +161,22 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             {txOpen && (
               <div className="load-font-menu transforms-menu">
                 <div className="load-font-section-label">Post-build transforms</div>
-                {transforms.map(t => (
-                  <div key={t.id} className="transform-row">
-                    <label className="transform-toggle" title={t.description}>
+                {transforms.map(t => {
+                  // Client-side mirror of the server's one-injector-per-axis
+                  // rule: if another enabled transform already adds this
+                  // transform's fvar axis, disable this toggle (the server
+                  // would 400 anyway) and explain why.
+                  const owner = t.injected_axis_tag
+                    ? transforms.find(o => o.id !== t.id && o.enabled && o.injected_axis_tag === t.injected_axis_tag)
+                    : null;
+                  const conflictDisabled = !t.enabled && !!owner;
+                  return (
+                  <div key={t.id} className={`transform-row${conflictDisabled ? ' transform-row-disabled' : ''}`}>
+                    <label className="transform-toggle" title={conflictDisabled ? `Adds the ${t.injected_axis_tag} axis, already added by "${owner.name}". Turn that off first.` : t.description}>
                       <input
                         type="checkbox"
                         checked={!!t.enabled}
-                        disabled={busy}
+                        disabled={busy || conflictDisabled}
                         onChange={(e) => onToggleTransform && onToggleTransform(t.id, e.target.checked)}
                       />
                       <span className="transform-name">{t.name}</span>
@@ -178,26 +187,47 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                         {(t.params_schema || []).map(p => (
                           <label key={p.key} className="transform-param">
                             <span className="transform-param-label">{p.label}</span>
-                            <input
-                              type="number"
-                              className="transform-param-input"
-                              value={t.params?.[p.key] ?? p.default}
-                              min={p.min ?? undefined}
-                              max={p.max ?? undefined}
-                              step={p.type === 'float' ? 0.1 : 1}
-                              disabled={busy}
-                              // Pass the RAW string so clearing the field or
-                              // typing a leading '-' isn't coerced to 0 — the
-                              // server coerces/clamps against the ParamSpec on
-                              // commit (empty → default).
-                              onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
-                            />
+                            {p.type === 'select' ? (
+                              <select
+                                className="transform-param-input"
+                                value={t.params?.[p.key] ?? p.default}
+                                disabled={busy}
+                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
+                              >
+                                {(p.options || []).map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            ) : p.type === 'bool' ? (
+                              <input
+                                type="checkbox"
+                                checked={!!(t.params?.[p.key] ?? p.default)}
+                                disabled={busy}
+                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.checked)}
+                              />
+                            ) : (
+                              <input
+                                type="number"
+                                className="transform-param-input"
+                                value={t.params?.[p.key] ?? p.default}
+                                min={p.min ?? undefined}
+                                max={p.max ?? undefined}
+                                step={p.type === 'float' ? 0.1 : 1}
+                                disabled={busy}
+                                // Pass the RAW string so clearing the field or
+                                // typing a leading '-' isn't coerced to 0 — the
+                                // server coerces/clamps against the ParamSpec on
+                                // commit (empty → default).
+                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
+                              />
+                            )}
                           </label>
                         ))}
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -40,8 +40,8 @@ def _spac_output_name(family: str, vf_path: Path) -> str:
 class SpacTransform(Transform):
     spec = TransformSpec(
         id="spac",
-        name="Spacing (SPAC axis)",
-        description="Inject a SPAC parametric axis; advances track uniformly, outlines unchanged.",
+        name="Spacing — uniform (gftools)",
+        description="Inject a SPAC axis via gftools-gen-spac; every glyph tracks by the same amount, outlines unchanged.",
         params=[
             # gftools-gen-spac's numbers are per-side, so ±N ≈ ±2N advance
             # units. -20…40 matches Crispy's proven build; editable per project.
@@ -49,6 +49,7 @@ class SpacTransform(Transform):
             ParamSpec(key="max", label="Max", type="int", default=40),
         ],
         default_enabled=False,
+        injected_axis_tag="SPAC",
     )
 
     def validate(self, params: dict) -> None:

@@ -24,7 +24,13 @@ from typing import Dict, List, Tuple
 
 from . import config as _config
 from .base import Transform
+from .builtin_gftools import (
+    FixInstancesTransform,
+    FixUnhintedTransform,
+    GenStatTransform,
+)
 from .builtin_spac import SpacTransform
+from .builtin_spac_widthaware import WidthAwareSpacTransform
 
 # id -> Transform instance
 REGISTRY: Dict[str, Transform] = {}
@@ -52,6 +58,10 @@ def discover(force: bool = False) -> None:
 
     # Built-ins.
     register(SpacTransform())
+    register(WidthAwareSpacTransform())
+    register(FixInstancesTransform())
+    register(GenStatTransform())
+    register(FixUnhintedTransform())
 
     # User scripts.
     d = user_transforms_dir()
@@ -149,6 +159,7 @@ def set_active(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
     persisting an enabled-but-doomed transform that silently fails at build.
     Returns the fresh UI list."""
     cleaned = []
+    enabled_by_tag = {}
     for e in entries_list or []:
         if not isinstance(e, dict):
             continue
@@ -162,6 +173,16 @@ def set_active(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
                 t.validate(params)
             except ValueError as exc:
                 raise ValueError(f"{t.spec.name}: {exc}") from exc
+            # At most one enabled transform may inject a given fvar axis —
+            # two SPAC injectors would produce a font with two SPAC axes.
+            tag = t.spec.injected_axis_tag
+            if tag:
+                if tag in enabled_by_tag:
+                    raise ValueError(
+                        f"Only one transform can add the {tag} axis at a time "
+                        f"('{enabled_by_tag[tag]}' and '{t.spec.name}' both do)."
+                    )
+                enabled_by_tag[tag] = t.spec.name
         cleaned.append({"type": t.spec.id, "enabled": enabled, "params": params})
     _config.save(source_path, cleaned)
     return available(source_path)

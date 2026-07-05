@@ -22,14 +22,19 @@ from typing import Callable, List, Optional
 @dataclass
 class ParamSpec:
     """One editable parameter, rendered as an input in the header dropdown
-    and used to validate PUT bodies."""
+    and used to validate PUT bodies.
+
+    ``type`` is one of "int" | "float" | "bool" | "select". A "select" param
+    must supply ``options`` (list of ``{"value","label"}``); its value is
+    coerced to one of the option values (falling back to ``default``)."""
 
     key: str
     label: str
-    type: str = "int"                 # "int" | "float"
-    default: float = 0
+    type: str = "int"
+    default: object = 0
     min: Optional[float] = None
     max: Optional[float] = None
+    options: Optional[list] = None     # for type == "select": [{"value","label"}]
 
     def to_dict(self) -> dict:
         return {
@@ -39,14 +44,22 @@ class ParamSpec:
             "default": self.default,
             "min": self.min,
             "max": self.max,
+            "options": self.options,
         }
 
     def coerce(self, value):
         """Coerce + clamp an incoming value to this param's type/range."""
+        if self.type == "bool":
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            return bool(value)
+        if self.type == "select":
+            allowed = [o["value"] for o in (self.options or [])]
+            return value if value in allowed else self.default
         try:
             num = int(value) if self.type == "int" else float(value)
         except (TypeError, ValueError):
-            num = self.default
+            return self.default
         if self.min is not None:
             num = max(num, int(self.min) if self.type == "int" else self.min)
         if self.max is not None:
@@ -65,6 +78,10 @@ class TransformSpec:
     description: str = ""              # one-line subtitle
     params: List[ParamSpec] = field(default_factory=list)
     default_enabled: bool = False
+    # If this transform injects an fvar axis (e.g. SPAC), its tag. The registry
+    # enforces at most one enabled transform per injected tag, so two SPAC
+    # transforms can't both add a SPAC axis (which would corrupt the font).
+    injected_axis_tag: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +90,7 @@ class TransformSpec:
             "description": self.description,
             "params_schema": [p.to_dict() for p in self.params],
             "default_enabled": self.default_enabled,
+            "injected_axis_tag": self.injected_axis_tag,
         }
 
     def default_params(self) -> dict:
