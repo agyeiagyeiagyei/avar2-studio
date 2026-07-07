@@ -80,16 +80,29 @@
 }
 
 .axis-values {
-  display: flex;
-  justify-content: space-between;
+  /* 1fr auto 1fr keeps the current value in a true center column, so it
+     lines up across rows regardless of how wide the min/max labels are
+     (e.g. "-20" vs "0"). space-between drifted it row-to-row. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
   font-size: 0.6375rem;
   font-family: monospace;
   color: #666;
 }
 
+.axis-min {
+  text-align: left;
+}
+
+.axis-max {
+  text-align: right;
+}
+
 .axis-current {
   font-weight: 600;
   color: #333;
+  text-align: center;
 }
 
 .axis-current-clickable {
