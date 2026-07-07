@@ -34,6 +34,7 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables import otTables
 from fontTools.ttLib.tables._f_v_a_r import Axis
+from fontTools.ttLib.tables._g_l_y_f import USE_MY_METRICS
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 
@@ -112,26 +113,35 @@ class WidthAwareSpacTransform(Transform):
                 ink = _ink_width(glyph_set, name)
                 if ink <= 0:
                     continue                     # space, .notdef — leave untouched
-                factor = (ink / upm) ** bias     # 1-em glyph → factor 1.0 at any bias
 
                 glyph = glyf[name]
+                composite = glyph.isComposite()
+                # A composite with USE_MY_METRICS takes its advance/lsb from a
+                # component, so it ALREADY inherits that base glyph's SPAC
+                # delta (an accented é tracks like its e). Injecting here would
+                # double it — skip.
+                if composite and any(c.flags & USE_MY_METRICS for c in glyph.components):
+                    continue
+
+                factor = (ink / upm) ** bias     # 1-em glyph → factor 1.0 at any bias
+
                 variations = gvar.variations.get(name)
                 if variations:
                     n = len(variations[0].coordinates)
                 else:
-                    # Composite / static glyph with no gvar entry (e.g. w, u,
-                    # accented letters) — create one so it tracks SPAC too.
                     n = _gvar_point_count(glyph, glyf)
                     variations = gvar.variations.setdefault(name, [])
 
-                mn = [None] * n
-                mn[-4] = (round(-lo * factor), 0)
-                mn[-3] = (round(lo * factor), 0)
-                variations.append(TupleVariation({"SPAC": (-1.0, -1.0, 0.0)}, mn))
-                mx = [None] * n
-                mx[-4] = (round(-hi * factor), 0)
-                mx[-3] = (round(hi * factor), 0)
-                variations.append(TupleVariation({"SPAC": (0.0, 1.0, 1.0)}, mx))
+                # Simple glyph: move both phantoms (±) for a symmetric grow.
+                # Composite: moving the LEFT phantom shifts the whole component,
+                # which opens BOTH sidebearings equally — so a right delta too
+                # would double the right side. Left phantom only.
+                for support, amount in (((-1.0, -1.0, 0.0), lo), ((0.0, 1.0, 1.0), hi)):
+                    coords = [None] * n
+                    coords[-4] = (round(-amount * factor), 0)
+                    if not composite:
+                        coords[-3] = (round(amount * factor), 0)
+                    variations.append(TupleVariation({"SPAC": support}, coords))
 
             # fvar axis + instance pinning (vendored from gen_spac.add_spacing_axis)
             name_table = font["name"]
