@@ -30,7 +30,6 @@ from .builtin_gftools import (
     GenStatTransform,
 )
 from .builtin_spac import SpacTransform
-from .builtin_spac_edgeaware import EdgeAwareSpacTransform
 from .builtin_spac_widthaware import WidthAwareSpacTransform
 
 # id -> Transform instance
@@ -60,7 +59,6 @@ def discover(force: bool = False) -> None:
     # Built-ins.
     register(SpacTransform())
     register(WidthAwareSpacTransform())
-    register(EdgeAwareSpacTransform())
     register(FixInstancesTransform())
     register(GenStatTransform())
     register(FixUnhintedTransform())
