@@ -1,26 +1,36 @@
 """Width-aware SPAC — our own spacing transform (built-in, transform #2).
 
-Same idea as the uniform gftools SPAC, but the per-glyph advance/sidebearing
-delta scales with each glyph's own outline width — wider glyphs get more
-spacing, narrower less — the way Crispy's original build did it, without the
-Crispy-hardcoded XTRA range or UPM-bound constants.
-
-It operates at the fontTools level (not shelling to gftools, since we need the
-per-glyph loop), reusing gen_spac's exact injection seam: two gvar
+Same idea as the uniform gftools SPAC, but each glyph's advance/sidebearing
+delta scales with its own outline width, so the whole font loosens by a
+consistent *proportion* — wider glyphs get proportionally more space, not a
+flat amount. It operates at the fontTools level (not shelling to gftools,
+since we need the per-glyph loop), reusing gen_spac's injection seam: two gvar
 ``TupleVariation``s per glyph on the phantom points ``[-4]`` (LSB) and ``[-3]``
 (advance), an fvar SPAC axis, ``add_HVAR``, and VarStore region padding.
 
-The width factor is normalized so a glyph exactly one em wide gets factor 1.0 —
-so ``min``/``max`` keep the same meaning as the uniform transform (nominal
-per-side amount), and the factor just modulates around that per glyph. Because
-the factor uses ``width / unitsPerEm``, it is UPM-invariant (Crispy is 2000).
+Two deliberate differences from a naive port of Crispy's original:
+
+1. **Proportional, not log.** The width factor is ``(width/UPM) ** bias``.
+   At ``bias = 1`` (default) the *added space ÷ ink width* is constant across
+   glyphs — an even, proportional loosening. Crispy's ``log(width)`` curve
+   actually *compressed* the wide end, handing narrow glyphs proportionally
+   MORE space and wide glyphs less (the opposite of even rhythm). ``bias > 1``
+   pushes past proportional so wide glyphs get extra.
+
+2. **Composites are spaced too.** gen_spac (and the uniform transform) skip
+   glyphs with no drawn outline, so ``w``/``u`` and every accented letter get
+   zero tracking and read as cramped. Here we measure their bounds through the
+   glyph set and inject advance/sidebearing deltas anyway.
+
+Because the factor uses ``width / unitsPerEm``, it is UPM-invariant (Crispy is
+2000). Outlines never move — only phantom points.
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables import otTables
 from fontTools.ttLib.tables._f_v_a_r import Axis
@@ -30,39 +40,42 @@ from fontTools.varLib.hvar import add_HVAR
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
 from .builtin_spac import _spac_output_name
 
-_LOG2 = math.log(2.0)
 
-
-def _outline_bbox_width(glyph, glyf):
-    """Outline bbox width (advance-agnostic — Crispy's 'ink stays put, only
-    sidebearings grow' invariant). getCoordinates returns outline points only
-    (no phantoms), so no stripping is needed."""
+def _ink_width(glyph_set, name) -> float:
+    """Outline bounding-box width at the default master, resolved through the
+    glyph set so composites (which reference other glyphs) measure correctly."""
+    pen = BoundsPen(glyph_set)
     try:
-        coords, _end, _flags = glyph.getCoordinates(glyf)
+        glyph_set[name].draw(pen)
     except Exception:
-        return None
-    pts = list(coords)
-    if not pts:
-        return None
-    xs = [p[0] for p in pts]
-    return max(xs) - min(xs)
+        return 0.0
+    if not pen.bounds:
+        return 0.0
+    xmin, _ymin, xmax, _ymax = pen.bounds
+    return xmax - xmin
+
+
+def _gvar_point_count(glyph, glyf) -> int:
+    """Number of gvar coordinate slots for a glyph = its points + 4 phantoms.
+    Composites store one slot per component; simple glyphs one per point."""
+    if glyph.isComposite():
+        return len(glyph.components) + 4
+    coords, _end, _flags = glyph.getCoordinates(glyf)
+    return len(coords) + 4
 
 
 class WidthAwareSpacTransform(Transform):
     spec = TransformSpec(
         id="spac_widthaware",
         name="Spacing — width-aware",
-        description="Inject a SPAC axis whose per-glyph tracking scales with each glyph's width (wider glyphs get more).",
+        description="Inject a SPAC axis that loosens every glyph by a consistent proportion of its width (wider glyphs get more), including composites.",
         params=[
             ParamSpec(key="min", label="Min", type="int", default=-20),
             ParamSpec(key="max", label="Max", type="int", default=40),
-            ParamSpec(
-                key="mode", label="Curve", type="select", default="log",
-                options=[
-                    {"value": "log", "label": "Log (gentle)"},
-                    {"value": "linear", "label": "Linear"},
-                ],
-            ),
+            # 1.0 = proportional (added space ÷ width is constant). >1 gives
+            # wide glyphs progressively more than proportional; the axis is
+            # normalized so a 1-em-wide glyph is unaffected by the exponent.
+            ParamSpec(key="bias", label="Wide bias", type="float", default=1.0, min=1.0, max=2.5),
         ],
         default_enabled=False,
         injected_axis_tag="SPAC",
@@ -80,9 +93,11 @@ class WidthAwareSpacTransform(Transform):
         hi = int(params.get("max", 40))
         if lo >= hi:
             raise ValueError(f"SPAC min ({lo}) must be less than max ({hi}).")
-        mode = params.get("mode", "log")
-        if mode not in ("log", "linear"):
-            mode = "log"
+        try:
+            bias = float(params.get("bias", 1.0))
+        except (TypeError, ValueError):
+            bias = 1.0
+        bias = max(1.0, bias)
 
         font = TTFont(str(vf_path))
         try:
@@ -91,31 +106,32 @@ class WidthAwareSpacTransform(Transform):
             upm = font["head"].unitsPerEm or 1000
             glyf = font["glyf"]
             gvar = font["gvar"]
+            glyph_set = font.getGlyphSet()
 
             for name in font.getGlyphOrder():
-                glyph = glyf[name]
-                if not hasattr(glyph, "coordinates"):     # composites / space
-                    continue
-                variations = gvar.variations.get(name)
-                if not variations:                        # static glyph (no gvar)
-                    continue
-                bw = _outline_bbox_width(glyph, glyf)
-                if not bw or bw <= 0:
-                    continue
-                w_norm = bw / upm
-                # normalized so a 1-em-wide glyph → factor 1.0 (min/max keep
-                # their nominal per-side meaning; the factor modulates per glyph)
-                factor = (math.log(w_norm + 1.0) / _LOG2) if mode == "log" else w_norm
+                ink = _ink_width(glyph_set, name)
+                if ink <= 0:
+                    continue                     # space, .notdef — leave untouched
+                factor = (ink / upm) ** bias     # 1-em glyph → factor 1.0 at any bias
 
-                n = len(variations[0].coordinates)   # outline points + 4 phantoms
+                glyph = glyf[name]
+                variations = gvar.variations.get(name)
+                if variations:
+                    n = len(variations[0].coordinates)
+                else:
+                    # Composite / static glyph with no gvar entry (e.g. w, u,
+                    # accented letters) — create one so it tracks SPAC too.
+                    n = _gvar_point_count(glyph, glyf)
+                    variations = gvar.variations.setdefault(name, [])
+
                 mn = [None] * n
                 mn[-4] = (round(-lo * factor), 0)
                 mn[-3] = (round(lo * factor), 0)
-                gvar.variations[name].append(TupleVariation({"SPAC": (-1.0, -1.0, 0.0)}, mn))
+                variations.append(TupleVariation({"SPAC": (-1.0, -1.0, 0.0)}, mn))
                 mx = [None] * n
                 mx[-4] = (round(-hi * factor), 0)
                 mx[-3] = (round(hi * factor), 0)
-                gvar.variations[name].append(TupleVariation({"SPAC": (0.0, 1.0, 1.0)}, mx))
+                variations.append(TupleVariation({"SPAC": (0.0, 1.0, 1.0)}, mx))
 
             # fvar axis + instance pinning (vendored from gen_spac.add_spacing_axis)
             name_table = font["name"]
@@ -148,5 +164,5 @@ class WidthAwareSpacTransform(Transform):
             font.save(str(out))
         finally:
             font.close()
-        ctx.log(f"width-aware SPAC injected ({lo}…{hi}, {mode}) → {out.name}")
+        ctx.log(f"width-aware SPAC injected ({lo}…{hi}, bias {bias:g}) → {out.name}")
         return out
