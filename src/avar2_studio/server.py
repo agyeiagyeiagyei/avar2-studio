@@ -154,6 +154,10 @@ LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
 # transform — e.g. SPAC — was skipped). Surfaced in /api/health + the
 # transforms PUT so the UI can flag an enabled-but-failing transform.
 LAST_TRANSFORM_ERROR: Optional[str] = None
+# Set when a build was requested while one was already running. The in-flight
+# build drains this when it finishes, so a change made mid-build still lands in
+# the font instead of being silently dropped.
+REBUILD_PENDING: bool = False
 OBSERVER: Optional[Observer] = None
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
@@ -791,20 +795,42 @@ def _apply_transform_chain(vf_path):
 
 
 def trigger_build():
-    """Trigger font build (used by both manual and auto-rebuild).
+    """Build the font, coalescing concurrent requests.
 
-    Tries the avar2 build first so the preview reflects the actual avar2
-    table the browser will apply. Falls back to a plain variable-font build
-    if the avar2 build fails (e.g. CSV is mid-edit, gftools is missing, or
-    the user hasn't authored mappings yet) so the rows view always has
-    *some* font to show.
+    Callers fire this from independent requests (e.g. clicking ✕ on several
+    brace layers in a row). If a build is already running we must NOT silently
+    drop the new state — the sidecar has already changed, so the font would be
+    left stale. Instead flag it and rebuild once the in-flight build finishes,
+    draining whatever landed meanwhile.
+    """
+    global REBUILD_PENDING
+
+    if BUILDING:
+        REBUILD_PENDING = True
+        print("Build in progress; queueing a rebuild for the new state.", file=sys.stderr)
+        return False
+
+    ok = _run_build()
+    # Drain state that changed while we were building. Bounded so a burst of
+    # edits can't spin here forever.
+    passes = 0
+    while REBUILD_PENDING and passes < 3:
+        REBUILD_PENDING = False
+        passes += 1
+        print("Rebuilding for state that changed during the last build...", file=sys.stderr)
+        ok = _run_build()
+    return ok
+
+
+def _run_build():
+    """One build pass: try the avar2 build first so the preview reflects the
+    actual avar2 table the browser will apply. Falls back to a plain
+    variable-font build if the avar2 build fails (e.g. CSV is mid-edit,
+    gftools is missing, or the user hasn't authored mappings yet) so the rows
+    view always has *some* font to show.
     """
     global VARIABLE_FONT_PATH, LAST_BUILD_TIME, BUILDING, USE_FONTC
     global LAST_BUILD_STATUS, LAST_BUILD_ERROR
-
-    if BUILDING:
-        print("Build already in progress, skipping...", file=sys.stderr)
-        return False
 
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
     avar2_result = _perform_avar2_build(check_sync=False)
@@ -1647,10 +1673,14 @@ def _get_preview_dir() -> Optional[Path]:
     if PREVIEW_DIR:
         return PREVIEW_DIR
 
-    if not GLYPHS_PATH:
+    # Resolve against the ORIGINAL source, never GLYPHS_PATH: once a control
+    # axis has brace layers GLYPHS_PATH points at the shadow, and deriving from
+    # it nests a second .avar2-studio/ INSIDE the shadow dir.
+    base = ORIGINAL_PATH or GLYPHS_PATH
+    if not base:
         return None
 
-    workdir = GLYPHS_PATH.parent / ".avar2-studio"
+    workdir = base.parent / ".avar2-studio"
     workdir.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR = workdir
     return workdir
@@ -1667,14 +1697,19 @@ def _get_preview_csv_path() -> Optional[Path]:
     if PREVIEW_CSV_PATH:
         return PREVIEW_CSV_PATH
 
-    if not GLYPHS_PATH:
+    # Resolve against the ORIGINAL source, never GLYPHS_PATH: once a control
+    # axis has brace layers GLYPHS_PATH points at the shadow, which would put
+    # the designer's authored CSV inside .avar2-studio/shadow/ and make every
+    # /api/avar2/* lookup miss the real one next to the source.
+    base = ORIGINAL_PATH or GLYPHS_PATH
+    if not base:
         return None
 
     # Locked convention: family name is the source file's stem in both
     # .glyphs and .designspace flows, so the CSV name is deterministic
     # without loading the source.
-    family_name = GLYPHS_PATH.stem
-    csv_path = GLYPHS_PATH.parent / f"{family_name}-avar.csv"
+    family_name = base.stem
+    csv_path = base.parent / f"{family_name}-avar.csv"
     PREVIEW_CSV_PATH = csv_path
     return csv_path
 
@@ -3007,7 +3042,10 @@ def set_control_axis_layers(tag: str):
             GLYPHS_PATH = shadow
         else:
             GLYPHS_PATH = ORIGINAL_PATH
-        VARIABLE_FONT_PATH = None
+        # Don't null VARIABLE_FONT_PATH here: trigger_build reassigns it on any
+        # successful build, and on failure (or when coalesced into an in-flight
+        # build) the last-good font keeps serving instead of /api/font 404ing
+        # and blanking the preview.
         try:
             trigger_build()
         except Exception as build_exc:
@@ -3045,7 +3083,7 @@ def update_control_axis(tag: str):
         )
         try:
             _control_axes.regenerate_shadow(ORIGINAL_PATH)
-            VARIABLE_FONT_PATH = None
+            # See set_control_axis_layers: keep the last-good font on failure.
             try:
                 trigger_build()
             except Exception as build_exc:
@@ -3094,7 +3132,7 @@ def delete_control_axis(tag: str):
             else:
                 _control_axes.remove_shadow(ORIGINAL_PATH)
                 GLYPHS_PATH = ORIGINAL_PATH
-            VARIABLE_FONT_PATH = None
+            # See set_control_axis_layers: keep the last-good font on failure.
             try:
                 trigger_build()
             except Exception as build_exc:
