@@ -215,6 +215,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         allMasters={masters}
         vfFamilyId={vfFamilyId}
         fontLoaded={fontLoaded}
+        building={building}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}

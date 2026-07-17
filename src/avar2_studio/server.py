@@ -158,6 +158,11 @@ LAST_TRANSFORM_ERROR: Optional[str] = None
 # build drains this when it finishes, so a change made mid-build still lands in
 # the font instead of being silently dropped.
 REBUILD_PENDING: bool = False
+# Count of background regen/rebuild tasks in flight. The sidecar write returns
+# immediately so the UI stays responsive, but the shadow regen + font build
+# take seconds — /api/health folds this into `building` so the frontend can
+# show the preview catching up.
+BACKGROUND_WORK: int = 0
 OBSERVER: Optional[Observer] = None
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
@@ -1598,7 +1603,10 @@ def health():
             "last_build_status": LAST_BUILD_STATUS,
             "last_build_error": LAST_BUILD_ERROR,
             "transform_error": LAST_TRANSFORM_ERROR,
-            "building": BUILDING,
+            # Fold in background regen/rebuild work: the layer save returns
+            # instantly, so BUILDING alone would read false while the shadow is
+            # still regenerating and the preview is stale.
+            "building": BUILDING or BACKGROUND_WORK > 0,
         })
     except Exception as e:
         print(f"Error in health endpoint: {e}", file=sys.stderr)
@@ -3017,7 +3025,7 @@ def set_control_axis_layers(tag: str):
     and triggers a rebuild. Switches the build path to the shadow
     when there's at least one layer; otherwise reverts to original.
     """
-    global GLYPHS_PATH, VARIABLE_FONT_PATH
+    global GLYPHS_PATH, VARIABLE_FONT_PATH, BACKGROUND_WORK
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -3025,31 +3033,43 @@ def set_control_axis_layers(tag: str):
     if not isinstance(entries, list):
         return jsonify({"error": "Body must include 'layers' as a list."}), 400
     try:
+        # The sidecar is the source of truth for what the UI lists, and writing
+        # it is instant. Regenerating the shadow and recompiling the font take
+        # seconds — do them in the background so this returns straight away:
+        # the modal can close and the new layer can appear immediately, while
+        # /api/health reports building=true until the preview catches up.
         stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
 
-        shadow = None
-        try:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-        except Exception as shadow_exc:
-            print(f"Warning: shadow regeneration after layers update failed: {shadow_exc}", file=sys.stderr)
+        BACKGROUND_WORK += 1
 
-        # Build path: shadow if ANY axis still has layers, else
-        # original. Avoids building from an axis-less shadow when the
-        # designer empties all layers.
-        sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
-        any_layers = any(ax.get("layers") for ax in sidecar_after)
-        if shadow is not None and any_layers:
-            GLYPHS_PATH = shadow
-        else:
-            GLYPHS_PATH = ORIGINAL_PATH
-        # Don't null VARIABLE_FONT_PATH here: trigger_build reassigns it on any
-        # successful build, and on failure (or when coalesced into an in-flight
-        # build) the last-good font keeps serving instead of /api/font 404ing
-        # and blanking the preview.
-        try:
-            trigger_build()
-        except Exception as build_exc:
-            print(f"Warning: rebuild after layers update failed: {build_exc}", file=sys.stderr)
+        def _regen_and_build():
+            global GLYPHS_PATH, BACKGROUND_WORK
+            try:
+                shadow = None
+                try:
+                    shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                except Exception as shadow_exc:
+                    print(f"Warning: shadow regeneration after layers update failed: {shadow_exc}", file=sys.stderr)
+
+                # Build path: shadow if ANY axis still has layers, else
+                # original. Avoids building from an axis-less shadow when the
+                # designer empties all layers.
+                sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
+                any_layers = any(ax.get("layers") for ax in sidecar_after)
+                GLYPHS_PATH = shadow if (shadow is not None and any_layers) else ORIGINAL_PATH
+
+                # Don't null VARIABLE_FONT_PATH: trigger_build reassigns it on
+                # any successful build, and on failure (or when coalesced into
+                # an in-flight build) the last-good font keeps serving instead
+                # of /api/font 404ing and blanking the preview.
+                try:
+                    trigger_build()
+                except Exception as build_exc:
+                    print(f"Warning: rebuild after layers update failed: {build_exc}", file=sys.stderr)
+            finally:
+                BACKGROUND_WORK -= 1
+
+        threading.Thread(target=_regen_and_build, daemon=True).start()
 
         return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
     except ValueError as exc:

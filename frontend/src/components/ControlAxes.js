@@ -24,7 +24,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allMasters, vfFamilyId, fontLoaded }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allMasters, vfFamilyId, fontLoaded, building = false }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -88,6 +88,15 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           aria-expanded={sectionOpen}
         >
           <h3 className="control-axes-title">CONTROL AXES</h3>
+          {/* The layer list saves instantly; the font recompiles in the
+              background. Say so, otherwise an edit looks like it did nothing
+              for the seconds the preview takes to catch up. */}
+          {building && (
+            <span className="control-axes-building" title="Your layers are saved. The preview font is recompiling.">
+              <span className="control-axes-spinner" aria-hidden="true" />
+              rebuilding preview…
+            </span>
+          )}
           {disabledCount > 0 && (
             <span className="control-axes-disabled-count" title={`${disabledCount} disabled in preview`}>
               {disabledCount} off

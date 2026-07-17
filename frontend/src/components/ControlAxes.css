@@ -929,6 +929,35 @@
   background: #f1eef9;
 }
 
+.control-axes-building {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.4rem;
+  font-size: 0.6rem;
+  font-style: italic;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.control-axes-spinner {
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 1.5px solid #d0d3d9;
+  border-top-color: #5b3a8f;
+  border-radius: 50%;
+  animation: control-axes-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes control-axes-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-axes-spinner { animation: none; }
+}
+
 .layer-duplicate {
   background: none;
   border: 1px solid #d5d5d5;
