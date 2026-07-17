@@ -24,6 +24,11 @@ src/avar2_studio/static/
 # Tool scratch
 .avar2-studio/
 
+# Launching directly against a bundled fixture bootstraps a sibling
+# CSV — keep the shipped fixtures git-clean (the Load Font dropdown
+# stages examples into ~/.avar2-studio/workspace/ for the same reason)
+examples/*/sources/*-avar.csv
+
 # macOS
 .DS_Store
 
