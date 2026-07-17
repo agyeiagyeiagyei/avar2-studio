@@ -240,6 +240,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           prefillGlyphs={addLocationFor.prefillGlyphs}
           lockGlyphs={addLocationFor.lockGlyphs}
           editLayer={addLocationFor.editLayer}
+          duplicateFrom={addLocationFor.duplicateFrom}
           allAxes={allAxes || []}
           allMasters={allMasters || []}
           vfFamilyId={vfFamilyId}

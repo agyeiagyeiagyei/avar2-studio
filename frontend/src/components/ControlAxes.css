@@ -929,6 +929,22 @@
   background: #f1eef9;
 }
 
+.layer-duplicate {
+  background: none;
+  border: 1px solid #d5d5d5;
+  border-radius: 3px;
+  color: #555;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.layer-duplicate:hover {
+  background: #f0f0f0;
+  border-color: #b9b9b9;
+}
+
 .layer-remove {
   background: none;
   border: 1px solid #f1c0c0;

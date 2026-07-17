@@ -255,6 +255,18 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
                           </button>
                           <button
                             type="button"
+                            className="layer-duplicate"
+                            title="Duplicate this layer — opens at the same coordinates so you only change what differs. Edit the glyph field to reuse this location on other glyphs."
+                            onClick={() => onRequestAddModal && onRequestAddModal({
+                              tag,
+                              axisDefault: axis.default,
+                              duplicateFrom: entry,
+                            })}
+                          >
+                            ⧉
+                          </button>
+                          <button
+                            type="button"
                             className="layer-remove"
                             title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
                             onClick={() => removeLayer(entry)}
