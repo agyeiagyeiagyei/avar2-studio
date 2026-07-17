@@ -380,6 +380,25 @@ export const api = {
     return parseJSON(response);
   },
 
+  /**
+   * Add and/or remove brace layers without sending the whole list. Preferred
+   * for interactive edits: the server merges against the on-disk list, so a
+   * save made while our cached copy is stale composes instead of wiping the
+   * layers we hadn't loaded yet.
+   */
+  async controlAxisLayerDelta(tag, { add = [], remove = [] } = {}) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/layers/delta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ add, remove }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to update layers: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async setControlAxisLayers(tag, layers) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/layers`, {
       method: 'PUT',

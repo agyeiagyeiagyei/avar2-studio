@@ -163,6 +163,15 @@ REBUILD_PENDING: bool = False
 # take seconds — /api/health folds this into `building` so the frontend can
 # show the preview catching up.
 BACKGROUND_WORK: int = 0
+# Serializes read-modify-write on the control-axis sidecar so two concurrent
+# edits can't interleave and drop each other's layers.
+SIDECAR_LOCK = threading.Lock()
+# Debounced shadow-regen + rebuild. Layer edits arrive in bursts (clicking ✕ a
+# few times, adding several glyphs); regenerating the shadow and recompiling
+# per edit costs seconds each and would queue up. Coalesce a burst into one job.
+_REBUILD_TIMER = None
+_REBUILD_TIMER_LOCK = threading.Lock()
+_REBUILD_DEBOUNCE_SECONDS = 1.2
 OBSERVER: Optional[Observer] = None
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
@@ -797,6 +806,53 @@ def _apply_transform_chain(vf_path):
     if errors:
         LAST_TRANSFORM_ERROR = "; ".join(errors)
     return out
+
+
+def _run_shadow_regen_and_build():
+    """Regenerate the control-axis shadow, point the build at it, and rebuild.
+    Runs on the debounce timer — never call directly from a request."""
+    global GLYPHS_PATH, BACKGROUND_WORK, _REBUILD_TIMER
+    with _REBUILD_TIMER_LOCK:
+        _REBUILD_TIMER = None
+    try:
+        if ORIGINAL_PATH is None:
+            return
+        shadow = None
+        try:
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+        # Build from the shadow only while some axis still has layers —
+        # otherwise the shadow carries an axis with no deltas.
+        try:
+            sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
+            any_layers = any(ax.get("layers") for ax in sidecar_after)
+        except Exception:  # noqa: BLE001
+            any_layers = False
+        GLYPHS_PATH = shadow if (shadow is not None and any_layers) else ORIGINAL_PATH
+        try:
+            trigger_build()
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: rebuild after control-axis change failed: {exc}", file=sys.stderr)
+    finally:
+        with _REBUILD_TIMER_LOCK:
+            BACKGROUND_WORK -= 1
+
+
+def schedule_shadow_rebuild():
+    """Queue a debounced shadow regen + rebuild, coalescing a burst of layer
+    edits into ONE job. Returns immediately so the request can answer straight
+    away; /api/health reports building=true until the job finishes."""
+    global _REBUILD_TIMER, BACKGROUND_WORK
+    with _REBUILD_TIMER_LOCK:
+        if _REBUILD_TIMER is not None:
+            # Already queued — push it out; the pending job still counts as work.
+            _REBUILD_TIMER.cancel()
+        else:
+            BACKGROUND_WORK += 1
+        _REBUILD_TIMER = threading.Timer(_REBUILD_DEBOUNCE_SECONDS, _run_shadow_regen_and_build)
+        _REBUILD_TIMER.daemon = True
+        _REBUILD_TIMER.start()
 
 
 def trigger_build():
@@ -3025,7 +3081,6 @@ def set_control_axis_layers(tag: str):
     and triggers a rebuild. Switches the build path to the shadow
     when there's at least one layer; otherwise reverts to original.
     """
-    global GLYPHS_PATH, VARIABLE_FONT_PATH, BACKGROUND_WORK
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -3033,44 +3088,47 @@ def set_control_axis_layers(tag: str):
     if not isinstance(entries, list):
         return jsonify({"error": "Body must include 'layers' as a list."}), 400
     try:
-        # The sidecar is the source of truth for what the UI lists, and writing
-        # it is instant. Regenerating the shadow and recompiling the font take
-        # seconds — do them in the background so this returns straight away:
-        # the modal can close and the new layer can appear immediately, while
-        # /api/health reports building=true until the preview catches up.
-        stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
+        # Whole-list replace. Prefer the delta endpoint for interactive edits —
+        # this one overwrites whatever the caller didn't know about.
+        with SIDECAR_LOCK:
+            stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
+        schedule_shadow_rebuild()
+        return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        print(f"Error setting control-axis layers: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-        BACKGROUND_WORK += 1
 
-        def _regen_and_build():
-            global GLYPHS_PATH, BACKGROUND_WORK
-            try:
-                shadow = None
-                try:
-                    shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-                except Exception as shadow_exc:
-                    print(f"Warning: shadow regeneration after layers update failed: {shadow_exc}", file=sys.stderr)
+@app.route('/api/control-axes/<tag>/layers/delta', methods=['POST'])
+def patch_control_axis_layers(tag: str):
+    """Add and/or remove brace layers without sending the whole list. Body::
 
-                # Build path: shadow if ANY axis still has layers, else
-                # original. Avoids building from an axis-less shadow when the
-                # designer empties all layers.
-                sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
-                any_layers = any(ax.get("layers") for ax in sidecar_after)
-                GLYPHS_PATH = shadow if (shadow is not None and any_layers) else ORIGINAL_PATH
+        {"add": [{"glyph": "e", "location": {...}}],
+         "remove": [{"glyph": "e", "location": {...}}]}
 
-                # Don't null VARIABLE_FONT_PATH: trigger_build reassigns it on
-                # any successful build, and on failure (or when coalesced into
-                # an in-flight build) the last-good font keeps serving instead
-                # of /api/font 404ing and blanking the preview.
-                try:
-                    trigger_build()
-                except Exception as build_exc:
-                    print(f"Warning: rebuild after layers update failed: {build_exc}", file=sys.stderr)
-            finally:
-                BACKGROUND_WORK -= 1
-
-        threading.Thread(target=_regen_and_build, daemon=True).start()
-
+    The on-disk list is the base, so an edit made while the client's copy is
+    stale composes instead of clobbering — the whole-list PUT silently drops
+    layers the caller hadn't loaded yet, which reads as layers "resetting".
+    Removals apply before additions, so a replace is remove+add. Serialized on
+    SIDECAR_LOCK so concurrent edits can't interleave.
+    """
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    add = data.get("add") or []
+    remove = data.get("remove") or []
+    if not isinstance(add, list) or not isinstance(remove, list):
+        return jsonify({"error": "'add' and 'remove' must be lists."}), 400
+    if not add and not remove:
+        return jsonify({"error": "Nothing to do: provide 'add' and/or 'remove'."}), 400
+    try:
+        with SIDECAR_LOCK:
+            stored = _control_axes.apply_layer_delta(ORIGINAL_PATH, tag, add=add, remove=remove)
+        schedule_shadow_rebuild()
         return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

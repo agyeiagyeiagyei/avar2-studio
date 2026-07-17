@@ -24,7 +24,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onSetLayers, allAxes, allMasters, vfFamilyId, fontLoaded, building = false }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, allAxes, allMasters, vfFamilyId, fontLoaded, building = false }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -37,9 +37,11 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
   // Append a batch of new {glyph, location} entries to an axis's
   // ``layers`` list and round-trip through the API.
   const handleAddLayers = async (ax, newEntries) => {
-    if (typeof onSetLayers !== 'function') return;
-    const merged = [...(ax.layers || []), ...newEntries];
-    await onSetLayers(ax.tag, merged);
+    if (typeof onLayerDelta !== 'function') return;
+    // Send only what changed. Merging into `ax.layers` here and PUTting the
+    // whole list would drop any layer added since our last refetch — the
+    // modal now closes before that refetch lands.
+    await onLayerDelta(ax.tag, { add: newEntries });
   };
   // Section opens by default — control axes are the primary editing
   // surface in v1, and per-axis rows are now collapsible themselves,
@@ -194,13 +196,13 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
               </div>
               {isExpanded && (
                 <div className="control-axis-body">
-                  {isStudio && typeof onSetLayers === 'function' ? (
+                  {isStudio && typeof onLayerDelta === 'function' ? (
                     <LayersEditor
                       tag={ax.tag}
                       axis={ax}
                       layers={ax.layers || []}
                       allAxes={allAxes || []}
-                      onChangeLayers={onSetLayers}
+                      onLayerDelta={onLayerDelta}
                       onOpenInEditor={onOpenInEditor}
                       onRequestAddModal={setAddLocationFor}
                       vfFamilyId={vfFamilyId}

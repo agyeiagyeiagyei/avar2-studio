@@ -275,6 +275,47 @@ def set_layers(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
     return cleaned
 
 
+def apply_layer_delta(source_path: Path, tag: str, add=None, remove=None) -> List[Dict]:
+    """Merge a delta into an axis's layers, using the ON-DISK list as the base.
+
+    ``set_layers`` replaces the whole list, which is a lost-update hazard: the
+    caller builds that list from its own cached copy, so a save made while the
+    cache is stale silently drops every layer the caller didn't know about
+    (authored layers appear to "reset"). A delta only states what changed, so
+    concurrent edits compose instead of clobbering.
+
+    ``add``/``remove`` are entry lists shaped like ``layers``. Removal matches
+    on (glyph, location); removals are applied before additions, so a
+    replace is ``remove=[old], add=[new]``. Returns the stored list.
+    """
+    tag_norm = (tag or "").strip().lower()
+    if not tag_norm:
+        raise ValueError("tag is required")
+    data = load(source_path)
+    target = None
+    for ax in data["axes"]:
+        if str(ax.get("tag", "")).lower() == tag_norm:
+            target = ax
+            break
+    if target is None:
+        raise ValueError(f"control axis '{tag_norm}' not found")
+
+    current = _normalise_layers(target.get("layers") or [])
+    remove_keys = {_layer_key(e) for e in _normalise_layers(remove or [])}
+    kept = [e for e in current if _layer_key(e) not in remove_keys]
+    merged = _normalise_layers(kept + _normalise_layers(add or []))
+    target["layers"] = merged
+    _save(source_path, data)
+    return merged
+
+
+def _layer_key(entry: Dict):
+    """Identity of a normalised layer entry — mirrors the dedup key in
+    ``_normalise_layers`` so delta removal matches what's stored."""
+    loc = entry.get("location") or {}
+    return (str(entry.get("glyph", "")).strip(), tuple(sorted(loc.items())))
+
+
 # --------------------------------------------------------------------------
 # Internals
 # --------------------------------------------------------------------------

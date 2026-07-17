@@ -15,11 +15,12 @@ import React, { useState } from 'react';
  *   axis               — full axis dict (range, default)
  *   layers             — Array<{glyph, location}> from sidecar
  *   allAxes            — full axes list from /api/axes (for the modal)
- *   onChangeLayers     — async (tag, layers) => void
+ *   onLayerDelta       — async (tag, {add, remove}) => void; sends only
+ *                        what changed so concurrent edits can't clobber
  *   onOpenInEditor     — (tag, glyphName?) => void
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
  */
-function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded }) {
+function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -111,14 +112,14 @@ function LayersEditor({ tag, axis, layers, allAxes, onChangeLayers, onOpenInEdit
     });
   };
 
+  // Both send a DELTA, never the whole list: rebuilding the list from our
+  // cached `layers` would silently wipe anything added since the last refetch.
   const removeLayer = async (entry) => {
-    const next = (layers || []).filter(e => !sameEntry(e, entry));
-    await onChangeLayers(tag, next);
+    await onLayerDelta(tag, { remove: [entry] });
   };
 
   const replaceLayer = async (oldEntry, newEntry) => {
-    const next = (layers || []).map(e => sameEntry(e, oldEntry) ? newEntry : e);
-    await onChangeLayers(tag, next);
+    await onLayerDelta(tag, { remove: [oldEntry], add: [newEntry] });
   };
 
   // Build the full N-D location for a brace: sparse pins from

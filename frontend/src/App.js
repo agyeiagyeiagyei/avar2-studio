@@ -443,6 +443,14 @@ function App() {
     await refreshAfterControlAxisChange();
   }, [refreshAfterControlAxisChange]);
 
+  // Interactive layer edits go through the delta endpoint, never a whole-list
+  // replace: the modal now closes before the refetch lands, so a list rebuilt
+  // from our cached copy would silently drop layers added moments earlier.
+  const handleControlAxisLayerDelta = useCallback(async (tag, delta) => {
+    await api.controlAxisLayerDelta(tag, delta);
+    await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
+
   // CONTROL AXES — open the shadow in Fontra.
   // ``url`` is the same-origin proxied path; ``direct_url`` is the
   // raw cross-origin URL (the iframe currently uses direct_url to
@@ -1950,6 +1958,7 @@ function App() {
                 : null
             }
             onSetControlAxisLayers={handleSetControlAxisLayers}
+            onControlAxisLayerDelta={handleControlAxisLayerDelta}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
