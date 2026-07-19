@@ -1,5 +1,11 @@
 # Control axes — design + implementation notes
 
+> **Terminology:** the UI now labels these **secondary parametric
+> axes** (renamed from "control axes" in v0.1.0.dev8, on designer
+> feedback). This doc, the code, the API routes, and the
+> `-control.json` sidecar keep the original "control axis" name —
+> they're the same concept.
+
 > **Status:** Partly shipped. This doc is part reference for what's
 > built and part design notes for what isn't; every section is tagged
 > **`SHIPPED`** or **`DESIGN-ONLY`** so the two don't blur.

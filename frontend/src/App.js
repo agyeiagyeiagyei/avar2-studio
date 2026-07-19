@@ -431,7 +431,7 @@ function App() {
         return next;
       });
     } catch (err) {
-      setError(err.message || `Failed to delete control axis "${tag}"`);
+      setError(err.message || `Failed to delete secondary parametric axis "${tag}"`);
     }
   }, [refreshAfterControlAxisChange]);
 
@@ -512,7 +512,7 @@ function App() {
       const controlValue = (layerLocation && layerLocation[tag] !== undefined)
         ? Number(layerLocation[tag]) : null;
       const axisName = ((axes || []).find(a => a.tag === tag) || {}).name || tag;
-      setFontraEditor({ url, directUrl, tag, glyphName, controlValue, axisName });
+      setFontraEditor({ url, directUrl, tag, glyphName, controlValue, axisName, editingOriginal: !!data.editing_original });
     } catch (err) {
       setError(err.message || `Failed to open Fontra for "${tag}"`);
     }
@@ -1954,7 +1954,7 @@ function App() {
             onDeleteControlAxis={handleDeleteControlAxis}
             controlAxisAuthoringDisabledReason={
               sourceFormat && sourceFormat !== 'glyphs'
-                ? 'Control-axis authoring is only supported for .glyphs sources right now. .designspace brace-layer authoring is not yet implemented.'
+                ? 'Secondary-parametric-axis authoring is only supported for .glyphs sources right now. .designspace brace-layer authoring is not yet implemented.'
                 : null
             }
             onSetControlAxisLayers={handleSetControlAxisLayers}

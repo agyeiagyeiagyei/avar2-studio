@@ -109,9 +109,9 @@ function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
         {axis.is_control_axis && (
           <span
             className="axis-control-badge"
-            title="Designer-declared control axis. Lives in <basename>-control.json; managed in the CONTROL AXES section."
+            title="Designer-declared secondary parametric axis. Lives in <basename>-control.json; managed in the SECONDARY PARAMETRIC AXES section."
           >
-            control
+            secondary
           </span>
         )}
         <span className="axis-tag">{axis.tag}</span>

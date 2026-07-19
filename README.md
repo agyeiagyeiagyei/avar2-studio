@@ -13,7 +13,7 @@ traditional→parametric mappings. The preview renders the **actual built
 avar2 font** — the browser applies the real avar2 table — so there are
 no JS-side approximations of what the shipped font will do.
 
-Beyond mappings, you can declare **control axes** — designer-named
+Beyond mappings, you can declare **secondary parametric axes** — designer-named
 axes that deform only a chosen subset of glyphs — author their brace
 layers visually, and draw the outlines themselves in an embedded
 [Fontra](https://github.com/fontra/fontra) editor. A **post-build
@@ -29,7 +29,7 @@ through three phases of work: lift-and-shift, genericization, and
 single-build-path consolidation. `dev6` added `.designspace` support
 alongside `.glyphs`, plus a two-tier instance model that keeps
 exploratory grid points out of the designer's source file. Since
-then: glyph-scoped **control axis** authoring (declare an axis, pick
+then: glyph-scoped **secondary parametric axis** authoring (declare an axis, pick
 its glyphs, author brace layers, draw outlines in an embedded
 Fontra), a free-form **Preview** tab for the built font, a
 **post-build transforms** framework, and a ~19× faster edit-rebuild
@@ -72,7 +72,7 @@ All dependencies — including `fontc` (the Rust font compiler, via
 its PyPI package) and `gftools` — are in the wheel's deps. Run
 `avar2-studio doctor` to confirm your environment is OK.
 
-> The released wheel is `dev6`. Control axes, the Preview tab, and
+> The released wheel is `dev6`. Secondary parametric axes, the Preview tab, and
 > post-build transforms landed after that release — install from
 > source (below) to use them today.
 
@@ -147,7 +147,7 @@ The tool sets up sibling files next to your `.glyphs` file:
 ~/work/MyFont/
 ├── MyFont.glyphs             # your source (read, and written back when you save edits)
 ├── MyFont-avar.csv           # authored avar2 mappings — commit this
-├── MyFont-control.json       # authored control axes + brace layers — commit this
+├── MyFont-control.json       # authored secondary parametric axes + brace layers — commit this
 ├── MyFont-transforms.json    # enabled post-build transforms + params — commit this
 └── .avar2-studio/            # tool-managed: config, build output, shadow source — gitignore this
     ├── config.yaml
@@ -163,8 +163,8 @@ be committed alongside the source (`-control.json` and
 `-transforms.json` only appear once you use those features).
 `.avar2-studio/` is tool-managed and should be added to your
 project's `.gitignore` — builds compile from the shadow copy once a
-control axis has brace layers, so **your original source file is
-never modified** by control-axis authoring.
+secondary parametric axis has brace layers, so **your original
+source file is never modified** by studio axis authoring.
 
 ## Axis surface — where each axis appears in the sidebar
 
@@ -177,7 +177,8 @@ what most designers think of when they say "the parametric axes."
 The studio treats them as the base designspace surface, and
 traditional axes get mapped *into* this space via avar2.
 
-**CONTROL AXES** — axes that only deform *some* glyphs. Two
+**SECONDARY PARAMETRIC AXES** — axes that only deform *some*
+glyphs (the UI called these "control axes" before v0.1.0.dev8). Two
 badges disambiguate why:
 
 - `scoped` — the axis was authored to affect a subset of glyphs
@@ -189,7 +190,7 @@ badges disambiguate why:
   that's a hint that a few glyphs are missing masters upstream.
 
 - `studio` — declared inside avar2-studio (via **+ Add** next to
-  CONTROL AXES) rather than in the source file. Lives in the
+  SECONDARY PARAMETRIC AXES) rather than in the source file. Lives in the
   sibling sidecar (`<basename>-control.json`); builds compile from
   a shadow copy of your source with the brace layers written in,
   so the original file is never touched. Use this to prototype new
@@ -212,7 +213,7 @@ implementation deep-dive.
   they surface under CORE / PARAMETRIC AXES with no badge.
 - **roboto-delta-mini** — `XOUC` / `YOUC` / `XTUC` only touch the
   uppercase glyphs (Roboto Delta's case-split design), so they
-  surface under CONTROL AXES with a `scoped` badge. Nothing wrong;
+  surface under SECONDARY PARAMETRIC AXES with a `scoped` badge. Nothing wrong;
   the classifier is reading Roboto Delta's actual authored coverage.
 
 Classifier logic: [glyph_coverage.py `_classify()`](./src/avar2_studio/glyph_coverage.py).
@@ -225,12 +226,12 @@ drives the **built font** the way an end user's app would: every fvar
 axis is a live slider, grouped into
 
 - **User axes** — the avar2-mapped axes you authored (`wght`, `wdth`, …)
-- **Control axes** — glyph-scoped axes
+- **Secondary parametric axes** — glyph-scoped axes
 - **Parametric axes** — the underlying designspace handles, collapsed
   by default
 
 Because the browser renders the actual compiled font, what you see —
-the avar2 table, control-axis deltas, transform-injected axes like
+the avar2 table, secondary-axis deltas, transform-injected axes like
 `SPAC` — is exactly what ships. A **Download** button saves the
 current built `.ttf`.
 
@@ -289,7 +290,7 @@ Open `http://localhost:3000` in a browser.
 - [x] SPAC axis support — shipped as post-build transforms (uniform via gftools + our width-aware variant)
 - [ ] PyPI publish (replace the release URL above with `pipx install avar2-studio`)
 - [ ] v0.1.0 release (current pre-releases are `v0.1.0.devN`)
-- [ ] `.designspace` control-axis authoring (brace-layer authoring is `.glyphs`-only right now; `.designspace` sources get read-only coverage)
+- [ ] `.designspace` secondary-parametric-axis authoring (brace-layer authoring is `.glyphs`-only right now; `.designspace` sources get a read-only layers panel)
 - [ ] Push-to-source sync (write studio-declared axes from the sidecar into the `.glyphs` on request)
 - [ ] Grade-master comparison panel (parked on the `grade-comparison` branch; uses uharfbuzz per-glyph advances)
 

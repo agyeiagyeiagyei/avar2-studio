@@ -197,7 +197,7 @@ function PreviewTab({
         {controlAxes.length > 0 && (
           <section className="preview-axis-group">
             <div className="preview-axis-group-head">
-              <h3>Control axes</h3>
+              <h3>Secondary parametric axes</h3>
               <span className="preview-axis-group-sub">glyph-scoped</span>
             </div>
             {controlAxes.map(renderAxis)}

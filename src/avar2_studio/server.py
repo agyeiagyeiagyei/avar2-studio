@@ -2307,6 +2307,16 @@ def glyph_coverage():
                 "covers_count": info["covers_count"],
                 "total_glyphs": info["total_glyphs"],
                 "kind": info["kind"],
+                # Per-glyph brace-layer / alternate-master locations —
+                # lets the frontend render source-derived scoped axes
+                # in the same layers panel as studio ones (read-only).
+                "layers": info.get("layers", []),
+                # Design-space axis extremes, same units as the layer
+                # locations above — the frontend prefers these over the
+                # built font's fvar for coverage classification.
+                "min": info.get("min"),
+                "default": info.get("default"),
+                "max": info.get("max"),
                 # ``source`` lets the frontend distinguish source-derived
                 # axes (read from brace layers / alternate masters) from
                 # studio-declared control axes (read from the sidecar).
@@ -3023,30 +3033,61 @@ def fontra_ws_proxy(ws):
 
 @app.route('/api/control-axes/<tag>/open-editor', methods=['POST'])
 def open_control_axis_in_editor(tag: str):
-    """Spin up Fontra on the shadow folder and return the iframe URL
-    the frontend should load. The shadow must exist for this to work
-    — the caller is expected to have set coverage already (the
-    coverage save in v2.3 regenerates the shadow with seed brace
-    layers, which is what Fontra opens to edit).
+    """Spin up Fontra and return the iframe URL the frontend should
+    load. Studio-authored axes edit the shadow copy (the coverage
+    save regenerates it with seed brace layers). When no shadow
+    exists — source-derived axes on a .designspace or plain .glyphs —
+    Fontra opens the original source directly, flagged in the
+    response as ``editing_original``.
     """
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
 
-    if not _control_axes.shadow_exists(ORIGINAL_PATH):
-        # No coverage / no shadow yet — there's nothing to edit.
-        return jsonify({
-            "error": "No shadow file yet. Add coverage glyphs first so the studio can seed brace layers."
-        }), 400
+    # Route by the AXIS, not by global shadow existence. A studio
+    # (sidecar-declared) axis only exists in the shadow — opening the
+    # original for it would let Fontra write into the user's real file
+    # at a location that isn't even declared there. Conversely a
+    # source-derived axis's layers live in the original — opening the
+    # shadow for it would strand the designer's edits in a copy that
+    # the next regeneration rebuilds from the original.
+    try:
+        is_studio_axis = any(
+            (ax.get("tag") or "").lower() == tag.lower()
+            for ax in _control_axes.list_axes(ORIGINAL_PATH)
+        )
+    except Exception:
+        is_studio_axis = False
 
-    shadow_path = _control_axes.shadow_path_for(ORIGINAL_PATH)
-    content_root = shadow_path.parent  # the shadow/ directory
+    if is_studio_axis:
+        if not _control_axes.shadow_exists(ORIGINAL_PATH):
+            # No coverage / no shadow yet — there's nothing to edit.
+            return jsonify({
+                "error": "No shadow file yet. Add coverage glyphs first so the studio can seed brace layers."
+            }), 400
+        # Studio-authored axes: Fontra edits the shadow copy; the
+        # user's original source stays untouched.
+        target_path = _control_axes.shadow_path_for(ORIGINAL_PATH)
+        # The shadow/ dir contains only the shadow file, so serving
+        # the directory exposes nothing else.
+        content_root = target_path.parent
+        editing_original = False
+    else:
+        # Source-derived axis (brace layers in the .glyphs, alternate
+        # masters in the .designspace): its source of truth IS the
+        # original file, so open it directly. Fontra saves write to
+        # the user's actual source; the frontend surfaces that. Pass
+        # the FILE as the root (Fontra's single-file mode) so sibling
+        # font projects in the same folder aren't exposed.
+        target_path = ORIGINAL_PATH
+        content_root = target_path
+        editing_original = True
 
     try:
-        port = _ensure_fontra_running(content_root, watch_file=shadow_path)
+        port = _ensure_fontra_running(content_root, watch_file=target_path)
     except Exception as exc:
         return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
 
-    project = shadow_path.name  # e.g. "CrispyMini.glyphs"
+    project = target_path.name  # e.g. "CrispyMini.glyphs"
     # Return the same-origin URL through avar2-studio's reverse
     # proxy. This is what unlocks CSS injection (the focused-UI
     # stylesheet that hides irrelevant Fontra panels) — cross-origin
@@ -3061,6 +3102,10 @@ def open_control_axis_in_editor(tag: str):
         "port": port,
         "project": project,
         "tag": tag.lower(),
+        # True when Fontra is serving the user's actual source (no
+        # shadow) — saves write straight to it. The frontend shows a
+        # notice so that's never a surprise.
+        "editing_original": editing_original,
     })
 
 

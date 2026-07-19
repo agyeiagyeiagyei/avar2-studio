@@ -4,7 +4,14 @@ import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
 
 /**
- * CONTROL AXES panel.
+ * SECONDARY PARAMETRIC AXES panel.
+ *
+ * Naming seam: the UI label is "secondary parametric axes" (renamed
+ * from "control axes" on designer feedback, v0.1.0.dev8), while the
+ * component/file names, CSS classes, API routes (/api/control-axes),
+ * the -control.json sidecar, and docs/control-axes.md keep the
+ * original "control axis" term. Same concept; grep either name from
+ * here.
  *
  * Renders the axes the backend's /api/glyph-coverage endpoint
  * classified as ``scoped`` (glyph-scoped variation, not
@@ -89,7 +96,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           onClick={() => setSectionOpen(o => !o)}
           aria-expanded={sectionOpen}
         >
-          <h3 className="control-axes-title">CONTROL AXES</h3>
+          <h3 className="control-axes-title">SECONDARY PARAMETRIC AXES</h3>
           {/* The layer list saves instantly; the font recompiles in the
               background. Say so, otherwise an edit looks like it did nothing
               for the seconds the preview takes to catch up. */}
@@ -117,7 +124,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
               // Open the section so the new axis is visible after creation.
               setSectionOpen(true);
             }}
-            title={addDisabledReason || 'Declare a new control axis (designer-named axis with a chosen min/max/default). Author its applicable glyphs + brace layers after creating it.'}
+            title={addDisabledReason || 'Declare a new secondary parametric axis (designer-named axis with a chosen min/max/default). Author its applicable glyphs + brace layers after creating it.'}
           >
             + Add
           </button>
@@ -136,6 +143,17 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           const kindBadge = isStudio
             ? null
             : <span className="kind-badge kind-scoped" title="Glyph-scoped variation. Only some glyphs change as this axis moves.">scoped</span>;
+
+          // Range/default for the read-only layers panel. Prefer the
+          // coverage entry's own values (design space, same units as
+          // its layer locations); fall back to the built font's fvar.
+          const full = (allAxes || []).find(a => a.tag === ax.tag) || {};
+          const enriched = {
+            ...ax,
+            min: ax.min ?? full.min,
+            max: ax.max ?? full.max,
+            default: ax.default ?? full.default,
+          };
 
           return (
             <div key={ax.tag} className={`control-axis-row ${isDisabled ? 'disabled' : ''}`}>
@@ -162,7 +180,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                   title={
                     isDisabled
                       ? `Re-enable ${ax.tag} in preview. Slider value is honoured again.`
-                      : `Disable ${ax.tag} in preview. The slider is pinned to the axis default while rendering — useful for comparing "with vs without" this control axis.`
+                      : `Disable ${ax.tag} in preview. The slider is pinned to the axis default while rendering — useful for comparing "with vs without" this axis.`
                   }
                 >
                   {isDisabled ? '👁‍🗨' : '👁'}
@@ -184,11 +202,11 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     className="control-axis-delete"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Delete control axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                      if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
                         onDeleteAxis(ax.tag);
                       }
                     }}
-                    title="Delete this studio-declared control axis from the sidecar."
+                    title="Delete this studio-declared secondary parametric axis from the sidecar."
                   >
                     🗑
                   </button>
@@ -208,6 +226,25 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       vfFamilyId={vfFamilyId}
                       fontLoaded={fontLoaded}
                     />
+                  ) : (!isStudio && ax.layers && ax.layers.length > 0) ? (
+                    // Source-derived scoped axis (brace layers in the
+                    // .glyphs / alternate masters in the .designspace).
+                    // Same per-glyph layers panel, read-only: the layer
+                    // list is authored in the source itself, but the
+                    // thumbnails, coverage warnings, and the Fontra
+                    // flyout all still apply. Gated on !isStudio so a
+                    // studio axis whose edit handler isn't wired can
+                    // never render with "source" labels.
+                    <LayersEditor
+                      tag={ax.tag}
+                      axis={enriched}
+                      layers={ax.layers}
+                      allAxes={allAxes || []}
+                      onOpenInEditor={onOpenInEditor}
+                      vfFamilyId={vfFamilyId}
+                      fontLoaded={fontLoaded}
+                      readOnly
+                    />
                   ) : (
                     <div className="control-axis-glyphs">
                       {ax.covers.length > 0 ? (
@@ -226,12 +263,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       className="control-axis-delete-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Delete control axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                        if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
                           onDeleteAxis(ax.tag);
                         }
                       }}
                     >
-                      Delete control axis
+                      Delete axis
                     </button>
                   )}
                 </div>

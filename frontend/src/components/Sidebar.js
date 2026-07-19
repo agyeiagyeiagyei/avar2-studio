@@ -21,9 +21,79 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
   const [showAddAxisModal, setShowAddAxisModal] = useState(false);
   const [showEditAxisModal, setShowEditAxisModal] = useState(false);
   const [editingAxisName, setEditingAxisName] = useState(null);
-  const [editingValue, setEditingValue] = useState({ instance: null, axis: null, value: null });
-  const [savingValue, setSavingValue] = useState(false);
+  const [editingValue, setEditingValue] = useState({ instance: null, axis: null });
   const [valueError, setValueError] = useState(null);
+  // Draft values for the AVAR2 MAPPINGS sliders, keyed by
+  // "<instance>:<axisColumn>". Shown optimistically until the commit
+  // lands and the refetched server state carries the value. Debounce
+  // matters: a drag fires onChange per pixel and each commit is a CSV
+  // write + full avar2 refetch — pointer-up flushes immediately, the
+  // timer is the fallback for keyboard/wheel value changes.
+  const [mappingDrafts, setMappingDrafts] = useState({});
+  const mappingCommitTimers = useRef({});
+  // All commits run through ONE promise chain: the server rewrites
+  // the whole CSV per commit and each refetch must observe its own
+  // write, so overlapping commits (two axes dragged back-to-back)
+  // could land out of order or trip the CSV external-edit guard if
+  // allowed to interleave.
+  const mappingCommitChain = useRef(Promise.resolve());
+
+  const fireMappingCommit = (key, instanceName, axisColumn, newValue) => {
+    delete mappingCommitTimers.current[key];
+    mappingCommitChain.current = mappingCommitChain.current.then(async () => {
+      setValueError(null);
+      try {
+        await onUpdateAvar2Mapping(instanceName, axisColumn, newValue);
+      } catch (err) {
+        setValueError(err.message || 'Failed to save value');
+        setTimeout(() => setValueError(null), 3000);
+      } finally {
+        // Drop the draft only if no newer change superseded it: on
+        // success the refetched state now carries this value; on
+        // failure the row snaps back to the last saved value (a
+        // visible revert beats silently showing an unsaved number).
+        setMappingDrafts(prev => {
+          if (prev[key] !== newValue) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    });
+  };
+
+  const scheduleMappingCommit = (instanceName, axisColumn, newValue, delayMs = 450) => {
+    const key = `${instanceName}:${axisColumn}`;
+    setMappingDrafts(prev => ({ ...prev, [key]: newValue }));
+    const pending = mappingCommitTimers.current[key];
+    if (pending) clearTimeout(pending.timer);
+    const timer = setTimeout(
+      () => fireMappingCommit(key, instanceName, axisColumn, newValue),
+      delayMs
+    );
+    mappingCommitTimers.current[key] = {
+      timer,
+      flush: () => {
+        clearTimeout(timer);
+        fireMappingCommit(key, instanceName, axisColumn, newValue);
+      },
+    };
+  };
+
+  // Commit one row's pending change right now (slider pointer-up)
+  // instead of waiting out the debounce.
+  const flushMappingCommit = (instanceName, axisColumn) => {
+    const pending = mappingCommitTimers.current[`${instanceName}:${axisColumn}`];
+    if (pending) pending.flush();
+  };
+
+  useEffect(() => {
+    const timers = mappingCommitTimers.current;
+    // FLUSH (not discard) anything still pending on unmount — the UI
+    // already showed the dragged value as applied, so dropping the
+    // timer here would silently lose the edit.
+    return () => Object.values(timers).forEach(p => p.flush());
+  }, []);
   const [fontSizeEditing, setFontSizeEditing] = useState(false);
   const [fontSizeEditValue, setFontSizeEditValue] = useState('');
   const fontSizeInputRef = useRef(null);
@@ -354,16 +424,30 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                       const axisLabel = axisMeta?.registered_tag || tag;
                       
                       const isEditing = editingValue.instance === selectedInstance.name && editingValue.axis === axisColumn;
-                      const isSaving = savingValue && editingValue.instance === selectedInstance.name && editingValue.axis === axisColumn;
-                      
+
                       // Check if this is a parametric axis (exists in Glyphs file) - cannot edit
                       // Use is_parametric flag from metadata, fallback to checking parametric_axes array
                       const isParametricAxis = axisMeta?.is_parametric === true || avar2Axes?.parametric_axes?.includes(axisColumn) || false;
-                      
+
                       // Get min/max from metadata or use defaults
                       const axisMin = axisMeta?.min ?? -1000;
                       const axisMax = axisMeta?.max ?? 1000;
-                      
+
+                      const draftKey = `${selectedInstance.name}:${axisColumn}`;
+                      const draft = mappingDrafts[draftKey];
+                      const shown = draft !== undefined ? draft : value;
+                      const sliderStep = (axisMax - axisMin) > 100 ? 1 : 0.1;
+
+                      const commitTyped = (raw) => {
+                        setEditingValue({ instance: null, axis: null });
+                        const numValue = parseFloat(raw);
+                        if (isNaN(numValue)) return;
+                        // Clamp to range — same semantics as the
+                        // AxisControl sliders above.
+                        const clamped = Math.max(axisMin, Math.min(axisMax, numValue));
+                        scheduleMappingCommit(selectedInstance.name, axisColumn, clamped, 0);
+                      };
+
                       return (
                         <div key={axisColumn} className="traditional-axis-item">
                           <div
@@ -379,85 +463,77 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                             {axisLabel}
                             {isParametricAxis && <span className="parametric-badge"> (Glyphs)</span>}
                           </div>
-                          {!hasValue && !isEditing ? (
+                          {!hasValue ? (
                             <div
                               className="traditional-axis-value traditional-axis-value-placeholder"
                               title={`No avar2 mapping for "${axisColumn}" on this instance. SmallOpsz / internal-only rows in Glyphs aren't declared in the avar2 mapping CSV.`}
                             >
                               —
                             </div>
-                          ) : isEditing && !isParametricAxis ? (
-                            <input
-                              type="number"
-                              className="traditional-axis-value-input"
-                              defaultValue={value}
-                              step="0.1"
-                              autoFocus
-                              ref={(input) => {
-                                // Select only on first mount. An inline
-                                // ref callback runs on every render, so
-                                // unconditionally calling .select() here
-                                // re-selected the typed text on every
-                                // keystroke and the next character
-                                // replaced what was already there —
-                                // typing "700" only ever showed "0".
-                                if (input && !input.dataset.selected) {
-                                  input.dataset.selected = "1";
-                                  input.select();
-                                }
-                              }}
-                              onBlur={async (e) => {
-                                const newValue = parseFloat(e.target.value);
-                                if (isNaN(newValue)) {
-                                  setEditingValue({ instance: null, axis: null, value: null });
-                                  return;
-                                }
-                                
-                                // Validate range
-                                if (newValue < axisMin || newValue > axisMax) {
-                                  setValueError(`Value must be between ${axisMin} and ${axisMax}`);
-                                  setTimeout(() => setValueError(null), 3000);
-                                  setEditingValue({ instance: null, axis: null, value: null });
-                                  return;
-                                }
-                                
-                                setSavingValue(true);
-                                setValueError(null);
-                                try {
-                                  await onUpdateAvar2Mapping(selectedInstance.name, axisColumn, newValue);
-                                  setEditingValue({ instance: null, axis: null, value: null });
-                                } catch (err) {
-                                  setValueError(err.message || 'Failed to save value');
-                                  setTimeout(() => setValueError(null), 3000);
-                                  // Revert to original value
-                                  setEditingValue({ instance: null, axis: null, value: null });
-                                } finally {
-                                  setSavingValue(false);
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.target.blur();
-                                } else if (e.key === 'Escape') {
-                                  setEditingValue({ instance: null, axis: null, value: null });
-                                }
-                              }}
-                            />
-                          ) : (
-                            <div 
-                              className={`traditional-axis-value ${isSaving ? 'saving' : (isParametricAxis ? '' : 'clickable')}`}
-                              onClick={() => {
-                                if (!isSaving && !isParametricAxis) {
-                                  setEditingValue({ 
-                                    instance: selectedInstance.name, 
-                                    axis: axisColumn, 
-                                    value: value 
-                                  });
-                                }
-                              }}
-                              title={isParametricAxis ? "Parametric axis (from Glyphs file) - cannot edit" : `Click to edit (range: ${axisMin} to ${axisMax})`}
+                          ) : isParametricAxis ? (
+                            <div
+                              className="traditional-axis-value"
+                              title="Parametric axis (from Glyphs file) - cannot edit"
                             >
-                              {isSaving ? '...' : value.toFixed(1)}
+                              {formatAxisValue(Number(value))}
+                            </div>
+                          ) : (
+                            // Mapping value drives like any other axis: a
+                            // slider spanning the axis's min…max with the
+                            // current value centered beneath it — click the
+                            // number to type an exact figure. Same layout
+                            // as the parametric AxisControl sliders above,
+                            // so the section reads as one system.
+                            <div className="axis-slider-container traditional-axis-slider-container">
+                              <input
+                                type="range"
+                                className="axis-slider"
+                                min={axisMin}
+                                max={axisMax}
+                                step={sliderStep}
+                                value={shown}
+                                onChange={(e) => scheduleMappingCommit(selectedInstance.name, axisColumn, parseFloat(e.target.value))}
+                                onPointerUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
+                                onKeyUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
+                              />
+                              <div className="axis-values">
+                                <span className="axis-min">{axisMin}</span>
+                                {isEditing ? (
+                                  <input
+                                    type="number"
+                                    className="traditional-axis-value-input"
+                                    defaultValue={shown}
+                                    step={sliderStep}
+                                    autoFocus
+                                    ref={(input) => {
+                                      // Select only on first mount — an inline ref
+                                      // callback runs on every render, and
+                                      // re-selecting per keystroke eats the input.
+                                      if (input && !input.dataset.selected) {
+                                        input.dataset.selected = "1";
+                                        input.select();
+                                      }
+                                    }}
+                                    onBlur={(e) => commitTyped(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.target.blur();
+                                      } else if (e.key === 'Escape') {
+                                        setEditingValue({ instance: null, axis: null });
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    className={`axis-current axis-current-clickable${draft !== undefined ? ' traditional-axis-saving' : ''}`}
+                                    onClick={() => setEditingValue({ instance: selectedInstance.name, axis: axisColumn })}
+                                    title={`Click to type a value (range: ${axisMin} to ${axisMax})`}
+                                  >
+                                    {formatAxisValue(Number(shown))}
+                                  </span>
+                                )}
+                                <span className="axis-max">{axisMax}</span>
+                              </div>
                             </div>
                           )}
                         </div>

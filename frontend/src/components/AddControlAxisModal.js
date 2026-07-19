@@ -124,7 +124,7 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
       }
       onClose();
     } catch (err) {
-      setSubmitError(err.message || (isEdit ? 'Failed to update control axis' : 'Failed to create control axis'));
+      setSubmitError(err.message || (isEdit ? 'Failed to update secondary parametric axis' : 'Failed to create secondary parametric axis'));
     } finally {
       setSubmitting(false);
     }
@@ -133,7 +133,7 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
   return (
     <div className="modal-overlay">
       <div className="add-control-axis-modal">
-        <h3>{isEdit ? `Edit control axis · ${editAxis.tag}` : 'New control axis'}</h3>
+        <h3>{isEdit ? `Edit secondary parametric axis · ${editAxis.tag}` : 'New secondary parametric axis'}</h3>
         <p className="modal-help">
           {isEdit
             ? 'Change the display name, range, or default. Tag is immutable — every applicable glyph\'s brace-layer location is keyed by it. Narrowing min/max is refused if any existing layer would fall outside the new range.'

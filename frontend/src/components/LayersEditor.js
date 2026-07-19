@@ -19,8 +19,13 @@ import React, { useState } from 'react';
  *                        what changed so concurrent edits can't clobber
  *   onOpenInEditor     — (tag, glyphName?) => void
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
+ *   readOnly           — source-derived axes: the layers live in the
+ *                        source file itself (brace layers / alternate
+ *                        masters), so add/remove/edit affordances are
+ *                        hidden. Thumbnails, coverage warnings, and
+ *                        the open-in-Fontra flyout stay.
  */
-function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded }) {
+function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded, readOnly = false }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -158,7 +163,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
         </span>
       </div>
 
-      {orderedGlyphs.length === 0 && (
+      {orderedGlyphs.length === 0 && !readOnly && (
         <div className="layers-editor-empty">
           No glyphs yet. <strong>+ Add applicable glyphs</strong> below to
           declare which glyphs this axis changes, and at what axis extreme.
@@ -198,14 +203,16 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                     return (
                       <li
                         key={i}
-                        className="layer-row"
-                        onClick={() => onRequestAddModal && onRequestAddModal({
+                        className={`layer-row${readOnly ? ' layer-row-readonly' : ''}`}
+                        onClick={readOnly ? undefined : () => onRequestAddModal && onRequestAddModal({
                           tag,
                           axisDefault: axis.default,
                           editLayer: entry,
                           replaceLayer: (newEntry) => replaceLayer(entry, newEntry),
                         })}
-                        title="Click to edit this brace layer's axis values."
+                        title={readOnly
+                          ? "Source-derived layer — authored in your source file, not the studio sidecar."
+                          : "Click to edit this brace layer's axis values."}
                       >
                         {fontLoaded && vfFamilyId && (
                           <span
@@ -228,7 +235,11 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             </span>
                             <span className="layer-coords-control-eq">=</span>
                             <span className="layer-coords-control-val">{entry.location?.[tag] ?? ''}</span>
-                            <span className="layer-coords-studio-badge" title="Brace layer authored through avar2-studio. Lives in the sidecar; written to the shadow .glyphs on save.">studio</span>
+                            {readOnly ? (
+                              <span className="layer-coords-source-badge" title="Layer read from your source file — a brace layer (.glyphs) or an alternate master (.designspace).">source</span>
+                            ) : (
+                              <span className="layer-coords-studio-badge" title="Brace layer authored through avar2-studio. Lives in the sidecar; written to the shadow .glyphs on save.">studio</span>
+                            )}
                           </div>
                           <div className="layer-coords-context">
                             <span className="layer-coords-context-prefix">at</span>
@@ -249,82 +260,80 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                           <button
                             type="button"
                             className="layer-open-fontra"
-                            title="Open this glyph in Fontra at this brace-layer location, in edit mode."
+                            title={readOnly
+                              ? "Open this glyph in Fontra at this layer's location. This axis lives in your source file, so Fontra edits the real source."
+                              : "Open this glyph in Fontra at this brace-layer location, in edit mode."}
                             onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, entry.location)}
                           >
                             ↗
                           </button>
-                          <button
-                            type="button"
-                            className="layer-duplicate"
-                            title="Duplicate this layer — opens at the same coordinates so you only change what differs. Edit the glyph field to reuse this location on other glyphs."
-                            onClick={() => onRequestAddModal && onRequestAddModal({
-                              tag,
-                              axisDefault: axis.default,
-                              duplicateFrom: entry,
-                            })}
-                          >
-                            ⧉
-                          </button>
-                          <button
-                            type="button"
-                            className="layer-remove"
-                            title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
-                            onClick={() => removeLayer(entry)}
-                          >
-                            ✕
-                          </button>
+                          {!readOnly && (
+                            <>
+                              <button
+                                type="button"
+                                className="layer-duplicate"
+                                title="Duplicate this layer — opens at the same coordinates so you only change what differs. Edit the glyph field to reuse this location on other glyphs."
+                                onClick={() => onRequestAddModal && onRequestAddModal({
+                                  tag,
+                                  axisDefault: axis.default,
+                                  duplicateFrom: entry,
+                                })}
+                              >
+                                ⧉
+                              </button>
+                              <button
+                                type="button"
+                                className="layer-remove"
+                                title="Remove this brace layer. If it's the last one for this glyph, the glyph drops out of coverage."
+                                onClick={() => removeLayer(entry)}
+                              >
+                                ✕
+                              </button>
+                            </>
+                          )}
                         </div>
                       </li>
                     );
                   })}
                 </ul>
-                <div className="layers-glyph-add-row">
-                  <button
-                    type="button"
-                    className="layer-add-for-glyph"
-                    onClick={() => onRequestAddModal && onRequestAddModal({
-                      tag,
-                      axisDefault: axis.default,
-                      prefillGlyphs: glyphName,
-                      lockGlyphs: true,
-                    })}
-                  >
-                    + Add layer for {glyphName}
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="layers-glyph-add-row">
+                    <button
+                      type="button"
+                      className="layer-add-for-glyph"
+                      onClick={() => onRequestAddModal && onRequestAddModal({
+                        tag,
+                        axisDefault: axis.default,
+                        prefillGlyphs: glyphName,
+                        lockGlyphs: true,
+                      })}
+                    >
+                      + Add layer for {glyphName}
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         );
       })}
 
-      <div className="layers-editor-toplevel-add">
-        <button
-          type="button"
-          className="layer-add-toplevel"
-          onClick={() => onRequestAddModal && onRequestAddModal({
-            tag,
-            axisDefault: axis.default,
-          })}
-        >
-          + Add applicable glyphs
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="layers-editor-toplevel-add">
+          <button
+            type="button"
+            className="layer-add-toplevel"
+            onClick={() => onRequestAddModal && onRequestAddModal({
+              tag,
+              axisDefault: axis.default,
+            })}
+          >
+            + Add applicable glyphs
+          </button>
+        </div>
+      )}
     </div>
   );
-}
-
-function sameEntry(a, b) {
-  if (!a || !b || a.glyph !== b.glyph) return false;
-  const la = a.location || {};
-  const lb = b.location || {};
-  const ka = Object.keys(la);
-  if (ka.length !== Object.keys(lb).length) return false;
-  for (const k of ka) {
-    if (Number(la[k]) !== Number(lb[k])) return false;
-  }
-  return true;
 }
 
 export default LayersEditor;

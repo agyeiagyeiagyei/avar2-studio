@@ -48,9 +48,21 @@ def compute_coverage(font: object) -> Dict[str, Dict[str, object]]:
             "covers_count": 245,
             "total_glyphs": 245,
             "kind": "universal" | "scoped",
+            "layers": [                          # per-glyph scoped variation
+              {"glyph": "A", "location": {"XOUC": 26.0}},
+              ...
+            ],
           },
           ...
         }
+
+    ``layers`` mirrors the sidecar's brace-layer shape so the frontend
+    can render source-derived scoped axes in the same per-glyph layers
+    panel as studio-declared ones (read-only). It records only the
+    intermediate contributions — brace layers (``.glyphs``) or
+    alternate masters (``.designspace``) — with a sparse location of
+    the axes the layer actually deviates on. Master-grid coverage on
+    universal axes produces no ``layers`` entries.
 
     Glyphs without coverage just stay static along the axis at
     render time; they don't appear in any axis's ``covers``.
@@ -120,6 +132,15 @@ def _coverage_from_glyphs(font: GSFont) -> Dict[str, Dict[str, object]]:
     # Second pass: brace layers can add per-glyph scoped variation on
     # top of master coverage. Only matters when a glyph has a layer at
     # an intermediate (non-master) position — that's a brace layer.
+    layers: Dict[str, list] = defaultdict(list)
+    seen_layers: set = set()
+    # Per-axis value sets in DESIGN space (master values + brace
+    # values) — emitted as min/default/max so the frontend can
+    # classify layer coverage in the same units the layer locations
+    # use, without joining against the built font's fvar.
+    axis_values: Dict[str, set] = {
+        axes[i].axisTag: set(axis_master_values[i]) for i in range(len(axes))
+    }
     for glyph in font.glyphs:
         if not getattr(glyph, "export", True):
             continue
@@ -127,14 +148,32 @@ def _coverage_from_glyphs(font: GSFont) -> Dict[str, Dict[str, object]]:
             loc = _layer_location(layer, len(axes))
             if loc is None or loc in master_locations:
                 continue
-            for axis_index, axis_value in enumerate(loc):
-                default = axis_defaults.get(axis_index)
-                if default is None:
-                    continue
-                if axis_value != default:
-                    coverage[axes[axis_index].axisTag].add(glyph.name)
+            # Sparse location: only the axes this brace layer deviates
+            # on — same shape the sidecar uses for studio layers.
+            sparse = {
+                axes[i].axisTag: loc[i]
+                for i in range(len(axes))
+                if axis_defaults.get(i) is not None and loc[i] != axis_defaults[i]
+            }
+            loc_key = tuple(sorted(sparse.items()))
+            for tag, value in sparse.items():
+                axis_values[tag].add(value)
+                _record_layer(coverage, layers, seen_layers, tag, glyph.name, sparse, loc_key)
 
-    return _shape_result(coverage, total_glyphs, {ax.axisTag for ax in axes})
+    tag_defaults = {
+        axes[i].axisTag: axis_defaults.get(i) for i in range(len(axes))
+    }
+    ranges = {
+        tag: (
+            min(vals) if vals else None,
+            tag_defaults.get(tag),
+            max(vals) if vals else None,
+        )
+        for tag, vals in axis_values.items()
+    }
+    return _shape_result(
+        coverage, total_glyphs, {ax.axisTag for ax in axes}, layers, ranges
+    )
 
 
 def _layer_location(layer, num_axes: int) -> Optional[tuple]:
@@ -210,6 +249,8 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
 
     all_glyphs: set = set(default_glifs.keys())
     coverage: Dict[str, set] = defaultdict(set)
+    layers: Dict[str, list] = defaultdict(list)
+    seen_layers: set = set()
 
     for src in doc.sources:
         if src is default_src:
@@ -219,14 +260,15 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
             continue
 
         loc = src.location or {}
-        non_default_axes = [
-            axis_tag_by_name[axis_name]
+        sparse = {
+            axis_tag_by_name[axis_name]: float(value)
             for axis_name, value in loc.items()
             if axis_name in axis_defaults
             and float(value) != axis_defaults[axis_name]
-        ]
-        if not non_default_axes:
+        }
+        if not sparse:
             continue  # supports / additional masters at default — skip
+        loc_key = tuple(sorted(sparse.items()))
 
         master_glifs = _load_ufo_glif_bytes(ufo_path)
         all_glyphs.update(master_glifs.keys())
@@ -239,11 +281,28 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
             default_bytes = default_glifs.get(glyph_name)
             if default_bytes is not None and glif_bytes == default_bytes:
                 continue  # copy of the default — no real variation
-            for tag in non_default_axes:
-                coverage[tag].add(glyph_name)
+            for tag in sparse:
+                _record_layer(coverage, layers, seen_layers, tag, glyph_name, sparse, loc_key)
 
     declared_tags = {ax.tag for ax in doc.axes}
-    return _shape_result(coverage, len(all_glyphs), declared_tags)
+    # Axis extremes in DESIGN space: source locations are design-space,
+    # so map the user-space axis min/default/max through the axis map
+    # before the frontend compares them against layer locations.
+    ranges: Dict[str, tuple] = {}
+    for ax in doc.axes:
+        minimum = getattr(ax, "minimum", None)
+        default = getattr(ax, "default", None)
+        maximum = getattr(ax, "maximum", None)
+        try:
+            fwd = ax.map_forward
+            ranges[ax.tag] = (
+                fwd(minimum) if minimum is not None else None,
+                fwd(default) if default is not None else None,
+                fwd(maximum) if maximum is not None else None,
+            )
+        except Exception:
+            ranges[ax.tag] = (minimum, default, maximum)
+    return _shape_result(coverage, len(all_glyphs), declared_tags, layers, ranges)
 
 
 def _find_default_source(doc: DesignSpaceDocument, axis_defaults: Dict[str, float]):
@@ -340,26 +399,59 @@ def _canonical_glif(raw: bytes) -> bytes:
 # --------------------------------------------------------------------------
 
 
+def _record_layer(
+    coverage: Dict[str, set],
+    layers: Dict[str, list],
+    seen: set,
+    tag: str,
+    glyph_name: str,
+    sparse: Dict[str, float],
+    loc_key: tuple,
+) -> None:
+    """Register one glyph-layer contribution on ``tag``: coverage
+    membership plus a deduped ``layers`` entry. ``loc_key`` is the
+    canonical identity of ``sparse`` (its sorted items) — hoisted by
+    callers because it's constant per brace layer / alternate master."""
+    coverage[tag].add(glyph_name)
+    key = (tag, glyph_name, loc_key)
+    if key not in seen:
+        seen.add(key)
+        layers[tag].append({"glyph": glyph_name, "location": sparse})
+
+
 def _shape_result(
     coverage: Dict[str, set],
     total_glyphs: int,
     declared_tags: set,
+    layers: Optional[Dict[str, list]] = None,
+    ranges: Optional[Dict[str, tuple]] = None,
 ) -> Dict[str, Dict[str, object]]:
     """Turn the raw ``axis_tag -> set(glyph_names)`` map into the
     public response, with kind classification and stable ordering.
     Includes axes that have zero coverage (declared but unused) so
-    the frontend can list them too."""
+    the frontend can list them too. ``ranges`` carries per-tag
+    ``(min, default, max)`` in design space when the backend could
+    derive them."""
     out: Dict[str, Dict[str, object]] = {}
     for tag in declared_tags:
         names = sorted(coverage.get(tag, set()))
         count = len(names)
         kind = _classify(count, total_glyphs)
-        out[tag] = {
+        axis_layers = sorted(
+            (layers or {}).get(tag, []),
+            key=lambda e: (e["glyph"], sorted(e["location"].items())),
+        )
+        entry: Dict[str, object] = {
             "covers": names,
             "covers_count": count,
             "total_glyphs": total_glyphs,
             "kind": kind,
+            "layers": axis_layers,
         }
+        rng = (ranges or {}).get(tag)
+        if rng is not None:
+            entry["min"], entry["default"], entry["max"] = rng
+        out[tag] = entry
     return out
 
 

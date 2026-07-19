@@ -878,6 +878,30 @@
   cursor: help;
 }
 
+/* Source-derived layer rows: same panel, but the layer list is read
+   from the source file itself — neutral badge, no row-edit cursor. */
+.layer-coords-source-badge {
+  margin-left: 0.4rem;
+  padding: 0.02rem 0.32rem;
+  background: #eef2ee;
+  color: #3a6b3a;
+  border: 1px solid #cfe0cf;
+  border-radius: 2px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.layer-row-readonly {
+  cursor: default;
+}
+
+.layer-row-readonly:hover {
+  background-color: transparent;
+}
+
 .layer-coords-context {
   display: flex;
   flex-wrap: wrap;

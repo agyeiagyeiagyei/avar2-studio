@@ -317,7 +317,7 @@ export const api = {
   async listControlAxes() {
     const response = await fetch(`${API_BASE}/control-axes`);
     if (!response.ok) {
-      throw new Error(`Failed to list control axes: ${response.status}`);
+      throw new Error(`Failed to list secondary parametric axes: ${response.status}`);
     }
     return parseJSON(response);
   },
@@ -351,7 +351,7 @@ export const api = {
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
-      throw new Error(err.error || `Failed to create control axis: ${response.status}`);
+      throw new Error(err.error || `Failed to create secondary parametric axis: ${response.status}`);
     }
     return parseJSON(response);
   },
@@ -364,7 +364,7 @@ export const api = {
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
-      throw new Error(err.error || `Failed to update control axis: ${response.status}`);
+      throw new Error(err.error || `Failed to update secondary parametric axis: ${response.status}`);
     }
     return parseJSON(response);
   },
@@ -375,7 +375,7 @@ export const api = {
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
-      throw new Error(err.error || `Failed to delete control axis: ${response.status}`);
+      throw new Error(err.error || `Failed to delete secondary parametric axis: ${response.status}`);
     }
     return parseJSON(response);
   },

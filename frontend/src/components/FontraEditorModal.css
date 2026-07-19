@@ -95,6 +95,13 @@
   font-style: italic;
 }
 
+/* Shown when Fontra is serving the user's real source (no shadow) —
+   saves write straight to it, so make that legible at a glance. */
+.fontra-editor-original-note {
+  color: #b58900;
+  font-weight: 600;
+}
+
 .fontra-editor-actions {
   display: flex;
   align-items: center;

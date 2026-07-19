@@ -100,6 +100,14 @@ function FontraEditorModal({ editor, onClose }) {
           </span>
           <span className="fontra-editor-subtitle">
             Draw the {editor.axisName || editor.tag} change here. Close to update the preview.
+            {editor.editingOriginal && (
+              <span
+                className="fontra-editor-original-note"
+                title="This axis's layers live in your source file itself (not a studio sidecar), so Fontra is editing the real source. Saves write to it directly."
+              >
+                {' '}Editing your actual source file.
+              </span>
+            )}
           </span>
         </div>
         <div className="fontra-editor-actions">
