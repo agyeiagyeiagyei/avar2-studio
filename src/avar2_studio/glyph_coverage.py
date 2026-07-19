@@ -446,6 +446,43 @@ def _canonical_glif(raw: bytes) -> bytes:
 # --------------------------------------------------------------------------
 
 
+def compute_glyph_chars(font: object) -> Dict[str, str]:
+    """Map glyph names to a displayable character, from the source's
+    unicode data. The layers panel renders its thumbnails as TEXT in
+    the built font, so a multi-character glyph name ("eight") needs
+    its actual codepoint — rendering the name would typeset the word.
+    Names without a codepoint are omitted; the frontend hides those
+    thumbnails rather than showing something wrong."""
+    if isinstance(font, GSFont):
+        out: Dict[str, str] = {}
+        for glyph in font.glyphs:
+            u = getattr(glyph, "unicode", None)
+            if not u:
+                continue
+            try:
+                out[glyph.name] = chr(int(u, 16))
+            except (ValueError, TypeError):
+                continue
+        return out
+    if isinstance(font, DesignSpaceDocument):
+        axis_defaults = {ax.name: float(ax.default) for ax in font.axes}
+        default_src = _find_default_source(font, axis_defaults)
+        if default_src is None or not default_src.path:
+            return {}
+        import xml.etree.ElementTree as ET
+        out = {}
+        for name, raw in _load_ufo_glif_bytes(Path(default_src.path)).items():
+            try:
+                el = ET.fromstring(raw).find("unicode")
+                hexv = el.get("hex") if el is not None else None
+                if hexv:
+                    out[name] = chr(int(hexv, 16))
+            except Exception:
+                continue
+        return out
+    return {}
+
+
 def _record_layer(
     coverage: Dict[str, set],
     layers: Dict[str, list],

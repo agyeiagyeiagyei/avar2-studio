@@ -31,7 +31,7 @@ import './AddBraceLocationModal.css';
  *                        glyph stays editable so the same coordinates can be
  *                        duplicated onto other glyphs.
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded, glyphChars = {} }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});           // edit mode: the single location
   const [controlValue, setControlValue] = useState(0);  // add mode: the crbr value
@@ -373,6 +373,12 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   (there's no brace yet, so crbr doesn't change it). This
                   is exactly what the seeded layer opens on in Fontra. */}
               {fontLoaded && vfFamilyId && parsedGlyphs[0] && (() => {
+                // The preview typesets text — map the glyph NAME to
+                // its character ("eight" → "8"); single-char names
+                // pass through, unmappable names get no preview.
+                const previewChar = glyphChars[parsedGlyphs[0]]
+                  || (parsedGlyphs[0].length === 1 ? parsedGlyphs[0] : null);
+                if (!previewChar) return null;
                 const items = [];
                 for (const m of (allMasters || [])) {
                   if (selectedCorners.has(m.name)) items.push({ label: m.name, coords: m.coordinates });
@@ -398,7 +404,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                               fontVariationSettings: fvs(it.coords),
                             }}
                           >
-                            {parsedGlyphs[0]}
+                            {previewChar}
                           </span>
                           <span className="corner-preview-label">{it.label}</span>
                         </div>

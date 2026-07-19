@@ -25,7 +25,7 @@ import React, { useState } from 'react';
  *                        hidden. Thumbnails, coverage warnings, and
  *                        the open-in-Fontra flyout stay.
  */
-function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded, readOnly = false }) {
+function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded, readOnly = false, glyphChars = {} }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -214,6 +214,13 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                       ? null
                       : (entry.location_user || entry.location);
                     const thumbLoc = navLocation ? buildFullLocation(navLocation) : null;
+                    // Thumbnails typeset TEXT in the built font, so a
+                    // multi-char glyph name ("eight") must be mapped to
+                    // its actual character via the source's unicode
+                    // data. No codepoint → no thumbnail, rather than
+                    // rendering the name as a word.
+                    const thumbChar = glyphChars[glyphName]
+                      || (glyphName.length === 1 ? glyphName : null);
                     return (
                       <li
                         key={i}
@@ -228,7 +235,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                           ? "Source-derived layer — authored in your source file, not the studio sidecar."
                           : "Click to edit this brace layer's axis values."}
                       >
-                        {fontLoaded && vfFamilyId && thumbLoc && (
+                        {fontLoaded && vfFamilyId && thumbLoc && thumbChar && (
                           <span
                             className="layer-thumb"
                             style={{
@@ -236,7 +243,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                               fontVariationSettings: thumbLoc.map(a => `"${a.tag}" ${a.value}`).join(', '),
                             }}
                           >
-                            {glyphName}
+                            {thumbChar}
                           </span>
                         )}
                         <div className="layer-coords">

@@ -83,6 +83,9 @@ function App() {
   // Disabled set is session-local: when an axis tag is in the set,
   // the preview pins it to its default value at render time.
   const [glyphCoverageAxes, setGlyphCoverageAxes] = useState([]);
+  // Glyph-name → displayable character (from the source's unicode
+  // data) — layer thumbnails render text, so "eight" needs "8".
+  const [glyphChars, setGlyphChars] = useState({});
   const [disabledControlAxes, setDisabledControlAxes] = useState(new Set());
   // Fontra iframe state — non-null = modal is open. The url comes
   // from POST /api/control-axes/<tag>/open-editor.
@@ -367,10 +370,12 @@ function App() {
     try {
       const data = await api.getGlyphCoverage();
       setGlyphCoverageAxes(data.axes || []);
+      setGlyphChars(data.glyph_chars || {});
     } catch (err) {
       // Silent — the endpoint returns [] on no-source-loaded; any
       // hard failure just leaves the CONTROL AXES panel empty.
       setGlyphCoverageAxes([]);
+      setGlyphChars({});
     }
   };
 
@@ -1956,6 +1961,7 @@ function App() {
             avar2Instances={avar2Instances}
             avar2Axes={avar2Axes}
             glyphCoverageAxes={glyphCoverageAxes}
+            glyphChars={glyphChars}
             disabledControlAxes={disabledControlAxes}
             onToggleDisableControlAxis={handleToggleDisableControlAxis}
             onCreateControlAxis={handleCreateControlAxis}

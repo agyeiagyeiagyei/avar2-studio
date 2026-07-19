@@ -31,7 +31,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, allAxes, allMasters, vfFamilyId, fontLoaded, building = false }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, allAxes, allMasters, vfFamilyId, fontLoaded, building = false, glyphChars = {} }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -225,6 +225,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       onRequestAddModal={setAddLocationFor}
                       vfFamilyId={vfFamilyId}
                       fontLoaded={fontLoaded}
+                      glyphChars={glyphChars}
                     />
                   ) : (!isStudio && ax.layers && ax.layers.length > 0) ? (
                     // Source-derived scoped axis (brace layers in the
@@ -243,6 +244,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       onOpenInEditor={onOpenInEditor}
                       vfFamilyId={vfFamilyId}
                       fontLoaded={fontLoaded}
+                      glyphChars={glyphChars}
                       readOnly
                     />
                   ) : (
@@ -293,6 +295,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           allMasters={allMasters || []}
           vfFamilyId={vfFamilyId}
           fontLoaded={fontLoaded}
+          glyphChars={glyphChars}
           onCreate={async (entries) => {
             // Edit flow: the LayersEditor row supplied a
             // ``replaceLayer`` callback that swaps the single

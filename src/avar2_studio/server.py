@@ -2395,7 +2395,14 @@ def glyph_coverage():
         # scoped. Within each bucket, by tag.
         kind_order = {"universal": 0, "scoped": 1}
         out.sort(key=lambda a: (kind_order.get(a["kind"], 99), a["tag"]))
-        return jsonify({"axes": out})
+        # Glyph-name → character map for the layer thumbnails: they
+        # render TEXT in the built font, so "eight" must become "8" —
+        # typesetting the name only works for single-char names.
+        try:
+            glyph_chars = _glyph_coverage.compute_glyph_chars(font)
+        except Exception:
+            glyph_chars = {}
+        return jsonify({"axes": out, "glyph_chars": glyph_chars})
     except Exception as e:
         print(f"Error in /api/glyph-coverage: {e}", file=sys.stderr)
         import traceback
