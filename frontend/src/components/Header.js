@@ -80,15 +80,17 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     setLoadingMsg(`Uploading ${names}…`);
     try {
       const result = await api.uploadSource(files);
-      if (result.ignored_files && result.ignored_files.length > 0) {
-        // Surface the silently-rejected files so the user knows their
-        // CSV / metadata picks didn't all land.
-        console.warn('Ignored files:', result.ignored_files);
-      }
       onSourceLoaded && onSourceLoaded();
+      if (result.ignored_files && result.ignored_files.length > 0) {
+        // Surface the rejected files in the header so the user knows
+        // their CSV / metadata picks didn't all land.
+        setLoadingMsg(`Loaded, but ignored: ${result.ignored_files.join(', ')}`);
+        setTimeout(() => setLoadingMsg(null), 6000);
+        return;
+      }
     } catch (err) {
       setLoadingMsg(`Failed: ${err.message || err}`);
-      setTimeout(() => setLoadingMsg(null), 4000);
+      setTimeout(() => setLoadingMsg(null), 6000);
       return;
     }
     setLoadingMsg(null);
@@ -139,12 +141,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               </button>
             </div>
           )}
+          {/* No ``accept`` filter: Safari (and some macOS pickers) map
+              accept extensions to registered document types, and an
+              unregistered ".glyphs" grays the user's own source out —
+              the picker opens but the file can't be chosen, which
+              reads as "nothing happens". The server validates and
+              reports anything that isn't a .glyphs / -avar.csv /
+              axis-metadata.json. Likewise offscreen-not-display:none:
+              some browsers ignore programmatic click() on a
+              display:none file input. */}
           <input
             ref={fileInputRef}
             type="file"
-            accept=".glyphs,.csv,.json"
             multiple
-            style={{ display: 'none' }}
+            style={{ position: 'fixed', left: '-9999px', width: 1, height: 1, opacity: 0 }}
             onChange={handleFileChange}
           />
         </div>
