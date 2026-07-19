@@ -89,6 +89,10 @@ pip install -e ".[dev]"
 cd frontend && npm ci && npm run build && cd ..
 ```
 
+New to the codebase? [docs/HANDOVER.md](./docs/HANDOVER.md) covers
+the environment traps, internal architecture, and known issues that
+the user-facing docs don't.
+
 ## Launch
 
 ```bash
