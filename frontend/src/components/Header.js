@@ -73,10 +73,14 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
   };
 
   const handleFileChange = async (e) => {
-    const files = e.target.files;
+    // COPY the FileList before clearing the input: ``input.files`` is
+    // a LIVE list, and resetting ``value`` empties it in place — the
+    // old grab-then-clear order left zero files and returned before
+    // any message or request ("upload does nothing").
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!files || files.length === 0) return;
-    const names = Array.from(files).map(f => f.name).join(', ');
+    if (files.length === 0) return;
+    const names = files.map(f => f.name).join(', ');
     setLoadingMsg(`Uploading ${names}…`);
     try {
       const result = await api.uploadSource(files);
