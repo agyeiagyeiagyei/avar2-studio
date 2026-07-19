@@ -483,9 +483,18 @@ function App() {
           selectedGlyph: { lineIndex: 0, glyphIndex: 0, isEditing: true },
         };
         // Build the FULL location vector by overlaying the sparse
-        // layer.location on top of each axis's default. Pass
+        // layer location on top of each axis's default. Pass
         // every axis the source declares so Fontra's location
         // matches a real brace layer point.
+        //
+        // SPACE CONTRACT: layerLocation arrives in USER space —
+        // LayersEditor passes `location_user`, which the backend
+        // derives by inverting designspace axis maps (identity for
+        // .glyphs and unmapped axes). The axis defaults from
+        // /api/axes are user space too, so the mix is consistent
+        // with Fontra's fontLocationUser. A null layerLocation
+        // means the map wasn't invertible: we still open the glyph,
+        // just without a location fragment.
         //
         // KEY: Fontra-glyphs builds its location dicts keyed by
         // ``axis.name`` (the display name — "Crossbar",

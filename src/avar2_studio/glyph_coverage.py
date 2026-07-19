@@ -158,7 +158,9 @@ def _coverage_from_glyphs(font: GSFont) -> Dict[str, Dict[str, object]]:
             loc_key = tuple(sorted(sparse.items()))
             for tag, value in sparse.items():
                 axis_values[tag].add(value)
-                _record_layer(coverage, layers, seen_layers, tag, glyph.name, sparse, loc_key)
+                # .glyphs axes have no user/design split in this
+                # pipeline — user space IS design space.
+                _record_layer(coverage, layers, seen_layers, tag, glyph.name, sparse, loc_key, sparse)
 
     tag_defaults = {
         axes[i].axisTag: axis_defaults.get(i) for i in range(len(axes))
@@ -237,6 +239,7 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
 
     axis_defaults = {ax.name: float(ax.default) for ax in doc.axes}
     axis_tag_by_name = {ax.name: ax.tag for ax in doc.axes}
+    axis_by_tag = {ax.tag: ax for ax in doc.axes}
 
     # Find the default master — its glif bytes are the reference we
     # diff against. A non-default master that simply copies the
@@ -270,6 +273,37 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
             continue  # supports / additional masters at default — skip
         loc_key = tuple(sorted(sparse.items()))
 
+        # User-space twin of ``sparse``, for consumers that talk to
+        # the COMPILED font or to Fontra — fvar coordinates and
+        # Fontra's location bar are user space, while source
+        # locations are design space; the two differ whenever the
+        # axis carries a <map>. The round-trip check guards against
+        # maps that can't be confidently inverted (non-monotonic /
+        # flat segments): ``None`` tells consumers to skip
+        # location-based navigation rather than land somewhere wrong.
+        sparse_user: Optional[Dict[str, float]] = {}
+        for tag, value in sparse.items():
+            ax_desc = axis_by_tag.get(tag)
+            try:
+                user = float(ax_desc.map_backward(value))
+                # Round-trip alone isn't enough: fontTools' piecewise
+                # map extrapolates symmetrically past its end nodes,
+                # so a design value outside the mapped range round-
+                # trips through an out-of-bounds user value that fvar
+                # would clamp. Reject those too.
+                if abs(float(ax_desc.map_forward(user)) - value) > 0.01:
+                    raise ValueError("map not invertible at this value")
+                lo_u = getattr(ax_desc, "minimum", None)
+                hi_u = getattr(ax_desc, "maximum", None)
+                if lo_u is not None and user < float(lo_u) - 1e-6:
+                    raise ValueError("inverts outside the axis range")
+                if hi_u is not None and user > float(hi_u) + 1e-6:
+                    raise ValueError("inverts outside the axis range")
+            except Exception:
+                sparse_user = None
+                break
+            sparse_user[tag] = user
+
         master_glifs = _load_ufo_glif_bytes(ufo_path)
         all_glyphs.update(master_glifs.keys())
 
@@ -282,7 +316,7 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
             if default_bytes is not None and glif_bytes == default_bytes:
                 continue  # copy of the default — no real variation
             for tag in sparse:
-                _record_layer(coverage, layers, seen_layers, tag, glyph_name, sparse, loc_key)
+                _record_layer(coverage, layers, seen_layers, tag, glyph_name, sparse, loc_key, sparse_user)
 
     declared_tags = {ax.tag for ax in doc.axes}
     # Axis extremes in DESIGN space: source locations are design-space,
@@ -295,10 +329,23 @@ def _coverage_from_designspace(doc: DesignSpaceDocument) -> Dict[str, Dict[str, 
         maximum = getattr(ax, "maximum", None)
         try:
             fwd = ax.map_forward
+            # Design extremes are the min/max over the map's OUTPUT
+            # values plus the mapped user extremes — forward(min)/
+            # forward(max) alone understate the range whenever the
+            # map is non-monotonic.
+            candidates = []
+            if minimum is not None:
+                candidates.append(float(fwd(minimum)))
+            if maximum is not None:
+                candidates.append(float(fwd(maximum)))
+            for _inp, outp in (getattr(ax, "map", None) or []):
+                candidates.append(float(outp))
+            lo = min(candidates) if candidates else None
+            hi = max(candidates) if candidates else None
             ranges[ax.tag] = (
-                fwd(minimum) if minimum is not None else None,
-                fwd(default) if default is not None else None,
-                fwd(maximum) if maximum is not None else None,
+                lo,
+                float(fwd(default)) if default is not None else None,
+                hi,
             )
         except Exception:
             ranges[ax.tag] = (minimum, default, maximum)
@@ -407,16 +454,24 @@ def _record_layer(
     glyph_name: str,
     sparse: Dict[str, float],
     loc_key: tuple,
+    sparse_user: Optional[Dict[str, float]],
 ) -> None:
     """Register one glyph-layer contribution on ``tag``: coverage
     membership plus a deduped ``layers`` entry. ``loc_key`` is the
     canonical identity of ``sparse`` (its sorted items) — hoisted by
-    callers because it's constant per brace layer / alternate master."""
+    callers because it's constant per brace layer / alternate master.
+    ``sparse_user`` is the user-space twin of ``sparse`` (equal for
+    identity maps), or ``None`` when the axis map couldn't be
+    inverted — consumers must then skip location-based navigation."""
     coverage[tag].add(glyph_name)
     key = (tag, glyph_name, loc_key)
     if key not in seen:
         seen.add(key)
-        layers[tag].append({"glyph": glyph_name, "location": sparse})
+        layers[tag].append({
+            "glyph": glyph_name,
+            "location": sparse,
+            "location_user": sparse_user,
+        })
 
 
 def _shape_result(

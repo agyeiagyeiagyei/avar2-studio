@@ -199,7 +199,21 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
               <>
                 <ul className="layers-glyph-list">
                   {glyphLayers.map((entry, i) => {
+                    // Display coords stay in DESIGN space (what the
+                    // source authors). Anything that drives the
+                    // compiled font or Fontra — the thumbnail's
+                    // fontVariationSettings, the flyout's location —
+                    // needs USER space: the backend inverts designspace
+                    // axis maps into `location_user` (== location for
+                    // identity maps; sidecar entries omit the field).
+                    // An explicit null means the map couldn't be
+                    // inverted — render/navigate WITHOUT a location
+                    // rather than at a wrong one.
                     const fullLoc = buildFullLocation(entry.location);
+                    const navLocation = entry.location_user === null
+                      ? null
+                      : (entry.location_user || entry.location);
+                    const thumbLoc = navLocation ? buildFullLocation(navLocation) : null;
                     return (
                       <li
                         key={i}
@@ -214,12 +228,12 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                           ? "Source-derived layer — authored in your source file, not the studio sidecar."
                           : "Click to edit this brace layer's axis values."}
                       >
-                        {fontLoaded && vfFamilyId && (
+                        {fontLoaded && vfFamilyId && thumbLoc && (
                           <span
                             className="layer-thumb"
                             style={{
                               fontFamily: `"${vfFamilyId}", sans-serif`,
-                              fontVariationSettings: fullLoc.map(a => `"${a.tag}" ${a.value}`).join(', '),
+                              fontVariationSettings: thumbLoc.map(a => `"${a.tag}" ${a.value}`).join(', '),
                             }}
                           >
                             {glyphName}
@@ -263,7 +277,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             title={readOnly
                               ? "Open this glyph in Fontra at this layer's location. This axis lives in your source file, so Fontra edits the real source."
                               : "Open this glyph in Fontra at this brace-layer location, in edit mode."}
-                            onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, entry.location)}
+                            onClick={() => onOpenInEditor && onOpenInEditor(tag, glyphName, navLocation)}
                           >
                             ↗
                           </button>
