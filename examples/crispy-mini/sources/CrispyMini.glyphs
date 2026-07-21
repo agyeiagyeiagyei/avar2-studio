@@ -54507,14 +54507,6 @@ unicode = 32;
 }
 );
 instances = (
-{
-axesValues = (
-94,
-2,
-2
-);
-name = Default;
-}
 );
 kerningLTR = {
 };
