@@ -23,7 +23,7 @@ fixes, your own scripts) to every build.
 ## Status
 
 **Pre-release.** Latest GitHub release: `v0.1.0.dev6`; the repo is at
-`v0.1.0.dev7` (unreleased). Extracted from the
+`v0.1.0.dev8` (unreleased). Extracted from the
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy) font project
 through three phases of work: lift-and-shift, genericization, and
 single-build-path consolidation. `dev6` added `.designspace` support

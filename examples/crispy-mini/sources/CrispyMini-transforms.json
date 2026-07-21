@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "transforms": [
+    {
+      "type": "spac_widthaware",
+      "enabled": true,
+      "params": {
+        "min": -20,
+        "max": 40,
+        "bias": 1.0,
+        "scale": 1.25
+      }
+    }
+  ]
+}

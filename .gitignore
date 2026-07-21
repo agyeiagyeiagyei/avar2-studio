@@ -29,6 +29,14 @@ src/avar2_studio/static/
 # stages examples into ~/.avar2-studio/workspace/ for the same reason)
 examples/*/sources/*-avar.csv
 
+# EXCEPT the crispy-mini exemplar: its mappings CSV, transforms, and
+# axis metadata ship deliberately so the bundled example opens as a
+# complete three-axis avar2 demo (opsz/wght/wdth + width-aware SPAC).
+!examples/crispy-mini/sources/CrispyMini-avar.csv
+!examples/crispy-mini/sources/.avar2-studio/
+examples/crispy-mini/sources/.avar2-studio/*
+!examples/crispy-mini/sources/.avar2-studio/axis-metadata.json
+
 # macOS
 .DS_Store
 
