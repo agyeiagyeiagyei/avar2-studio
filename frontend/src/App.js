@@ -1892,6 +1892,7 @@ function App() {
           <PreviewTab
             axes={axes}
             avar2Error={avar2Error}
+            familyName={familyName}
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
             fontUrl={fontUrl}

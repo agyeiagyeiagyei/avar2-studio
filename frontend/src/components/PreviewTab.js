@@ -43,6 +43,7 @@ const DEFAULT_SAMPLE = 'Adhesion';
 function PreviewTab({
   axes,
   avar2Error,
+  familyName,
   vfFamilyId,
   fontLoaded,
   fontUrl,
@@ -397,6 +398,18 @@ function PreviewTab({
           <div className="modal-overlay" onClick={() => !exporting && setShowExportModal(false)}>
             <div className="preview-export-modal" onClick={(e) => e.stopPropagation()}>
               <h3>Export font</h3>
+              {/* Specimen: the family name set in the font itself at the
+                  current preview location — what the export's resting
+                  state will look like when "Set default" is on. */}
+              <div
+                className="preview-export-specimen"
+                style={{
+                  fontFamily: fontLoaded && vfFamilyId ? `"${vfFamilyId}", sans-serif` : 'sans-serif',
+                  fontVariationSettings: fontLoaded ? fvs : undefined,
+                }}
+              >
+                {familyName || vfFamilyId || 'Aa'}
+              </div>
               <div className="preview-export-options">
                 <div className="preview-export-row">
                   <span
@@ -432,7 +445,7 @@ function PreviewTab({
                       onChange={(e) => setExportUseDefault(e.target.checked)}
                     />
                     <span>
-                      Open at current location{' '}
+                      Set default at{' '}
                       <span className="preview-export-loc">
                         {Object.entries(currentUserLocation).map(([t, v]) => `${t} ${v}`).join(' · ')}
                       </span>
