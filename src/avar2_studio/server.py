@@ -2767,9 +2767,13 @@ def export_font():
             # Where the combination lands in the design space — the
             # parametric axes get rebased there so the new origin
             # renders this exact master.
+            # Round the rebased defaults to integers: fractional default
+            # coordinates put every variation region peak at awkward
+            # normalized floats, defeating delta sharing and inflating
+            # the rebased gvar further. A ≤0.5-unit nudge is invisible.
             mapped = _evaluate_mapped_location(requested)
             export_defaults = {
-                t: mapped[t] for t in fvar_tags if t not in requested and t in mapped
+                t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
             }
 
             if BUILDING:
@@ -2814,8 +2818,7 @@ def export_font():
                 produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
                 if not produced:
                     return jsonify({"error": "Export build produced no font"}), 500
-                loc_slug = "-".join(f"{t}{v:g}" for t, v in sorted(requested.items()))
-                out_path = export_dir / f"{produced[0].stem}-at-{loc_slug}.ttf"
+                out_path = export_dir / produced[0].name
                 shutil.move(str(produced[0]), str(out_path))
                 # Same post-build transforms (SPAC…) as the preview.
                 out_path = Path(_apply_transform_chain(out_path))

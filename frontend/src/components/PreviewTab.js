@@ -213,11 +213,7 @@ function PreviewTab({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      const base = (builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`).replace(/\.ttf$/i, '');
-      const suffix = exportUseDefault
-        ? '-at-' + Object.entries(currentUserLocation).map(([t, v]) => `${t}${v}`).join('-')
-        : '';
-      link.download = `${base}${suffix}.ttf`;
+      link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
