@@ -462,6 +462,21 @@ export const api = {
     return parseJSON(response);
   },
 
+  async exportFont(options) {
+    // POST /api/export-font — returns the font binary. Options:
+    // {hidden_axes: [tags], default_location: {tag: value} | null}.
+    const response = await fetch(`${API_BASE}/export-font`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({}));
+      throw new Error(err.error || `Export failed: ${response.status}`);
+    }
+    return response.blob();
+  },
+
   async getMappedLocation(coordinates) {
     // Evaluate the built font's avar table at a user-space location —
     // returns { mapped: {tag: value} }, the effective post-mapping

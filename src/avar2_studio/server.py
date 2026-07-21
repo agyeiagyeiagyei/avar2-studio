@@ -2660,39 +2660,174 @@ def mapped_location():
         return jsonify({"error": "coordinates must be a JSON object"}), 400
 
     try:
-        from fontTools.varLib.models import normalizeLocation
-
-        with _MAPPED_FONT_LOCK:
-            key = (str(VARIABLE_FONT_PATH), VARIABLE_FONT_PATH.stat().st_mtime)
-            if _MAPPED_FONT_CACHE["key"] != key:
-                _MAPPED_FONT_CACHE["font"] = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
-                _MAPPED_FONT_CACHE["key"] = key
-            tt = _MAPPED_FONT_CACHE["font"]
-
-            axes = {
-                a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
-                for a in tt["fvar"].axes
-            }
-            loc = {}
-            for tag, (lo, d, hi) in axes.items():
-                try:
-                    v = float(coords.get(tag, d))
-                except (TypeError, ValueError):
-                    v = d
-                loc[tag] = max(lo, min(hi, v))
-            norm = normalizeLocation(loc, axes)
-            avar = tt.get("avar")
-            renorm = avar.renormalizeLocation(norm, tt) if avar is not None else norm
-
-        def _denorm(tag, n):
-            lo, d, hi = axes[tag]
-            return d + n * ((hi - d) if n > 0 else (d - lo))
-
-        # Axes absent from the renormalized dict sit at their default
-        # (normalized 0) — emit them too so the client needn't guess.
-        mapped = {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
-        return jsonify({"mapped": mapped})
+        return jsonify({"mapped": _evaluate_mapped_location(coords)})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
+    """Evaluate the built font's avar table at a user-space location;
+    returns every fvar axis's effective post-mapping value in user
+    space. Shared by /api/mapped-location (slider reflection) and
+    /api/export-font (default relocation)."""
+    from fontTools.varLib.models import normalizeLocation
+
+    with _MAPPED_FONT_LOCK:
+        key = (str(VARIABLE_FONT_PATH), VARIABLE_FONT_PATH.stat().st_mtime)
+        if _MAPPED_FONT_CACHE["key"] != key:
+            _MAPPED_FONT_CACHE["font"] = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
+            _MAPPED_FONT_CACHE["key"] = key
+        tt = _MAPPED_FONT_CACHE["font"]
+
+        axes = {
+            a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
+            for a in tt["fvar"].axes
+        }
+        loc = {}
+        for tag, (lo, d, hi) in axes.items():
+            try:
+                v = float(coords.get(tag, d))
+            except (TypeError, ValueError):
+                v = d
+            loc[tag] = max(lo, min(hi, v))
+        norm = normalizeLocation(loc, axes)
+        avar = tt.get("avar")
+        renorm = avar.renormalizeLocation(norm, tt) if avar is not None else norm
+
+    def _denorm(tag, n):
+        lo, d, hi = axes[tag]
+        return d + n * ((hi - d) if n > 0 else (d - lo))
+
+    # Axes absent from the renormalized dict sit at their default
+    # (normalized 0) — emit them too so the caller needn't guess.
+    return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
+
+
+def _apply_hidden_axes(path: Path, hidden_tags) -> None:
+    """Set the fvar HIDDEN flag (0x0001) on the given axes so end-user
+    font pickers don't surface them. In place; unknown tags ignored."""
+    tags = {str(t) for t in (hidden_tags or [])}
+    if not tags:
+        return
+    tt = TTFont(str(path))
+    changed = False
+    for a in tt["fvar"].axes:
+        if str(a.axisTag) in tags and not (a.flags & 0x0001):
+            a.flags |= 0x0001
+            changed = True
+    if changed:
+        tt.save(str(path))
+
+
+@app.route('/api/export-font', methods=['POST'])
+def export_font():
+    """Download the built font with export options applied.
+
+    Body::
+
+        {"hidden_axes": ["XOPQ", ...],
+         "default_location": {"opsz": 12, "wght": 900} | null}
+
+    ``hidden_axes`` sets the fvar HIDDEN flag so font pickers don't
+    surface those axes. ``default_location`` re-origins the export: the
+    plain build's parametric defaults are rebased to the avar2-mapped
+    location of the requested combination (instancer L3, applied by
+    the gen-avar2 shim while the font is still plain — fontTools
+    refuses partial-instancing once avar2 exists) and the table is
+    generated against the requested user-axis defaults, so the font
+    OPENS at that style with every axis range intact. The preview's
+    served font is never touched.
+    """
+    global BUILDING
+    if VARIABLE_FONT_PATH is None or not VARIABLE_FONT_PATH.exists():
+        return jsonify({"error": "No built font"}), 404
+    body = request.get_json(silent=True) or {}
+    hidden = body.get("hidden_axes") or []
+    default_location = body.get("default_location") or None
+
+    try:
+        export_dir = Path(tempfile.mkdtemp(prefix="avar2-export-"))
+
+        if not default_location:
+            out_path = export_dir / VARIABLE_FONT_PATH.name
+            shutil.copy2(str(VARIABLE_FONT_PATH), str(out_path))
+        else:
+            tt = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
+            fvar_tags = {str(a.axisTag) for a in tt["fvar"].axes}
+            requested = {}
+            for t, v in default_location.items():
+                if str(t) in fvar_tags:
+                    try:
+                        requested[str(t)] = float(v)
+                    except (TypeError, ValueError):
+                        pass
+            if not requested:
+                return jsonify({"error": "default_location has no known axis values"}), 400
+
+            # Where the combination lands in the design space — the
+            # parametric axes get rebased there so the new origin
+            # renders this exact master.
+            mapped = _evaluate_mapped_location(requested)
+            export_defaults = {
+                t: mapped[t] for t in fvar_tags if t not in requested and t in mapped
+            }
+
+            if BUILDING:
+                return jsonify({"error": "A build is in progress — try again in a moment"}), 409
+            BUILDING = True
+            try:
+                config_path = _get_preview_config_path()
+                workdir = _get_preview_dir()
+                if not config_path or not config_path.exists():
+                    return jsonify({"error": "No build config — build the font first"}), 400
+                # Regenerate the config with blank in: cells MATERIALIZED
+                # at the standard declared defaults: blank means "at
+                # default", and with the default relocated to the
+                # requested combination, blank rows would alias onto the
+                # new origin ("Locations must be unique"). The next
+                # preview build regenerates the config normally, so this
+                # doesn't stick.
+                try:
+                    from .build import config_generator as _cfg_gen
+                    _cfg_gen.update_config(
+                        csv_path=_get_preview_csv_path(),
+                        config_path=config_path,
+                        backup=False,
+                        source_path=GLYPHS_PATH,
+                        fill_in_defaults=True,
+                    )
+                except Exception as e:
+                    return jsonify({"error": "Export config generation failed", "details": str(e)}), 500
+                build_env = _builder_env(default_overrides=requested)
+                build_env["AVAR2_STUDIO_EXPORT_DEFAULTS"] = json.dumps(export_defaults)
+                fontc_path = shutil.which("fontc", path=build_env["PATH"])
+                if not fontc_path:
+                    return jsonify({"error": "fontc not found in PATH"}), 500
+                builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(config_path.resolve())]
+                result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir), env=build_env)
+                if result.returncode != 0:
+                    return jsonify({
+                        "error": "Export build failed",
+                        "details": (result.stderr or result.stdout or "")[-800:],
+                    }), 500
+                project_fonts_dir = workdir.parent / "fonts" / "variable"
+                produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if not produced:
+                    return jsonify({"error": "Export build produced no font"}), 500
+                loc_slug = "-".join(f"{t}{v:g}" for t, v in sorted(requested.items()))
+                out_path = export_dir / f"{produced[0].stem}-at-{loc_slug}.ttf"
+                shutil.move(str(produced[0]), str(out_path))
+                # Same post-build transforms (SPAC…) as the preview.
+                out_path = Path(_apply_transform_chain(out_path))
+            finally:
+                BUILDING = False
+
+        _apply_hidden_axes(out_path, hidden)
+        return send_file(str(out_path), as_attachment=True, download_name=out_path.name)
+    except Exception as e:
+        print(f"Error in /api/export-font: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -4344,6 +4479,62 @@ def _record_build_failure(result: Dict) -> Dict:
     return result
 
 
+def _builder_env(default_overrides: Optional[Dict[str, float]] = None) -> Dict[str, str]:
+    """Environment for the gftools-builder subprocess.
+
+    Resolves compilers against THIS python env first (ninja steps call
+    gftools-* scripts from PATH), with build/_shims/ in front so our
+    patched gftools-gen-avar2 shadows the venv console script (fvar
+    axis dedup + declared ranges + export rebasing — see the shim).
+
+    Also hands the studio's declared axis ranges to the shim: created
+    axes (opsz/wght…) get their declared min/DEFAULT/max instead of
+    upstream's range-from-in-values with default=min — default=min
+    makes the lowest-mapped instance the un-remappable avar2 origin.
+    ``default_overrides`` ({fvar tag: value}) replaces specific axes'
+    DEFAULT — the export-with-default build uses it to make the
+    requested combination the compiled origin.
+    """
+    build_env = os.environ.copy()
+    shims_dir = Path(__file__).parent / "build" / "_shims"
+    build_env["PATH"] = (
+        str(shims_dir)
+        + os.pathsep
+        + str(Path(sys.executable).parent)
+        + os.pathsep
+        + build_env.get("PATH", "")
+    )
+    try:
+        _meta = _load_axis_metadata() or {}
+        _ranges = {}
+        for _col, _m in _meta.items():
+            _tag = (_m.get("registered_tag") or "").strip()
+            if not _tag or _m.get("is_parametric"):
+                continue
+            _lo, _hi = _m.get("min"), _m.get("max")
+            if _lo is None or _hi is None:
+                continue
+            # Same fallback chain as /api/avar2/axes: explicit metadata
+            # default, else the registered-axis convention (wght 400,
+            # opsz 72, …), else the minimum — clamped into range so the
+            # shim never rejects the triple.
+            _d = _m.get("default")
+            if _d is None:
+                _d = TRADITIONAL_AXIS_DEFAULTS.get(_tag.lower(), _lo)
+            _d = max(float(_lo), min(float(_hi), float(_d)))
+            _ranges[_tag] = [float(_lo), _d, float(_hi)]
+        if default_overrides:
+            for _tag, _val in default_overrides.items():
+                if _tag in _ranges:
+                    _lo, _, _hi = _ranges[_tag]
+                    _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
+        if _ranges:
+            build_env["AVAR2_STUDIO_AXIS_RANGES"] = json.dumps(_ranges)
+    except Exception:
+        pass
+    return build_env
+
+
 def _perform_avar2_build(check_sync: bool = True) -> Dict:
     """Build the avar2 variable font in-process.
 
@@ -4407,54 +4598,7 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
         except Exception as e:
             return _record_build_failure({"success": False, "error": "Failed to update config", "details": str(e)})
 
-        # Resolve the compilers against THIS python env first: gftools'
-        # builder shells out to ninja steps that call gftools-* scripts
-        # found on PATH — under a bare ``.venv/bin/python`` launch the
-        # venv's bin/ isn't on PATH, and those steps can pick up a broken
-        # system/Framework install instead of the env's own tools.
-        build_env = os.environ.copy()
-        # Shims first: build/_shims/gftools-gen-avar2 shadows the venv
-        # console script to fix upstream's broken fvar axis-membership
-        # check (string-vs-Axis-objects), which duplicates every axis
-        # when avar2 in: axes already exist in the font — the
-        # parametric-in mapping case. See the shim's docstring.
-        shims_dir = Path(__file__).parent / "build" / "_shims"
-        build_env["PATH"] = (
-            str(shims_dir)
-            + os.pathsep
-            + str(Path(sys.executable).parent)
-            + os.pathsep
-            + build_env.get("PATH", "")
-        )
-
-        # Hand the studio's declared axis ranges to the gen-avar2 shim:
-        # created axes (opsz/wght…) get their declared min/DEFAULT/max
-        # instead of upstream's range-from-in-values with default=min —
-        # default=min makes the lowest-mapped instance the un-remappable
-        # avar2 origin and silently drops its mapping.
-        try:
-            _meta = _load_axis_metadata() or {}
-            _ranges = {}
-            for _col, _m in _meta.items():
-                _tag = (_m.get("registered_tag") or "").strip()
-                if not _tag or _m.get("is_parametric"):
-                    continue
-                _lo, _hi = _m.get("min"), _m.get("max")
-                if _lo is None or _hi is None:
-                    continue
-                # Same fallback chain as /api/avar2/axes: explicit
-                # metadata default, else the registered-axis convention
-                # (wght 400, opsz 72, …), else the minimum — clamped
-                # into range so the shim never rejects the triple.
-                _d = _m.get("default")
-                if _d is None:
-                    _d = TRADITIONAL_AXIS_DEFAULTS.get(_tag.lower(), _lo)
-                _d = max(float(_lo), min(float(_hi), float(_d)))
-                _ranges[_tag] = [_lo, _d, _hi]
-            if _ranges:
-                build_env["AVAR2_STUDIO_AXIS_RANGES"] = json.dumps(_ranges)
-        except Exception:
-            pass
+        build_env = _builder_env()
 
         fontc_path = shutil.which("fontc", path=build_env["PATH"])
         if not fontc_path:

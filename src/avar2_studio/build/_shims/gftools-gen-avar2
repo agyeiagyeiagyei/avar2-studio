@@ -69,5 +69,44 @@ def _fixed_gen_fvar_axes(font, mapping):
 _mod.gen_fvar_axes = _fixed_gen_fvar_axes
 
 
+def _rebase_parametric_defaults() -> None:
+    """Export-with-default support. ``AVAR2_STUDIO_EXPORT_DEFAULTS``
+    ({tag: newDefault}) moves the PLAIN font's axis defaults via
+    fontTools instancer L3 — full ranges kept, gvar deltas rebased —
+    before the avar2 table is generated, so the table's normalization
+    is built against the new origin. This must happen HERE: fontTools
+    refuses partial-instancing once an avar2 table exists, and this
+    shim is the last moment the font is still plain."""
+    raw = os.environ.get("AVAR2_STUDIO_EXPORT_DEFAULTS", "")
+    if not raw:
+        return
+    try:
+        new_defaults = {str(k): float(v) for k, v in json.loads(raw).items()}
+    except (ValueError, TypeError):
+        print("shim: bad AVAR2_STUDIO_EXPORT_DEFAULTS, ignoring", file=sys.stderr)
+        return
+    font_path = next((a for a in sys.argv[1:] if a.lower().endswith(".ttf")), None)
+    if font_path is None:
+        return
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib import instancer
+
+    tt = TTFont(font_path)
+    limits = {}
+    for a in tt["fvar"].axes:
+        tag = str(a.axisTag)
+        if tag in new_defaults:
+            lo, hi = float(a.minValue), float(a.maxValue)
+            d = max(lo, min(hi, new_defaults[tag]))
+            limits[tag] = (lo, d, hi)
+    if not limits:
+        return
+    out = instancer.instantiateVariableFont(tt, limits, inplace=False, updateFontNames=False)
+    out.save(font_path)
+    print(f"shim: rebased axis defaults for export: "
+          + ", ".join(f"{t}={v[1]}" for t, v in limits.items()), file=sys.stderr)
+
+
 if __name__ == "__main__":
+    _rebase_parametric_defaults()
     sys.exit(_mod.main())

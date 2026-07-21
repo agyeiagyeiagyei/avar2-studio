@@ -1288,6 +1288,7 @@ def update_config(
     backup: bool = False,
     dry_run: bool = False,
     source_path: Optional[Path] = None,
+    fill_in_defaults: bool = False,
 ) -> None:
     """Generate STAT + avar2 sections from a CSV and merge them into config.yaml.
 
@@ -1309,6 +1310,8 @@ def update_config(
         argv.append("--dry-run")
     if source_path:
         argv += ["--source", str(source_path)]
+    if fill_in_defaults:
+        argv.append("--fill-in-defaults")
 
     rc = main(argv)
     if rc != 0:
@@ -1331,6 +1334,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--save-opsz-csv", action="store_true", help="Save expanded opsz CSV to file (default: use temporary file, auto-deleted).")
     ap.add_argument("--source", type=Path, default=None,
                     help="Source file (.glyphs/.designspace). Its declared axis ranges pad the avar2 in: envelope so fontc doesn't clamp the built fvar axes to the CSV's instance envelope.")
+    ap.add_argument("--fill-in-defaults", action="store_true",
+                    help="Materialize blank in: cells at the declared axis defaults. "
+                         "Blank normally means 'at default', which rebinds if a build "
+                         "relocates the default (export-with-default) — aliasing "
+                         "explicitly-authored rows onto the new origin. Filling keeps "
+                         "every row's location fixed regardless of the compiled defaults.")
     args = ap.parse_args(argv)
 
     try:
@@ -1442,6 +1451,39 @@ def main(argv: Optional[List[str]] = None) -> int:
                 mappings = _pad_in_envelope(mappings, source_axes_list)
             except Exception as e:
                 print(f"  Warning: could not pad avar2 range envelope: {e}", file=sys.stderr)
+
+        if args.fill_in_defaults:
+            # Materialize blank cells at the DECLARED defaults so each
+            # row's location stays fixed even when the compiled default
+            # moves (export-with-default). Applies to the traditional
+            # (non-source) in: axes only.
+            source_tags_u = {str(a.get("tag", "")).upper() for a in source_axes_list}
+            declared = {
+                str(k).upper(): v
+                for k, v in _declared_axis_defaults(args.config).items()
+            }
+            trad_tags = {
+                str(t)
+                for m in mappings
+                for t in m.in_axes
+                if str(t).upper() not in source_tags_u
+            }
+            filled: List[RowMapping] = []
+            filled_count = 0
+            for m in mappings:
+                in_axes = dict(m.in_axes)
+                present_u = {str(k).upper() for k in in_axes}
+                for t in trad_tags:
+                    if str(t).upper() in present_u:
+                        continue
+                    d = declared.get(str(t).upper())
+                    if d is not None:
+                        in_axes[t] = d
+                        filled_count += 1
+                filled.append(replace(m, in_axes=in_axes))
+            mappings = filled
+            if filled_count:
+                print(f"  ℹ Filled {filled_count} blank in: cells at declared defaults", file=sys.stderr)
 
         # Two mappings that normalize to the SAME in: location crash
         # fontTools ("Locations must be unique") deep inside gen-avar2

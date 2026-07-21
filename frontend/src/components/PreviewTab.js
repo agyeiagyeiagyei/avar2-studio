@@ -167,15 +167,64 @@ function PreviewTab({
     [axes, coords]
   );
 
-  const handleDownload = () => {
+  // Export options: axes to flag HIDDEN in the exported fvar, and an
+  // optional "open here" default captured from the current user-axis
+  // sliders (the export is rebuilt so that combination becomes the
+  // compiled origin — ranges stay intact).
+  const [exportHidden, setExportHidden] = useState(() => new Set());
+  const [exportUseDefault, setExportUseDefault] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  const toggleExportHidden = (tag) => setExportHidden(prev => {
+    const next = new Set(prev);
+    if (next.has(tag)) next.delete(tag);
+    else next.add(tag);
+    return next;
+  });
+
+  const currentUserLocation = useMemo(
+    () => Object.fromEntries(userAxes.map(a => [a.tag, coords[a.tag] ?? a.default])),
+    [userAxes, coords]
+  );
+
+  const handleDownload = async () => {
     if (!fontUrl) return;
-    const downloadUrl = `${fontUrl}${fontUrl.includes('?') ? '&' : '?'}download=1`;
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const plainDownload = exportHidden.size === 0 && !exportUseDefault;
+    if (plainDownload) {
+      const downloadUrl = `${fontUrl}${fontUrl.includes('?') ? '&' : '?'}download=1`;
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await api.exportFont({
+        hidden_axes: [...exportHidden],
+        default_location: exportUseDefault ? currentUserLocation : null,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const base = (builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`).replace(/\.ttf$/i, '');
+      const suffix = exportUseDefault
+        ? '-at-' + Object.entries(currentUserLocation).map(([t, v]) => `${t}${v}`).join('-')
+        : '';
+      link.download = `${base}${suffix}.ttf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const renderAxis = (a) => (
@@ -331,14 +380,60 @@ function PreviewTab({
         ))}
 
         <div className="preview-tab-download">
+          <div className="preview-export-options">
+            <div className="preview-export-row">
+              <span
+                className="preview-export-label"
+                title="Hidden axes keep working via font-variation-settings but don't appear in font pickers or design apps."
+              >
+                Hide on export
+              </span>
+              <div className="preview-export-chips">
+                {(axes || []).map(a => (
+                  <button
+                    key={a.tag}
+                    type="button"
+                    className={`preview-export-chip${exportHidden.has(a.tag) ? ' on' : ''}`}
+                    onClick={() => toggleExportHidden(a.tag)}
+                    title={exportHidden.has(a.tag)
+                      ? `${a.tag} will be flagged hidden in the exported font. Click to unhide.`
+                      : `Flag ${a.tag} as hidden in the exported font.`}
+                  >
+                    {a.tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {userAxes.length > 0 && (
+              <label
+                className="preview-export-default"
+                title="Rebuilds the export so its resting state IS this style: parametric defaults move to the mapped location and the avar2 table is regenerated around it. Every axis range stays intact."
+              >
+                <input
+                  type="checkbox"
+                  checked={exportUseDefault}
+                  onChange={(e) => setExportUseDefault(e.target.checked)}
+                />
+                <span>
+                  Open at current location{' '}
+                  <span className="preview-export-loc">
+                    {Object.entries(currentUserLocation).map(([t, v]) => `${t} ${v}`).join(' · ')}
+                  </span>
+                </span>
+              </label>
+            )}
+            {exportError && <div className="preview-export-error">{exportError}</div>}
+          </div>
           <button
             type="button"
             className="btn btn-secondary"
             onClick={handleDownload}
-            disabled={!fontLoaded}
-            title="Download the built variable font (.ttf)"
+            disabled={!fontLoaded || exporting}
+            title={exportHidden.size === 0 && !exportUseDefault
+              ? "Download the built variable font (.ttf)"
+              : "Export with the options above (a relocated default rebuilds the font — takes a few seconds)"}
           >
-            Download font
+            {exporting ? 'Exporting…' : 'Download font'}
           </button>
         </div>
       </div>

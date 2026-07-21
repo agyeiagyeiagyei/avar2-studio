@@ -196,3 +196,71 @@
 .preview-axis-reflected .axis-current {
   font-style: italic;
 }
+
+/* Export options above the download button. */
+.preview-export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid #eee;
+}
+
+.preview-export-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.preview-export-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #777;
+  cursor: help;
+}
+
+.preview-export-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.preview-export-chip {
+  font-family: monospace;
+  font-size: 0.62rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+}
+
+.preview-export-chip.on {
+  background: #5b3a8f;
+  border-color: #5b3a8f;
+  color: #fff;
+  text-decoration: line-through;
+}
+
+.preview-export-default {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: #444;
+  cursor: pointer;
+}
+
+.preview-export-loc {
+  font-family: monospace;
+  color: #5b3a8f;
+}
+
+.preview-export-error {
+  font-size: 0.7rem;
+  color: #a33;
+}
