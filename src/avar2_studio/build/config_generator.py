@@ -1417,23 +1417,60 @@ def main(argv: Optional[List[str]] = None) -> int:
                     print(f"  ✓ sources: repointed to {resolved}", file=sys.stderr)
         print("  ✓ Config loaded and validated", file=sys.stderr)
 
-        # Step 4: Determine font key
+        # Step 4: Determine font key. The builder names the VF after
+        # the ACTIVE source's axes — "<family>[<sorted axis tags>].ttf"
+        # — so when a source is available, derive from it. The key
+        # stored in the config goes stale whenever the axis set
+        # changes (e.g. a shadow adds a studio control axis: gen-avar2
+        # then looks up the tstx-bearing filename and KeyErrors on the
+        # old entry), so it is only a fallback.
         if args.font_key:
             font_key = args.font_key
         else:
-            try:
+            font_key = None
+            if args.source and args.source.exists():
+                try:
+                    font, _fmt = _source_font.load_source(args.source)
+                    family = _source_font.get_family_name(font, args.source)
+                    tags = sorted(
+                        a["tag"] for a in _source_font.get_axes(font) if a.get("tag")
+                    )
+                    font_key = (
+                        f"{family}[{','.join(tags)}].ttf" if tags else f"{family}-VF.ttf"
+                    )
+                except Exception as e:
+                    print(f"  Warning: font key from source failed: {e}", file=sys.stderr)
+            if font_key is None:
                 font_key = _load_font_key_from_config(args.config)
-            except ValueError:
-                # Instance-less configs carry no fvarInstances — derive the
-                # built filename the same way the studio's config init does:
-                # "<family>[<sorted axis tags>].ttf".
-                if not args.source:
-                    raise
-                font, _fmt = _source_font.load_source(args.source)
-                family = _source_font.get_family_name(font, args.source)
-                tags = sorted(a["tag"] for a in _source_font.get_axes(font) if a.get("tag"))
-                font_key = f"{family}[{','.join(tags)}].ttf" if tags else f"{family}-VF.ttf"
         print(f"  ✓ Font key: {font_key}", file=sys.stderr)
+
+        # Filename-keyed config sections go stale the same way the
+        # font key does — gen-fvar-instances looks up the BUILT
+        # filename in ``fvarInstances`` and KeyErrors on the old
+        # entry. Re-key in place (textual, single key line) so the
+        # rest of the file — comments included — is untouched.
+        try:
+            cfg_text = Path(args.config).read_text(encoding="utf-8")
+            fvar_keys = list((config.get("fvarInstances") or {}).keys())
+            if len(fvar_keys) == 1 and fvar_keys[0] != font_key:
+                import re as _re_key
+                cfg_text2, n_rekey = _re_key.subn(
+                    rf"(?m)^(\s+){_re_key.escape(fvar_keys[0])}:\s*$",
+                    lambda m: f"{m.group(1)}{font_key}:",
+                    cfg_text,
+                    count=1,
+                )
+                if n_rekey:
+                    Path(args.config).write_text(cfg_text2, encoding="utf-8")
+                    config["fvarInstances"][font_key] = config["fvarInstances"].pop(
+                        fvar_keys[0]
+                    )
+                    print(
+                        f"  ✓ fvarInstances: re-keyed {fvar_keys[0]} → {font_key}",
+                        file=sys.stderr,
+                    )
+        except Exception as e:
+            print(f"  Warning: fvarInstances re-key failed: {e}", file=sys.stderr)
 
         # Parametric-only CSV: pin in: to the source's instance
         # coordinates so edited CSV values remap the design (an in-sync

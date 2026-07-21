@@ -135,6 +135,11 @@ ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at.
 # kept warm across opens. Killed on shutdown via atexit.
 FONTRA_PROCESS: Optional[object] = None
 FONTRA_PORT: int = 8001
+# Per-session state for the embedded editor, set by open-editor and
+# read by the proxy's CSS builder + the injected shim (via
+# /api/fontra-shim-config). Studio sessions get the trimmed
+# multi-source panel; source-derived sessions keep the bare canvas.
+FONTRA_EDITOR_SESSION: Optional[dict] = None
 FONTRA_CONTENT_ROOT: Optional[Path] = None
 # mtime of the shadow .glyphs Fontra was spawned against. If the file
 # is rewritten (a layer edit regenerates the shadow), Fontra's backend
@@ -3032,17 +3037,9 @@ def create_control_axis():
     """
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    # Control-axis authoring is .glyphs-only for now. On a .designspace
-    # source ``regenerate_shadow`` silently returns None, so the axis
-    # would land in the sidecar as a no-op slider that can never be
-    # authored (no shadow, no "Open in editor"). Reject it up front
-    # with a clear message rather than let that dead state accrue.
-    if SOURCE_FORMAT and SOURCE_FORMAT != "glyphs":
-        return jsonify({
-            "error": "Control-axis authoring is only supported for .glyphs "
-                     "sources right now. .designspace brace-layer authoring "
-                     "(via pooled UFO masters) is not yet implemented.",
-        }), 400
+    # Both source formats author through a shadow now: .glyphs gets
+    # brace layers inside a shadow copy, .designspace gets pooled
+    # sparse UFO sources next to a shadow document.
     data = request.get_json(silent=True) or {}
     try:
         entry = _control_axes.add_axis(
@@ -3235,60 +3232,68 @@ _atexit.register(_stop_fontra)
 # If Fontra renames panels/tools we'll have to update; these are
 # documented in their identifier properties so changes are easy
 # to track.
-_FONTRA_FOCUSED_CSS = """
+#
+# The CSS is built per session: a STUDIO-axis session keeps the
+# designspace-navigation panel visible — its glyph-sources list is
+# the multi-source batch-editing surface, trimmed to studio layers
+# by the shim script below — while every other session hides it
+# along with the rest.
+
+
+def _fontra_focus_css() -> str:
+    show_nav = bool((FONTRA_EDITOR_SESSION or {}).get("studio"))
+    hidden = [
+        "text-entry", "selection-info", "reference-font", "glyph-search",
+        "selection-transformation", "glyph-note", "related-glyphs",
+        "characters-glyphs",
+    ]
+    if not show_nav:
+        hidden.insert(1, "designspace-navigation")
+    panel_rules = ",\n  ".join(
+        f'.sidebar-tab[data-sidebar-name="{n}"],\n'
+        f'  .sidebar-content[data-sidebar-name="{n}"]'
+        for n in hidden
+    )
+    # In studio sessions the sidebar containers must stay visible so
+    # the designspace-navigation panel has somewhere to live; the
+    # NOTE about shadow DOM still applies (accordion internals are
+    # trimmed by the shim, not this stylesheet).
+    if show_nav:
+        chrome_rules = ".top-bar-container,\n  menu-bar"
+    else:
+        chrome_rules = (
+            ".top-bar-container,\n  .sidebar-container.left,\n"
+            "  .sidebar-container.right,\n  menu-bar"
+        )
+    return f"""
 <style id="avar2-studio-fontra-focus">
-  /* Hide every sidebar panel — Fontra is a pure outline canvas.
-     avar2-studio seeds and manages the control-axis layers (the
-     "Applicable glyphs" section) and navigates Fontra to the exact
-     layer to edit via the ↗ button, so none of Fontra's panels are
-     needed: not the axis sliders, glyph sources, or source layers
-     (designspace-navigation), nor reference-font / glyph-search /
-     transformation / notes / related / characters. The layers still
-     exist and stay editable at the navigated location.
+  /* Hide the sidebar panels that aren't useful for a brace-layer
+     edit. avar2-studio seeds and manages the control-axis layers
+     and navigates Fontra to the exact layer via the ↗ button.
 
      NOTE: the accordion SECTIONS inside designspace-navigation (the
      #font-axes / #glyph-sources items) live in a shadow DOM that
-     injected global CSS can't reach — so we hide the whole panel by
-     its light-DOM container instead. */
-  .sidebar-tab[data-sidebar-name="text-entry"],
-  .sidebar-tab[data-sidebar-name="designspace-navigation"],
-  .sidebar-tab[data-sidebar-name="selection-info"],
-  .sidebar-tab[data-sidebar-name="reference-font"],
-  .sidebar-tab[data-sidebar-name="glyph-search"],
-  .sidebar-tab[data-sidebar-name="selection-transformation"],
-  .sidebar-tab[data-sidebar-name="glyph-note"],
-  .sidebar-tab[data-sidebar-name="related-glyphs"],
-  .sidebar-tab[data-sidebar-name="characters-glyphs"],
-  .sidebar-content[data-sidebar-name="text-entry"],
-  .sidebar-content[data-sidebar-name="designspace-navigation"],
-  .sidebar-content[data-sidebar-name="selection-info"],
-  .sidebar-content[data-sidebar-name="reference-font"],
-  .sidebar-content[data-sidebar-name="glyph-search"],
-  .sidebar-content[data-sidebar-name="selection-transformation"],
-  .sidebar-content[data-sidebar-name="glyph-note"],
-  .sidebar-content[data-sidebar-name="related-glyphs"],
-  .sidebar-content[data-sidebar-name="characters-glyphs"] {
+     injected global CSS can't reach — so hiding happens at the
+     light-DOM container level (here) or via the shim script. */
+  {panel_rules} {{
     display: none !important;
-  }
+  }}
 
   /* Top-level menu bar (File / Edit / View / Font / Glyph / Help).
-     Not needed — the studio drives the editor. Hide the whole
-     top-bar strip (its dark background + the menu bar) and the left
-     sidebar container (now empty since all its panels are hidden).
-     The edit tools live in a floating #edit-tools overlay, not a
-     sidebar, so they survive. Leaves just the canvas + tools. */
-  .top-bar-container,
-  .sidebar-container.left,
-  .sidebar-container.right,
-  menu-bar {
+     Not needed — the studio drives the editor. The edit tools live
+     in a floating #edit-tools overlay, not a sidebar, so they
+     survive. */
+  {chrome_rules} {{
     display: none !important;
-  }
+  }}
 
   /* Edit tools — hide drawing tools, knife, shapes. Keep:
      pointer-tools (selection + drag), power-ruler-tool
      (measure), metrics-tool (sidebearings — kerning sub-tool
      stays visible inside the group), hand-tool (pan), and the
-     entire zoom-tools group. */
+     entire zoom-tools group. Structural edits would also desync
+     multi-source editing, so the pen stays hidden in studio
+     sessions on purpose. */
   #edit-tools > .tool-button[data-tool="pen-tool"],
   #edit-tools > .tool-button[data-tool="pen-tool-cubic"],
   #edit-tools > .tool-button[data-tool="pen-tool-quad"],
@@ -3297,10 +3302,95 @@ _FONTRA_FOCUSED_CSS = """
   #edit-tools > .tool-button[data-tool="shape-tool-rectangle"],
   #edit-tools > .tool-button[data-tool="shape-tool-ellipse"],
   .tool-button.multi-tool[data-tool="pen-tool"],
-  .tool-button.multi-tool[data-tool="shape-tool"] {
+  .tool-button.multi-tool[data-tool="shape-tool"] {{
     display: none !important;
-  }
+  }}
 </style>
+"""
+
+
+# Studio-session shim: runs inside the proxied Fontra page (same
+# origin, so it can reach our /api and Fontra's DOM alike). Active
+# only when /api/fontra-shim-config says the session is a
+# studio-axis edit. It:
+#   1. opens the designspace-navigation sidebar tab,
+#   2. trims the panel to the glyph-sources accordion (no font axes,
+#      no layers list, no add/remove source buttons),
+#   3. hides every sources-list row that is not a STUDIO layer of the
+#      session's axis (masters, font sources, other axes' layers),
+#   4. enables Fontra's multi-source editing on the studio rows once
+#      per layer (the designer can still toggle any row off).
+# A row is a studio layer when its dense location sits OFF the
+# session axis's default — only sidecar seeding creates such layers
+# in the shadow. Fallback: match the seed-time source-name label
+# ("<corner> · <tag> <value>"). If no row matches, the list is left
+# untrimmed (fail open) and nothing is auto-enabled (fail closed).
+_FONTRA_STUDIO_SHIM_JS = """
+<script id="avar2-studio-fontra-shim">
+(function () {
+  'use strict';
+  fetch('/api/fontra-shim-config').then(r => r.json()).then((cfg) => {
+    if (!cfg || !cfg.studio) return;
+    const keys = [cfg.axis_name, cfg.tag].filter(Boolean);
+    const labelRe = new RegExp('(^|[\\\\s,])' + cfg.tag + '\\\\s+-?[\\\\d.]+');
+    const isStudioItem = (item) => {
+      if (!item || item.isFontSource) return false;
+      const dl = item.denseLocation || {};
+      for (const k of keys) {
+        if (k in dl) return Number(dl[k]) !== Number(cfg.axis_default);
+      }
+      return labelRe.test(String(item.name || ''));
+    };
+    let tabOpened = false, panelTrimmed = false;
+    const autoEnabled = new Set();
+    const sweep = () => {
+      const host = document.querySelector(
+        '.sidebar-content[data-sidebar-name="designspace-navigation"]');
+      const panel = host && host.children[0];
+      if (!panel || !panel.sourcesList) return;
+      if (!tabOpened) {
+        const tab = document.querySelector(
+          '.sidebar-tab[data-sidebar-name="designspace-navigation"]');
+        if (tab && !tab.classList.contains('selected')) tab.click();
+        tabOpened = true;
+      }
+      if (!panelTrimmed && panel.shadowRoot) {
+        const st = document.createElement('style');
+        st.textContent =
+          '#font-axes-accordion-item,#glyph-axes-accordion-item,' +
+          '#glyph-layers-accordion-item,#sources-list-add-remove-buttons' +
+          '{display:none !important;}';
+        panel.shadowRoot.appendChild(st);
+        panelTrimmed = true;
+      }
+      const list = panel.sourcesList;
+      const items = list.items || [];
+      const anyStudio = items.some(isStudioItem);
+      const rows = list.shadowRoot
+        ? list.shadowRoot.querySelectorAll('.contents > .row') : [];
+      rows.forEach((row) => {
+        const item = items[Number(row.dataset.rowIndex)];
+        if (!item) return;
+        const studio = isStudioItem(item);
+        row.style.display = (anyStudio && !studio) ? 'none' : '';
+        if (!anyStudio) return;
+        if (studio) {
+          if (!autoEnabled.has(item.layerName)) {
+            autoEnabled.add(item.layerName);
+            if (!item.editing) item.editing = true;
+          }
+        } else if (item.editing) {
+          // Hard rule: masters and source layers are never batch-edit
+          // targets — Fontra's own init can put the selected source
+          // here, so keep stripping it, not just once.
+          item.editing = false;
+        }
+      });
+    };
+    setInterval(sweep, 500);
+  }).catch((e) => console.warn('avar2-studio shim:', e));
+})();
+</script>
 """
 
 
@@ -3331,10 +3421,15 @@ def _rewrite_html_paths(body: bytes) -> bytes:
     # every JS module load 404s and the canvas never initialises.
     text = text.replace('"fontra/": "/"', '"fontra/": "/fontra/"')
     text = text.replace("'fontra/': '/'", "'fontra/': '/fontra/'")
-    # Inject the focused-UI CSS before </head>; tolerate uppercase.
+    # Inject the focused-UI CSS + studio shim before </head>;
+    # tolerate uppercase. The CSS is session-aware (see
+    # _fontra_focus_css); the shim self-deactivates unless
+    # /api/fontra-shim-config marks the session as a studio edit.
     for needle in ("</head>", "</HEAD>"):
         if needle in text:
-            text = text.replace(needle, _FONTRA_FOCUSED_CSS + needle, 1)
+            text = text.replace(
+                needle, _fontra_focus_css() + _FONTRA_STUDIO_SHIM_JS + needle, 1
+            )
             break
     return text.encode("utf-8")
 
@@ -3539,6 +3634,14 @@ def fontra_ws_proxy(ws):
             pass
 
 
+@app.route('/api/fontra-shim-config')
+def fontra_shim_config():
+    """Session config for the shim injected into proxied Fontra
+    pages. Must be registered before Fontra's /api catch-all so the
+    specific rule wins."""
+    return jsonify(FONTRA_EDITOR_SESSION or {"studio": False})
+
+
 @app.route('/api/control-axes/<tag>/open-editor', methods=['POST'])
 def open_control_axis_in_editor(tag: str):
     """Spin up Fontra and return the iframe URL the frontend should
@@ -3589,6 +3692,25 @@ def open_control_axis_in_editor(tag: str):
         target_path = ORIGINAL_PATH
         content_root = target_path
         editing_original = True
+
+    # Record the session for the proxy (CSS variant) and the injected
+    # shim (which layers to show + batch-enable). Studio-axis sessions
+    # expose the designspace-navigation panel trimmed to this axis's
+    # studio layers; everything else keeps the bare-canvas UI.
+    global FONTRA_EDITOR_SESSION
+    spec = next(
+        (
+            ax for ax in (_control_axes.list_axes(ORIGINAL_PATH) or [])
+            if (ax.get("tag") or "").lower() == tag.lower()
+        ),
+        None,
+    ) if is_studio_axis else None
+    FONTRA_EDITOR_SESSION = {
+        "studio": bool(is_studio_axis and not editing_original),
+        "tag": tag.lower(),
+        "axis_name": (spec or {}).get("display_name") or tag.lower(),
+        "axis_default": float((spec or {}).get("default") or 0.0),
+    }
 
     try:
         port = _ensure_fontra_running(content_root, watch_file=target_path)
@@ -5256,11 +5378,21 @@ def main():
             """Handle file modification events."""
             if event.is_directory:
                 return
-            
-            # Only process our Glyphs file
-            if Path(event.src_path).resolve() != GLYPHS_PATH.resolve():
+
+            # Two kinds of relevant change: the source file itself
+            # (sync + rebuild), and — for an active .designspace
+            # shadow — .glif edits inside its UFOs, which is how the
+            # embedded Fontra saves pooled brace-layer drawings
+            # (build only; instances didn't change).
+            src = Path(event.src_path)
+            is_source = src.resolve() == GLYPHS_PATH.resolve()
+            is_glif = (
+                GLYPHS_PATH.suffix.lower() == ".designspace"
+                and src.suffix.lower() in (".glif", ".plist")
+            )
+            if not (is_source or is_glif):
                 return
-            
+
             # Debounce rapid saves
             current_time = time.time()
             if current_time - self.last_modified < self.debounce_interval:
@@ -5272,19 +5404,19 @@ def main():
             # sync+build here would duplicate it.
             if current_time < _SUPPRESS_WATCHDOG_UNTIL:
                 return
-            
+
             global BUILDING, VARIABLE_FONT_PATH, LAST_BUILD_TIME
-            
+
             if BUILDING:
                 return
-            
+
             try:
-                print(f"\nGlyphs file modified, syncing CSV and rebuilding...", file=sys.stderr)
-                
-                # Sync CSV first (skips editing instances)
-                sync_csv_with_glyphs()
-                
-                # Rebuild font
+                if is_source:
+                    print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                    # Sync CSV first (skips editing instances)
+                    sync_csv_with_glyphs()
+                else:
+                    print(f"\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
                 trigger_build()
             except Exception as e:
                 print(f"Error handling file change: {e}", file=sys.stderr)
@@ -5297,7 +5429,13 @@ def main():
     if WATCHDOG_AVAILABLE and GLYPHS_PATH is not None:
         event_handler = GlyphsFileHandler()
         observer = Observer()
-        observer.schedule(event_handler, path=str(GLYPHS_PATH.parent), recursive=False)
+        # .designspace shadows need recursion: Fontra writes .glif
+        # files inside the pooled UFO directories.
+        observer.schedule(
+            event_handler,
+            path=str(GLYPHS_PATH.parent),
+            recursive=GLYPHS_PATH.suffix.lower() == ".designspace",
+        )
         observer.start()
         OBSERVER = observer
         print(f"Real-time file watching enabled: watching {GLYPHS_PATH}", file=sys.stderr)
