@@ -76,6 +76,19 @@ function PreviewTab({
 
   const [coords, setCoords] = useState({});
   const [showParametric, setShowParametric] = useState(false);
+
+  // Editable specimen: the canvas IS the text input (the sidebar
+  // textarea is gone on this tab). Uncontrolled contentEditable —
+  // React must never render its children or the caret resets on
+  // every keystroke; this effect pushes only EXTERNAL changes (edits
+  // made on the Instances tab, initial load) into the DOM.
+  const specimenRef = useRef(null);
+  useEffect(() => {
+    const el = specimenRef.current;
+    if (el && el.textContent !== (sampleText || '')) {
+      el.textContent = sampleText || DEFAULT_SAMPLE;
+    }
+  }, [sampleText]);
   // Post-mapping axis values from /api/mapped-location: the effective
   // location after the built font's avar table is applied to the
   // current inputs. Non-overridden parametric sliders DISPLAY these,
@@ -289,16 +302,6 @@ function PreviewTab({
           </button>
         </div>
 
-        <div className="sample-text-section">
-          <textarea
-            value={sampleText}
-            onChange={(e) => onSampleTextChange(e.target.value)}
-            className="sample-text-input"
-            placeholder="Enter sample text..."
-            rows={2}
-          />
-        </div>
-
         <div className="font-size-control">
           <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
           <input
@@ -478,15 +481,25 @@ function PreviewTab({
 
       <div className="preview-tab-canvas">
         <div
-          className="preview-tab-sample"
+          ref={specimenRef}
+          className="preview-tab-sample preview-tab-sample-editable"
+          contentEditable
+          suppressContentEditableWarning
+          spellCheck={false}
           style={{
             fontFamily: `"${vfFamilyId}", sans-serif`,
             fontSize: `${fontSize}rem`,
             fontVariationSettings: fvs,
           }}
-        >
-          {sampleText || DEFAULT_SAMPLE}
-        </div>
+          onInput={(e) => onSampleTextChange(e.currentTarget.textContent)}
+          onPaste={(e) => {
+            // Plain text only — strip any formatting from pastes.
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+            document.execCommand('insertText', false, text);
+          }}
+          title="Click and type to change the preview text"
+        />
       </div>
     </div>
   );
