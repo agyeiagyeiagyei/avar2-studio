@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Patched ``gftools-gen-avar2`` — fvar axis-duplication fix.
+
+Upstream bug (gftools/scripts/gen_avar2.py, gen_fvar_axes):
+
+    if axis_name not in font["fvar"].axes:
+
+compares a tag STRING against Axis OBJECTS, so the membership check is
+always True and every avar2 ``in:`` axis is appended to the fvar even
+when an axis with that tag already exists. Traditional mappings
+(in: wght/wdth on a parametric font) never noticed — those axes really
+were new. The studio's parametric-only mappings (in: = the font's own
+XOPQ/XTRA/YOPQ) hit it head-on: every parametric axis lands in the
+fvar TWICE, and any non-default location applies both copies' deltas —
+glyphs render roughly double-wide along XTRA, which reads as a
+mysterious tracking/spacing transform.
+
+This shim pre-filters each mapping's ``in:`` dict down to axes the
+font does NOT already have before handing off to the upstream
+function, which then behaves identically for the traditional case and
+appends nothing for parametric-in mappings. The studio prepends this
+script's directory to PATH for the gftools-builder subprocess
+(server.py, _perform_avar2_build), so it shadows the venv console
+script of the same name. Delete it once the check is fixed upstream.
+"""
+import json
+import os
+import sys
+
+from gftools.scripts import gen_avar2 as _mod
+
+_orig_gen_fvar_axes = _mod.gen_fvar_axes
+
+# Studio-declared ranges for CREATED axes, {tag: [min, default, max]},
+# passed via env by _perform_avar2_build. Upstream derives a created
+# axis's range purely from the mapping in: values and sets default=min
+# — which makes the lowest-mapped instance THE ORIGIN of the variation
+# space, and avar2 cannot remap the origin (the default location must
+# map to itself), so that instance's mapping silently disappears. The
+# studio's declared metadata (e.g. opsz 18…144 default 72) puts the
+# default where the designer said it is; every in: location then
+# normalizes against it consistently before the model is built.
+try:
+    _DECLARED = json.loads(os.environ.get("AVAR2_STUDIO_AXIS_RANGES", "") or "{}")
+except Exception:
+    _DECLARED = {}
+
+
+def _fixed_gen_fvar_axes(font, mapping):
+    existing = {str(a.axisTag) for a in font["fvar"].axes}
+    filtered = [
+        {**m, "in": {k: v for k, v in m["in"].items() if k not in existing}}
+        for m in mapping
+    ]
+    result = _orig_gen_fvar_axes(font, filtered)
+    for a in font["fvar"].axes:
+        tag = str(a.axisTag)
+        if tag in existing or tag not in _DECLARED:
+            continue  # only axes this run created, only if declared
+        try:
+            lo, d, hi = (float(v) for v in _DECLARED[tag])
+        except (TypeError, ValueError):
+            continue
+        if lo <= d <= hi:
+            a.minValue, a.defaultValue, a.maxValue = lo, d, hi
+    return result
+
+
+_mod.gen_fvar_axes = _fixed_gen_fvar_axes
+
+
+if __name__ == "__main__":
+    sys.exit(_mod.main())

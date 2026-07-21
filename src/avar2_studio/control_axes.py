@@ -108,6 +108,20 @@ def find_axis(source_path: Path, tag: str) -> Optional[Dict]:
 # --------------------------------------------------------------------------
 
 
+def save_all(source_path: Path, data: Dict) -> Dict:
+    """Replace the WHOLE sidecar with ``data`` (normalised first). Returns
+    the payload that was written.
+
+    Used by config-bundle import; the per-axis writers below
+    (``add_axis`` / ``set_layers`` / …) stay the interactive API. Caller
+    is responsible for validating the payload against the target source
+    first (config_port.validate_bundle).
+    """
+    payload = _normalise(data if isinstance(data, dict) else {})
+    _save(source_path, payload)
+    return payload
+
+
 def add_axis(
     source_path: Path,
     tag: str,
@@ -413,6 +427,10 @@ def _normalise_layers(raw) -> List[Dict]:
 def _save(source_path: Path, data: Dict) -> None:
     sidecar = sidecar_path_for(source_path)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
+    # Authored brace layers are the hardest data in the studio to
+    # recreate — keep bounded timestamped copies before every rewrite.
+    from . import csv_io as _csv_io
+    _csv_io.backup_sidecar(sidecar)
     with sidecar.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")

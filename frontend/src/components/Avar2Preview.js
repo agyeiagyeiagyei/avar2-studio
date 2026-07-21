@@ -2,6 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import './Avar2Preview.css';
 import AxisControl from './AxisControl';
 
+// Font size stays in rem internally; the slider presents it in pt
+// (12pt = 1rem at the default 16px root — same convention as Sidebar).
+const remToPt = (rem) => rem * 12;
+const ptToRem = (pt) => pt / 12;
+const roundHalf = (v) => Math.round(v * 2) / 2;
+const formatPt = (rem) => {
+  const pt = roundHalf(remToPt(rem));
+  return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
+};
+
 function Avar2Preview({
   avar2Instances,
   avar2Axes,
@@ -301,14 +311,14 @@ function Avar2Preview({
 
         <div className="font-size-control">
           <label>
-            Font Size: {fontSize}rem
+            Font Size: {formatPt(fontSize)}pt
             <input
               type="range"
-              min="1"
-              max="5"
-              step="0.1"
-              value={fontSize}
-              onChange={(e) => onFontSizeChange(parseFloat(e.target.value))}
+              min="9"
+              max="144"
+              step="0.5"
+              value={roundHalf(remToPt(fontSize))}
+              onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
             />
           </label>
         </div>

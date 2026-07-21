@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './Header.css';
 import { api } from '../api';
+import ImportConfigModal from './ImportConfigModal';
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
 // single entry point for swapping the active source at runtime:
@@ -16,10 +17,16 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
   const [examples, setExamples] = useState([]);
   const [open, setOpen] = useState(false);
   const [txOpen, setTxOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState(null);
+  // Non-null while the import confirmation modal is open:
+  // {bundle, report} from the dry-run POST.
+  const [importData, setImportData] = useState(null);
   const dropdownRef = useRef(null);
   const transformsRef = useRef(null);
+  const configRef = useRef(null);
   const fileInputRef = useRef(null);
+  const configFileInputRef = useRef(null);
 
   useEffect(() => {
     api.listExamples()
@@ -50,6 +57,18 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [txOpen]);
+
+  // Click-outside closes the config menu.
+  useEffect(() => {
+    if (!configOpen) return;
+    const onDocClick = (e) => {
+      if (configRef.current && !configRef.current.contains(e.target)) {
+        setConfigOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [configOpen]);
 
   const enabledCount = transforms.filter(t => t.enabled).length;
 
@@ -100,7 +119,75 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     setLoadingMsg(null);
   };
 
+  const handleExportConfig = () => {
+    setConfigOpen(false);
+    // Same temporary-anchor trick as the font download in PreviewTab:
+    // the server sets Content-Disposition: attachment with a
+    // "<family>-avar2studio.json" filename, so the empty download
+    // attr just forces navigation-free saving and the server's
+    // filename wins.
+    const link = document.createElement('a');
+    link.href = api.exportConfigUrl();
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportClick = () => {
+    setConfigOpen(false);
+    configFileInputRef.current && configFileInputRef.current.click();
+  };
+
+  const handleConfigFileChange = (e) => {
+    // Grab the File BEFORE clearing the input (``input.files`` is live —
+    // see handleFileChange); the File object itself stays valid after.
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setLoadingMsg(`Reading ${file.name}…`);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let parsed;
+      try {
+        parsed = JSON.parse(reader.result);
+      } catch (parseErr) {
+        setLoadingMsg(`Not valid JSON: ${parseErr.message}`);
+        setTimeout(() => setLoadingMsg(null), 6000);
+        return;
+      }
+      // Two-step import: this first POST is a DRY RUN — the server
+      // validates the bundle and returns a report without applying
+      // anything. The modal shows that report; only its Import
+      // button POSTs again with dry_run=false.
+      setLoadingMsg(`Validating ${file.name}…`);
+      try {
+        const report = await api.importConfig(parsed, true);
+        setImportData({ bundle: parsed, report });
+        setLoadingMsg(null);
+      } catch (err) {
+        setLoadingMsg(`Import check failed: ${err.message || err}`);
+        setTimeout(() => setLoadingMsg(null), 6000);
+      }
+    };
+    reader.onerror = () => {
+      setLoadingMsg(`Could not read ${file.name}`);
+      setTimeout(() => setLoadingMsg(null), 6000);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImported = () => {
+    setImportData(null);
+    // A successful import replaces axes / mappings / transforms
+    // server-side, so it needs the same full refetch a source load gets.
+    onSourceLoaded && onSourceLoaded();
+    setLoadingMsg('Configuration imported.');
+    setTimeout(() => setLoadingMsg(null), 4000);
+  };
+
   return (
+    <>
     <header className="header">
       <div className="header-title">
         {familyName ? <h1>{familyName}</h1> : <h1 className="header-title-empty">avar2-studio</h1>}
@@ -246,6 +333,50 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             )}
           </div>
         )}
+        {familyName && (
+          <div className="config-dropdown" ref={configRef}>
+            <button
+              className="btn btn-load-font"
+              onClick={() => setConfigOpen(o => !o)}
+              disabled={busy}
+              title="Export or import the studio configuration (control axes, avar2 mappings, transforms) as one JSON file"
+            >
+              Config ▾
+            </button>
+            {configOpen && (
+              <div className="load-font-menu">
+                <div className="load-font-section-label">Studio configuration</div>
+                <button
+                  className="load-font-item"
+                  onClick={handleExportConfig}
+                >
+                  <div className="load-font-item-name">Export configuration…</div>
+                  <div className="load-font-item-subtitle">
+                    Control axes, avar2 mappings, transforms as one JSON file
+                  </div>
+                </button>
+                <button
+                  className="load-font-item"
+                  onClick={handleImportClick}
+                >
+                  <div className="load-font-item-name">Import configuration…</div>
+                  <div className="load-font-item-subtitle">
+                    Replace the current configuration from an exported JSON file. You review a validation report before anything is applied.
+                  </div>
+                </button>
+              </div>
+            )}
+            {/* Same offscreen-not-display:none, no-accept-filter treatment
+                as the .glyphs input above — see the long comment there.
+                Single file; the server validates the bundle contents. */}
+            <input
+              ref={configFileInputRef}
+              type="file"
+              style={{ position: 'fixed', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+              onChange={handleConfigFileChange}
+            />
+          </div>
+        )}
         {fontLoaded !== undefined && familyName && (
           <button
             onClick={onBuildFont}
@@ -257,6 +388,16 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
         )}
       </div>
     </header>
+    {importData && (
+      <ImportConfigModal
+        bundle={importData.bundle}
+        report={importData.report}
+        familyName={familyName}
+        onCancel={() => setImportData(null)}
+        onImported={handleImported}
+      />
+    )}
+    </>
   );
 }
 

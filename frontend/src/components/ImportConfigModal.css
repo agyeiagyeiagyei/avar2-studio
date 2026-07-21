@@ -1,0 +1,129 @@
+/* ImportConfigModal — follows the DeleteInstanceModal structure:
+   fixed overlay + centered white box, message/warning/error blocks,
+   cancel + primary-action buttons bottom-right. */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.import-config-modal {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.import-config-modal h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.import-config-summary {
+  margin: 0 0 1rem 0;
+  font-size: 0.875rem;
+  color: #666;
+  line-height: 1.5;
+}
+
+.import-config-note {
+  margin: 0 0 1rem 0;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: #333;
+  line-height: 1.5;
+}
+
+.import-config-errors,
+.import-config-warnings {
+  margin: 0 0 1rem 0;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.import-config-errors {
+  background: #f8d7da;
+  border: 1px solid #dc3545;
+  color: #721c24;
+}
+
+.import-config-warnings {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  color: #856404;
+}
+
+.import-config-list-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.import-config-errors ul,
+.import-config-warnings ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.import-config-errors li + li,
+.import-config-warnings li + li {
+  margin-top: 0.25rem;
+}
+
+.import-config-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.import-config-cancel,
+.import-config-confirm {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.import-config-cancel {
+  background: #f8f9fa;
+  color: #333;
+}
+
+.import-config-cancel:hover:not(:disabled) {
+  background: #e9ecef;
+}
+
+.import-config-confirm {
+  background: #007bff;
+  color: white;
+}
+
+.import-config-confirm:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.import-config-cancel:disabled,
+.import-config-confirm:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}

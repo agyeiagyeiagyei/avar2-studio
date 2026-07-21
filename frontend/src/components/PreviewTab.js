@@ -1,7 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PreviewTab.css';
 import AxisControl from './AxisControl';
-import { formatAxisValue } from '../utils/formatNumber';
+import { api } from '../api';
+
+// Font size stays in rem internally; the slider presents it in pt
+// (12pt = 1rem at the default 16px root — same convention as Sidebar).
+const remToPt = (rem) => rem * 12;
+const ptToRem = (pt) => pt / 12;
+const roundHalf = (v) => Math.round(v * 2) / 2;
+const formatPt = (rem) => {
+  const pt = roundHalf(remToPt(rem));
+  return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
+};
 
 const DEFAULT_SAMPLE = 'Adhesion';
 
@@ -32,6 +42,7 @@ const DEFAULT_SAMPLE = 'Adhesion';
  */
 function PreviewTab({
   axes,
+  avar2Error,
   vfFamilyId,
   fontLoaded,
   fontUrl,
@@ -53,8 +64,49 @@ function PreviewTab({
     return { userAxes: user, controlAxes: control, parametricAxes: param };
   }, [axes]);
 
+  // A parametric-only font (avar2 mappings whose in: axes ARE the
+  // parametric axes) has no dedicated user axes — the avar2 table
+  // remaps the parametric axes themselves. In that world the
+  // parametric group IS the avar2 surface, so promote it to a primary
+  // always-open section (transform-injected axes like SPAC live there
+  // too) instead of hiding everything behind the "advanced" toggle
+  // under a misleading "no avar2-mapped axes" empty state.
+  const parametricPromoted = userAxes.length === 0 && parametricAxes.length > 0;
+
   const [coords, setCoords] = useState({});
   const [showParametric, setShowParametric] = useState(false);
+  // Post-mapping axis values from /api/mapped-location: the effective
+  // location after the built font's avar table is applied to the
+  // current inputs. Non-overridden parametric sliders DISPLAY these,
+  // so they visibly follow the avar2 mappings as wght/opsz move.
+  // Display-only — the font applies the real mapping while rendering;
+  // `coords` (the inputs) is what feeds font-variation-settings.
+  const [mappedParams, setMappedParams] = useState({});
+  // Parametric axes the designer has dragged directly. An override
+  // stops that axis reflecting the mapping (its input value shows
+  // instead) until Reset.
+  const [overrides, setOverrides] = useState(() => new Set());
+  const mapTimer = useRef(null);
+
+  const parametricTagSet = useMemo(
+    () => new Set(parametricAxes.map(a => a.tag)),
+    [parametricAxes]
+  );
+
+  useEffect(() => {
+    if (!fontLoaded) return undefined;
+    clearTimeout(mapTimer.current);
+    mapTimer.current = setTimeout(async () => {
+      try {
+        const res = await api.getMappedLocation(coords);
+        setMappedParams(res.mapped || {});
+      } catch {
+        // No built font / transient error — sliders fall back to inputs.
+        setMappedParams({});
+      }
+    }, 120);
+    return () => clearTimeout(mapTimer.current);
+  }, [coords, fontLoaded]);
 
   // Seed each axis at its default the first time it appears; leave
   // designer edits untouched on subsequent axis-list changes.
@@ -86,12 +138,20 @@ function PreviewTab({
       .catch(err => console.error('Preview: failed to load font:', err));
   }, [fontUrl, fontLoaded, vfFamilyId]);
 
-  const setAxis = (tag, value) => setCoords(prev => ({ ...prev, [tag]: value }));
+  const setAxis = (tag, value) => {
+    // Dragging a parametric slider is an explicit override: it stops
+    // following the mapping and becomes a direct input.
+    if (parametricTagSet.has(tag)) {
+      setOverrides(prev => (prev.has(tag) ? prev : new Set(prev).add(tag)));
+    }
+    setCoords(prev => ({ ...prev, [tag]: value }));
+  };
 
   const resetAll = () => {
     const next = {};
     for (const a of (axes || [])) next[a.tag] = a.default;
     setCoords(next);
+    setOverrides(new Set());
   };
 
   const atDefault = useMemo(
@@ -127,6 +187,32 @@ function PreviewTab({
       treatEmptyAsActive
     />
   );
+
+  // Parametric sliders reflect the avar2 mapping unless overridden:
+  // the displayed value is the post-mapping location, so they move as
+  // the user drags wght/opsz above.
+  const renderParametricAxis = (a) => {
+    const reflected = !overrides.has(a.tag);
+    const value = reflected
+      ? (mappedParams[a.tag] ?? coords[a.tag] ?? a.default)
+      : (coords[a.tag] ?? a.default);
+    return (
+      <div
+        key={a.tag}
+        className={reflected ? 'preview-axis-reflected' : 'preview-axis-overridden'}
+        title={reflected
+          ? 'Following the avar2 mapping — drag to override this axis directly.'
+          : 'Manually overridden — Reset to follow the mapping again.'}
+      >
+        <AxisControl
+          axis={a}
+          value={value}
+          onChange={(v) => setAxis(a.tag, v)}
+          treatEmptyAsActive
+        />
+      </div>
+    );
+  };
 
   if (!fontLoaded) {
     return (
@@ -166,33 +252,45 @@ function PreviewTab({
         </div>
 
         <div className="font-size-control">
-          <label className="axis-name">Font Size: {formatAxisValue(fontSize)}rem</label>
+          <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
           <input
             type="range"
-            min="1"
-            max="12"
-            step="0.1"
-            value={fontSize}
-            onChange={(e) => onFontSizeChange(parseFloat(e.target.value))}
+            min="9"
+            max="144"
+            step="0.5"
+            value={roundHalf(remToPt(fontSize))}
+            onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
             className="axis-slider"
           />
         </div>
 
-        <section className="preview-axis-group">
-          <div className="preview-axis-group-head">
-            <h3>User axes</h3>
-            <span className="preview-axis-group-sub">avar2-mapped</span>
+        {avar2Error && (
+          <div
+            className="preview-avar2-warning"
+            title={avar2Error}
+          >
+            ⚠ The avar2 build is failing, so this preview is the plain
+            build — mapped axes are missing. Hover for the error.
           </div>
-          {userAxes.length === 0 ? (
-            <p className="preview-axis-empty">
-              No avar2-mapped axes declared yet. Add a user-facing axis
-              (e.g. Weight) in <strong>AVAR2 MAPPINGS</strong> on the
-              Instances tab.
-            </p>
-          ) : (
-            userAxes.map(renderAxis)
-          )}
-        </section>
+        )}
+
+        {!parametricPromoted && (
+          <section className="preview-axis-group">
+            <div className="preview-axis-group-head">
+              <h3>User axes</h3>
+              <span className="preview-axis-group-sub">avar2-mapped</span>
+            </div>
+            {userAxes.length === 0 ? (
+              <p className="preview-axis-empty">
+                No avar2-mapped axes declared yet. Add a user-facing axis
+                (e.g. Weight) in <strong>AVAR2 MAPPINGS</strong> on the
+                Instances tab.
+              </p>
+            ) : (
+              userAxes.map(renderAxis)
+            )}
+          </section>
+        )}
 
         {controlAxes.length > 0 && (
           <section className="preview-axis-group">
@@ -204,7 +302,15 @@ function PreviewTab({
           </section>
         )}
 
-        {parametricAxes.length > 0 && (
+        {parametricAxes.length > 0 && (parametricPromoted ? (
+          <section className="preview-axis-group">
+            <div className="preview-axis-group-head">
+              <h3>Parametric axes</h3>
+              <span className="preview-axis-group-sub">avar2-mapped — your mappings drive these</span>
+            </div>
+            {parametricAxes.map(renderParametricAxis)}
+          </section>
+        ) : (
           <section className="preview-axis-group">
             <button
               type="button"
@@ -218,11 +324,11 @@ function PreviewTab({
             </button>
             {showParametric && (
               <div className="preview-axis-group-body">
-                {parametricAxes.map(renderAxis)}
+                {parametricAxes.map(renderParametricAxis)}
               </div>
             )}
           </section>
-        )}
+        ))}
 
         <div className="preview-tab-download">
           <button

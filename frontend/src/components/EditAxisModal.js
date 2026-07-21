@@ -5,6 +5,7 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
   const [displayName, setDisplayName] = useState('');
   const [registeredTag, setRegisteredTag] = useState('');
   const [minValue, setMinValue] = useState('');
+  const [defaultValue, setDefaultValue] = useState('');
   const [maxValue, setMaxValue] = useState('');
   const [errors, setErrors] = useState({});
   const displayNameRef = useRef(null);
@@ -14,6 +15,7 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
       setDisplayName(axisMetadata.display_name || '');
       setRegisteredTag(axisMetadata.registered_tag || '');
       setMinValue(String(axisMetadata.min ?? -1000));
+      setDefaultValue(String(axisMetadata.default ?? axisMetadata.min ?? 0));
       setMaxValue(String(axisMetadata.max ?? 1000));
       setErrors({});
       // Focus input after a brief delay
@@ -60,7 +62,13 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
     if (!isNaN(min) && !isNaN(max) && min >= max) {
       newErrors.maxValue = 'Max must be greater than min';
     }
-    
+    const def = parseFloat(defaultValue);
+    if (isNaN(def)) {
+      newErrors.defaultValue = 'Default must be a number';
+    } else if (!isNaN(min) && !isNaN(max) && (def < min || def > max)) {
+      newErrors.defaultValue = 'Default must be between min and max';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -72,6 +80,7 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
         display_name: displayName.trim(),
         registered_tag: registeredTag.toLowerCase().trim(),
         min: parseFloat(minValue),
+        default: parseFloat(defaultValue),
         max: parseFloat(maxValue),
       });
     }
@@ -152,7 +161,24 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
               />
               {errors.minValue && <span className="error-message">{errors.minValue}</span>}
             </div>
-            
+
+            <div className="form-group">
+              <label>
+                Default <span className="required">*</span>
+              </label>
+              <input
+                type="number"
+                value={defaultValue}
+                onChange={(e) => setDefaultValue(e.target.value)}
+                min="-1000"
+                max="1000"
+                step="1"
+                className={`axis-number-input ${errors.defaultValue ? 'error' : ''}`}
+                title="Where the axis rests. This compiles into the font's fvar — avar2 cannot remap the default location, so put it where the SOURCE's default outlines live (or author a mapping row structure that surrounds it)."
+              />
+              {errors.defaultValue && <span className="error-message">{errors.defaultValue}</span>}
+            </div>
+
             <div className="form-group">
               <label>
                 Max Value <span className="required">*</span>

@@ -23,12 +23,14 @@ import csv
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 
 import yaml  # PyYAML
+
+from .. import source_font as _source_font
 try:
     import ruamel.yaml
     HAS_RUAMEL = True
@@ -124,9 +126,12 @@ def validate_csv_structure(csv_path: Path) -> Tuple[str, List[str], List[str]]:
             if col_upper in traditional_axes or col_upper.endswith("-E"):
                 in_cols.append(c)
         
-        if not in_cols:
-            raise ValueError("CSV contains no traditional axis columns (WGHT/WDTH/OPSZ or WGHT-e/WDTH-e/OPSZ-e); cannot build 'in:' locations")
-
+        # No traditional columns is NOT an error: such a CSV maps instance
+        # names straight onto parametric axes, which only makes sense for a
+        # font whose fvar axes ARE those parametric axes. in_axes stay
+        # empty here; main() fills them from the source's fvarInstances
+        # (see _fill_identity_in_axes).
+        
         out_cols = [c for c in fieldnames if c not in (name_col,) and c not in in_cols]
         if not out_cols:
             raise ValueError("CSV contains no parametric axis columns for 'out:'")
@@ -176,6 +181,11 @@ def read_csv_mappings(csv_path: Path) -> List[RowMapping]:
                     raise ValueError(f"Line {line_no}: parametric axis '{c}' is blank (not allowed)")
                 out_axes[c] = _parse_decimal(raw, context=f"line {line_no} / {c}")
 
+            # No traditional columns → in_axes stays empty here. main()
+            # fills it from the source's instance coordinates via
+            # _fill_identity_in_axes (that's what makes CSV edits remap
+            # the design instead of compiling to a no-op table).
+
             # No traditional axis is universally required; if a row's in_axes
             # is empty the mapping is degenerate and gets skipped elsewhere.
             
@@ -195,6 +205,57 @@ def read_csv_mappings(csv_path: Path) -> List[RowMapping]:
         raise ValueError("CSV contains no valid mappings")
 
     return mappings
+
+
+def _fill_identity_in_axes(
+    mappings: List[RowMapping],
+    config: Dict,
+    font_key: str,
+) -> List[RowMapping]:
+    """Fill empty ``in_axes`` (parametric-only CSV) from the source's
+    instance coordinates (``fvarInstances`` in the config).
+
+    Such a CSV maps instance names straight onto parametric axes, which
+    only makes sense for a font whose fvar axes ARE those parametric
+    axes. Pinning ``in:`` to where the instance currently sits (per the
+    source) makes the avar2 table remap the design when the CSV's values
+    diverge from the source — i.e. studio mapping edits actually change
+    the built font. A CSV in sync with its source yields identity
+    mappings, which fontc rightly omits as a no-op table.
+
+    Tags stay VERBATIM (case-sensitive fvar tags — never through
+    ``_normalize_in_axis_name``, which lowercases); SPAC is excluded,
+    matching the out: emission in generate_avar2_yaml_string. Instances
+    not found in fvarInstances fall back to identity (in: = out:).
+    """
+    if all(m.in_axes for m in mappings):
+        return mappings  # traditional CSV — nothing to fill
+    fvar_instances = {
+        str(inst.get("name", "")): (inst.get("coordinates") or {})
+        for inst in (config.get("fvarInstances", {}).get(font_key) or [])
+    }
+    out: List[RowMapping] = []
+    for m in mappings:
+        if m.in_axes:
+            out.append(m)
+            continue
+        coords = fvar_instances.get(m.instance_name)
+        if coords:
+            # fvarInstances coordinate keys may be lower-cased by the
+            # config initialiser (``xopq`` vs the CSV's ``XOPQ``) — match
+            # case-insensitively, emit the CSV's verbatim (fvar) tag.
+            out_by_upper = {k.upper(): k for k in m.out_axes}
+            in_axes = {}
+            for ck, cv in coords.items():
+                tag = out_by_upper.get(str(ck).upper())
+                if tag and tag != "SPAC":
+                    in_axes[tag] = Decimal(str(cv))
+        else:
+            in_axes = {}
+        if not in_axes:  # unknown instance, or no usable coords → identity
+            in_axes = {k: v for k, v in m.out_axes.items() if k != "SPAC"}
+        out.append(replace(m, in_axes=in_axes))
+    return out
 
 
 # ============================================================================
@@ -362,6 +423,174 @@ def validate_stat_section(stat_data: Dict, font_key: str) -> None:
 # avar2 Generation
 # ============================================================================
 
+def _pad_in_envelope(mappings: List[RowMapping], source_axes: List[Dict]) -> List[RowMapping]:
+    """Pad the avar2 in: envelope to the source's declared axis ranges.
+
+    fontc derives the built fvar's min/default/max from the avar2 in:
+    locations (the default is the source default clamped into the
+    envelope). A CSV that lists only its instances — never reaching the
+    axis extremes — therefore builds a font whose axes are clamped to
+    the instance envelope and whose default may shift to the envelope's
+    edge (e.g. a source declaring XTRA 94…3330 building as
+    181.2…2744.3 with the default moved to 181.2). Appending identity
+    (in: = out:) entries at the per-axis source min/max corners keeps
+    the full declared range reachable without remapping anything.
+    Corner rows duplicating an existing mapping are dropped downstream.
+    """
+    if not mappings:
+        return mappings
+    out_order = mappings[0].out_axis_order
+    tags = [t for t in out_order if t != "SPAC"]
+    axis_by_tag = {str(a.get("tag")): a for a in source_axes}
+    if not tags or not all(t in axis_by_tag for t in tags):
+        return mappings  # can't bound an axis we don't have ranges for
+    try:
+        default_coords = {t: Decimal(str(axis_by_tag[t]["default"])) for t in tags}
+    except (KeyError, InvalidOperation, TypeError):
+        default_coords = None
+    out: List[RowMapping] = list(mappings)
+    for label, key in (("Auto: range min", "min"), ("Auto: range max", "max")):
+        coords = {t: Decimal(str(axis_by_tag[t][key])) for t in tags}
+        # A corner AT the default location (min == default on every
+        # axis, the common parametric layout) adds no envelope — the
+        # default is reachable by definition — and it normalizes to the
+        # avar2 origin, colliding with any at-default mapping row
+        # (fontTools: "Locations must be unique"). Skip it.
+        if default_coords is not None and coords == default_coords:
+            continue
+        out.append(RowMapping(label, dict(coords), dict(coords), out_order))
+    return out
+
+
+def _declared_axis_defaults(config_path: Optional[Path]) -> Dict[str, Decimal]:
+    """Studio-declared defaults for non-parametric axes, keyed by fvar
+    tag, from the sibling axis-metadata.json. Mirrors what the
+    gen-avar2 shim applies to created axes, so the collision guard
+    normalizes in: locations against the same defaults the compiled
+    font will actually use."""
+    out: Dict[str, Decimal] = {}
+    if not config_path:
+        return out
+    meta_path = Path(config_path).parent / "axis-metadata.json"
+    if not meta_path.exists():
+        return out
+    try:
+        import json as _json
+        meta = _json.loads(meta_path.read_text(encoding="utf-8")) or {}
+        for _col, m in meta.items():
+            tag = (m.get("registered_tag") or "").strip()
+            if not tag or m.get("is_parametric") or m.get("default") is None:
+                continue
+            try:
+                out[tag] = Decimal(str(m["default"]))
+            except InvalidOperation:
+                continue
+    except Exception:
+        return {}
+    return out
+
+
+def _drop_colliding_in_locations(
+    mappings: List[RowMapping],
+    source_axes: List[Dict],
+    declared_defaults: Optional[Dict[str, Decimal]] = None,
+) -> List[RowMapping]:
+    """Drop mappings whose EFFECTIVE in: location duplicates an earlier
+    row's. Raw in: dicts can differ yet normalize identically: a
+    missing axis sits at its default, an explicit value can equal the
+    default ({} vs {XOPQ: 1} when XOPQ's default is 1), and gen-avar2
+    derives a made-axis default from the minimum of its in: values.
+    fontTools then dies with "Locations must be unique" deep inside
+    gen-avar2 — this guard reports the colliding instances by NAME and
+    keeps the first row instead."""
+    if not mappings:
+        return mappings
+    defaults: Dict[str, Decimal] = {}
+    for a in (source_axes or []):
+        tag = str(a.get("tag"))
+        if a.get("default") is not None:
+            try:
+                defaults[tag] = Decimal(str(a["default"]))
+            except InvalidOperation:
+                continue
+    # ALL tag comparison is case-insensitive from here: in_axes keys
+    # arrive in CSV-column case ('WGHT', 'OPSZ') while source tags and
+    # declared registered tags are their own cases ('XTRA', 'wght') —
+    # a case miss fills a blank cell with 0 instead of the axis
+    # default and two colliding rows sail through as "different".
+    defaults = {str(k).upper(): v for k, v in defaults.items()}
+    # Axes gen-avar2 will CREATE (in: tags with no source axis): their
+    # default becomes the axis minimum (gen_fvar_axes assigns
+    # defaultValue = min of the in: values).
+    source_tags = {str(a.get("tag")).upper() for a in (source_axes or [])}
+    for m in mappings:
+        for tag, v in m.in_axes.items():
+            tag_u = str(tag).upper()
+            if tag_u in source_tags:
+                continue  # source axis — default already set above
+            if tag_u not in defaults or v < defaults[tag_u]:
+                defaults[tag_u] = v
+    # Studio-declared defaults beat the min-rule — the shim gives the
+    # compiled axes these defaults, so effective locations must be
+    # judged against them.
+    defaults.update({str(k).upper(): v for k, v in (declared_defaults or {}).items()})
+    all_tags = sorted({str(t).upper() for m in mappings for t in m.in_axes})
+    seen: Dict[tuple, RowMapping] = {}
+    out: List[RowMapping] = []
+    for m in mappings:
+        in_ci = {str(k).upper(): v for k, v in m.in_axes.items()}
+        # Compare as FLOATS: Decimal('144.0') (CSV) and Decimal('144')
+        # (metadata default) are numerically equal but stringify
+        # differently, which let colliding rows sail through.
+        loc = tuple(
+            (t, float(in_ci.get(t, defaults.get(t, Decimal(0)))))
+            for t in all_tags
+        )
+        if loc in seen:
+            prev = seen[loc]
+            if prev.out_axes == m.out_axes:
+                note = "dropped (one avar2 entry serves both)"
+            else:
+                note = ("with a DIFFERENT out: — dropped the later row; "
+                        "check these instances' mapping values")
+            print(
+                f"  ⚠ '{m.instance_name}' resolves to the same avar2 input "
+                f"location as '{prev.instance_name}' — {note}",
+                file=sys.stderr,
+            )
+            continue
+        seen[loc] = m
+        out.append(m)
+    return out
+
+
+def _drop_identical_duplicates(mappings: List[RowMapping]) -> List[RowMapping]:
+    """Drop rows whose in: AND out: both duplicate an earlier row.
+
+    Benign repeats happen when a source declares two named instances at
+    the same location (e.g. a "HighContrast" variant at identical
+    coordinates): one mapping serves both, so the second row is dropped
+    with a note. Same in: with DIFFERENT out: is a real contradiction —
+    those rows stay, for _dedupe_check to raise on.
+    """
+    seen: Dict[Tuple[Tuple[str, str], ...], str] = {}
+    out: List[RowMapping] = []
+    for m in mappings:
+        key = tuple(
+            sorted((k, str(v)) for k, v in list(m.in_axes.items()) + list(m.out_axes.items()))
+        )
+        if key in seen:
+            print(
+                f"  ℹ Duplicate mapping '{m.instance_name}' identical to "
+                f"'{seen[key]}' — dropped (one avar2 entry serves both)",
+                file=sys.stderr,
+            )
+            continue
+        seen[key] = m.instance_name
+        out.append(m)
+    return out
+
+
 def _dedupe_check(mappings: List[RowMapping]) -> None:
     """Check for duplicate in: coordinate tuples."""
     seen: Dict[Tuple[Tuple[str, str], ...], str] = {}
@@ -412,6 +641,7 @@ def generate_avar2_yaml_string(
     If skip_opsz_if_no_variation is True, removes opsz from in_axes if all mappings
     have the same opsz value.
     """
+    mappings = _drop_identical_duplicates(mappings)
     _dedupe_check(mappings)
     
     # Check for opsz variation if requested
@@ -515,8 +745,10 @@ def load_config(config_path: Path) -> Dict:
     if not isinstance(data, dict):
         raise ValueError("config.yaml did not parse to a mapping/dict")
 
-    # Validate required keys
-    required_keys = {"sources", "familyName", "fvarInstances"}
+    # Validate required keys. fvarInstances is intentionally NOT required:
+    # instance-less sources omit it (the gftools builder's schema rejects
+    # an EMPTY fvarInstances list, and its own schema marks it optional).
+    required_keys = {"sources", "familyName"}
     missing = required_keys - set(data.keys())
     if missing:
         raise ValueError(f"config.yaml missing required keys: {missing}")
@@ -526,21 +758,24 @@ def load_config(config_path: Path) -> Dict:
 
 def merge_config(
     config: Dict,
-    stat_data: Dict,
+    stat_data: Optional[Dict],
     avar2_yaml: str,
     font_key: str,
     add_contrast: bool = False,
     csv_path: Optional[Path] = None,
 ) -> Tuple[Dict, str]:
     """Merge stat and avar2 sections into config.
-    
+
     Returns (updated_config_dict, avar2_yaml_string) for writing.
-    
-    If add_contrast is True, automatically adds cntr: 0 to all fvarInstances.
+
+    ``stat_data=None`` (parametric-only CSV) leaves any existing stat
+    section untouched. If add_contrast is True, automatically adds cntr: 0
+    to all fvarInstances.
     Note: spacingAxis section is preserved as-is and never updated automatically.
     """
-    # Update/replace stat section
-    config["stat"] = stat_data
+    # Update/replace stat section (skip when the CSV has no traditional axes)
+    if stat_data is not None:
+        config["stat"] = stat_data
 
     # Parse avar2 YAML to validate structure, but we'll use the string for output
     avar2_parsed = yaml.safe_load(avar2_yaml)
@@ -563,12 +798,13 @@ def merge_config(
     return config, avar2_yaml
 
 
-def validate_merged_config(config: Dict, font_key: str) -> None:
+def validate_merged_config(config: Dict, font_key: str, require_stat: bool = True) -> None:
     """Validate the merged config structure."""
-    # Check stat section
+    # Check stat section (absent is fine for parametric-only CSVs)
     if "stat" not in config:
-        raise ValueError("Merged config missing 'stat' section")
-    if font_key not in config["stat"]:
+        if require_stat:
+            raise ValueError("Merged config missing 'stat' section")
+    elif font_key not in config["stat"]:
         raise ValueError(f"Merged config stat section missing font key: {font_key}")
 
     # Check avar2 section
@@ -823,6 +1059,15 @@ def write_config(
         new_lines.extend(avar2_yaml.strip().splitlines())
         if new_lines and new_lines[-1].strip():  # Only add blank line if last line isn't blank
             new_lines.append("")
+    else:
+        # No avar2 section in the original file — append it. Without this,
+        # a freshly initialised config silently loses the generated avar2:
+        # the build "succeeds" but the table never lands in the font.
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("")
+        new_lines.extend(avar2_yaml.strip().splitlines())
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("")
 
     # Part after avar2
     if avar2_start_idx is not None and avar2_end_idx is not None:
@@ -1042,12 +1287,15 @@ def update_config(
     font_key: Optional[str] = None,
     backup: bool = False,
     dry_run: bool = False,
+    source_path: Optional[Path] = None,
 ) -> None:
     """Generate STAT + avar2 sections from a CSV and merge them into config.yaml.
 
     Raises ``RuntimeError`` on failure. Designed to be called in-process from
     the server's build pipeline so we don't pay subprocess startup cost on
-    every build-on-save.
+    every build-on-save. ``source_path`` (the active source) lets the avar2
+    in: envelope be padded to the declared axis ranges — without it the
+    built fvar axes clamp to the CSV's instance envelope.
     """
     argv: List[str] = [
         "--csv", str(csv_path),
@@ -1059,6 +1307,8 @@ def update_config(
         argv.append("--no-backup")
     if dry_run:
         argv.append("--dry-run")
+    if source_path:
+        argv += ["--source", str(source_path)]
 
     rc = main(argv)
     if rc != 0:
@@ -1079,6 +1329,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--add-contrast", action="store_true", help="Expand CSV with contrast variations before processing.")
     ap.add_argument("--add-opsz", action="store_true", help="Expand CSV with MinOPSZ and MaxOPSZ rows based on opsz.yaml.")
     ap.add_argument("--save-opsz-csv", action="store_true", help="Save expanded opsz CSV to file (default: use temporary file, auto-deleted).")
+    ap.add_argument("--source", type=Path, default=None,
+                    help="Source file (.glyphs/.designspace). Its declared axis ranges pad the avar2 in: envelope so fontc doesn't clamp the built fvar axes to the CSV's instance envelope.")
     args = ap.parse_args(argv)
 
     try:
@@ -1131,14 +1383,72 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Step 3: Load and validate existing config
         print("Step 3: Loading existing config.yaml...", file=sys.stderr)
         config = load_config(args.config)
+
+        # The config's sources: must track the ACTIVE source path — a
+        # workspace migration or rename leaves the stored path stale,
+        # and the builder would try to read a file that no longer
+        # exists (FileNotFoundError deep inside glyphsLib). NB:
+        # write_config splices generated sections into the ON-DISK
+        # text, so mutating the dict alone is not enough — patch the
+        # sources: block in the file itself.
+        if args.source and args.source.exists():
+            resolved = str(Path(args.source).resolve())
+            if config.get("sources") != [resolved]:
+                config["sources"] = [resolved]
+                import re as _re_src
+                text = Path(args.config).read_text(encoding="utf-8")
+                text2, n = _re_src.subn(
+                    r"(?ms)^sources:\n(?:[ \t]*-[^\n]*\n)+",
+                    "sources:\n- " + resolved + "\n",
+                    text,
+                    count=1,
+                )
+                if n:
+                    Path(args.config).write_text(text2, encoding="utf-8")
+                    print(f"  ✓ sources: repointed to {resolved}", file=sys.stderr)
         print("  ✓ Config loaded and validated", file=sys.stderr)
 
         # Step 4: Determine font key
         if args.font_key:
             font_key = args.font_key
         else:
-            font_key = _load_font_key_from_config(args.config)
+            try:
+                font_key = _load_font_key_from_config(args.config)
+            except ValueError:
+                # Instance-less configs carry no fvarInstances — derive the
+                # built filename the same way the studio's config init does:
+                # "<family>[<sorted axis tags>].ttf".
+                if not args.source:
+                    raise
+                font, _fmt = _source_font.load_source(args.source)
+                family = _source_font.get_family_name(font, args.source)
+                tags = sorted(a["tag"] for a in _source_font.get_axes(font) if a.get("tag"))
+                font_key = f"{family}[{','.join(tags)}].ttf" if tags else f"{family}-VF.ttf"
         print(f"  ✓ Font key: {font_key}", file=sys.stderr)
+
+        # Parametric-only CSV: pin in: to the source's instance
+        # coordinates so edited CSV values remap the design (an in-sync
+        # CSV yields identity mappings, which fontc omits as a no-op).
+        mappings = _fill_identity_in_axes(mappings, config, font_key)
+
+        # fontc derives the built fvar's min/default/max from the avar2
+        # in: envelope — pad it to the source's declared axis ranges or
+        # the built font's axes clamp to the CSV's instance envelope.
+        source_axes_list: List[Dict] = []
+        if args.source and args.source.exists():
+            try:
+                font, _fmt = _source_font.load_source(args.source)
+                source_axes_list = _source_font.get_axes(font)
+                mappings = _pad_in_envelope(mappings, source_axes_list)
+            except Exception as e:
+                print(f"  Warning: could not pad avar2 range envelope: {e}", file=sys.stderr)
+
+        # Two mappings that normalize to the SAME in: location crash
+        # fontTools ("Locations must be unique") deep inside gen-avar2
+        # — catch it here, with instance names, before the build.
+        mappings = _drop_colliding_in_locations(
+            mappings, source_axes_list, _declared_axis_defaults(args.config)
+        )
 
         # Step 5: Generate STAT section
         print("Step 5: Generating STAT section...", file=sys.stderr)
@@ -1149,9 +1459,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         if len(axis_values.get("opsz", [])) <= 1:
             axis_values.pop("opsz", None)
             print("  ℹ OPSZ axis skipped in STAT (no variation)", file=sys.stderr)
-        stat_data = generate_stat_section(axis_values, font_key)
-        validate_stat_section(stat_data, font_key)
-        print(f"  ✓ STAT section generated ({len(stat_data[font_key])} axes)", file=sys.stderr)
+        # SPAC is transform-injected, not a STAT axis this generator emits —
+        # without the drop, a CSV whose only registered column is SPAC
+        # produces an empty section and fails validation.
+        axis_values.pop("spac", None)
+        if axis_values:
+            stat_data = generate_stat_section(axis_values, font_key)
+            validate_stat_section(stat_data, font_key)
+            print(f"  ✓ STAT section generated ({len(stat_data[font_key])} axes)", file=sys.stderr)
+        else:
+            # Parametric-only CSV (identity in: case): no registered
+            # (traditional) axes to describe, so STAT has nothing to say.
+            # Leave any existing stat section in the config untouched.
+            stat_data = None
+            print("  ℹ No traditional axes in CSV — STAT section skipped", file=sys.stderr)
 
         # Step 6: Generate avar2 section
         print("Step 6: Generating avar2 section...", file=sys.stderr)
@@ -1182,7 +1503,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             all_have_cntr = all("cntr" in inst.get("coordinates", {}) for inst in fvar_inst)
             if all_have_cntr:
                 print(f"  ✓ fvarInstances updated with cntr: 0 ({len(fvar_inst)} instances)", file=sys.stderr)
-        validate_merged_config(merged_config, font_key)
+        validate_merged_config(merged_config, font_key, require_stat=stat_data is not None)
         print("  ✓ Config merged and validated", file=sys.stderr)
 
         # Step 8: Write config (or dry-run)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './ControlAxes.css';
 import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
@@ -48,6 +48,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
     // Send only what changed. Merging into `ax.layers` here and PUTting the
     // whole list would drop any layer added since our last refetch — the
     // modal now closes before that refetch lands.
+    markEdit();
     await onLayerDelta(ax.tag, { add: newEntries });
   };
   // Section opens by default — control axes are the primary editing
@@ -56,6 +57,32 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
   // Designer can still fold the whole section if they want it out
   // of the way.
   const [sectionOpen, setSectionOpen] = useState(true);
+
+  // "rebuilding preview…" is scoped to builds THIS panel caused: layer
+  // and axis edits here schedule a shadow regen + rebuild. Unrelated
+  // builds (instance renames, mapping commits, transforms) no longer
+  // flash the label in this sidebar. Set on any mutating action below,
+  // cleared when the resulting build completes (building true→false) —
+  // with a timeout fallback for actions that never reach a build
+  // (e.g. a cancelled modal).
+  const [editPending, setEditPending] = useState(false);
+  const wasBuilding = useRef(false);
+  const editTimer = useRef(null);
+  const markEdit = () => {
+    setEditPending(true);
+    clearTimeout(editTimer.current);
+    editTimer.current = setTimeout(() => setEditPending(false), 20000);
+  };
+  useEffect(() => () => clearTimeout(editTimer.current), []);
+  useEffect(() => {
+    if (building) {
+      wasBuilding.current = true;
+    } else if (wasBuilding.current) {
+      wasBuilding.current = false;
+      setEditPending(false);
+      clearTimeout(editTimer.current);
+    }
+  }, [building]);
 
   // Filter to scoped. Universal axes are master-driven and belong
   // under AVAR2 MAPPINGS / parametric, not here.
@@ -100,7 +127,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           {/* The layer list saves instantly; the font recompiles in the
               background. Say so, otherwise an edit looks like it did nothing
               for the seconds the preview takes to catch up. */}
-          {building && (
+          {editPending && (
             <span className="control-axes-building" title="Your layers are saved. The preview font is recompiling.">
               <span className="control-axes-spinner" aria-hidden="true" />
               rebuilding preview…
@@ -120,6 +147,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
             onClick={(e) => {
               e.stopPropagation();
               if (addDisabledReason) return;
+              markEdit();
               onAddClick();
               // Open the section so the new axis is visible after creation.
               setSectionOpen(true);
@@ -190,6 +218,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     className="control-axis-edit"
                     onClick={(e) => {
                       e.stopPropagation();
+                      markEdit();
                       onEditAxis(ax);
                     }}
                     title="Edit this axis's display name, range, or default. Tag stays the same."
@@ -203,6 +232,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     onClick={(e) => {
                       e.stopPropagation();
                       if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                        markEdit();
                         onDeleteAxis(ax.tag);
                       }
                     }}
@@ -220,7 +250,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       axis={ax}
                       layers={ax.layers || []}
                       allAxes={allAxes || []}
-                      onLayerDelta={onLayerDelta}
+                      onLayerDelta={(...args) => { markEdit(); return onLayerDelta(...args); }}
                       onOpenInEditor={onOpenInEditor}
                       onRequestAddModal={setAddLocationFor}
                       vfFamilyId={vfFamilyId}

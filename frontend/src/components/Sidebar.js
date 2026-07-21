@@ -10,6 +10,17 @@ import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
 import { formatAxisValue } from '../utils/formatNumber';
 
+// Font size stays in rem internally (CSS font-size + /api/text-width's
+// font_size_rem); the slider presents it in pt. 12pt = 1rem at the
+// default 16px root, so 9pt…144pt maps to 0.75rem…12rem.
+const remToPt = (rem) => rem * 12;
+const ptToRem = (pt) => pt / 12;
+const roundHalf = (v) => Math.round(v * 2) / 2;
+const formatPt = (rem) => {
+  const pt = roundHalf(remToPt(rem));
+  return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
+};
+
 function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
@@ -106,6 +117,23 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
     }
   }, [fontSizeEditing]);
 
+  // Commit/nudge helpers for the pt-typed font-size field: the user
+  // works in pt, the state stays in rem (see module-level converters).
+  const commitFontSizePt = (raw) => {
+    const num = parseFloat(raw);
+    if (!isNaN(num)) {
+      const clamped = Math.max(9, Math.min(144, roundHalf(num)));
+      onFontSizeChange(ptToRem(clamped));
+    }
+    setFontSizeEditing(false);
+  };
+  const nudgeFontSizePt = (delta) => {
+    const current = parseFloat(fontSizeEditValue) || remToPt(fontSize);
+    const next = Math.max(9, Math.min(144, roundHalf(current + delta)));
+    setFontSizeEditValue(formatPt(ptToRem(next)));
+    onFontSizeChange(ptToRem(next));
+  };
+
   // Update editValue when fontSize changes externally (e.g., from slider)
   useEffect(() => {
     if (!fontSizeEditing) {
@@ -154,20 +182,20 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
       
       <div className="font-size-control">
         <div className="axis-header">
-          <label className="axis-name">Font Size: {formatAxisValue(fontSize)}rem</label>
+          <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
         </div>
         <div className="axis-slider-container">
           <input
             type="range"
-            min="0.5"
-            max="12"
-            step="0.1"
-            value={fontSize}
-            onChange={(e) => onFontSizeChange(parseFloat(e.target.value))}
+            min="9"
+            max="144"
+            step="0.5"
+            value={roundHalf(remToPt(fontSize))}
+            onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
             className="axis-slider"
           />
           <div className="axis-values">
-            <span className="axis-min">0.5</span>
+            <span className="axis-min">9</span>
             {fontSizeEditing ? (
               <input
                 ref={fontSizeInputRef}
@@ -175,46 +203,20 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                 className="axis-current axis-current-editing"
                 value={fontSizeEditValue}
                 onChange={(e) => setFontSizeEditValue(e.target.value)}
-                onBlur={() => {
-                  const numValue = parseFloat(fontSizeEditValue);
-                  if (isNaN(numValue)) {
-                    setFontSizeEditing(false);
-                    return;
-                  }
-                  const clampedValue = Math.max(0.5, Math.min(12, numValue));
-                  const roundedValue = Math.round(clampedValue * 1000) / 1000;
-                  onFontSizeChange(roundedValue);
-                  setFontSizeEditing(false);
-                }}
+                onBlur={() => commitFontSizePt(fontSizeEditValue)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    const numValue = parseFloat(fontSizeEditValue);
-                    if (isNaN(numValue)) {
-                      setFontSizeEditing(false);
-                      return;
-                    }
-                    const clampedValue = Math.max(0.5, Math.min(12, numValue));
-                    const roundedValue = Math.round(clampedValue * 1000) / 1000;
-                    onFontSizeChange(roundedValue);
-                    setFontSizeEditing(false);
+                    commitFontSizePt(fontSizeEditValue);
                   } else if (e.key === 'Escape') {
                     setFontSizeEditing(false);
                     setFontSizeEditValue('');
                   } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    const numValue = parseFloat(fontSizeEditValue) || fontSize;
-                    const newValue = Math.min(12, numValue + 0.1);
-                    const roundedValue = Math.round(newValue * 1000) / 1000;
-                    setFontSizeEditValue(roundedValue.toFixed(3));
-                    onFontSizeChange(roundedValue);
+                    nudgeFontSizePt(0.5);
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    const numValue = parseFloat(fontSizeEditValue) || fontSize;
-                    const newValue = Math.max(0.5, numValue - 0.1);
-                    const roundedValue = Math.round(newValue * 1000) / 1000;
-                    setFontSizeEditValue(roundedValue.toFixed(3));
-                    onFontSizeChange(roundedValue);
+                    nudgeFontSizePt(-0.5);
                   }
                 }}
               />
@@ -223,14 +225,14 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                 className="axis-current axis-current-clickable"
                 onClick={() => {
                   setFontSizeEditing(true);
-                  setFontSizeEditValue(fontSize.toFixed(3));
+                  setFontSizeEditValue(formatPt(fontSize));
                 }}
                 title="Click to edit value"
               >
-                {formatAxisValue(fontSize)}
+                {formatPt(fontSize)}
               </span>
             )}
-            <span className="axis-max">12.0</span>
+            <span className="axis-max">144</span>
           </div>
         </div>
       </div>
@@ -388,7 +390,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
               if (axisColumns.length === 0) {
                 return (
                   <div className="avar2-empty-hint">
-                    Mapping rows live in the sibling -avar.csv. This instance doesn't have one yet.
+                    This instance has no mapping values yet.
                   </div>
                 );
               }
@@ -436,7 +438,16 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
 
                       const draftKey = `${selectedInstance.name}:${axisColumn}`;
                       const draft = mappingDrafts[draftKey];
-                      const shown = draft !== undefined ? draft : value;
+                      // Unset cells still get a LIVE slider. Fresh and
+                      // duplicated instances start with blank mapping
+                      // cells (deliberately — a stamped 0 becomes real
+                      // avar2 data), but a dead "—" placeholder left no
+                      // way to author the value. The slider rests at
+                      // the axis default; the first drag or typed value
+                      // commits it.
+                      const axisDefault = axisMeta?.default ?? (axisMin + axisMax) / 2;
+                      const unset = !hasValue && draft === undefined;
+                      const shown = draft !== undefined ? draft : (hasValue ? value : axisDefault);
                       const sliderStep = (axisMax - axisMin) > 100 ? 1 : 0.1;
 
                       const commitTyped = (raw) => {
@@ -464,19 +475,12 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                             {axisLabel}
                             {isParametricAxis && <span className="parametric-badge"> (Glyphs)</span>}
                           </div>
-                          {!hasValue ? (
-                            <div
-                              className="traditional-axis-value traditional-axis-value-placeholder"
-                              title={`No avar2 mapping for "${axisColumn}" on this instance. SmallOpsz / internal-only rows in Glyphs aren't declared in the avar2 mapping CSV.`}
-                            >
-                              —
-                            </div>
-                          ) : isParametricAxis ? (
+                          {isParametricAxis ? (
                             <div
                               className="traditional-axis-value"
                               title="Parametric axis (from Glyphs file) - cannot edit"
                             >
-                              {formatAxisValue(Number(value))}
+                              {hasValue ? formatAxisValue(Number(value)) : '—'}
                             </div>
                           ) : (
                             // Mapping value drives like any other axis: a
@@ -526,11 +530,13 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                                   />
                                 ) : (
                                   <span
-                                    className={`axis-current axis-current-clickable${draft !== undefined ? ' traditional-axis-saving' : ''}`}
+                                    className={`axis-current axis-current-clickable${draft !== undefined ? ' traditional-axis-saving' : ''}${unset ? ' traditional-axis-unset' : ''}`}
                                     onClick={() => setEditingValue({ instance: selectedInstance.name, axis: axisColumn })}
-                                    title={`Click to type a value (range: ${axisMin} to ${axisMax})`}
+                                    title={unset
+                                      ? `No mapping value yet — drag the slider or click to type one. The slider rests at the axis default (${axisDefault}).`
+                                      : `Click to type a value (range: ${axisMin} to ${axisMax})`}
                                   >
-                                    {formatAxisValue(Number(shown))}
+                                    {unset ? '—' : formatAxisValue(Number(shown))}
                                   </span>
                                 )}
                                 <span className="axis-max">{axisMax}</span>

@@ -18,9 +18,10 @@ Everything below is tribal knowledge as of this handover.
 ## 1. Repo state at handover
 
 - **Active branch: `glyph-scoped-axes`** — all recent work lands here
-  first. At handover it is **5 commits ahead of `origin/glyph-scoped-axes`
-  and of `main`** (mapping sliders + rename + source-derived layers
-  panel; axis-map inversion; glyph-name thumbnails; two upload fixes).
+  first. At handover it has **unpushed commits ahead of
+  `origin/glyph-scoped-axes` and of `main`** (mapping sliders + rename +
+  source-derived layers panel; axis-map inversion; glyph-name thumbnails;
+  two upload fixes; this doc).
   Nothing is lost if you just push the branch and fast-forward main —
   that has been the merge pattern throughout (no PRs, ff-only).
 - Other branches: `grade-comparison` (parked WIP — grade-master
@@ -61,7 +62,10 @@ Everything below is tribal knowledge as of this handover.
   path* (venv shims exec the base interpreter), so you cannot tell from
   `ps` which env a server is using. When in doubt:
   `python -c "import avar2_studio; print(avar2_studio.__file__)"` —
-  it must point into this repo's `src/`.
+  it must point into this repo's `src/`. Don't use the *version* to
+  identify the env: the venv's editable-install metadata still reports
+  `0.1.0.dev5` even though `pyproject.toml` says `dev7` — stale
+  dist-info, harmless but misleading.
 - **Frontend deploy loop:** the served bundle is
   `src/avar2_studio/static/` (gitignored, CI-assembled for wheels).
   Locally after any frontend change:
@@ -252,7 +256,7 @@ fontc ~0.09s, startup ~1-2s.
 
 ## 6. Suggested first week
 
-1. Push the 5 pending commits; fast-forward main.
+1. Push the pending commits on `glyph-scoped-axes`; fast-forward main.
 2. Add `flask-sock` to pyproject deps; decide how to document the
    fontra/fontra-glyphs git installs (extras? doctor check exists).
 3. Stand up pytest + the three test families from §4.1.

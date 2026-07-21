@@ -55,11 +55,29 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [building, setBuilding] = useState(false);
+  // Non-null ⇒ the avar2 build is failing and the served font is the
+  // plain fallback (no avar2 table / mapped axes). Surfaced on the
+  // Preview tab so the fallback is never silent.
+  const [avar2Error, setAvar2Error] = useState(null);
+  // True ⇒ the CSV changed after the last build (auto-saved edits no
+  // longer rebuild per save). The Preview tab rebuilds once on open.
+  const [buildStale, setBuildStale] = useState(false);
   const [sampleText, setSampleText] = useState(DEFAULT_SAMPLE_TEXT);
   const [fontSize, setFontSize] = useState(2); // Default 2rem
   // Which top-level view is active: 'instances' (authoring) or
   // 'preview' (free-form driving of the built font).
   const [mainTab, setMainTab] = useState('instances');
+
+  // Rebuild-on-demand: coordinate auto-saves no longer rebuild per
+  // edit, so the built font can be stale when the designer opens the
+  // Preview tab (the one place the avar2 table is actually consumed).
+  // Kick ONE rebuild when arriving there stale; build_stale clears
+  // when the build lands, so this can't loop.
+  useEffect(() => {
+    if (mainTab === 'preview' && buildStale && !building) {
+      api.buildFont().catch(() => {});
+    }
+  }, [mainTab, buildStale, building]);
   const [familyName, setFamilyName] = useState(null);
   // "glyphs" | "designspace" | null — from /api/health. Gates
   // control-axis authoring, which is .glyphs-only for now.
@@ -108,15 +126,6 @@ function App() {
   const [instanceToDelete, setInstanceToDelete] = useState(null);
   const [avar2FontUrl, setAvar2FontUrl] = useState(null);
   const [avar2FontLoaded, setAvar2FontLoaded] = useState(false);
-  // Advance width cache: { coordinatesKey: width_pixels }
-  // coordinatesKey is a normalized string representation of coordinates
-  const [advanceWidthCache, setAdvanceWidthCache] = useState({});
-  // Current advance width for display (calculated from current coordinates)
-  const [currentAdvanceWidth, setCurrentAdvanceWidth] = useState(null); // in font units
-  const [currentAdvanceWidthPixels, setCurrentAdvanceWidthPixels] = useState(null); // in pixels (for reference)
-  // Loading state for advance width recalculation
-  const [advanceWidthLoading, setAdvanceWidthLoading] = useState(false);
-
   // Load initial data
   useEffect(() => {
     loadData();
@@ -176,6 +185,8 @@ function App() {
         ]);
         
         setBuilding(health.building || false);
+        setAvar2Error(health.avar2_error || null);
+        setBuildStale(health.build_stale || false);
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
         setLastBuildStatus(health.last_build_status || null);
         setLastBuildError(health.last_build_error || null);
@@ -256,9 +267,6 @@ function App() {
         setOriginalCoordinates({});
         setInstanceEditingCoordinates({});
         setInstanceOriginalCoordinates({});
-        setAdvanceWidthCache({});
-        setCurrentAdvanceWidth(null);
-        setCurrentAdvanceWidthPixels(null);
       }
       loadedGlyphsPathRef.current = sourceIdentity;
 
@@ -307,13 +315,8 @@ function App() {
       setBuiltFontFilename(health.built_font_filename || null);
       setLastBuildTime(health.last_build_time || null);
       setBuilding(health.building || false);
-
-      if (health.font_built) {
-        // Wait a bit for font to be ready, then cache widths.
-        setTimeout(() => {
-          cacheInstanceAdvanceWidths(instancesData.instances, {});
-        }, 1000);
-      }
+      setAvar2Error(health.avar2_error || null);
+      setBuildStale(health.build_stale || false);
 
       // If font was rebuilt (new build time), reload the font
       if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
@@ -339,6 +342,17 @@ function App() {
 
   const loadAvar2Data = async () => {
     try {
+      // No-op without a loaded source: the avar2 endpoints 404 when
+      // there's no CSV, which blind launch (and only blind launch) is
+      // guaranteed to hit — firing them anyway litters the console
+      // with errors on an otherwise clean empty state.
+      const health = await api.health().catch(() => null);
+      if (!health || !health.glyphs_path) {
+        setAvar2Instances([]);
+        setAvar2Axes(null);
+        return;
+      }
+
       // Load both in parallel, but update state as soon as each arrives
       const instancesPromise = api.getAvar2Instances().then(data => {
         setAvar2Instances(data.instances || []);
@@ -555,6 +569,16 @@ function App() {
   // slider value.
   const axisDefaults = React.useMemo(
     () => Object.fromEntries((axes || []).map(a => [a.tag, a.default])),
+    [axes],
+  );
+
+  // Transform-injected axes (SPAC): live preview state, never
+  // per-instance data. Excluded from dirtiness checks and save
+  // payloads — the server refuses to persist them anyway, so counting
+  // them as "edits" left dots permanently red and saves apparent
+  // no-ops.
+  const injectedAxisTags = React.useMemo(
+    () => new Set((axes || []).filter(a => a.transform_injected).map(a => a.tag)),
     [axes],
   );
 
@@ -826,21 +850,30 @@ function App() {
       edits = instanceEditingCoordinates[instance.name];
     }
 
-    // The CSV's parametric out-values for this row, if present. The
-    // /api/avar2/instances endpoint exposes both ``out`` (CSV parametric
-    // coords) and ``glyphs_coordinates`` (source-derived) — comparing
-    // them tells us whether the CSV has been written past the source.
+    // The CSV's values for this row, split by domain. /api/avar2/instances
+    // exposes ``out`` (parametric coords), ``in`` (user-axis values, incl.
+    // SPAC — csv_io classifies the SPAC column as an in-axis), and
+    // ``glyphs_coordinates`` (source-derived). Dirtiness is PER KEY against
+    // the union of everything persisted — the old whole-dict key-count
+    // compare could never clear once a draft carried SPAC or an in: axis
+    // (5 draft keys vs 3 persisted out: keys → permanently red).
     const mapping = avar2Instances.find(m => m.instance_name === instance.name);
-    const csvCoords = mapping && mapping.avar2_mapping && mapping.avar2_mapping.out;
-    const sourceCoords = instance.coordinates;
+    const csvOut = (mapping && mapping.avar2_mapping && mapping.avar2_mapping.out) || {};
+    const csvIn = (mapping && mapping.avar2_mapping && mapping.avar2_mapping.in) || {};
+    const sourceCoords = instance.coordinates || {};
+    const persisted = { ...sourceCoords, ...csvIn, ...csvOut };
+    const csvCoords = Object.keys(csvOut).length > 0 ? csvOut : null;
 
-    // The most recent "persisted" snapshot for this row. CSV wins over
-    // source because the studio's csv_only save path bypasses the
-    // source file — CSV is the authoritative "last save" view.
-    const persisted = (csvCoords && Object.keys(csvCoords).length > 0) ? csvCoords : sourceCoords;
-
-    if (edits && Object.keys(edits).length > 0 && !_sameCoords(edits, persisted)) {
-      return 'red';   // dirty — local edits not persisted
+    if (edits && Object.keys(edits).length > 0) {
+      const dirty = Object.keys(edits).some(k => {
+        if (injectedAxisTags.has(k)) return false;   // live preview axis (SPAC) — never persisted
+        if (!(k in persisted)) return true;          // value with no persisted home
+        const ve = Number(edits[k]);
+        const vp = Number(persisted[k]);
+        if (!Number.isFinite(ve) || !Number.isFinite(vp)) return edits[k] !== persisted[k];
+        return Math.abs(ve - vp) > 0.01;
+      });
+      if (dirty) return 'red';   // local edits not persisted
     }
 
     if (instance.origin === 'studio') {
@@ -849,175 +882,18 @@ function App() {
       return 'orange';
     }
 
-    if (csvCoords && Object.keys(csvCoords).length > 0 && !_sameCoords(csvCoords, sourceCoords)) {
+    if (csvCoords && !_sameCoords(csvCoords, sourceCoords)) {
       return 'orange';   // CSV diverges from source — needs a source push
     }
 
     return 'green';
-  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, avar2Instances]);
+  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, avar2Instances, injectedAxisTags]);
 
-  // Helper: Create normalized key from coordinates and text for caching
-  const getCoordinatesKey = useCallback((coordinates, text = sampleText) => {
-    // Sort keys and round values for consistent keys
-    const coordsKey = Object.keys(coordinates)
-      .sort()
-      .map(key => `${key}:${coordinates[key].toFixed(2)}`)
-      .join('|');
-    // Include text in key so cache updates when text changes
-    return `${text}|${coordsKey}`;
-  }, [sampleText]);
+  // Advance-width measurement (per-row /api/text-width polling with a
+  // cache + interpolation + live recalculation) was removed at the
+  // designer's request — it dominated request traffic. The backend
+  // endpoint survives for easy reinstatement.
 
-  // Helper: Interpolate advance width between cached points
-  const interpolateAdvanceWidth = useCallback((targetCoords, cache) => {
-    // Find nearest cached points
-    const cachedPoints = Object.entries(cache).map(([key, width]) => {
-      // Parse coordinates from key (key format: "TAG1:value1|TAG2:value2" - text already filtered out)
-      const coords = {};
-      const parts = key.split('|');
-      parts.forEach(part => {
-        if (part.includes(':')) {
-          const [tag, value] = part.split(':');
-          coords[tag] = parseFloat(value);
-        }
-      });
-      return { coords, width };
-    });
-
-    if (cachedPoints.length === 0) return null;
-
-    // Find nearest point(s) for interpolation
-    // For simplicity, use weighted average of all cached points based on distance
-    // More sophisticated: find points that differ in only one axis and interpolate along that axis
-    
-    // Calculate distance to each cached point
-    const distances = cachedPoints.map(point => {
-      let distance = 0;
-      let axisCount = 0;
-      Object.keys(targetCoords).forEach(tag => {
-        const targetVal = targetCoords[tag] || 0;
-        const pointVal = point.coords[tag] || 0;
-        const diff = Math.abs(targetVal - pointVal);
-        distance += diff * diff; // Squared distance
-        axisCount++;
-      });
-      return { point, distance: Math.sqrt(distance), axisCount };
-    });
-
-    // Sort by distance
-    distances.sort((a, b) => a.distance - b.distance);
-
-    // If we have a very close point (distance < 1), use it directly
-    if (distances[0].distance < 1) {
-      return distances[0].point.width;
-    }
-
-    // Use weighted average of nearest 3 points (inverse distance weighting)
-    const nearest = distances.slice(0, Math.min(3, distances.length));
-    let totalWeight = 0;
-    let weightedSum = 0;
-
-    nearest.forEach(({ point, distance }) => {
-      // Avoid division by zero
-      const weight = distance > 0 ? 1 / (distance + 0.1) : 1000;
-      totalWeight += weight;
-      weightedSum += weight * point.width;
-    });
-
-    return totalWeight > 0 ? weightedSum / totalWeight : null;
-  }, [getCoordinatesKey]);
-
-  // Cache advance widths for all instances. The optional second
-  // arg (formerly spacValuesMap) is kept for call-site compatibility
-  // but no longer used.
-  const cacheInstanceAdvanceWidths = useCallback(async (instancesList, _unused = {}, showLoading = false) => {
-    if (instancesList.length === 0) {
-      return;
-    }
-
-    if (showLoading) {
-      setAdvanceWidthLoading(true);
-    }
-
-    try {
-      const cachePromises = instancesList.map(async (instance) => {
-        const coords = { ...instance.coordinates };
-        const key = getCoordinatesKey(coords, sampleText);
-        
-        try {
-          const result = await api.getTextWidth(sampleText, coords, fontSize);
-          // Store font units instead of pixels
-          return { key, width: result.width_font_units };
-        } catch (err) {
-          console.error(`Failed to cache advance width for ${instance.name}:`, err);
-          return null;
-        }
-      });
-
-      const results = await Promise.all(cachePromises);
-      let cachedCount = 0;
-      
-      // Use functional update to ensure we're updating the latest cache state
-      setAdvanceWidthCache(currentCache => {
-        const newCache = { ...currentCache };
-        results.forEach(result => {
-          if (result) {
-            newCache[result.key] = result.width;
-            cachedCount++;
-          }
-        });
-        return newCache;
-      });
-    } catch (err) {
-      console.error('Failed to cache advance widths:', err);
-    } finally {
-      if (showLoading) {
-        setAdvanceWidthLoading(false);
-      }
-    }
-  }, [sampleText, fontSize, getCoordinatesKey]);
-
-  // Calculate advance width for current coordinates (with interpolation)
-  // Returns width in font units
-  const calculateAdvanceWidth = useCallback((coordinates, text = sampleText) => {
-    if (!coordinates || Object.keys(coordinates).length === 0) {
-      return null;
-    }
-    
-    const key = getCoordinatesKey(coordinates, text);
-    
-    // Check cache first (cache now stores font units)
-    if (advanceWidthCache[key] !== undefined) {
-      return advanceWidthCache[key];
-    }
-
-    // Try interpolation (need to filter cache by same text)
-    const textFilteredCache = {};
-    Object.keys(advanceWidthCache).forEach(cacheKey => {
-      if (cacheKey.startsWith(text + '|')) {
-        // Extract coordinates part (everything after text|)
-        const coordsPart = cacheKey.substring(text.length + 1);
-        textFilteredCache[coordsPart] = advanceWidthCache[cacheKey];
-      }
-    });
-    
-    const interpolated = interpolateAdvanceWidth(coordinates, textFilteredCache);
-    if (interpolated !== null && interpolated !== undefined) {
-      return interpolated;
-    }
-
-    return null;
-  }, [advanceWidthCache, getCoordinatesKey, interpolateAdvanceWidth, sampleText]);
-
-
-  // Recache advance widths when sample text changes
-  useEffect(() => {
-    if (instances.length > 0 && fontLoaded) {
-      setAdvanceWidthCache({});
-      setTimeout(() => {
-        cacheInstanceAdvanceWidths(instances, {}, true);
-      }, 500);
-    }
-  }, [sampleText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectInstance = useCallback((instance) => {
     // If clicking the same instance, don't reset coordinates
@@ -1073,49 +949,56 @@ function App() {
     });
   }, [selectedInstance, editingCoordinates]);
 
-  // Calculate advance width in real-time when coordinates change
+
+  // AUTO-PERSIST studio-instance coordinate edits (debounced,
+  // serialized). The old contract — slider edits live in page state
+  // until "Update Instance" is clicked — reads as saved-but-isn't,
+  // and a refresh has discarded real authoring twice. Studio rows
+  // live in the studio's own CSV, so writing through is safe; SOURCE
+  // rows keep the explicit Update flow (rewriting a designer's
+  // .glyphs is never implicit). Calls the API directly and leaves
+  // local editing state alone, so a drag that continues while a save
+  // is in flight can't be snapped back by a refetch.
+  const autoSaveTimer = useRef(null);
+  const autoSaveChain = useRef(Promise.resolve());
+  const autoSaveLastSaved = useRef({});
   useEffect(() => {
-    if (!fontLoaded || !selectedInstance) {
-      setCurrentAdvanceWidth(null);
-      setCurrentAdvanceWidthPixels(null);
-      return;
-    }
-
-    // Build current coordinates — instance base overlaid with edits.
-    const currentCoords = { ...selectedInstance.coordinates, ...editingCoordinates };
-
-    // For selected instance, always use API call for accuracy (skip cache to avoid interpolation errors)
-    // Debounce to avoid too many API calls while dragging slider
-    const timeoutId = setTimeout(async () => {
-      try {
-        const widthResult = await api.getTextWidth(sampleText, currentCoords, fontSize);
-        
-        if (widthResult && widthResult.width_font_units !== undefined) {
-          const widthFontUnits = widthResult.width_font_units;
-          const widthPixels = widthResult.width_pixels;
-          
-          // Update cache with font units (for consistency)
-          const cacheKey = getCoordinatesKey(currentCoords, sampleText);
-          setAdvanceWidthCache(currentCache => ({
-            ...currentCache,
-            [cacheKey]: widthFontUnits // Store in font units
-          }));
-          
-          setCurrentAdvanceWidth(widthFontUnits);
-          setCurrentAdvanceWidthPixels(widthPixels);
-        } else {
-          setCurrentAdvanceWidth(null);
-          setCurrentAdvanceWidthPixels(null);
+    if (!selectedInstance || selectedInstance.origin !== 'studio') return undefined;
+    if (!editingCoordinates || Object.keys(editingCoordinates).length === 0) return undefined;
+    const name = selectedInstance.name;
+    const coords = { ...selectedInstance.coordinates, ...editingCoordinates };
+    // Injected preview axes (SPAC) never persist — dragging Spacing
+    // must not schedule CSV writes or destabilize the saved-key guard.
+    for (const t of injectedAxisTags) delete coords[t];
+    const coordsKey = JSON.stringify(Object.keys(coords).sort().map(k => [k, coords[k]]));
+    // Idempotence guard. WITHOUT it, a completed rebuild (font reload,
+    // instances refetch) re-fires this effect with UNCHANGED coords,
+    // which saves again, which rebuilds again — a self-sustaining
+    // rebuild loop while the user sits idle (shipped once: 442 PUTs
+    // at ~11s intervals). Only genuinely new coordinates get saved.
+    if (autoSaveLastSaved.current[name] === coordsKey) return undefined;
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      autoSaveChain.current = autoSaveChain.current.then(async () => {
+        try {
+          await api.updateInstance(name, coords, { csvOnly: true });
+          // Mark saved only on success so a failure retries on the
+          // next edit rather than silently never saving.
+          autoSaveLastSaved.current[name] = coordsKey;
+          // Refresh BOTH row caches WITHOUT touching editing state.
+          // The sync dot judges "persisted" against avar2Instances —
+          // refreshing only `instances` left it stale, so a saved
+          // studio row stayed red forever.
+          const d = await api.getInstances();
+          setInstances(d.instances);
+          await loadAvar2Data();
+        } catch (err) {
+          console.warn(`Auto-save of "${name}" failed:`, err.message || err);
         }
-      } catch (err) {
-        // Don't fallback to interpolation - it's inaccurate
-        setCurrentAdvanceWidth(null);
-        setCurrentAdvanceWidthPixels(null);
-      }
-    }, 200); // 200ms debounce
-
-    return () => clearTimeout(timeoutId);
-  }, [editingCoordinates, selectedInstance, fontLoaded, calculateAdvanceWidth, sampleText, fontSize, advanceWidthCache, getCoordinatesKey]);
+      });
+    }, 800);
+    return () => clearTimeout(autoSaveTimer.current);
+  }, [editingCoordinates, selectedInstance, injectedAxisTags]);
 
   // Helper function to wait for font to be loaded and ready
   const waitForFontReady = async (maxAttempts = 50, delayMs = 100) => {
@@ -1142,6 +1025,15 @@ function App() {
     const instance = instances.find(inst => inst.name === instanceName);
     if (!instance) {
       throw new Error(`Instance "${instanceName}" not found`);
+    }
+
+    // Strip transform-injected axes (SPAC) — live preview state, not
+    // instance data; the server won't persist them and comparing them
+    // makes saves look like no-ops.
+    if (injectedAxisTags.size > 0) {
+      coordinatesToUse = Object.fromEntries(
+        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag))
+      );
     }
 
     const originalCoords = { ...instance.coordinates };
@@ -1252,7 +1144,7 @@ function App() {
     if (!instanceObj || instanceObj.origin !== 'source') return;
     const confirmed = window.confirm(
       `Remove "${instanceObj.name}" from the source file?\n\n` +
-      `The CSV row stays — the instance becomes studio-only and the SRC badge goes away. ` +
+      `It stays in the studio — the instance becomes studio-only and the SRC badge goes away. ` +
       `This rewrites your .glyphs / .designspace file and can't be undone from here.`
     );
     if (!confirmed) return;
@@ -1364,10 +1256,6 @@ function App() {
       const instancesData = await api.getInstances();
       setInstances(instancesData.instances);
       
-      // Clear and recache advance widths since font metrics may have changed after rebuild
-      setAdvanceWidthCache({});
-      setCurrentAdvanceWidth(null);
-      setCurrentAdvanceWidthPixels(null);
       
       // Find the updated instance
       const updatedInstance = instancesData.instances.find(inst => inst.name === targetInstanceName);
@@ -1377,10 +1265,6 @@ function App() {
         return;
       }
       
-      // Recache advance widths after the font rebuild.
-      setTimeout(() => {
-        cacheInstanceAdvanceWidths(instancesData.instances, {}, true);
-      }, 500);
 
       const updatedCoords = { ...updatedInstance.coordinates };
       
@@ -1540,10 +1424,6 @@ function App() {
       const instancesDataAfterDup = await api.getInstances();
       setInstances(instancesDataAfterDup.instances);
       
-      // Clear and recache advance widths since font metrics may have changed after rebuild
-      setAdvanceWidthCache({});
-      setCurrentAdvanceWidth(null);
-      setCurrentAdvanceWidthPixels(null);
       
       // Reload SPAC values if spacMode is enabled
       
@@ -1627,11 +1507,17 @@ function App() {
         if (renamed) {
           setSelectedInstance(renamed);
           
-          // Update coordinates with SPAC if spacMode is enabled
-          const updatedCoords = { ...renamed.coordinates };
-          
-          setEditingCoordinates(updatedCoords);
-          setOriginalCoordinates(updatedCoords);
+          // Preserve an in-flight draft across the rename. Reseeding
+          // both coordinate states from the backend here used to
+          // silently discard unsaved slider edits — the rename
+          // "overwrote" them. The rename changes the name only, so the
+          // draft and its baseline stay valid as-is.
+          const hasDraft = JSON.stringify(editingCoordinates) !== JSON.stringify(originalCoordinates);
+          if (!hasDraft) {
+            const updatedCoords = { ...renamed.coordinates };
+            setEditingCoordinates(updatedCoords);
+            setOriginalCoordinates(updatedCoords);
+          }
           
           // Update instanceEditingCoordinates and instanceOriginalCoordinates
           // Remove old name, add new name
@@ -1774,15 +1660,7 @@ function App() {
         // Additional small delay to ensure DOM is updated after font load
         await new Promise(resolve => setTimeout(resolve, 200));
 
-        // Clear and recache advance widths since font metrics may have changed after rebuild
-        setAdvanceWidthCache({});
-        setCurrentAdvanceWidth(null);
-        setCurrentAdvanceWidthPixels(null);
 
-        // Recache advance widths after the font rebuild.
-        setTimeout(() => {
-          cacheInstanceAdvanceWidths(instancesData.instances, {}, true);
-        }, 500);
 
         // Reset building state after font is fully loaded and ready
         setBuilding(false);
@@ -2008,14 +1886,12 @@ function App() {
             onDemoteFromSource={handleDemoteFromSource}
             disabledControlAxes={disabledControlAxes}
             axisDefaults={axisDefaults}
-            calculateAdvanceWidth={calculateAdvanceWidth}
-            advanceWidthLoading={advanceWidthLoading}
-            currentAdvanceWidth={currentAdvanceWidth}
           />
         </div>
         ) : (
           <PreviewTab
             axes={axes}
+            avar2Error={avar2Error}
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
             fontUrl={fontUrl}

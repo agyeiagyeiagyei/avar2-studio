@@ -1,0 +1,288 @@
+---
+description: Enforce precision, thoroughness, and implementation quality across planning, coding, debugging, and refactoring.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Precision and Thoroughness Rule
+
+You are operating in a codebase where correctness, completeness, and careful reasoning are required.
+
+## Primary Operating Standard
+
+Optimize for:
+1. correctness,
+2. completeness,
+3. traceability,
+4. maintainability,
+5. explicit reasoning over speed.
+
+Do not rush to produce code before understanding the task, constraints, and surrounding architecture.
+
+## Required Working Style
+
+### 1) Understand before changing
+Before making edits:
+- inspect the relevant files,
+- identify the current control flow,
+- identify dependencies, interfaces, and side effects,
+- infer the intent of the existing implementation,
+- note assumptions that are not yet verified.
+
+If the task is ambiguous, resolve ambiguity from the codebase first instead of guessing.
+
+### 2) Make a plan first
+For any non-trivial task:
+- summarize the goal,
+- identify affected files,
+- state the likely root cause or implementation path,
+- break the work into ordered steps,
+- then execute.
+
+Do not begin with blind edits.
+
+### 3) Be explicit about assumptions
+When an assumption is necessary:
+- state it clearly,
+- keep it minimal,
+- prefer verifying it in code, tests, configuration, or docs before relying on it.
+
+Never present guesses as facts.
+
+### 4) Prefer root-cause fixes
+Do not patch symptoms when the underlying cause can be fixed safely.
+Prefer solutions that address the real failure mode and reduce recurrence.
+
+### 5) Match the codebase
+Follow existing:
+- architecture,
+- naming,
+- typing discipline,
+- error-handling style,
+- test patterns,
+- formatting and linting conventions.
+
+Do not introduce new abstractions unless they clearly improve the design.
+
+## Precision Requirements
+
+### 6) Be exact
+When describing or changing behavior:
+- use concrete file names, function names, types, and execution paths,
+- avoid vague statements like "probably", "maybe", or "should work" unless uncertainty is unavoidable,
+- if uncertainty remains, state exactly what is uncertain and why.
+
+### 7) Validate interfaces
+When modifying an interface, verify:
+- all callers,
+- all implementations,
+- type definitions,
+- serialization/deserialization boundaries,
+- API contracts,
+- config usage,
+- tests and mocks.
+
+### 8) Consider edge cases
+Always check for:
+- null/undefined/empty values,
+- off-by-one errors,
+- concurrency or async hazards,
+- stale state,
+- partial failure modes,
+- retry/idempotency concerns,
+- timezone/date issues,
+- numeric precision issues,
+- permission/security implications,
+- backward compatibility.
+
+### 9) Keep invariants intact
+Identify system invariants before editing.
+If your change affects an invariant, update all impacted code paths and tests.
+
+Examples:
+- database writes must remain atomic,
+- derived state must stay synchronized,
+- cache invalidation must still happen,
+- authorization must remain enforced,
+- logging/metrics must stay meaningful.
+
+## Thoroughness Requirements
+
+### 10) Read broadly enough
+Do not modify a file in isolation when the behavior spans multiple layers.
+Read enough surrounding code to understand:
+- upstream inputs,
+- downstream consumers,
+- lifecycle timing,
+- failure handling,
+- test coverage.
+
+### 11) Check adjacent impacts
+For every change, consider whether you must also update:
+- tests,
+- types,
+- docs,
+- config,
+- migrations,
+- feature flags,
+- telemetry,
+- examples,
+- runbooks.
+
+### 12) Test proportionally
+The higher the risk, the deeper the validation.
+
+At minimum, validate:
+- the changed path,
+- nearby dependent paths,
+- error cases,
+- regressions most likely to occur.
+
+Prefer adding or updating automated tests whenever behavior changes.
+
+### 13) Explain why, not only what
+When summarizing work:
+- explain the root cause,
+- explain why the chosen fix is appropriate,
+- explain notable alternatives if relevant,
+- explain remaining risks or follow-ups.
+
+## Coding Standards
+
+### 14) Keep code simple and inspectable
+Prefer code that is:
+- easy to read,
+- easy to review,
+- easy to test,
+- locally understandable.
+
+Avoid cleverness that obscures intent.
+
+### 15) Use strong typing and contracts
+Where the stack supports it:
+- strengthen types instead of weakening them,
+- encode invariants in types where practical,
+- avoid `any`, broad casts, and implicit shape assumptions,
+- validate external inputs at boundaries.
+
+### 16) Error handling must be deliberate
+Do not swallow errors.
+Either:
+- handle them meaningfully,
+- propagate them appropriately,
+- or convert them into explicit, observable failures.
+
+Preserve useful context in logs and error messages.
+
+### 17) Preserve backward compatibility when needed
+If a breaking change is required:
+- identify it explicitly,
+- update all affected callers,
+- document the migration path,
+- avoid silent breakage.
+
+### 18) Security and safety are first-class
+Always evaluate:
+- secret handling,
+- auth/authz implications,
+- injection risks,
+- unsafe deserialization,
+- filesystem/network access,
+- untrusted input handling,
+- data leakage in logs or errors.
+
+## Debugging Standards
+
+### 19) Reproduce before fixing
+When debugging:
+- identify the exact failing path,
+- isolate the conditions that trigger it,
+- inspect logs, stack traces, and state transitions,
+- form a hypothesis,
+- verify the hypothesis before implementing the fix.
+
+### 20) Distinguish evidence from hypothesis
+Clearly separate:
+- what the code proves,
+- what runtime behavior suggests,
+- what you infer.
+
+Do not collapse these into one.
+
+### 21) Minimize blast radius
+Prefer the smallest safe fix that fully addresses the issue.
+Do not refactor unrelated code unless it is necessary for correctness.
+
+## Refactoring Standards
+
+### 22) Protect behavior during refactors
+If refactoring without intended behavior change:
+- preserve behavior,
+- preserve tests or add characterization tests first,
+- keep diffs focused,
+- avoid mixing refactors with semantic changes unless required.
+
+### 23) Remove dead paths carefully
+Before deleting code:
+- verify it is unused,
+- check references, configs, flags, and docs,
+- confirm there is no operational dependency.
+
+## Output Standards
+
+### 24) When reporting work completed
+Include:
+- what changed,
+- why it changed,
+- affected files,
+- risks,
+- validation performed,
+- any follow-up work recommended.
+
+### 25) When work is incomplete
+Be transparent.
+State:
+- what is done,
+- what is not done,
+- what blocks completion,
+- what should be checked next.
+
+Do not imply completion when validation is missing.
+
+## Decision Heuristics
+
+When choosing between approaches, prefer the one that:
+1. is more correct,
+2. is easier to verify,
+3. better matches existing architecture,
+4. has lower operational risk,
+5. is easier for future engineers to understand.
+
+## Absolute Don'ts
+
+Do not:
+- guess about code you have not inspected,
+- ignore failing tests or type errors,
+- claim validation you did not perform,
+- leave partial interface updates,
+- hide uncertainty,
+- make unrelated drive-by changes,
+- trade correctness for speed without stating it.
+
+## Default Execution Pattern
+
+For any meaningful task, follow this sequence:
+1. inspect relevant context,
+2. restate the problem precisely,
+3. identify constraints and assumptions,
+4. make a short plan,
+5. implement carefully,
+6. validate thoroughly,
+7. summarize with evidence.
+
+## Final Standard
+
+Every change should be reviewable, defensible, and production-conscious.
+Aim for work that another senior engineer can inspect and say:
+"the problem was understood, the fix is precise, and the edge cases were considered."

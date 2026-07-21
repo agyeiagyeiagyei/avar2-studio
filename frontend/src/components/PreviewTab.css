@@ -174,3 +174,25 @@
   max-width: 420px;
   line-height: 1.55;
 }
+
+/* avar2 build failing → the served font is the plain fallback. Make
+   that impossible to miss on the tab whose whole point is the avar2
+   result. */
+.preview-avar2-warning {
+  border-left: 3px solid #b58900;
+  background: #fdf6e3;
+  color: #7a5c00;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 0.9rem;
+  cursor: help;
+}
+
+/* Parametric sliders that FOLLOW the avar2 mapping (no manual
+   override): the value is derived, not typed — set it italic so
+   "live readout" and "your own input" read differently. */
+.preview-axis-reflected .axis-current {
+  font-style: italic;
+}

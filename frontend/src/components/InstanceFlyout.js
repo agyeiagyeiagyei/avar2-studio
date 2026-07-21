@@ -89,7 +89,7 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
             onUpdateStudio();
             onClose();
           }}
-          title="Persist these coordinates to the sibling -avar.csv (the avar2 mapping file) only. Your .glyphs / .designspace source file stays untouched."
+          title="Save these coordinates in the studio (the avar2 mapping data) only. Your .glyphs / .designspace source file stays untouched."
         >
           Save to avar2-studio (CSV)
         </button>
@@ -113,7 +113,7 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
             onDemoteFromSource();
             onClose();
           }}
-          title="Remove this instance from the source file (.glyphs / .designspace). The CSV row stays so the avar2 mapping is preserved; the row becomes studio-only and loses its SRC badge."
+          title="Remove this instance from the source file (.glyphs / .designspace). It stays in the studio with its avar2 mapping preserved; the row loses its SRC badge."
         >
           Remove from source file
         </button>

@@ -70,6 +70,8 @@ def entries(source_path: Path) -> List[Dict]:
 
 def save(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
     """Persist the ordered transform entries; returns what was stored."""
+    from .. import csv_io as _csv_io
+    _csv_io.backup_sidecar(sidecar_path_for(source_path))
     cleaned = []
     for e in entries_list:
         if not isinstance(e, dict) or not e.get("type"):

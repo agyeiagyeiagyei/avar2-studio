@@ -462,6 +462,20 @@ export const api = {
     return parseJSON(response);
   },
 
+  async getMappedLocation(coordinates) {
+    // Evaluate the built font's avar table at a user-space location —
+    // returns { mapped: {tag: value} }, the effective post-mapping
+    // value of every fvar axis. Drives the preview's "parametric
+    // sliders follow the avar2 mapping" reflection.
+    const params = new URLSearchParams({ coordinates: JSON.stringify(coordinates) });
+    const response = await fetch(`${API_BASE}/mapped-location?${params}`);
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({}));
+      throw new Error(err.error || `Failed to map location: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async getTextWidth(text, coordinates, fontSizeRem = 2.0) {
     const params = new URLSearchParams({
       text: text,
@@ -479,6 +493,36 @@ export const api = {
         }
         throw new Error(`Failed to measure text width: ${response.status} ${response.statusText}`);
       }
+    }
+    return parseJSON(response);
+  },
+
+  exportConfigUrl() {
+    // URL builder only, no fetch — the Header uses this as an anchor
+    // href and lets the server's Content-Disposition header turn it
+    // into a download (same trick as getFontUrl).
+    return `${API_BASE}/config/export`;
+  },
+
+  async importConfig(bundle, dryRun) {
+    const response = await fetch(`${API_BASE}/config/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bundle, dry_run: dryRun }),
+    });
+    if (!response.ok) {
+      // A 400 carries one of two shapes: a plain {error} (e.g. no source
+      // loaded) or a validation report ({ok, errors, warnings, summary})
+      // when the bundle itself was rejected. Attach the report to the
+      // thrown error so the import modal can swap it in and show exactly
+      // why the apply failed.
+      const body = await parseJSON(response).catch(() => null);
+      const message = (body && body.error)
+        || (body && body.errors && body.errors[0])
+        || `Failed to import configuration: ${response.status}`;
+      const err = new Error(message);
+      if (body && body.errors) err.report = body;
+      throw err;
     }
     return parseJSON(response);
   },

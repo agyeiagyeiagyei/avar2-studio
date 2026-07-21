@@ -271,6 +271,35 @@ may inject a given axis tag.
 next launch. The folder is created with a README template on first
 run.
 
+## Export / import studio configuration
+
+The **Config** dropdown in the header moves a whole studio
+configuration between sources or instances — e.g. from a test copy to
+the real file, or onto a colleague's machine.
+
+- **Export configuration…** downloads `<family>-avar2studio.json`, a
+  single bundle containing the control axes ("secondary parametric
+  axes") and their brace-layer declarations, the avar2 mappings CSV,
+  and the transforms on/off + params. Drawn outlines are **not**
+  included (they live in the source's `.avar2-studio/` workdir);
+  imported brace layers are re-seeded by interpolation.
+- **Import configuration…** takes a bundle and first shows a
+  validation report — nothing is applied until you confirm. Import is
+  **all-or-nothing**: if anything the config depends on is missing
+  from the loaded source (a parametric axis the mappings route onto,
+  an axis a brace layer pins, a glyph, a transform that isn't
+  installed), the report lists every problem and the Import button
+  stays disabled.
+
+Importing **replaces** the current studio configuration (control axes
++ transforms wholesale; the avar2 CSV too when the bundle carries one —
+a bundle with no mappings leaves the existing CSV untouched). Brace
+layers, shadow, and preview rebuild automatically afterwards. Control
+axes remain `.glyphs`-only: a bundle that declares control axes fails
+validation on a `.designspace` source — delete the `control_axes`
+section from the bundle to import just its mappings and transforms
+there.
+
 ## Frontend hot-reload (optional)
 
 If you're iterating on the frontend, the React dev server has hot

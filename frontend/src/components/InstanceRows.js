@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth, disabledControlAxes, axisDefaults }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -141,9 +141,6 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             onDemoteFromSource={onDemoteFromSource ? () => onDemoteFromSource(instance) : undefined}
             disabledControlAxes={disabledControlAxes}
             axisDefaults={axisDefaults}
-            calculateAdvanceWidth={calculateAdvanceWidth}
-            advanceWidthLoading={advanceWidthLoading}
-            currentAdvanceWidth={selectedInstance?.name === instance.name ? currentAdvanceWidth : null}
           />
         </div>
       ))}

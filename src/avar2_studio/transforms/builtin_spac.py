@@ -37,6 +37,29 @@ def _spac_output_name(family: str, vf_path: Path) -> str:
     return f"{family}[{','.join(tags)}].ttf"
 
 
+def _instance_spac_overrides(source_path: Path) -> dict:
+    """Per-instance SPAC values from the sidecar CSV (``<stem>-avar.csv``).
+
+    The SPAC column is the per-instance spacing coordinate authored in the
+    studio. It lives OUTSIDE avar2 (the config generator excludes it from
+    out:), so nothing else carries it into the built font — the transform
+    applies it directly when pinning instance coordinates. Missing/blank
+    cells fall back to the axis default (0)."""
+    import csv as _csv
+    csv_path = source_path.parent / f"{source_path.stem}-avar.csv"
+    overrides = {}
+    try:
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            for row in _csv.DictReader(f):
+                name = (row.get("Instance Name") or "").strip()
+                cell = (row.get("SPAC") or "").strip()
+                if name and cell:
+                    overrides[name] = float(cell)
+    except (OSError, ValueError):
+        pass
+    return overrides
+
+
 class SpacTransform(Transform):
     spec = TransformSpec(
         id="spac",
@@ -85,5 +108,23 @@ class SpacTransform(Transform):
             raise RuntimeError(
                 f"gftools-gen-spac failed: {(proc.stderr or proc.stdout or '').strip()[:500]}"
             )
+
+        # gen-spac pins every instance's SPAC coordinate to the axis default.
+        # Re-apply the per-instance SPAC values authored via the CSV — the
+        # per-instance spacing coordinate must survive injection.
+        overrides = _instance_spac_overrides(ctx.source_path)
+        if overrides:
+            font = TTFont(str(out))
+            name_table = font["name"]
+            changed = False
+            for inst in font["fvar"].instances:
+                iname = name_table.getDebugName(inst.subfamilyNameID) or ""
+                if iname in overrides:
+                    inst.coordinates["SPAC"] = overrides[iname]
+                    changed = True
+            if changed:
+                font.save(str(out))
+            font.close()
+
         ctx.log(f"SPAC axis injected ({lo}…{hi}) → {out.name}")
         return out

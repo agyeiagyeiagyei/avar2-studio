@@ -3,7 +3,7 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, calculateAdvanceWidth, advanceWidthLoading, currentAdvanceWidth, disabledControlAxes, axisDefaults }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -41,32 +41,23 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   }, [activeCoordinates, disabledControlAxes, axisDefaults]);
 
   // SPAC support is deferred — the coordinate dict is rendered as-is.
-  const coordinatesForWidth = { ...previewCoordinates };
-  
-  // Calculate advance width for this instance
-  // If this is the selected instance and we have an exact API value, use it
-  // Otherwise, use cache/interpolation
-  const advanceWidth = React.useMemo(() => {
-    // Use exact API value for selected instance if available
-    if (isSelected && currentAdvanceWidth !== null && currentAdvanceWidth !== undefined) {
-      return currentAdvanceWidth;
-    }
-    
-    if (!calculateAdvanceWidth || !fontLoaded) {
-      return null;
-    }
-    try {
-      const width = calculateAdvanceWidth(coordinatesForWidth, sampleText);
-      return width;
-    } catch (err) {
-      return null;
-    }
-  }, [calculateAdvanceWidth, fontLoaded, coordinatesForWidth, sampleText, instance.name, isSelected, currentAdvanceWidth]);
-  
-  // Build font-variation-settings string from whatever axes the
-  // source declares. previewCoordinates differs from activeCoordinates
-  // only when the CONTROL AXES disable toggle has axes pinned.
-  let fontVariationSettings = Object.entries(previewCoordinates)
+
+  // Pin EVERY fvar axis explicitly. Any axis left unpinned is free
+  // for plain CSS to drive: the moment opsz/wght exist in the fvar,
+  // font-optical-sizing:auto (the browser default) maps the font
+  // SIZE onto opsz and font-weight maps 400 onto wght — routing every
+  // row through the avar2 table at (opsz≈size, wght 400) and
+  // fattening the hairlines. Rows render the authored PARAMETRIC
+  // location: user axes rest at their defaults (where avar2
+  // contributes nothing) and the row's coordinates overlay only
+  // exact fvar tags — the uppercase OPSZ/WGHT mapping columns never
+  // match and stay display-only chips.
+  const pinnedAxes = { ...(axisDefaults || {}) };
+  for (const [tag, value] of Object.entries(previewCoordinates)) {
+    if (tag in pinnedAxes) pinnedAxes[tag] = value;
+  }
+  const axesForRender = Object.keys(pinnedAxes).length > 0 ? pinnedAxes : previewCoordinates;
+  let fontVariationSettings = Object.entries(axesForRender)
     .map(([tag, value]) => `"${tag}" ${value}`)
     .join(', ');
 
@@ -227,9 +218,9 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               ref={dotRef}
               className={`sync-status-dot sync-status-${syncStatus}`}
               title={
-                syncStatus === 'green' ? 'Saved in source file — click to demote (remove from source, keep in studio)' :
-                syncStatus === 'orange' ? 'Saved in avar2-studio CSV only — click to save to source / demote' :
-                syncStatus === 'red' ? 'Unsaved edits — click to choose where to save' :
+                syncStatus === 'green' ? 'Saved in the source file — click to demote (remove from source, keep in studio)' :
+                syncStatus === 'orange' ? 'Saved in the studio — not in the source file. Click to push to source.' :
+                syncStatus === 'red' ? 'Unsaved edits — saving shortly; click to choose where to save' :
                 'Unknown status'
               }
               style={{
@@ -383,6 +374,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
             fontFamily: fontLoaded && vfFamilyId ? `"${vfFamilyId}", sans-serif` : 'sans-serif',
             fontVariationSettings: fontLoaded ? fontVariationSettings : undefined,
             fontFeatureSettings: 'normal',
+            // Belt to the pinning above: never let the browser steer
+            // opsz from the font size or synthesize weight/slant.
+            fontOpticalSizing: 'none',
+            fontSynthesis: 'none',
+            fontWeight: 'normal',
             fontSize: `${fontSize}rem`,
           }}
         >
@@ -394,16 +390,6 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               {tag}: {formatAxisValue(value)}
             </span>
           ))}
-          {advanceWidthLoading ? (
-            <span className="coordinate advance-width-coordinate advance-width-loading">
-              <span className="advance-width-spinner"></span>
-              Calculating...
-            </span>
-          ) : advanceWidth !== null && advanceWidth !== undefined ? (
-            <span className="coordinate advance-width-coordinate">
-              Width: {typeof advanceWidth === 'number' ? Math.round(advanceWidth) : advanceWidth} units
-            </span>
-          ) : null}
         </div>
       </div>
     </div>

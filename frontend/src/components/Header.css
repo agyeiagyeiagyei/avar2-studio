@@ -217,6 +217,11 @@
   position: relative;
 }
 
+/* ---- Config dropdown (export/import the studio configuration) ---- */
+.config-dropdown {
+  position: relative;
+}
+
 .transforms-menu {
   min-width: 300px;
 }

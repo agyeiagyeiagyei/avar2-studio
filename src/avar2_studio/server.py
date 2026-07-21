@@ -57,6 +57,7 @@ from . import source_font as _source_font
 from . import csv_io as _csv_io
 from . import glyph_coverage as _glyph_coverage
 from . import control_axes as _control_axes
+from . import config_port as _config_port
 from . import transforms as _transforms
 from .source_font import UnsupportedSourceFormat
 
@@ -149,6 +150,25 @@ BUILDING: bool = False
 # the last-good font; the user's most recent edit didn't make it through).
 LAST_BUILD_STATUS: Optional[str] = None  # "ok" | "failed" | None
 LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
+# Set when the avar2 build failed and the plain-VF fallback is being
+# served instead. The fallback keeps LAST_BUILD_STATUS "ok", which made
+# avar2 failures invisible — the preview silently lost its mapped axes.
+LAST_AVAR2_ERROR: Optional[str] = None
+
+# Registered-axis conventions, used wherever a declared axis has no
+# explicit default: the /api/avar2/axes response AND the compiled-axis
+# ranges handed to the gen-avar2 shim. One table so the sliders and
+# the built fvar can never disagree about where "default" is.
+TRADITIONAL_AXIS_DEFAULTS = {
+    "wght": 400.0,
+    "wdth": 100.0,
+    "opsz": 72.0,
+    "cntr": 0.0,
+    "slnt": 0.0,
+    "ital": 0.0,
+    "grad": 0.0,
+    "spac": 0.0,
+}
 # Set when an ENABLED post-build transform failed during the last build (the
 # base font still compiled, so LAST_BUILD_STATUS stays "ok", but the requested
 # transform — e.g. SPAC — was skipped). Surfaced in /api/health + the
@@ -166,6 +186,16 @@ BACKGROUND_WORK: int = 0
 # Serializes read-modify-write on the control-axis sidecar so two concurrent
 # edits can't interleave and drop each other's layers.
 SIDECAR_LOCK = threading.Lock()
+
+# Watchdog suppression window: while time.time() < this value, the file
+# watcher ignores source-file modifications. Set around SERVER-INITIATED
+# writes (instance rename/update/delete, shadow regen) — those changes
+# already carry their own rebuild, and letting the watcher fire on them
+# produced a redundant CSV sync plus a second full build per edit (the
+# "saved, saved, rebuilt, rebuilt" sequence). External saves from
+# Glyphs.app outside the window still sync + rebuild as before.
+_SUPPRESS_WATCHDOG_UNTIL: float = 0.0
+_SUPPRESS_WATCHDOG_SECONDS = 6.0
 # Debounced shadow-regen + rebuild. Layer edits arrive in bursts (clicking ✕ a
 # few times, adding several glyphs); regenerating the shadow and recompiling
 # per edit costs seconds each and would queue up. Coalesce a burst into one job.
@@ -252,6 +282,11 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
         font_object: Optional font object to re-save after Glyphs.app saves
                     (if None, will reload and save from disk)
     """
+    # This write (and the Glyphs.app save/close/reopen dance below) is
+    # server-initiated — suppress the file watcher so it doesn't queue a
+    # redundant sync + second build on top of the caller's own rebuild.
+    global _SUPPRESS_WATCHDOG_UNTIL
+    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
     try:
         # Touch the file to update its modification time
         current_time = time.time()
@@ -633,11 +668,10 @@ def get_instances():
         source_names = {entry["name"] for entry in instances}
 
         # Pull studio-only rows: any CSV row whose Instance Name isn't in
-        # the source file. We don't include their coordinates here — the
-        # frontend already fetches CSV data through other endpoints and
-        # the row's coordinates aren't strictly needed for instance
-        # listing. (If the UI later wants them, we can add parametric
-        # values from the CSV here.)
+        # the source file. For SOURCE rows, merge the CSV's SPAC cell into
+        # the coordinates — SPAC is a per-instance render coordinate that
+        # lives only in the CSV (it's transform-injected, not a source
+        # axis), so without this merge a saved SPAC value never comes back.
         csv_path = _get_preview_csv_path()
         if csv_path and csv_path.exists():
             try:
@@ -645,7 +679,17 @@ def get_instances():
                     reader = csv.DictReader(f)
                     for row in reader:
                         name = (row.get("Instance Name") or "").strip()
-                        if not name or name in source_names:
+                        if not name:
+                            continue
+                        if name in source_names:
+                            spac = (row.get("SPAC") or "").strip()
+                            if spac:
+                                try:
+                                    next(
+                                        inst for inst in instances if inst["name"] == name
+                                    )["coordinates"]["SPAC"] = float(spac)
+                                except (StopIteration, TypeError, ValueError):
+                                    pass
                             continue
                         coordinates = {}
                         for key, value in row.items():
@@ -733,21 +777,47 @@ def get_axes():
         # BUILT-FONT overlay. Post-build transforms (e.g. SPAC) inject fvar
         # axes that have no source master, so get_axes_from_glyphs can't see
         # them. Read the built font's fvar and surface any tag not already
-        # present as a normal parametric slider (has_master_coverage=True →
-        # draggable; not a control axis → sits with XTRA/XOPQ/YOPQ).
+        # present. Two kinds:
+        #   - avar2 USER axes (the CSV's in-columns — wght/opsz): mapping
+        #     targets with no masters of their own → has_master_coverage
+        #     False, so the Preview tab files them under USER AXES.
+        #   - transform-injected axes (SPAC): treated as parametric sliders
+        #     (has_master_coverage=True → draggable; not a control axis →
+        #     sits with XTRA/XOPQ/YOPQ).
         if VARIABLE_FONT_PATH is not None and Path(VARIABLE_FONT_PATH).exists():
             try:
+                user_axis_tags = set()
+                csv_path = _get_avar2_csv_path()
+                if csv_path and csv_path.exists():
+                    try:
+                        _, _, in_cols, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+                        user_axis_tags = {
+                            _csv_io.normalize_in_axis_name(c).lower() for c in in_cols
+                        }
+                        user_axis_tags.discard("spac")  # transform-injected, stays parametric
+                    except Exception:
+                        user_axis_tags = set()
                 have = {str(a.get("tag", "")).lower() for a in axes}
                 for b in get_axes_from_built_font(VARIABLE_FONT_PATH):
-                    if str(b.get("tag", "")).lower() in have:
+                    tag_lower = str(b.get("tag", "")).lower()
+                    if tag_lower in have:
                         continue
+                    is_user_axis = tag_lower in user_axis_tags
                     axes.append({
                         "tag": b["tag"],
                         "name": b.get("name", b["tag"]),
                         "min": b["min"],
                         "max": b["max"],
                         "default": b["default"],
-                        "has_master_coverage": True,
+                        "has_master_coverage": not is_user_axis,
+                        # Built-font-only and not an avar2 user axis ⇒
+                        # injected by a post-build transform (SPAC).
+                        # Injected axes are LIVE PREVIEW state, never
+                        # per-instance data: the frontend must exclude
+                        # them from dirtiness checks and save payloads,
+                        # or a dragged Spacing slider turns every dot
+                        # permanently red ("saves do nothing").
+                        "transform_injected": not is_user_axis,
                     })
             except Exception as built_exc:
                 print(f"Warning: built-font overlay on /api/axes failed: {built_exc}", file=sys.stderr)
@@ -820,6 +890,11 @@ def _run_shadow_regen_and_build():
         shadow = None
         try:
             shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            # Regenerating rewrites the watched source file (the shadow IS
+            # GLYPHS_PATH while active) — this job already triggers the
+            # build, so suppress the watcher for it.
+            global _SUPPRESS_WATCHDOG_UNTIL
+            _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
         except Exception as exc:  # noqa: BLE001
             print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
         # Build from the shadow only while some axis still has layers —
@@ -853,6 +928,39 @@ def schedule_shadow_rebuild():
         _REBUILD_TIMER = threading.Timer(_REBUILD_DEBOUNCE_SECONDS, _run_shadow_regen_and_build)
         _REBUILD_TIMER.daemon = True
         _REBUILD_TIMER.start()
+
+
+_CSV_BUILD_TIMER: Optional[threading.Timer] = None
+_CSV_BUILD_TIMER_LOCK = threading.Lock()
+_CSV_BUILD_DEBOUNCE_SECONDS = 3.0
+
+
+def schedule_debounced_build(delay: float = _CSV_BUILD_DEBOUNCE_SECONDS) -> None:
+    """Coalesce a burst of CSV-level edits (auto-saved instance
+    coordinates, mapping tweaks) into ONE rebuild ``delay`` seconds
+    after the last one. An immediate rebuild per save made every
+    slider settle cost a multi-second build plus a preview reload
+    mid-editing. Folds into /api/health's ``building`` via
+    BACKGROUND_WORK, same as the shadow-regen debounce."""
+    global _CSV_BUILD_TIMER, BACKGROUND_WORK
+
+    def _run():
+        global _CSV_BUILD_TIMER, BACKGROUND_WORK
+        try:
+            trigger_build()
+        finally:
+            with _CSV_BUILD_TIMER_LOCK:
+                _CSV_BUILD_TIMER = None
+                BACKGROUND_WORK -= 1
+
+    with _CSV_BUILD_TIMER_LOCK:
+        if _CSV_BUILD_TIMER is not None:
+            _CSV_BUILD_TIMER.cancel()
+        else:
+            BACKGROUND_WORK += 1
+        _CSV_BUILD_TIMER = threading.Timer(delay, _run)
+        _CSV_BUILD_TIMER.daemon = True
+        _CSV_BUILD_TIMER.start()
 
 
 def trigger_build():
@@ -891,14 +999,24 @@ def _run_build():
     view always has *some* font to show.
     """
     global VARIABLE_FONT_PATH, LAST_BUILD_TIME, BUILDING, USE_FONTC
-    global LAST_BUILD_STATUS, LAST_BUILD_ERROR
+    global LAST_BUILD_STATUS, LAST_BUILD_ERROR, LAST_AVAR2_ERROR
 
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
     avar2_result = _perform_avar2_build(check_sync=False)
     if avar2_result.get("success"):
+        LAST_AVAR2_ERROR = None
         print(f"Avar2 font built: {avar2_result['font_path']}", file=sys.stderr)
         return True
 
+    # Record WHY, so /api/health can surface that the served font is
+    # the plain fallback (no avar2 table, no mapped axes) — otherwise
+    # everything reports "ok" while the preview quietly loses its
+    # user-facing axes.
+    _avar2_details = str(avar2_result.get("details") or "").strip()
+    LAST_AVAR2_ERROR = (
+        f"{avar2_result.get('error')}"
+        + (f": …{_avar2_details[-400:]}" if _avar2_details else "")
+    )
     print(
         f"Avar2 build skipped/failed ({avar2_result.get('error')}); "
         f"falling back to plain variable-font build.",
@@ -921,6 +1039,18 @@ def _run_build():
         return True
     except Exception as e:
         print(f"Build failed: {e}", file=sys.stderr)
+        # BOTH paths failed — the avar2 attempt and the plain fallback.
+        # Report the compiler error (the actionable one: the source
+        # itself can't compile) with the avar2 failure as context,
+        # instead of leaving only the avar2 error in the banner. The
+        # compiler output is multiline; collapse it so the banner stays
+        # one line, and keep the tail where the actual error lives.
+        flat = " | ".join(ln for ln in str(e).splitlines() if ln.strip())
+        _record_build_failure({
+            "success": False,
+            "error": "Font build failed",
+            "details": f"…{flat[-350:]} (avar2 build also failed: {avar2_result.get('error')})",
+        })
         return False
     finally:
         BUILDING = False
@@ -1226,7 +1356,11 @@ def create_instance():
             value = coordinates.get(tag, coordinates.get(upper, axis["default"]))
             new_row[upper] = str(value)
         for field in fieldnames:
-            new_row.setdefault(field, str(axis_defaults.get(field.upper(), 0)))
+            # Columns beyond the parametric axes (OPSZ/WGHT mapping
+            # inputs) start BLANK, never 0: a stamped zero becomes a
+            # real avar2 in: value and drags the compiled axis range
+            # to it (the recurring unset-becomes-zero bug class).
+            new_row.setdefault(field, "")
 
         if insert_after:
             insert_index = None
@@ -1241,6 +1375,7 @@ def create_instance():
         else:
             rows.append(new_row)
 
+        _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -1296,9 +1431,6 @@ def update_instance(instance_name: str):
     except (ValueError, TypeError):
         return jsonify({"error": "Coordinates must be numeric"}), 400
 
-    # SPAC support is deferred; if the caller sent one we silently drop it.
-    coordinates.pop('SPAC', None)
-
     csv_only_flag = (
         request.args.get('csv_only', '').lower() in ('1', 'true', 'yes')
         or bool(data.get('csv_only'))
@@ -1312,6 +1444,13 @@ def update_instance(instance_name: str):
     glyphs_coordinates = {
         tag: value for tag, value in coordinates.items()
         if tag in source_axis_tags
+    }
+    # The CSV row takes source axes AND SPAC — the per-instance spacing
+    # coordinate lives in the CSV only (it's transform-injected, not a
+    # source axis, so it never goes to the .glyphs writeback).
+    csv_coordinates = {
+        tag: value for tag, value in coordinates.items()
+        if tag in source_axis_tags or tag == 'SPAC'
     }
 
     global EDITING_INSTANCES
@@ -1328,7 +1467,7 @@ def update_instance(instance_name: str):
     # studio-only instances this is the only persistence path; for
     # source instances it keeps the avar2 mapping CSV row in lockstep
     # with the source's <location>.
-    csv_writeback_needed = bool(glyphs_coordinates)
+    csv_writeback_needed = bool(csv_coordinates)
     if csv_writeback_needed:
         csv_path = _get_preview_csv_path()
         if csv_path and csv_path.exists():
@@ -1353,22 +1492,37 @@ def update_instance(instance_name: str):
                 for row in rows:
                     if row.get("Instance Name", "").strip() == instance_name:
                         if should_write_csv_row:
-                            for tag, value in glyphs_coordinates.items():
-                                row[tag.upper()] = str(value)
+                            for tag, value in csv_coordinates.items():
+                                col = tag.upper()
+                                if col not in fieldnames:
+                                    # Unknown coordinate tag — DON'T create
+                                    # a column for it. The mappings data
+                                    # models source parametric axes plus
+                                    # declared mapping axes only; transform-
+                                    # injected axes (SPAC) ride along in
+                                    # instance coordinates but don't exist
+                                    # when the avar2 table compiles, and a
+                                    # stray SPAC column hard-failed config
+                                    # generation ("parametric axis 'SPAC'
+                                    # is blank"). Spacing is driven live on
+                                    # the preview instead.
+                                    continue
+                                row[col] = str(value)
                         instance_updated = True
                         updated_count += 1
 
                 if instance_updated:
                     if updated_count > 1:
                         print(f"Warning: Found {updated_count} duplicate rows for '{instance_name}', updated all", file=sys.stderr)
+                    _csv_io.backup_sidecar(csv_path)
                     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
                     _update_csv_modification_time(csv_path)
-                    print(f"Updated CSV row for '{instance_name}'", file=sys.stderr)
+                    print(f"Saved '{instance_name}' in the studio", file=sys.stderr)
                 else:
-                    print(f"Error: Instance '{instance_name}' not found in CSV", file=sys.stderr)
+                    print(f"Error: Instance '{instance_name}' not found in the studio", file=sys.stderr)
             except Exception as e:
                 print(f"Warning: Could not update CSV: {e}", file=sys.stderr)
                 import traceback
@@ -1387,26 +1541,36 @@ def update_instance(instance_name: str):
             except Exception as e:
                 print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
     
-    # Trigger immediate rebuild after updating instance
-    # Run rebuild in background thread to avoid blocking the response and file locking issues
-    def rebuild_in_background():
-        global BUILDING
-        if BUILDING:
-            print("Build already in progress, skipping rebuild after instance update...", file=sys.stderr)
-            return
+    if csv_only_flag:
+        # NO rebuild for auto-saved coordinate edits. The instance
+        # rows preview through font-variation-settings on the
+        # already-built font, so a rebuild changes nothing they show —
+        # it only refreshes the avar2 table, which is consumed on the
+        # Preview tab. Health reports ``build_stale`` (CSV newer than
+        # the last build); the frontend rebuilds once when the Preview
+        # tab opens. Rebuilding per slider settle made every tweak
+        # cost a multi-second build and a preview flash.
+        pass
+    else:
+        # Explicit source writeback: rebuild immediately, in a
+        # background thread to avoid blocking the response.
+        def rebuild_in_background():
+            global BUILDING
+            if BUILDING:
+                print("Build already in progress, skipping rebuild after instance update...", file=sys.stderr)
+                return
 
-        print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
-        trigger_build()
-    
-    # Start rebuild in background thread (small delay to ensure file save completes)
-    rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-    rebuild_thread.start()
+            print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
+            trigger_build()
+
+        rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
+        rebuild_thread.start()
     
     message_parts = []
     if glyphs_updated:
         message_parts.append(f"Updated instance '{instance_name}' in source file")
     if csv_writeback_needed:
-        message_parts.append(f"Updated CSV row for '{instance_name}'")
+        message_parts.append(f"Saved '{instance_name}' in the studio")
 
     return jsonify({
         "success": True,
@@ -1455,6 +1619,7 @@ def rename_instance(instance_name: str):
                             rows.append(row)
                     
                     # Write updated CSV
+                    _csv_io.backup_sidecar(csv_path)
                     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
@@ -1541,7 +1706,7 @@ def add_instance_to_source(instance_name: str):
                 break
 
         if not found:
-            return jsonify({"error": f"Instance '{instance_name}' not found in CSV"}), 404
+            return jsonify({"error": f"Instance '{instance_name}' not found in the studio"}), 404
 
         ok = _source_font.add_instance_to_source(font, GLYPHS_PATH, instance_name, coords)
         if not ok:
@@ -1626,6 +1791,20 @@ def _get_avar2_built_font_filename() -> Optional[str]:
     return None
 
 
+def _is_build_stale() -> bool:
+    """CSV modified after the last build ⇒ the served font's avar2
+    table no longer reflects the mappings. Cheap mtime compare."""
+    if LAST_BUILD_TIME is None:
+        return False
+    try:
+        csv_path = _get_avar2_csv_path() or _get_preview_csv_path()
+        if not csv_path or not csv_path.exists():
+            return False
+        return csv_path.stat().st_mtime > LAST_BUILD_TIME
+    except Exception:
+        return False
+
+
 @app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint."""
@@ -1659,6 +1838,14 @@ def health():
             "last_build_status": LAST_BUILD_STATUS,
             "last_build_error": LAST_BUILD_ERROR,
             "transform_error": LAST_TRANSFORM_ERROR,
+            # Non-null ⇒ the served font is the plain fallback build;
+            # the avar2 build is failing for this reason.
+            "avar2_error": LAST_AVAR2_ERROR,
+            # True ⇒ the mappings CSV changed after the last build —
+            # the served font's avar2 table is stale. Auto-saved
+            # coordinate edits set this instead of rebuilding; the
+            # Preview tab rebuilds once on open when it's true.
+            "build_stale": _is_build_stale(),
             # Fold in background regen/rebuild work: the layer save returns
             # instantly, so BUILDING alone would read false while the shadow is
             # still regenerating and the preview is stale.
@@ -1943,9 +2130,27 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
     if not config_path:
         return None
     
-    # Don't overwrite existing config
+    # Don't overwrite existing config — except to repair the empty-
+    # fvarInstances case: an instance-less source produced ``ttf: []``,
+    # which the gftools builder's schema rejects (failing every avar2
+    # build). Delete and regenerate; avar2/STAT merge back on next build.
     if config_path.exists():
-        return config_path
+        try:
+            import yaml
+            existing = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            fvar = existing.get("fvarInstances") or {}
+            if fvar and all(not v for v in fvar.values()):
+                # Broken either way: an instance-less source shouldn't
+                # carry the key at all (the builder's strictyaml schema
+                # rejects ``ttf: []``), and an instance-BEARING source
+                # should carry its instances — a stale empty list from
+                # before they existed fails every avar2 build just the
+                # same. Regenerate from the source in both cases.
+                config_path.unlink()
+            else:
+                return config_path
+        except Exception:
+            return config_path
     
     if not GLYPHS_PATH or not GLYPHS_PATH.exists():
         return None
@@ -1980,14 +2185,18 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
         
         # Use absolute path for sources to avoid path issues
         sources_path = str(GLYPHS_PATH.resolve())
-        
+
+        # Only emit fvarInstances when the source declares instances.
+        # An empty list crashes the gftools builder's strictyaml schema
+        # ("ugly disallowed JSONesque flow mapping") — which silently
+        # failed the whole avar2 build for instance-less sources, so the
+        # preview never got avar2 or its user axes.
         config = {
             "sources": [sources_path],
             "familyName": family_name,
-            "fvarInstances": {
-                font_filename: fvar_instances
-            }
         }
+        if fvar_instances:
+            config["fvarInstances"] = {font_filename: fvar_instances}
         
         # Write config
         with config_path.open("w", encoding="utf-8") as f:
@@ -2077,6 +2286,7 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
         return False
     
     try:
+        _csv_io.backup_sidecar(metadata_path)
         with metadata_path.open("w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         return True
@@ -2176,6 +2386,7 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
         rows.append(new_row)
         
         # Write updated CSV (use normalized fieldnames)
+        _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -2420,6 +2631,69 @@ def glyph_coverage():
 # and, for axis-injecting transforms like SPAC, surfaces the new axis as
 # a parametric slider (see the built-font overlay in get_axes).
 # ----------------------------------------------------------------------
+
+
+# Cached TTFont for /api/mapped-location — reparsing the built font per
+# slider tick would dwarf the actual avar evaluation. Keyed on
+# (path, mtime) so rebuilds invalidate naturally.
+_MAPPED_FONT_LOCK = threading.Lock()
+_MAPPED_FONT_CACHE: Dict[str, object] = {"key": None, "font": None}
+
+
+@app.route('/api/mapped-location', methods=['GET'])
+def mapped_location():
+    """Evaluate the BUILT font's avar table at a user-space location.
+
+    Returns the effective post-mapping value of every fvar axis,
+    denormalized back to user space. The preview uses this to make the
+    parametric sliders FOLLOW the avar2 mappings as the designer drags
+    wght/opsz — computed from the compiled table itself (fontTools
+    ``avar.renormalizeLocation``), not a JS reimplementation of the
+    mapping model, so what the sliders show is exactly what the font
+    does. Fonts without an avar table just echo the input location.
+    """
+    if VARIABLE_FONT_PATH is None or not VARIABLE_FONT_PATH.exists():
+        return jsonify({"error": "No built font"}), 404
+    try:
+        coords = json.loads(request.args.get("coordinates", "{}")) or {}
+    except (ValueError, TypeError):
+        return jsonify({"error": "coordinates must be a JSON object"}), 400
+
+    try:
+        from fontTools.varLib.models import normalizeLocation
+
+        with _MAPPED_FONT_LOCK:
+            key = (str(VARIABLE_FONT_PATH), VARIABLE_FONT_PATH.stat().st_mtime)
+            if _MAPPED_FONT_CACHE["key"] != key:
+                _MAPPED_FONT_CACHE["font"] = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
+                _MAPPED_FONT_CACHE["key"] = key
+            tt = _MAPPED_FONT_CACHE["font"]
+
+            axes = {
+                a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
+                for a in tt["fvar"].axes
+            }
+            loc = {}
+            for tag, (lo, d, hi) in axes.items():
+                try:
+                    v = float(coords.get(tag, d))
+                except (TypeError, ValueError):
+                    v = d
+                loc[tag] = max(lo, min(hi, v))
+            norm = normalizeLocation(loc, axes)
+            avar = tt.get("avar")
+            renorm = avar.renormalizeLocation(norm, tt) if avar is not None else norm
+
+        def _denorm(tag, n):
+            lo, d, hi = axes[tag]
+            return d + n * ((hi - d) if n > 0 else (d - lo))
+
+        # Axes absent from the renormalized dict sit at their default
+        # (normalized 0) — emit them too so the client needn't guess.
+        mapped = {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
+        return jsonify({"mapped": mapped})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/transforms', methods=['GET'])
@@ -3276,6 +3550,92 @@ def delete_control_axis(tag: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/config/export', methods=['GET'])
+def export_config_bundle():
+    """Download the studio-authored configuration (control axes +
+    brace-layer declarations, avar2 mappings CSV, transforms) as one
+    portable JSON bundle. See config_port.py for the format."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    try:
+        bundle = _config_port.build_export(ORIGINAL_PATH, _get_avar2_csv_path())
+    except Exception as e:
+        print(f"Error exporting config: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+    family = (bundle.get("source") or {}).get("family_name") or "source"
+    return Response(
+        json.dumps(bundle, indent=2) + "\n",
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_config_port.bundle_filename(family)}"'
+            )
+        },
+    )
+
+
+@app.route('/api/config/import', methods=['POST'])
+def import_config_bundle():
+    """Validate (``dry_run: true``) or apply a config bundle.
+
+    All-or-nothing: a failed validation writes nothing and returns 400
+    with the report. Applying REPLACES the current studio config
+    (control axes + transforms wholesale; the avar2 CSV only when the
+    bundle carries one), then regenerates the shadow and rebuilds.
+    """
+    global GLYPHS_PATH
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    body = request.get_json(silent=True) or {}
+    bundle = body.get("bundle")
+    if bundle is None:
+        return jsonify({"error": "POST JSON {bundle: {...}, dry_run: bool}"}), 400
+    dry_run = bool(body.get("dry_run", True))
+    try:
+        report = _config_port.validate_bundle(bundle, ORIGINAL_PATH)
+    except Exception as e:
+        print(f"Error validating config bundle: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+    if dry_run or not report["ok"]:
+        return jsonify(report), (200 if dry_run else 400)
+
+    with SIDECAR_LOCK:
+        try:
+            # CSV destination: the CSV the studio is currently editing,
+            # else the conventional <stem>-avar.csv next to the ORIGINAL
+            # (never the shadow — same rule as every sidecar).
+            csv_dest = _get_avar2_csv_path() or _get_preview_csv_path()
+            report = _config_port.apply_bundle(bundle, ORIGINAL_PATH, csv_dest)
+        except Exception as e:
+            print(f"Error applying config bundle: {e}", file=sys.stderr)
+            return jsonify({"error": str(e)}), 500
+
+        # Same shadow + build dance as delete_control_axis: regenerate
+        # while the sidecar still has axes, drop it otherwise; keep the
+        # last-good font on build failure.
+        try:
+            remaining = _control_axes.list_axes(ORIGINAL_PATH)
+            if remaining:
+                shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                if shadow is not None and any(ax.get("layers") for ax in remaining):
+                    GLYPHS_PATH = shadow
+                else:
+                    GLYPHS_PATH = ORIGINAL_PATH
+            else:
+                _control_axes.remove_shadow(ORIGINAL_PATH)
+                GLYPHS_PATH = ORIGINAL_PATH
+            try:
+                trigger_build()
+            except Exception as build_exc:
+                print(f"Warning: rebuild after config import failed: {build_exc}",
+                      file=sys.stderr)
+        except Exception as shadow_exc:
+            print(f"Warning: shadow refresh after config import failed: {shadow_exc}",
+                  file=sys.stderr)
+
+    return jsonify(report)
+
+
 @app.route('/api/avar2/axes', methods=['GET'])
 def get_avar2_axes():
     """Get traditional axes (in:) and parametric axes (out:) from CSV, including metadata."""
@@ -3420,16 +3780,7 @@ def get_avar2_axes():
 
         # Ensure every axis entry has a numeric `default` so the frontend
         # can initialise sliders without hardcoding values.
-        TRADITIONAL_DEFAULTS = {
-            "wght": 400.0,
-            "wdth": 100.0,
-            "opsz": 72.0,
-            "cntr": 0.0,
-            "slnt": 0.0,
-            "ital": 0.0,
-            "grad": 0.0,
-            "spac": 0.0,
-        }
+        TRADITIONAL_DEFAULTS = TRADITIONAL_AXIS_DEFAULTS
         for entry in axes_with_metadata.values():
             if "default" in entry and isinstance(entry["default"], (int, float)):
                 continue
@@ -3548,6 +3899,7 @@ def delete_instance(instance_name: str):
                             rows.append(row)
                 
                 # Write updated CSV (without deleted instance)
+                _csv_io.backup_sidecar(csv_path)
                 with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
@@ -3633,7 +3985,7 @@ def add_avar2_axis():
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
-                "error": "CSV was modified externally. Please reload.",
+                "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
         
@@ -3687,13 +4039,20 @@ def add_avar2_axis():
         if axis_name_normalized in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' already exists"}), 400
         
-        # Add new column to CSV (use normalized name)
+        # Add new column to CSV (use normalized name). Existing rows get
+        # a BLANK cell, not the axis default: the designer hasn't
+        # authored a mapping value for them yet, and a stamped number
+        # becomes real data — it feeds the avar2 in: locations and drags
+        # the built axis's range/default to wherever the stamp landed
+        # (the "opsz slider goes to 0" bug). Blank renders as "—" in the
+        # UI and is omitted from the mapping until assigned.
         fieldnames.append(axis_name_normalized)
         for row in rows:
-            row[axis_name_normalized] = str(default_value)
+            row[axis_name_normalized] = ""
         
         # Write updated CSV (use normalized fieldnames)
         import csv
+        _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -3713,6 +4072,11 @@ def add_avar2_axis():
             "registered_tag": registered_tag,
             "is_parametric": is_parametric,
             "min": min_value,
+            # The declared default was previously dropped on the floor —
+            # the modal collects it, so record it. (It feeds the axis
+            # metadata consumers; the CSV backfill deliberately does NOT
+            # use it, see above.)
+            "default": default_value,
             "max": max_value
         }
         _save_axis_metadata(metadata)
@@ -3739,7 +4103,7 @@ def update_avar2_axis(axis_name: str):
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
-                "error": "CSV was modified externally. Please reload.",
+                "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
         
@@ -3800,6 +4164,10 @@ def update_avar2_axis(axis_name: str):
                 return jsonify({"error": "max must be between -1000 and 1000"}), 400
         if new_min is not None and new_max is not None and new_min >= new_max:
             return jsonify({"error": "min must be less than max"}), 400
+        new_default = data.get("default")
+        if new_default is not None and new_min is not None and new_max is not None:
+            if not (new_min <= new_default <= new_max):
+                return jsonify({"error": "default must be between min and max"}), 400
         
         # Read CSV
         import csv
@@ -3812,7 +4180,7 @@ def update_avar2_axis(axis_name: str):
                 rows.append(row)
         
         if axis_name not in fieldnames:
-            return jsonify({"error": f"Axis '{axis_name}' not found in CSV"}), 404
+            return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
         
         # Update metadata (use normalized name)
         if axis_name_normalized not in metadata:
@@ -3834,6 +4202,11 @@ def update_avar2_axis(axis_name: str):
             current_meta["min"] = new_min
         if new_max is not None:
             current_meta["max"] = new_max
+        if new_default is not None:
+            # Compiles into the built axis via the gen-avar2 shim's
+            # declared ranges — where the axis RESTS, and the one
+            # location avar2 cannot remap.
+            current_meta["default"] = new_default
         
         # Ensure is_parametric flag is preserved (don't allow changing it via edit)
         # It should already be set correctly from initialization
@@ -3847,6 +4220,7 @@ def update_avar2_axis(axis_name: str):
         
         # Write CSV back (use normalized fieldnames)
         import csv
+        _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -3876,7 +4250,7 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
-                "error": "CSV was modified externally. Please reload.",
+                "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
         
@@ -3913,7 +4287,7 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         rows, fieldnames, _, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
         
         if axis_name_normalized not in fieldnames:
-            return jsonify({"error": f"Axis '{axis_name}' not found in CSV"}), 404
+            return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
         
         # Find and update the instance
         instance_found = False
@@ -3924,10 +4298,11 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
                 break
         
         if not instance_found:
-            return jsonify({"error": f"Instance '{instance_name}' not found in CSV"}), 404
+            return jsonify({"error": f"Instance '{instance_name}' not found in the studio"}), 404
         
         # Write updated CSV (use normalized fieldnames)
         import csv
+        _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -4028,21 +4403,72 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
                 "details": str(e),
             })
         try:
-            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False)
+            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False, source_path=GLYPHS_PATH)
         except Exception as e:
             return _record_build_failure({"success": False, "error": "Failed to update config", "details": str(e)})
 
-        fontc_path = shutil.which("fontc")
+        # Resolve the compilers against THIS python env first: gftools'
+        # builder shells out to ninja steps that call gftools-* scripts
+        # found on PATH — under a bare ``.venv/bin/python`` launch the
+        # venv's bin/ isn't on PATH, and those steps can pick up a broken
+        # system/Framework install instead of the env's own tools.
+        build_env = os.environ.copy()
+        # Shims first: build/_shims/gftools-gen-avar2 shadows the venv
+        # console script to fix upstream's broken fvar axis-membership
+        # check (string-vs-Axis-objects), which duplicates every axis
+        # when avar2 in: axes already exist in the font — the
+        # parametric-in mapping case. See the shim's docstring.
+        shims_dir = Path(__file__).parent / "build" / "_shims"
+        build_env["PATH"] = (
+            str(shims_dir)
+            + os.pathsep
+            + str(Path(sys.executable).parent)
+            + os.pathsep
+            + build_env.get("PATH", "")
+        )
+
+        # Hand the studio's declared axis ranges to the gen-avar2 shim:
+        # created axes (opsz/wght…) get their declared min/DEFAULT/max
+        # instead of upstream's range-from-in-values with default=min —
+        # default=min makes the lowest-mapped instance the un-remappable
+        # avar2 origin and silently drops its mapping.
+        try:
+            _meta = _load_axis_metadata() or {}
+            _ranges = {}
+            for _col, _m in _meta.items():
+                _tag = (_m.get("registered_tag") or "").strip()
+                if not _tag or _m.get("is_parametric"):
+                    continue
+                _lo, _hi = _m.get("min"), _m.get("max")
+                if _lo is None or _hi is None:
+                    continue
+                # Same fallback chain as /api/avar2/axes: explicit
+                # metadata default, else the registered-axis convention
+                # (wght 400, opsz 72, …), else the minimum — clamped
+                # into range so the shim never rejects the triple.
+                _d = _m.get("default")
+                if _d is None:
+                    _d = TRADITIONAL_AXIS_DEFAULTS.get(_tag.lower(), _lo)
+                _d = max(float(_lo), min(float(_hi), float(_d)))
+                _ranges[_tag] = [_lo, _d, _hi]
+            if _ranges:
+                build_env["AVAR2_STUDIO_AXIS_RANGES"] = json.dumps(_ranges)
+        except Exception:
+            pass
+
+        fontc_path = shutil.which("fontc", path=build_env["PATH"])
         if not fontc_path:
             return _record_build_failure({"success": False, "error": "fontc not found in PATH"})
 
         builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(config_to_update.resolve())]
-        result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir))
+        result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir), env=build_env)
         if result.returncode != 0:
             return _record_build_failure({
                 "success": False,
                 "error": "Font build failed",
-                "details": (result.stderr or result.stdout or "No error details")[:1000],
+                # TAIL, not head: builder stderr opens with pages of
+                # glyphsLib INFO noise; the actual error is at the end.
+                "details": (result.stderr or result.stdout or "No error details")[-1000:],
             })
 
         project_fonts_dir = workdir.parent / "fonts" / "variable"
@@ -4058,6 +4484,26 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
         avar2_font_dir.mkdir(parents=True, exist_ok=True)
         font_file = avar2_font_dir / built_font.name
         shutil.move(str(built_font), str(font_file))
+
+        # Sanity: a compiled font must never carry duplicate fvar tags.
+        # gen-avar2's axis-append bug produced exactly that (each
+        # parametric axis twice → deltas apply twice → glyphs render
+        # wide, looks like a phantom spacing transform). Fail the avar2
+        # build loudly so the plain-VF fallback serves instead of a
+        # corrupted font.
+        try:
+            _tags = [a.axisTag for a in TTFont(str(font_file))["fvar"].axes]
+        except Exception:
+            _tags = []
+        _dupes = sorted({t for t in _tags if _tags.count(t) > 1})
+        if _dupes:
+            return _record_build_failure({
+                "success": False,
+                "error": "avar2 build produced duplicate fvar axes",
+                "details": f"duplicated tags: {', '.join(_dupes)} — "
+                           "gen-avar2 appended in: axes that already exist "
+                           "(shim missing or bypassed?)",
+            })
 
         try:
             if project_fonts_dir.exists() and not any(project_fonts_dir.iterdir()):
@@ -4314,63 +4760,84 @@ def load_source():
          / display names). Anything unrecognised is rejected with 400.
     Returns the new active path on success."""
     try:
-        # Multipart upload branch.
+        # Multipart upload branch. Each font gets its OWN workspace dir
+        # keyed by basename: re-uploading the same font replaces just
+        # the .glyphs (the outgoing copy is archived) and PRESERVES the
+        # studio sidecars — mappings CSV, axis metadata, transforms,
+        # control axes. The old shared "uploaded/" slot wiped everything
+        # on every upload, which destroyed a designer's authored studio
+        # data the first time they re-uploaded an edited source.
         uploaded = list(request.files.values())
         if uploaded:
-            workspace = Path.home() / ".avar2-studio" / "workspace" / "uploaded"
-            # Wipe the workspace so a re-upload starts fresh. Otherwise
-            # a previous upload's sibling CSV/metadata would leak into
-            # the new source's view (the same leakage class we fixed
-            # for built-in example swaps).
+            import re as _re
             import shutil
-            if workspace.exists():
-                shutil.rmtree(workspace)
-            workspace.mkdir(parents=True, exist_ok=True)
 
-            glyphs_dest: Optional[Path] = None
-            csv_dest: Optional[Path] = None
-            metadata_dest: Optional[Path] = None
+            glyphs_name: Optional[str] = None
+            staged: list = []
             extras_skipped: list = []
-
             for f in uploaded:
                 name = (f.filename or '').strip()
                 if not name:
                     continue
                 lower = name.lower()
                 if lower.endswith('.glyphs'):
-                    if glyphs_dest is not None:
+                    if glyphs_name is not None:
                         return jsonify({"error": "Upload one .glyphs file at a time (got multiple)."}), 400
-                    glyphs_dest = workspace / name
-                    f.save(str(glyphs_dest))
-                elif lower.endswith('-avar.csv') or lower == 'avar2-mappings.csv':
-                    # Defer destination naming until we know the .glyphs
-                    # basename. Save to a temp name first.
-                    tmp = workspace / f".__pending_csv__{name}"
-                    f.save(str(tmp))
-                    csv_dest = tmp
-                elif lower == 'avar2-axis-metadata.json' or lower.endswith('-axis-metadata.json'):
-                    # axis-metadata.json lives in the per-project workdir
-                    # (.avar2-studio/), not next to the .glyphs file.
-                    workdir = workspace / ".avar2-studio"
-                    workdir.mkdir(parents=True, exist_ok=True)
-                    metadata_dest = workdir / "axis-metadata.json"
-                    f.save(str(metadata_dest))
-                else:
-                    extras_skipped.append(name)
+                    glyphs_name = name
+                staged.append((f, name, lower))
 
-            if glyphs_dest is None:
+            if glyphs_name is None:
                 return jsonify({
                     "error": "No .glyphs file in the upload. Required: one .glyphs source. "
                              "Optional: a sibling -avar.csv and/or avar2-axis-metadata.json."
                 }), 400
 
-            # Now that we know the .glyphs basename, rename the pending
-            # CSV to ``<basename>-avar.csv`` so _get_avar2_csv_path
-            # finds it via the standard sibling-lookup rule.
-            if csv_dest is not None:
-                final_csv = workspace / f"{glyphs_dest.stem}-avar.csv"
-                csv_dest.replace(final_csv)
-                csv_dest = final_csv
+            slug = _re.sub(r'[^A-Za-z0-9._-]+', '_', Path(glyphs_name).stem) or "font"
+            workspace = Path.home() / ".avar2-studio" / "workspace" / "uploads" / slug
+
+            # One-time migration from the legacy shared slot: if this
+            # same font was last authored in workspace/uploaded/, carry
+            # its sidecars into the per-font home instead of orphaning
+            # them.
+            legacy = Path.home() / ".avar2-studio" / "workspace" / "uploaded"
+            if not workspace.exists() and (legacy / glyphs_name).exists():
+                workspace.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy), str(workspace))
+                print(f"Migrated legacy upload workspace → {workspace}", file=sys.stderr)
+
+            workspace.mkdir(parents=True, exist_ok=True)
+            glyphs_dest = workspace / glyphs_name
+
+            # Archive the outgoing source instead of overwriting it —
+            # bounded undo for every future "wait, the old version had
+            # it" moment.
+            if glyphs_dest.exists():
+                archive = workspace / ".avar2-studio" / "archive"
+                archive.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                shutil.move(str(glyphs_dest), str(archive / f"{stamp}-{glyphs_name}"))
+                for old in sorted(archive.glob(f"*-{glyphs_name}"))[:-5]:
+                    old.unlink()
+
+            csv_dest: Optional[Path] = None
+            metadata_dest: Optional[Path] = None
+            for f, name, lower in staged:
+                if lower.endswith('.glyphs'):
+                    f.save(str(glyphs_dest))
+                elif lower.endswith('-avar.csv') or lower == 'avar2-mappings.csv':
+                    # Explicitly uploaded CSV replaces the project's —
+                    # after a safety backup of what it replaces.
+                    csv_dest = workspace / f"{Path(glyphs_name).stem}-avar.csv"
+                    _csv_io.backup_sidecar(csv_dest)
+                    f.save(str(csv_dest))
+                elif lower == 'avar2-axis-metadata.json' or lower.endswith('-axis-metadata.json'):
+                    workdir = workspace / ".avar2-studio"
+                    workdir.mkdir(parents=True, exist_ok=True)
+                    metadata_dest = workdir / "axis-metadata.json"
+                    _csv_io.backup_sidecar(metadata_dest)
+                    f.save(str(metadata_dest))
+                else:
+                    extras_skipped.append(name)
 
             _apply_source_path(glyphs_dest)
             return jsonify({
@@ -4563,6 +5030,12 @@ def main():
             if current_time - self.last_modified < self.debounce_interval:
                 return
             self.last_modified = current_time
+
+            # Server-initiated write (instance edit / shadow regen): the
+            # triggering code already queued its rebuild — a watcher-driven
+            # sync+build here would duplicate it.
+            if current_time < _SUPPRESS_WATCHDOG_UNTIL:
+                return
             
             global BUILDING, VARIABLE_FONT_PATH, LAST_BUILD_TIME
             

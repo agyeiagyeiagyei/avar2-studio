@@ -26,12 +26,40 @@ Public surface:
 from __future__ import annotations
 
 import csv
+import shutil
 import sys
+import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from . import source_font
+
+
+def backup_sidecar(path: Path, keep: int = 20) -> None:
+    """Timestamped copy of an authored sidecar (mappings CSV, axis
+    metadata, control/transforms JSON) under the project's
+    ``.avar2-studio/backups/`` before a rewrite. Bounded to the last
+    ``keep`` copies per filename. Never raises — a failed backup must
+    not block the write it protects. Two data-loss incidents in one
+    week bought this."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            return
+        parent = p.parent
+        # axis-metadata.json already lives inside .avar2-studio/ —
+        # don't nest another workdir under it.
+        workdir = parent if parent.name == ".avar2-studio" else parent / ".avar2-studio"
+        backups = workdir / "backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(str(p), str(backups / f"{p.name}.{stamp}"))
+        siblings = sorted(backups.glob(f"{p.name}.*"))
+        for old in siblings[:-keep]:
+            old.unlink()
+    except Exception as e:
+        print(f"Warning: sidecar backup failed for {path}: {e}", file=sys.stderr)
 
 
 # Column-name → axis tag mapping. CSV columns for registered axes are
@@ -321,6 +349,7 @@ def update_csv_from_glyphs(
             return bool(updated_count or removed_count or added_count or new_axes)
 
         if updated_count or removed_count or added_count or new_axes:
+            backup_sidecar(csv_path)
             with csv_path.open("w", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()

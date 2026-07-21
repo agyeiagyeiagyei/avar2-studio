@@ -150,14 +150,14 @@ def active(source_path: Path) -> List[Tuple[Transform, Dict]]:
     return out
 
 
-def set_active(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
-    """Validate + persist the transform entries. Unknown types are dropped;
-    params are coerced against each transform's schema. Each ENABLED
-    transform's params are cross-validated (``Transform.validate``) BEFORE
-    anything is persisted, so an invalid config (e.g. SPAC min >= max) raises
-    ``ValueError`` and the caller returns a 400 with feedback — rather than
-    persisting an enabled-but-doomed transform that silently fails at build.
-    Returns the fresh UI list."""
+def validate(entries_list: List[Dict]) -> List[Dict]:
+    """Validate + clean transform entries WITHOUT persisting them.
+    Unknown types are dropped; params are coerced against each
+    transform's schema. Each ENABLED transform's params are
+    cross-validated (``Transform.validate``) — an invalid config (e.g.
+    SPAC min >= max) raises ``ValueError``. Returns the cleaned entries.
+    Split out of ``set_active`` so config import can dry-run the same
+    checks before anything is written."""
     cleaned = []
     enabled_by_tag = {}
     for e in entries_list or []:
@@ -184,6 +184,16 @@ def set_active(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
                     )
                 enabled_by_tag[tag] = t.spec.name
         cleaned.append({"type": t.spec.id, "enabled": enabled, "params": params})
+    return cleaned
+
+
+def set_active(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
+    """Validate + persist the transform entries. Validation happens BEFORE
+    anything is persisted, so an invalid config raises ``ValueError`` and
+    the caller returns a 400 with feedback — rather than persisting an
+    enabled-but-doomed transform that silently fails at build. Returns
+    the fresh UI list."""
+    cleaned = validate(entries_list)
     _config.save(source_path, cleaned)
     return available(source_path)
 

@@ -10,20 +10,34 @@ since we need the per-glyph loop), reusing gen_spac's injection seam: two gvar
 
 Two deliberate differences from a naive port of Crispy's original:
 
-1. **Proportional, not log.** The width factor is ``(width/UPM) ** bias``.
-   At ``bias = 1`` (default) the *added space ÷ ink width* is constant across
-   glyphs — an even, proportional loosening. Crispy's ``log(width)`` curve
-   actually *compressed* the wide end, handing narrow glyphs proportionally
-   MORE space and wide glyphs less (the opposite of even rhythm). ``bias > 1``
-   pushes past proportional so wide glyphs get extra.
+1. **Proportional around the font's own average, not log, and not
+   UPM-normalized.** The width factor is ``(ink / mean_ink) ** bias``,
+   where ``mean_ink`` is the font's average ink width. At ``bias = 1``
+   (default) an average-width glyph tracks exactly like the uniform
+   gftools transform (±N per side), wide glyphs get more, narrow less —
+   the *distribution* is proportional but the *magnitude* matches the
+   flat transform at any design width. (Normalizing by UPM instead —
+   the original behaviour — made the effect ~10× too weak on condensed
+   designs, whose glyphs are a small fraction of the em.) Crispy's
+   ``log(width)`` curve actually *compressed* the wide end, handing
+   narrow glyphs proportionally MORE space and wide glyphs less (the
+   opposite of even rhythm). ``bias > 1`` pushes past proportional so
+   wide glyphs get extra.
 
 2. **Composites are spaced too.** gen_spac (and the uniform transform) skip
    glyphs with no drawn outline, so ``w``/``u`` and every accented letter get
    zero tracking and read as cramped. Here we measure their bounds through the
    glyph set and inject advance/sidebearing deltas anyway.
 
-Because the factor uses ``width / unitsPerEm``, it is UPM-invariant (Crispy is
-2000). Outlines never move — only phantom points.
+Because the factor uses each glyph's share of the font's own average
+width, it is UPM- and design-invariant (same magnitude on condensed and
+wide designs alike). Outlines never move — only phantom points.
+
+Per-unit rate: at ``scale = 1``, ±N SPAC units ≈ ∓N units on each
+sidebearing of an average-width glyph (±2N advance — exactly the uniform
+gftools amount). ``scale`` multiplies that rate; the default 1.25 sits
+just above parity so lowercase-heavy sample text (narrower than the
+glyph mean) also matches the gftools amount.
 """
 
 from __future__ import annotations
@@ -39,7 +53,7 @@ from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
-from .builtin_spac import _spac_output_name
+from .builtin_spac import _spac_output_name, _instance_spac_overrides
 
 
 def _ink_width(glyph_set, name) -> float:
@@ -74,9 +88,14 @@ class WidthAwareSpacTransform(Transform):
             ParamSpec(key="min", label="Min", type="int", default=-20),
             ParamSpec(key="max", label="Max", type="int", default=40),
             # 1.0 = proportional (added space ÷ width is constant). >1 gives
-            # wide glyphs progressively more than proportional; the axis is
-            # normalized so a 1-em-wide glyph is unaffected by the exponent.
+            # wide glyphs progressively more than proportional; normalized so
+            # an average-width glyph has factor 1 at any bias.
             ParamSpec(key="bias", label="Wide bias", type="float", default=1.0, min=1.0, max=2.5),
+            # Per-unit rate multiplier. 1.0 = ±N SPAC ≈ ∓N per sidebearing
+            # for an average-width glyph (±2N advance — i.e. exactly the
+            # uniform gftools amount). 1.25 lands lowercase-heavy sample
+            # text (narrower than the glyph mean) at the gftools amount too.
+            ParamSpec(key="scale", label="Scale", type="float", default=1.25, min=0.1, max=10.0),
         ],
         default_enabled=False,
         injected_axis_tag="SPAC",
@@ -99,21 +118,35 @@ class WidthAwareSpacTransform(Transform):
         except (TypeError, ValueError):
             bias = 1.0
         bias = max(1.0, bias)
+        try:
+            scale = float(params.get("scale", 1.25))
+        except (TypeError, ValueError):
+            scale = 1.25
+        scale = max(0.1, scale)
 
         font = TTFont(str(vf_path))
         try:
             if not all(t in font for t in ("fvar", "gvar", "glyf")):
                 raise RuntimeError("width-aware SPAC needs a glyf-based VF with fvar+gvar")
-            upm = font["head"].unitsPerEm or 1000
             glyf = font["glyf"]
             gvar = font["gvar"]
             glyph_set = font.getGlyphSet()
 
-            for name in font.getGlyphOrder():
-                ink = _ink_width(glyph_set, name)
-                if ink <= 0:
-                    continue                     # space, .notdef — leave untouched
+            # Two passes: measure every glyph first so deltas can be
+            # normalized against the font's OWN average ink width — an
+            # average-width glyph then tracks exactly like the uniform
+            # gftools transform (see module docstring), whatever the
+            # design's absolute width. space/.notdef (no ink) are skipped.
+            inks = {
+                name: ink
+                for name in font.getGlyphOrder()
+                if (ink := _ink_width(glyph_set, name)) > 0
+            }
+            if not inks:
+                raise RuntimeError("width-aware SPAC: no measurable glyph outlines")
+            mean_ink = sum(inks.values()) / len(inks)
 
+            for name, ink in inks.items():
                 glyph = glyf[name]
                 composite = glyph.isComposite()
                 # A composite with USE_MY_METRICS takes its advance/lsb from a
@@ -123,7 +156,7 @@ class WidthAwareSpacTransform(Transform):
                 if composite and any(c.flags & USE_MY_METRICS for c in glyph.components):
                     continue
 
-                factor = (ink / upm) ** bias     # 1-em glyph → factor 1.0 at any bias
+                factor = (ink / mean_ink) ** bias  # average-width glyph → factor 1.0 at any bias
 
                 variations = gvar.variations.get(name)
                 if variations:
@@ -138,9 +171,9 @@ class WidthAwareSpacTransform(Transform):
                 # would double the right side. Left phantom only.
                 for support, amount in (((-1.0, -1.0, 0.0), lo), ((0.0, 1.0, 1.0), hi)):
                     coords = [None] * n
-                    coords[-4] = (round(-amount * factor), 0)
+                    coords[-4] = (round(-amount * factor * scale), 0)
                     if not composite:
-                        coords[-3] = (round(amount * factor), 0)
+                        coords[-3] = (round(amount * factor * scale), 0)
                     variations.append(TupleVariation({"SPAC": support}, coords))
 
             # fvar axis + instance pinning (vendored from gen_spac.add_spacing_axis)
@@ -153,8 +186,13 @@ class WidthAwareSpacTransform(Transform):
             axis.maxValue = float(hi)
             fvar = font["fvar"]
             fvar.axes.append(axis)
+            # Instance pinning: default 0 — EXCEPT instances the CSV gives a
+            # per-instance SPAC coordinate (authored via the studio). Those
+            # must survive injection, not be flattened to the default.
+            spac_overrides = _instance_spac_overrides(ctx.source_path)
             for inst in fvar.instances:
-                inst.coordinates["SPAC"] = 0.0
+                iname = name_table.getDebugName(inst.subfamilyNameID) or ""
+                inst.coordinates["SPAC"] = spac_overrides.get(iname, 0.0)
             add_HVAR(font)
 
             # pad every VarStore's regions for the new axis
@@ -174,5 +212,5 @@ class WidthAwareSpacTransform(Transform):
             font.save(str(out))
         finally:
             font.close()
-        ctx.log(f"width-aware SPAC injected ({lo}…{hi}, bias {bias:g}) → {out.name}")
+        ctx.log(f"width-aware SPAC injected ({lo}…{hi}, bias {bias:g}, scale {scale:g}) → {out.name}")
         return out
