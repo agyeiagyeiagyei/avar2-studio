@@ -264,3 +264,30 @@
   font-size: 0.7rem;
   color: #a33;
 }
+
+/* Export modal — options moved out of the sidebar panel. */
+.preview-export-modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.2rem 1.4rem;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+}
+
+.preview-export-modal h3 {
+  margin: 0 0 0.9rem;
+  font-size: 1rem;
+}
+
+.preview-export-modal .preview-export-options {
+  border-top: none;
+  padding-top: 0;
+  margin-bottom: 1rem;
+}
+
+.preview-export-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}

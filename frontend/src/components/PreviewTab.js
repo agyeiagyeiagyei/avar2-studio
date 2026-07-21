@@ -175,6 +175,7 @@ function PreviewTab({
   const [exportUseDefault, setExportUseDefault] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const toggleExportHidden = (tag) => setExportHidden(prev => {
     const next = new Set(prev);
@@ -220,6 +221,7 @@ function PreviewTab({
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      setShowExportModal(false);
     } catch (err) {
       setExportError(err.message || 'Export failed');
     } finally {
@@ -380,62 +382,89 @@ function PreviewTab({
         ))}
 
         <div className="preview-tab-download">
-          <div className="preview-export-options">
-            <div className="preview-export-row">
-              <span
-                className="preview-export-label"
-                title="Hidden axes keep working via font-variation-settings but don't appear in font pickers or design apps."
-              >
-                Hide on export
-              </span>
-              <div className="preview-export-chips">
-                {(axes || []).map(a => (
-                  <button
-                    key={a.tag}
-                    type="button"
-                    className={`preview-export-chip${exportHidden.has(a.tag) ? ' on' : ''}`}
-                    onClick={() => toggleExportHidden(a.tag)}
-                    title={exportHidden.has(a.tag)
-                      ? `${a.tag} will be flagged hidden in the exported font. Click to unhide.`
-                      : `Flag ${a.tag} as hidden in the exported font.`}
-                  >
-                    {a.tag}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {userAxes.length > 0 && (
-              <label
-                className="preview-export-default"
-                title="Rebuilds the export so its resting state IS this style: parametric defaults move to the mapped location and the avar2 table is regenerated around it. Every axis range stays intact."
-              >
-                <input
-                  type="checkbox"
-                  checked={exportUseDefault}
-                  onChange={(e) => setExportUseDefault(e.target.checked)}
-                />
-                <span>
-                  Open at current location{' '}
-                  <span className="preview-export-loc">
-                    {Object.entries(currentUserLocation).map(([t, v]) => `${t} ${v}`).join(' · ')}
-                  </span>
-                </span>
-              </label>
-            )}
-            {exportError && <div className="preview-export-error">{exportError}</div>}
-          </div>
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={handleDownload}
-            disabled={!fontLoaded || exporting}
-            title={exportHidden.size === 0 && !exportUseDefault
-              ? "Download the built variable font (.ttf)"
-              : "Export with the options above (a relocated default rebuilds the font — takes a few seconds)"}
+            onClick={() => { setExportError(null); setShowExportModal(true); }}
+            disabled={!fontLoaded}
+            title="Download the built variable font — choose hidden axes and an optional opening location first"
           >
-            {exporting ? 'Exporting…' : 'Download font'}
+            Download font…
           </button>
         </div>
+
+        {showExportModal && (
+          <div className="modal-overlay" onClick={() => !exporting && setShowExportModal(false)}>
+            <div className="preview-export-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Export font</h3>
+              <div className="preview-export-options">
+                <div className="preview-export-row">
+                  <span
+                    className="preview-export-label"
+                    title="Hidden axes keep working via font-variation-settings but don't appear in font pickers or design apps."
+                  >
+                    Hide on export
+                  </span>
+                  <div className="preview-export-chips">
+                    {(axes || []).map(a => (
+                      <button
+                        key={a.tag}
+                        type="button"
+                        className={`preview-export-chip${exportHidden.has(a.tag) ? ' on' : ''}`}
+                        onClick={() => toggleExportHidden(a.tag)}
+                        title={exportHidden.has(a.tag)
+                          ? `${a.tag} will be flagged hidden in the exported font. Click to unhide.`
+                          : `Flag ${a.tag} as hidden in the exported font.`}
+                      >
+                        {a.tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {userAxes.length > 0 && (
+                  <label
+                    className="preview-export-default"
+                    title="Rebuilds the export so its resting state IS this style: parametric defaults move to the mapped location and the avar2 table is regenerated around it. Every axis range stays intact."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exportUseDefault}
+                      onChange={(e) => setExportUseDefault(e.target.checked)}
+                    />
+                    <span>
+                      Open at current location{' '}
+                      <span className="preview-export-loc">
+                        {Object.entries(currentUserLocation).map(([t, v]) => `${t} ${v}`).join(' · ')}
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {exportError && <div className="preview-export-error">{exportError}</div>}
+              </div>
+              <div className="preview-export-actions">
+                <button
+                  type="button"
+                  className="btn btn-cancel"
+                  onClick={() => setShowExportModal(false)}
+                  disabled={exporting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleDownload}
+                  disabled={exporting}
+                  title={exportUseDefault
+                    ? "Rebuilds the font at the chosen location — takes a few seconds"
+                    : "Download the built variable font (.ttf)"}
+                >
+                  {exporting ? 'Exporting…' : 'Download'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="preview-tab-canvas">
