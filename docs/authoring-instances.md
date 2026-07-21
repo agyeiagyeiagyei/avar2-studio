@@ -59,6 +59,8 @@ work the same way at the structural level:
    address (`wght=400 wdth=100`); its parametric columns are the
    parametric coordinates that address maps to. The CSV format also makes it easy for editing without the UI if desired, or for routing to an AI agent for mass edits.
 
+![Instance rows in the studio — each row is one authored instance rendered live in the built font](images/instance-rows.png)
+
 The split between the two approaches is in **how the parametric
 axes themselves are laid out** — how many of them, and which glyphs
 each one deforms.
@@ -117,6 +119,8 @@ What the parametric move does, axis by axis:
 - `XTRA` 94 → 456.3 — counters open up, letters stop touching each other.
 - `XOPQ` 2 → 228.9 — vertical strokes thicken to "regular" weight.
 - `YOPQ` 2 → 164.8 — horizontal strokes follow, slightly thinner than vertical for contrast.
+
+<img src="images/sidebar-axes.png" width="340" alt="The sidebar where parametric coordinates and avar2 mappings are authored">
 
 ## The case-split approach (Roboto Delta)
 

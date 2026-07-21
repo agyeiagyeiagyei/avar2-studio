@@ -59,4 +59,4 @@ In addition to that file, these repo-specific rules apply.
 - `README.md` — user-facing features and launch.
 - `docs/HANDOVER.md` — tribal knowledge: traps, architecture internals,
   known issues ranked, smoke-test playbook. Keep it current when behavior changes.
-- `docs/authoring-instances.md`, `docs/control-axes.md` — workflows/design.
+- `docs/authoring-instances.md`, `docs/secondary-parametric-axes.md` — workflows/design.

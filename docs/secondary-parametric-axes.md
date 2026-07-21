@@ -1,24 +1,29 @@
-# Control axes — design + implementation notes
+# Secondary parametric axes — design + implementation notes
 
-> **Terminology:** the UI now labels these **secondary parametric
-> axes** (renamed from "control axes" in v0.1.0.dev8, on designer
-> feedback). This doc, the code, the API routes, and the
-> `-control.json` sidecar keep the original "control axis" name —
-> they're the same concept.
+> **Naming:** the product term is **secondary parametric axes**
+> (renamed from "secondary parametric axes" in v0.1.0.dev8, on designer feedback).
+> The code, the API routes (`/api/control-axes`), the frontend
+> component files, and the `-control.json` sidecar keep the internal
+> `control` name — where this doc quotes code, routes, or file names,
+> that internal name appears; everywhere else the doc says secondary
+> parametric axis (or "secondary axis" for short).
 
 > **Status:** Partly shipped. This doc is part reference for what's
 > built and part design notes for what isn't; every section is tagged
 > **`SHIPPED`** or **`DESIGN-ONLY`** so the two don't blur.
 >
 > **Shipped:** read-only coverage visualisation; `+ Add` / edit /
-> delete of studio-declared control axes; applicable-glyph &
-> brace-layer authoring on `.glyphs` via the `-control.json` sidecar +
-> a shadow source file; inline outline editing through an embedded
+> delete of studio-declared secondary parametric axes; applicable-glyph &
+> brace-layer authoring via the `-control.json` sidecar + a shadow —
+> on `.glyphs` (brace layers in a shadow copy) **and** `.designspace`
+> (a shadow document with pooled sparse UFO sources); inline outline
+> editing through an embedded
 > [Fontra](https://github.com/fontra/fontra) drawer (a same-origin
-> reverse proxy — integration Path 2, and then some); disable-in-preview.
+> reverse proxy — integration Path 2, and then some) with
+> **studio-restricted multi-source batch editing**; disable-in-preview.
 >
 > **Design-only:** push-to-source / demote sync and the red/orange/green
-> tri-state for control axes; `.designspace` authoring; capturing drawn
+> tri-state for secondary parametric axes; capturing drawn
 > outlines back into the sidecar (true "model α"); mtime-driven shadow
 > regeneration; and the "editing context" trio (interpolation-compat
 > validation, context-string editing, axis-aware context rendering).
@@ -30,13 +35,13 @@
 
 ## Vocabulary
 
-A **control axis** is an axis whose effect is constrained to a named
+A **secondary parametric axis** is an axis whose effect is constrained to a named
 subset of glyphs — realised by **glyph-scoped variation**: brace
 layers in `.glyphs`, alternate UFO masters in `.designspace`. Glyphs
 without coverage stay static across the axis range.
 
-Control axes have **two origins**, and both surface under the
-CONTROL AXES sidebar section:
+Secondary parametric axes have **two origins**, and both surface under the
+SECONDARY PARAMETRIC AXES sidebar section:
 
 - **Source-derived** (`source: "source"`) — a scoped axis that already
   exists in the source file, read out of its brace layers / alternate
@@ -47,22 +52,22 @@ CONTROL AXES sidebar section:
   `<basename>-control.json` sidecar. These carry the edit/delete
   affordances and the brace-layer authoring flow.
 
-Control axes are **parallel to**, not a replacement for, AVAR2
+Secondary parametric axes are **parallel to**, not a replacement for, AVAR2
 MAPPINGS axes:
 
-| | AVAR2 MAPPINGS axes | CONTROL AXES |
+| | AVAR2 MAPPINGS axes | SECONDARY PARAMETRIC AXES |
 |---|---|---|
-| Declared by | designer via **+ Add** (AVAR2 modal) | designer via **+ Add** (control-axis modal), or read from source |
+| Declared by | designer via **+ Add** (AVAR2 modal) | designer via **+ Add** (secondary-axis modal), or read from source |
 | Effect | routed through `-avar.csv` to parametric output axes | brace layers / alternate UFO masters drive per-glyph variation |
 | Sidecar | `<basename>-avar.csv` | `<basename>-control.json` (studio-declared only) |
 | Source mutation | direct (instance flow) | indirect, via a shadow file (studio-declared) |
-| Sidebar section | AVAR2 MAPPINGS | CONTROL AXES |
+| Sidebar section | AVAR2 MAPPINGS | SECONDARY PARAMETRIC AXES |
 
 There are **no hybrids** — but note there's no explicit "axis type"
 field. Routing is by **coverage**: `glyph_coverage._classify` labels
 an axis `universal` (100% of glyphs vary → stays under AVAR2 MAPPINGS /
-parametric) or `scoped` (anything less → CONTROL AXES). The frontend
-renders only `kind === 'scoped'` rows under CONTROL AXES. A tag that
+parametric) or `scoped` (anything less → SECONDARY PARAMETRIC AXES). The frontend
+renders only `kind === 'scoped'` rows under SECONDARY PARAMETRIC AXES. A tag that
 exists both source-derived *and* studio-declared is merged into one
 row, never split into a hybrid. (An earlier draft had a third
 `partial` kind for 80–100% coverage; it was dropped — the threshold
@@ -72,8 +77,8 @@ frontend comments but the backend never emits it.)
 
 ## Applicable glyphs, coverage & extrapolation `SHIPPED`
 
-This is the mental model a designer needs when authoring a control
-axis. It's the part that's easy to get wrong, so it's spelled out
+This is the mental model a designer needs when authoring a secondary
+parametric axis. It's the part that's easy to get wrong, so it's spelled out
 here in full.
 
 ### A brace layer is an *alternate* outline at a *non-default* location
@@ -86,12 +91,12 @@ drawing), which lives at the axis **default**. A brace layer is an
 Consequence: **you cannot place a brace layer at the axis default.**
 The default is the master's territory; a layer there would collide
 with it. That's why the *Add applicable glyphs* modal requires the
-control-axis pin to be **non-default** — it's not an arbitrary rule,
+secondary-axis pin to be **non-default** — it's not an arbitrary rule,
 it's what makes the layer a brace layer instead of a duplicate master.
 
 ### "Applicable glyphs" = the covered subset
 
-A control axis only deforms the glyphs you give it layers for — its
+A secondary parametric axis only deforms the glyphs you give it layers for — its
 **applicable glyphs** (a.k.a. coverage). Every other glyph stays
 static as the slider moves. The axis row lists these glyphs; each
 one expands to show its layers. Coverage is **derived** from the
@@ -154,19 +159,19 @@ Two ways, both in the glyph's tray:
 
 ## The shadow source file `SHIPPED` (with caveats)
 
-For studio-declared control-axis authoring, the studio operates on a
+For studio-declared secondary-axis authoring, the studio operates on a
 **shadow source file** — never the original. This keeps
 experimentation cheap and the original safe.
 
 ```
 <source-dir>/
   Crispy.glyphs                       ← original. The studio does not
-                                        write control-axis edits here.
+                                        write secondary-axis edits here.
                                         The designer edits it freely
                                         for everything else.
   Crispy-avar.csv                     ← AVAR2 MAPPINGS staging (existing).
-  Crispy-control.json                 ← CONTROL AXES sidecar — declared
-                                        control axes + their brace-layer
+  Crispy-control.json                 ← SECONDARY PARAMETRIC AXES sidecar — declared
+                                        secondary parametric axes + their brace-layer
                                         LOCATIONS (not outlines).
   .avar2-studio/
     shadow/
@@ -179,7 +184,7 @@ experimentation cheap and the original safe.
 
 ### How `regenerate_shadow` works
 
-On each control-axis action (and once at load), `regenerate_shadow`:
+On each secondary-axis action (and once at load), `regenerate_shadow`:
 
 1. Copies the original source tree → `.avar2-studio/shadow/`.
 2. Appends any sidecar-declared axes missing from the shadow's axis
@@ -256,26 +261,23 @@ Key facts about the real shape:
 
 ### Lazy shadow creation `SHIPPED` (partial)
 
-The shadow is only created once a control axis exists:
+The shadow is only created once a secondary parametric axis exists:
 `regenerate_shadow` returns `None` when the sidecar has zero axes (and
 for non-`.glyphs` sources), so the shadow directory is absent until
 the first **+ Add**.
 
-**`KNOWN GAP` — the build path does not switch to the shadow on
-*add*.** `create_control_axis` deliberately keeps the build pointed at
-the original; the switch to the shadow happens only when
-`set_layers` writes the first brace layer (gated on the axis having
-`layers`). Worse, the load-time and delete-time swap is gated on a
-dead `ax.get("coverage")` key that the current sidecar never emits —
-so **after a restart the build can stay on the original and authored
-brace deltas drop out of the preview until the user re-saves a
-layer.** This is a bug, not a design choice; fixing the gate to test
-`layers` is the intended behaviour.
+The build path deliberately does **not** switch to the shadow on
+*add*: `create_control_axis` keeps the build pointed at the original,
+and the swap happens when `set_layers` writes the first brace layer.
+Every swap site (load, delete, import, layer save) gates on the axis
+having `layers`. (An earlier draft warned about a dead
+`ax.get("coverage")` gate that could strand the build on the original
+after a restart — that was fixed in `c7dce1f`.)
 
 ### Drift between original and shadow `DESIGN-ONLY`
 
 The intent is that the designer never thinks about syncing: edit the
-original for normal font work, the shadow for control-axis drawings,
+original for normal font work, the shadow for secondary-axis drawings,
 and the studio glues them together by watching the original's mtime
 and regenerating the shadow on change.
 
@@ -284,7 +286,7 @@ and regenerating the shadow on change.
 - There is **no mtime-driven shadow regeneration.** The file watcher's
   handler only re-syncs the CSV and triggers a build; it never calls
   `regenerate_shadow`. The shadow is refreshed only on explicit
-  control-axis actions (add / set-layers / update / delete) and once
+  secondary-axis actions (add / set-layers / update / delete) and once
   at load.
 - When the shadow is the active build path, the watcher observes the
   **shadow** directory, not the original — so edits to the original
@@ -292,7 +294,7 @@ and regenerating the shadow on change.
   get no watcher at all.
 
 So today, after editing the original outside the studio, you must
-trigger a control-axis action (or reload) to fold those changes into
+trigger a secondary-axis action (or reload) to fold those changes into
 the shadow. Automatic drift-handling is a model-α-era goal.
 
 ## Authoring round-trip
@@ -318,7 +320,7 @@ Where the 8-step loop stands today:
    "+ Add layer for `{glyph}`" and top-level "+ Add applicable glyphs"
    open `AddBraceLocationModal` → `PUT /api/control-axes/<tag>/layers`
    → `set_layers`. The designer pins whichever axes they want; the
-   control axis is required non-default.
+   secondary parametric axis is required non-default.
 5. **Open in editor** — `SHIPPED`. The ↗ per-layer button →
    `POST /api/control-axes/<tag>/open-editor` spawns Fontra on the
    shadow and opens the glyph at that location, in edit mode, in a
@@ -330,62 +332,60 @@ Where the 8-step loop stands today:
    above).
 7. **Iterate** — steps 4–5 repeat.
 8. **Push to source** — `NOT BUILT`. There is no push-to-source
-   endpoint for control axes. Add/delete mutate only the sidecar; the
-   original is never written for control-axis work.
+   endpoint for secondary parametric axes. Add/delete mutate only the sidecar; the
+   original is never written for secondary-axis work.
 
-### Sync state `DESIGN-ONLY` for control axes
+### Sync state `DESIGN-ONLY` for secondary parametric axes
 
 The red/orange/green tri-state, the SRC badge, and the demote flow
-described in earlier drafts **exist only for instances**, not control
-axes. Control-axis rows carry just two badges: a `studio` tag on
+described in earlier drafts **exist only for instances**, not
+secondary axes. Secondary-axis rows carry just two badges: a `studio` tag on
 studio-authored layer rows, and the `scoped` kind badge on the axis
 row. A per-axis in-sidecar-vs-in-source tri-state (and the
 push/demote actions that would drive it) is future work that depends
 on step 8 landing first.
 
-## Source-format scope `SHIPPED` (.glyphs) / `DESIGN-ONLY` (.designspace)
+## Source-format scope `SHIPPED` (both formats)
 
-Brace-layer authoring differs structurally across the two formats.
+Brace-layer authoring differs structurally across the two formats,
+but both author through a shadow now.
 
 ### `.glyphs`
 
 Brace layers live inside each glyph's `<layers>` block. Adding one
 means appending a layer entry per applicable glyph, keyed by location.
 `glyphsLib` round-trips this; the shadow is a single `.glyphs` copy
-and mutations are localised. This is what ships.
+and mutations are localised.
 
 ### `.designspace`
 
-There are no brace layers — the equivalent is a **new UFO master at
-the brace location**, containing only the applicable glyphs (others
-interpolate from existing masters). This is the Roboto Delta pattern,
-and it's heavier: each unique location needs its own UFO directory,
-UFOs have to be *pooled* across glyphs sharing a location, and the
-`<sources>` block has to stay consistent.
+There are no brace layers — the equivalent is a **pooled sparse UFO
+source per unique brace location**: one UFO holding every applicable
+glyph pinned at that location, attached as an extra `<source>`
+(`_regenerate_shadow_designspace` in `control_axes.py`). Pooled UFOs
+are named `<stem>-studio-<slug>.ufo` and live beside the shadow
+document in `.avar2-studio/shadow/`, next to fresh copies of the
+original's UFOs. Because the pools are wholly studio-owned files,
+outline preservation is simpler than on `.glyphs`: a pool that still
+matches a sidecar location is **kept as-is** across regenerations
+(drawn outlines included); only missing glyphs are seeded (natural
+interpolated shape via fontmake's Instantiator, default-source copy
+as fallback) and stale pools are deleted. Glyphs dropped from the
+sidecar are reconciled out of their pool.
 
-### `.glyphs` only for now
-
-Control-axis **authoring** works on `.glyphs` sources only.
-`regenerate_shadow` short-circuits (returns `None`) for any
-non-`.glyphs` suffix — that silent skip is where `.designspace`
-deferral is actually enforced.
-
-**`KNOWN GAP` — there is no `.designspace` guard-rail in the UI.**
-The **+ Add** button is *not* disabled for `.designspace` sources, and
-clicking it *succeeds*: `add_axis` writes the sidecar, `/api/axes`
-surfaces the new axis as a live-but-no-op slider, and only
-`regenerate_shadow` silently returns `None`. So a `.designspace` user
-can declare a control axis that can never be authored (no shadow, no
-"Open in editor"). A disabled button + explanatory tooltip is the
-intended design but is **not yet implemented**.
-
-The v1 **read-only** coverage panel does work on `.designspace` —
-Roboto Delta's existing case-split masters show up there; users just
-can't author new ones yet.
+Two build-side consequences, fixed alongside: the built VF's filename
+derives from the ACTIVE source's axes, so `config_generator` now
+derives the font key from the source (not the config's stored key,
+which goes stale the moment a shadow adds an axis) and re-keys the
+`fvarInstances` section in place. Both fixes apply to `.glyphs`
+shadows too — the stale key was the root of avar2-build KeyErrors
+whenever a shadow was active. The file watcher runs recursively for
+`.designspace` shadows and treats `.glif`/`.plist` changes inside the
+pooled UFOs (Fontra saves) as build triggers.
 
 ## Disable in preview `SHIPPED`
 
-Each control-axis row has an **eye-icon toggle** (👁 enabled /
+Each secondary-axis row has an **eye-icon toggle** (👁 enabled /
 👁‍🗨 disabled — an emoji with a tooltip; there's no text "disable"
 label and no keyboard shortcut). When toggled off:
 
@@ -398,11 +398,11 @@ label and no keyboard shortcut). When toggled off:
 - State is **session-local**: a plain React `Set`, not persisted to
   localStorage or the sidecar. It's cleared on every source load /
   swap and pruned when an axis is deleted.
-- The toggle renders for **all** control-like axes (source-derived and
+- The toggle renders for **all** secondary axes (source-derived and
   studio-declared alike) and the override applies per instance-preview
   row.
 
-It answers "what does my font look like *without* this control axis's
+It answers "what does my font look like *without* this secondary parametric axis's
 deformation?" — useful for spotting regressions on non-coverage glyphs
 or comparing against a baseline. (Persisting the state is future work.)
 
@@ -446,6 +446,44 @@ What ships:
 
 Together these resolve the two open unknowns the design flagged — CORS
 behaviour and jump-to-glyph navigation — both handled.
+
+### Multi-source batch editing `SHIPPED` (studio sessions)
+
+Studio-axis sessions expose Fontra's **designspace-navigation** panel
+(its glyph-sources list is the multi-source editing surface), trimmed
+to studio layers only. The mechanics:
+
+- `open-editor` records the session (`FONTRA_EDITOR_SESSION`:
+  studio?, tag, axis display name, axis default), served back at
+  `GET /api/fontra-shim-config`.
+- The reverse proxy's injected CSS is **session-aware**
+  (`_fontra_focus_css`): studio sessions keep the panel + sidebar
+  containers; every other session hides them as before.
+- A same-origin **shim script** (`_FONTRA_STUDIO_SHIM_JS`, injected
+  next to the CSS) self-deactivates unless the config says studio,
+  then: opens the panel tab, hides the other accordion items and the
+  add/remove-source buttons inside the panel's shadow DOM, hides
+  every sources-list row that isn't a studio layer of the session's
+  axis, and enables Fontra's multi-source editing
+  (`sceneSettings.editingLayers`, via the row model's `editing` flag)
+  on each studio row once — the designer can toggle rows off freely,
+  but non-studio rows are actively stripped from the editing set
+  (Fontra's own init can add the selected source).
+- **A row is a studio layer when its dense location sits OFF the
+  session axis's default** — only sidecar seeding creates such
+  layers in a shadow. Fallback: the seed-time
+  `xyz.fontra.source-name` label (`… · <tag> <value>`). If nothing
+  matches, the list is left untrimmed (fail open) and nothing is
+  auto-enabled (fail closed).
+- Masters and source-derived layers are therefore neither visible
+  nor editable in a studio session — the restriction that keeps
+  shadow regeneration (which rebuilds masters from the original)
+  from ever discarding a designer's edits.
+
+Editing multiple sources at once requires point-compatible outlines;
+seeded layers start as copies/interpolations of the masters, so
+they're compatible by construction, and the drawing tools stay
+hidden so structural edits can't desync the batch.
 
 ### Editing-context futures `DESIGN-ONLY`
 
@@ -529,28 +567,30 @@ The read-only coverage surface that v1 shipped, still current:
   ```
   - `kind: "universal"` (full coverage) → stays under AVAR2 MAPPINGS /
     parametric.
-  - `kind: "scoped"` (anything less) → surfaces under CONTROL AXES.
+  - `kind: "scoped"` (anything less) → surfaces under SECONDARY PARAMETRIC AXES.
 
 Everything the older "Out of v1" list marked as future has since
 **shipped**, except two items. Shipped since v1: the `-control.json`
-sidecar, the shadow source file, the **+ Add** control-axis modal
+sidecar, the shadow source file, the **+ Add** secondary-axis modal
 (create *and* edit), the coverage editor (redesigned as the explicit
 `LayersEditor` brace-layer authoring UI), and the "Open in editor"
 button (the embedded Fontra drawer). **Still not built:**
-push-to-source / demote for control axes, and persisted disable state.
+push-to-source / demote for secondary parametric axes, and persisted disable state.
 
 ## What stays untouched
 
 The existing AVAR2 MAPPINGS section, `-avar.csv`, and instance flow
 work exactly as before. No shadow is interposed for instance editing;
 "Save to source file" still writes directly. The shadow strategy is
-reserved for control axes, where the iteration loop and structural
+reserved for secondary parametric axes, where the iteration loop and structural
 risk justify it.
 
 ## Open questions
 
-- **`.designspace` authoring** — the UFO-pooling design (a UFO per
-  pooled brace location, dedup, `<sources>` consistency) is unbuilt.
+- ~~**`.designspace` authoring**~~ — shipped as pooled sparse UFO
+  sources, one UFO per unique brace location with glyphs pooled and
+  the `<sources>` block regenerated each time (see "Source-format
+  scope").
 - **Coverage-compute perf** — Roboto Delta's full source is ~3000
   glyphs × ~20 UFOs; iterating every master at each load may be slow.
   Cache by mtime? Compute lazily when the panel expands?

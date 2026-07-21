@@ -8,7 +8,7 @@ doesn't repeat them:
   working-tree layout, axis surface, Preview tab, transforms (user-facing)
 - [docs/authoring-instances.md](./authoring-instances.md) — the
   instance/mapping authoring workflow, both example fixtures
-- [docs/control-axes.md](./control-axes.md) — secondary parametric
+- [docs/secondary-parametric-axes.md](./secondary-parametric-axes.md) — secondary parametric
   ("control") axes: design + implementation, tagged SHIPPED/DESIGN-ONLY
 
 Everything below is tribal knowledge as of this handover.
@@ -95,7 +95,7 @@ Everything below is tribal knowledge as of this handover.
   **only in the shadow file** and survive regeneration by being read
   back from the previous shadow. **Deleting `.avar2-studio/` loses
   drawn outlines.** True model α (outlines captured into the sidecar)
-  is designed but unbuilt — see control-axes.md.
+  is designed but unbuilt — see secondary-parametric-axes.md.
 
 ### Build orchestration (server.py)
 - `trigger_build()` coalesces: if a build is running, it sets
