@@ -2703,6 +2703,79 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
 
 
+def _build_export_source(parametric_location: Dict[str, float], export_dir: Path) -> Path:
+    """Materialize the export source: the loaded font as a designspace
+    with ONE ADDED MASTER — a fully interpolated instance (outlines,
+    metrics, kerning) at the mapped parametric location — set as the
+    default, so fontc compiles the export resting on that master
+    natively. This is the designer's formulation: corner deltas
+    anchored to the new default master, natural-size gvar. (The
+    earlier binary rebase via fontTools instancer preserved behavior
+    by splitting every variation region around the new origin — ~6x
+    the font size.) The user's source file is never touched."""
+    import glyphsLib
+    import ufoLib2
+    from fontmake.instantiator import Instantiator
+    from fontTools.designspaceLib import SourceDescriptor, InstanceDescriptor
+
+    src_dir = export_dir / "sources"
+    src_dir.mkdir(parents=True, exist_ok=True)
+
+    if str(GLYPHS_PATH).lower().endswith(".glyphs"):
+        gsfont = glyphsLib.GSFont(str(GLYPHS_PATH))
+        ds = glyphsLib.to_designspace(gsfont, ufo_module=ufoLib2)
+        for i, s in enumerate(ds.sources):
+            fname = Path(s.filename or f"master{i}.ufo").name
+            s.font.save(str(src_dir / fname), overwrite=True)
+            s.path = str(src_dir / fname)
+    else:
+        from fontTools.designspaceLib import DesignSpaceDocument
+        ds = DesignSpaceDocument.fromfile(str(GLYPHS_PATH))
+        ds.loadSourceFonts(ufoLib2.Font.open)
+
+    name_by_tag = {a.tag: a.name for a in ds.axes}
+    design_loc = {
+        name_by_tag[t]: float(v)
+        for t, v in parametric_location.items()
+        if t in name_by_tag
+    }
+    # Fill unspecified axes at their (design-space) defaults.
+    for a in ds.axes:
+        if a.name not in design_loc:
+            design_loc[a.name] = float(a.map_forward(a.default))
+
+    inst = InstanceDescriptor()
+    inst.familyName = ds.sources[0].familyName or "Export"
+    inst.styleName = "ExportOrigin"
+    inst.location = dict(design_loc)
+    generator = Instantiator.from_designspace(ds, round_geometry=True)
+    origin_ufo = generator.generate_instance(inst)
+    origin_path = src_dir / "ExportOrigin.ufo"
+    origin_ufo.save(str(origin_path), overwrite=True)
+
+    s = SourceDescriptor()
+    s.path = str(origin_path)
+    s.name = "Export Origin"
+    s.familyName = inst.familyName
+    s.styleName = "ExportOrigin"
+    s.location = dict(design_loc)
+    ds.addSource(s)
+
+    # The added master becomes the DEFAULT: designspace axis defaults
+    # move to its location (parametric axes carry no maps, so design
+    # coords are axis coords).
+    for a in ds.axes:
+        if a.name in design_loc:
+            a.default = design_loc[a.name]
+
+    # SAME stem as the original: the gftools builder derives output
+    # names from the source filename, and the config's stat/avar2
+    # sections are keyed by that name — a suffix here breaks the keys.
+    out = export_dir / f"{Path(str(GLYPHS_PATH)).stem}.designspace"
+    ds.write(str(out))
+    return out
+
+
 def _apply_hidden_axes(path: Path, hidden_tags) -> None:
     """Set the fvar HIDDEN flag (0x0001) on the given axes so end-user
     font pickers don't surface them. In place; unknown tags ignored."""
@@ -2767,10 +2840,8 @@ def export_font():
             # Where the combination lands in the design space — the
             # parametric axes get rebased there so the new origin
             # renders this exact master.
-            # Round the rebased defaults to integers: fractional default
-            # coordinates put every variation region peak at awkward
-            # normalized floats, defeating delta sharing and inflating
-            # the rebased gvar further. A ≤0.5-unit nudge is invisible.
+            # The parametric location the export will REST at — the new
+            # default master gets interpolated exactly here.
             mapped = _evaluate_mapped_location(requested)
             export_defaults = {
                 t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
@@ -2780,42 +2851,60 @@ def export_font():
                 return jsonify({"error": "A build is in progress — try again in a moment"}), 409
             BUILDING = True
             try:
-                config_path = _get_preview_config_path()
-                workdir = _get_preview_dir()
-                if not config_path or not config_path.exists():
-                    return jsonify({"error": "No build config — build the font first"}), 400
-                # Regenerate the config with blank in: cells MATERIALIZED
-                # at the standard declared defaults: blank means "at
-                # default", and with the default relocated to the
-                # requested combination, blank rows would alias onto the
-                # new origin ("Locations must be unique"). The next
-                # preview build regenerates the config normally, so this
-                # doesn't stick.
+                # Interpolate the new default master at the mapped
+                # location and stage a designspace resting on it.
+                try:
+                    export_source = _build_export_source(export_defaults, export_dir)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return jsonify({"error": "Could not generate the default master", "details": str(e)}), 500
+
+                # Config for the export build: regenerated against the
+                # staged designspace, with blank in: cells MATERIALIZED
+                # at the standard declared defaults — blank means "at
+                # default", and with the default relocated the blanks
+                # would alias onto the new origin ("Locations must be
+                # unique").
+                export_workdir = export_dir / "work"
+                export_workdir.mkdir(parents=True, exist_ok=True)
+                export_config = export_workdir / "config.yaml"
+                shutil.copy2(str(_get_preview_config_path()), str(export_config))
+                # The axis metadata must travel with the config:
+                # _declared_axis_defaults resolves it as a config
+                # sibling, and without it the blank-cell fill silently
+                # no-ops — blanks then rebind to the relocated defaults
+                # and alias rows ("Locations must be unique").
+                _meta_src = _get_avar2_metadata_path()
+                if _meta_src and Path(_meta_src).exists():
+                    shutil.copy2(str(_meta_src), str(export_workdir / "axis-metadata.json"))
                 try:
                     from .build import config_generator as _cfg_gen
                     _cfg_gen.update_config(
                         csv_path=_get_preview_csv_path(),
-                        config_path=config_path,
+                        config_path=export_config,
                         backup=False,
-                        source_path=GLYPHS_PATH,
+                        source_path=export_source,
                         fill_in_defaults=True,
                     )
                 except Exception as e:
                     return jsonify({"error": "Export config generation failed", "details": str(e)}), 500
+
                 build_env = _builder_env(default_overrides=requested)
-                build_env["AVAR2_STUDIO_EXPORT_DEFAULTS"] = json.dumps(export_defaults)
                 fontc_path = shutil.which("fontc", path=build_env["PATH"])
                 if not fontc_path:
                     return jsonify({"error": "fontc not found in PATH"}), 500
-                builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(config_path.resolve())]
-                result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir), env=build_env)
+                builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(export_config.resolve())]
+                result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(export_workdir), env=build_env)
                 if result.returncode != 0:
                     return jsonify({
                         "error": "Export build failed",
                         "details": (result.stderr or result.stdout or "")[-800:],
                     }), 500
-                project_fonts_dir = workdir.parent / "fonts" / "variable"
-                produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
+                produced = []
+                for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
+                    produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
+                produced = sorted(set(produced), key=lambda p: p.stat().st_mtime, reverse=True)
                 if not produced:
                     return jsonify({"error": "Export build produced no font"}), 500
                 out_path = export_dir / produced[0].name
