@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>avar2-studio — visual authoring for avar2 variable fonts</title>
+<meta name="description" content="Point avar2-studio at a .glyphs or .designspace file and author avar2 mappings visually. The demo below is a real avar2 font — your browser is applying the actual table.">
+<style>
+  :root {
+    --ink: #1a1a1a; --muted: #6b6b6b; --line: #e4e4e4;
+    --accent: #1668dc; --bg: #ffffff; --panel: #fafafa;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  @font-face {
+    font-family: "CrispyMini";
+    src: url("assets/CrispyMini-demo.ttf");
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+  header.top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 22px 0; border-bottom: 1px solid var(--line);
+  }
+  .brand { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--ink); }
+  .top nav a { font-family: var(--mono); font-size: 14px; margin-left: 20px; color: var(--muted); }
+  .top nav a:hover { color: var(--accent); }
+
+  .hero { padding: 56px 0 8px; }
+  .hero h1 { font-size: 30px; line-height: 1.25; font-weight: 650; max-width: 720px; }
+  .hero p.tag { color: var(--muted); margin-top: 12px; max-width: 640px; }
+
+  /* ---- demo ---- */
+  .demo { margin: 40px 0 8px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .specimen-box { padding: 34px 30px 30px; min-height: 220px; display: flex; align-items: center; overflow: hidden; }
+  #specimen {
+    font-family: "CrispyMini", sans-serif; width: 100%;
+    line-height: 1.08; outline: none; cursor: text; white-space: pre-wrap;
+    word-break: break-word; font-optical-sizing: none;
+  }
+  #specimen:empty::before { content: "Type here…"; color: #ccc; font-family: var(--mono); font-size: 16px; }
+  .demo-note {
+    padding: 10px 30px; font-family: var(--mono); font-size: 12.5px;
+    color: var(--muted); border-top: 1px dashed var(--line);
+  }
+  .controls { border-top: 1px solid var(--line); background: var(--panel); padding: 20px 30px 24px; }
+  .controls .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 34px; }
+  .axis { font-family: var(--mono); font-size: 13px; }
+  .axis .row1 { display: flex; justify-content: space-between; color: var(--ink); }
+  .axis .row1 .tag { color: var(--muted); }
+  .axis input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 0; }
+  details.parametric { margin-top: 18px; font-family: var(--mono); font-size: 13px; }
+  details.parametric summary { cursor: pointer; color: var(--muted); user-select: none; }
+  details.parametric .grid { margin-top: 14px; }
+  .demo-actions { margin-top: 18px; display: flex; gap: 14px; align-items: center; }
+  .demo-actions button {
+    font-family: var(--mono); font-size: 13px; padding: 6px 14px;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer;
+  }
+  .demo-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .caption { font-size: 14px; color: var(--muted); margin: 10px 2px 0; }
+
+  section.feature { padding: 56px 0 8px; }
+  section.feature h2 { font-size: 22px; font-weight: 650; margin-bottom: 10px; }
+  section.feature p { max-width: 680px; color: #333; margin-bottom: 8px; }
+  section.feature img {
+    display: block; max-width: 100%; border: 1px solid var(--line);
+    border-radius: 8px; margin: 22px 0 6px;
+  }
+  section.feature img.narrow { max-width: 420px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+
+  .get-started { margin: 64px 0 0; padding: 34px 0 44px; border-top: 1px solid var(--line); }
+  .get-started h2 { font-size: 22px; margin-bottom: 10px; }
+  pre.cmd {
+    background: #14161a; color: #e8e8e8; font-family: var(--mono); font-size: 13.5px;
+    line-height: 1.7; padding: 18px 22px; border-radius: 8px; overflow-x: auto; margin: 18px 0;
+  }
+  pre.cmd .c { color: #7d8590; }
+  .prenote { font-size: 14px; color: var(--muted); }
+
+  footer {
+    border-top: 1px solid var(--line); padding: 26px 0 46px;
+    font-family: var(--mono); font-size: 13px; color: var(--muted);
+  }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap" style="display:flex;justify-content:space-between;align-items:baseline;">
+    <span class="brand">avar2-studio</span>
+    <nav>
+      <a href="#demo">demo</a>
+      <a href="#features">features</a>
+      <a href="#get-started">install</a>
+      <a href="https://github.com/agyeiagyeiagyei/avar2-studio">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <h1>Visual authoring and preview for avar2 variable fonts.</h1>
+    <p class="tag">
+      Point it at a <code>.glyphs</code> or <code>.designspace</code> file and author
+      the mapping from familiar axes — weight, width, optical size — onto the
+      parametric axes that actually shape the strokes. What you preview is the
+      real compiled font, never an approximation.
+    </p>
+  </div>
+
+  <div class="demo" id="demo">
+    <div class="specimen-box">
+      <div id="specimen" contenteditable="true" spellcheck="false">Adhesion</div>
+    </div>
+    <div class="demo-note">
+      This is a live avar2 font built with avar2-studio — your browser is applying
+      the actual avar2 table. Type in the specimen; drag the sliders.
+    </div>
+    <div class="controls">
+      <div class="grid" id="user-axes"></div>
+      <details class="parametric">
+        <summary>Parametric axes — what the user axes drive through the mapping</summary>
+        <div class="grid" id="parametric-axes"></div>
+      </details>
+      <div class="demo-actions">
+        <div class="axis" style="flex:1;max-width:240px;">
+          <div class="row1"><span>Size</span><span class="tag" id="size-val">96px</span></div>
+          <input type="range" id="size" min="28" max="180" value="96">
+        </div>
+        <button id="reset">Reset</button>
+      </div>
+    </div>
+  </div>
+  <p class="caption">
+    CrispyMini, the studio's bundled example — three parametric axes
+    (stroke thicknesses + counter width) exposed to users as
+    <code>opsz</code>/<code>wdth</code>/<code>wght</code> through an avar2 mapping.
+  </p>
+
+  <div id="features">
+
+    <section class="feature">
+      <h2>Author instances visually</h2>
+      <p>
+        The Instances tab is the authoring surface: create named styles and tune
+        each one's parametric coordinates with sliders — every instance renders
+        live as a row of the built font. Give an instance user-axis coordinates
+        and it becomes an avar2 mapping; a few dozen instances span a whole
+        designspace.
+      </p>
+      <img src="assets/instances-workspace.png" alt="The avar2-studio workspace: sidebar sliders and live instance rows" loading="lazy">
+    </section>
+
+    <section class="feature">
+      <h2>Preview the actual built font</h2>
+      <p>
+        The Preview tab drives the compiled font the way an end user's app would.
+        Moving a user axis moves the parametric sliders through your mapping —
+        because the browser is applying the real avar2 table, not a simulation.
+      </p>
+      <img src="assets/preview-sliders.gif" alt="Dragging the wght slider drives the parametric axes through the avar2 mapping" loading="lazy">
+    </section>
+
+    <section class="feature">
+      <h2>Glyph-scoped secondary axes</h2>
+      <div class="cols">
+        <div>
+          <p>
+            Declare axes that deform only chosen glyphs — a crossbar axis for
+            letters with crossbars, case-split stroke axes, figure-only tuning.
+            Pin brace layers at any designspace location and draw their outlines
+            in an embedded Fontra editor, with multi-source editing across all
+            of an axis's layers at once.
+          </p>
+          <p>
+            Works on <code>.glyphs</code> and <code>.designspace</code> sources;
+            your original file is never modified.
+          </p>
+        </div>
+        <img src="assets/axis-expand.gif" alt="Expanding a scoped axis to its glyphs, then a glyph to its brace layers" loading="lazy" style="margin-top:6px;">
+      </div>
+    </section>
+
+    <section class="feature">
+      <h2>Export with intent</h2>
+      <div class="cols">
+        <div>
+          <p>
+            Download the built font as-is, or open the export dialog to flag
+            axes as hidden and set a custom default: pick an axis combination
+            and the export interpolates a real master there and makes it the
+            font's resting state — ranges intact, source untouched.
+          </p>
+        </div>
+        <img src="assets/export-modal.gif" alt="Export dialog: hiding axes and setting a default location" loading="lazy" style="margin-top:6px;">
+      </div>
+    </section>
+
+    <section class="feature">
+      <h2>Post-build transforms</h2>
+      <p>
+        Optional VF→VF steps that run after every build: spacing axes (uniform
+        or width-aware), instance cleanup, STAT regeneration, unhinted-rendering
+        smoothing — or your own Python transform dropped in a folder.
+      </p>
+      <img src="assets/transforms-menu.png" alt="The Transforms menu with built-in post-build steps" loading="lazy">
+    </section>
+
+  </div>
+
+  <div class="get-started" id="get-started">
+    <h2>Get started</h2>
+    <pre class="cmd"><span class="c"># pre-release — install from the latest GitHub release</span>
+pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev6-py3-none-any.whl
+avar2-studio /path/to/MyFont.glyphs   <span class="c"># or .designspace, or no argument for the font picker</span></pre>
+    <p class="prenote">
+      All dependencies — including the fontc compiler — come with the wheel.
+      Newest features live on <a href="https://github.com/agyeiagyeiagyei/avar2-studio">the repo</a>;
+      see the README for installing from source.
+    </p>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>avar2-studio · Apache-2.0</span>
+    <span>
+      <a href="https://github.com/agyeiagyeiagyei/avar2-studio">GitHub</a> ·
+      built on <a href="https://github.com/googlefonts/fontc">fontc</a>,
+      <a href="https://github.com/googlefonts/gftools">gftools</a> &
+      <a href="https://github.com/fontra/fontra">Fontra</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  // fvar of the demo font, read from the compiled TTF.
+  var AXES = [
+    { tag: "opsz", name: "Optical Size", min: 12, def: 144, max: 144, user: true },
+    { tag: "wdth", name: "Width", min: 20, def: 20, max: 200, user: true },
+    { tag: "wght", name: "Weight", min: 100, def: 100, max: 900, user: true },
+    { tag: "XTRA", name: "X-Transparency", min: 94, def: 94, max: 3330, user: false },
+    { tag: "XOPQ", name: "X-Opacity", min: 2, def: 2, max: 1016, user: false },
+    { tag: "YOPQ", name: "Y-Opacity", min: 2, def: 2, max: 462, user: false },
+    { tag: "SPAC", name: "Spacing", min: -20, def: 0, max: 40, user: false }
+  ];
+  // Open somewhere handsome rather than at the thin-condensed default.
+  var START = { opsz: 144, wdth: 100, wght: 400 };
+
+  var specimen = document.getElementById('specimen');
+  var sizeInput = document.getElementById('size');
+  var sizeVal = document.getElementById('size-val');
+  var values = {}, inputs = {}, valEls = {};
+
+  function fvs() {
+    return AXES.map(function (a) {
+      return '"' + a.tag + '" ' + values[a.tag];
+    }).join(', ');
+  }
+  function render() {
+    specimen.style.fontVariationSettings = fvs();
+    specimen.style.fontSize = sizeInput.value + 'px';
+    sizeVal.textContent = sizeInput.value + 'px';
+    AXES.forEach(function (a) { valEls[a.tag].textContent = a.tag + ' ' + values[a.tag]; });
+  }
+  function makeSlider(a, host) {
+    var box = document.createElement('div'); box.className = 'axis';
+    var row = document.createElement('div'); row.className = 'row1';
+    var nm = document.createElement('span'); nm.textContent = a.name;
+    var tg = document.createElement('span'); tg.className = 'tag';
+    row.appendChild(nm); row.appendChild(tg);
+    var input = document.createElement('input');
+    input.type = 'range'; input.min = a.min; input.max = a.max;
+    input.step = 'any'; input.value = values[a.tag];
+    input.addEventListener('input', function () {
+      values[a.tag] = Math.round(Number(input.value) * 10) / 10;
+      render();
+    });
+    box.appendChild(row); box.appendChild(input);
+    host.appendChild(box);
+    inputs[a.tag] = input; valEls[a.tag] = tg;
+  }
+  function setAll(loc) {
+    AXES.forEach(function (a) {
+      values[a.tag] = (a.tag in loc) ? loc[a.tag] : a.def;
+      if (inputs[a.tag]) inputs[a.tag].value = values[a.tag];
+    });
+    render();
+  }
+
+  AXES.forEach(function (a) { values[a.tag] = a.def; });
+  var userHost = document.getElementById('user-axes');
+  var paraHost = document.getElementById('parametric-axes');
+  AXES.forEach(function (a) { makeSlider(a, a.user ? userHost : paraHost); });
+
+  sizeInput.addEventListener('input', render);
+  document.getElementById('reset').addEventListener('click', function () { setAll(START); });
+  specimen.addEventListener('paste', function (e) {
+    e.preventDefault();
+    var t = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, t);
+  });
+
+  setAll(START);
+})();
+</script>
+
+</body>
+</html>

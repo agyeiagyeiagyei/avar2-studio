@@ -1,0 +1,10 @@
+# avar2-studio project site — static, no build step.
+# Connect this repo to Netlify and it publishes site/ as-is.
+
+[build]
+  publish = "site"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
