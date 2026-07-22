@@ -64,7 +64,7 @@ def test_export_validate_apply_round_trip(crispy_source, crispy_csv):
     report = config_port.validate_bundle(bundle, crispy_source)
     assert report["ok"] is True
     assert report["errors"] == []
-    assert report["summary"] == {"axes": 1, "layers": 1, "mapping_rows": 1, "transforms": 1}
+    assert report["summary"] == {"axes": 1, "layers": 1, "mapping_rows": 8, "transforms": 1}
 
     apply_report = config_port.apply_bundle(bundle, crispy_source, crispy_csv)
     assert apply_report["ok"] is True

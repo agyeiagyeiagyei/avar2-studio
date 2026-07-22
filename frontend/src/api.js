@@ -5,9 +5,10 @@
 // Always hit the same origin the React bundle was served from — the
 // Flask backend serves both the UI and the API on whatever --port the
 // user picked. The old production branch hardcoded localhost:5001 and
-// broke any non-default port. REACT_APP_API_URL still wins so the
-// dev-server-on-3000 + backend-on-5001 split workflow keeps working.
-const API_BASE = process.env.REACT_APP_API_URL || '/api';
+// broke any non-default port. VITE_API_URL still wins so the
+// dev-server + backend-on-5001 split workflow keeps working (the dev
+// server also proxies /api — see vite.config.js).
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // Helper to parse JSON response with error handling
 async function parseJSON(response) {

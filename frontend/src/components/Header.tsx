@@ -1,7 +1,61 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './Header.css';
 import { api } from '../api';
-import ImportConfigModal from './ImportConfigModal';
+import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+// Server shapes — see GET /api/examples and GET /api/transforms.
+interface ExampleInfo {
+  id: string;
+  name: string;
+  subtitle?: string;
+}
+
+interface TransformParamOption {
+  value: string;
+  label: string;
+}
+
+interface TransformParamSpec {
+  key: string;
+  label: string;
+  type: string; // 'select' | 'bool' | 'float' | 'int' (int/float share the number input)
+  default?: any; // server-defined; type depends on ``type``
+  options?: TransformParamOption[];
+  min?: number;
+  max?: number;
+}
+
+interface TransformEntry {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  injected_axis_tag?: string | null;
+  params_schema?: TransformParamSpec[];
+  params?: Record<string, any>; // user values keyed by ParamSpec.key
+}
+
+interface ImportData {
+  bundle: unknown;
+  report: ImportReport;
+}
+
+interface HeaderProps {
+  onBuildFont?: () => void;
+  building?: boolean;
+  fontLoaded?: boolean;
+  familyName?: string;
+  onSourceLoaded?: () => void;
+  busy?: boolean;
+  transforms?: TransformEntry[];
+  onToggleTransform?: (id: string, enabled: boolean) => void;
+  onTransformParam?: (id: string, key: string, value: any) => void;
+}
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
 // single entry point for swapping the active source at runtime:
@@ -12,21 +66,26 @@ import ImportConfigModal from './ImportConfigModal';
 //     the shipped fixture stays clean.
 //   - "Upload .glyphs file…" opens a hidden file picker. The chosen
 //     file is sent as multipart/form-data to the same endpoint.
+//
+// The Transforms menu's open/close mechanics are the vendored shadcn
+// DropdownMenu (Radix): trigger toggling, click-outside and Escape
+// dismissal come from the primitive instead of a hand-rolled
+// useEffect. Its content keeps the original load-font-menu /
+// transforms-menu markup and styling hooks. The Load Font and Config
+// dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
-                 transforms = [], onToggleTransform, onTransformParam }) {
-  const [examples, setExamples] = useState([]);
+                 transforms = [], onToggleTransform, onTransformParam }: HeaderProps) {
+  const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
-  const [txOpen, setTxOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState(null);
+  const [loadingMsg, setLoadingMsg] = useState<string | null>(null);
   // Non-null while the import confirmation modal is open:
   // {bundle, report} from the dry-run POST.
-  const [importData, setImportData] = useState(null);
-  const dropdownRef = useRef(null);
-  const transformsRef = useRef(null);
-  const configRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const configFileInputRef = useRef(null);
+  const [importData, setImportData] = useState<ImportData | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const configRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const configFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.listExamples()
@@ -37,8 +96,8 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
   // Click-outside closes the menu.
   useEffect(() => {
     if (!open) return;
-    const onDocClick = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+    const onDocClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
@@ -46,23 +105,11 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  // Click-outside closes the transforms menu.
-  useEffect(() => {
-    if (!txOpen) return;
-    const onDocClick = (e) => {
-      if (transformsRef.current && !transformsRef.current.contains(e.target)) {
-        setTxOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [txOpen]);
-
   // Click-outside closes the config menu.
   useEffect(() => {
     if (!configOpen) return;
-    const onDocClick = (e) => {
-      if (configRef.current && !configRef.current.contains(e.target)) {
+    const onDocClick = (e: MouseEvent) => {
+      if (configRef.current && !configRef.current.contains(e.target as Node)) {
         setConfigOpen(false);
       }
     };
@@ -72,7 +119,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
 
   const enabledCount = transforms.filter(t => t.enabled).length;
 
-  const handleLoadExample = async (id, name) => {
+  const handleLoadExample = async (id: string, name: string) => {
     setOpen(false);
     setLoadingMsg(`Loading ${name}…`);
     try {
@@ -91,7 +138,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     fileInputRef.current && fileInputRef.current.click();
   };
 
-  const handleFileChange = async (e) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     // COPY the FileList before clearing the input: ``input.files`` is
     // a LIVE list, and resetting ``value`` empties it in place — the
     // old grab-then-clear order left zero files and returned before
@@ -139,7 +186,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     configFileInputRef.current && configFileInputRef.current.click();
   };
 
-  const handleConfigFileChange = (e) => {
+  const handleConfigFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Grab the File BEFORE clearing the input (``input.files`` is live —
     // see handleFileChange); the File object itself stays valid after.
     const file = e.target.files && e.target.files[0];
@@ -150,7 +197,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     reader.onload = async () => {
       let parsed;
       try {
-        parsed = JSON.parse(reader.result);
+        parsed = JSON.parse(reader.result as string); // readAsText → string
       } catch (parseErr) {
         setLoadingMsg(`Not valid JSON: ${parseErr.message}`);
         setTimeout(() => setLoadingMsg(null), 6000);
@@ -250,88 +297,87 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           />
         </div>
         {familyName && transforms.length > 0 && (
-          <div className="transforms-dropdown" ref={transformsRef}>
-            <button
-              className="btn btn-load-font"
-              onClick={() => setTxOpen(o => !o)}
-              disabled={busy}
-              title="Post-build transforms — run on the compiled font and rebuild. Off by default."
-            >
-              Transforms{enabledCount > 0 ? ` (${enabledCount})` : ''} ▾
-            </button>
-            {txOpen && (
-              <div className="load-font-menu transforms-menu">
-                <div className="load-font-section-label">Post-build transforms</div>
-                {transforms.map(t => {
-                  // Client-side mirror of the server's one-injector-per-axis
-                  // rule: if another enabled transform already adds this
-                  // transform's fvar axis, disable this toggle (the server
-                  // would 400 anyway) and explain why.
-                  const owner = t.injected_axis_tag
-                    ? transforms.find(o => o.id !== t.id && o.enabled && o.injected_axis_tag === t.injected_axis_tag)
-                    : null;
-                  const conflictDisabled = !t.enabled && !!owner;
-                  return (
-                  <div key={t.id} className={`transform-row${conflictDisabled ? ' transform-row-disabled' : ''}`}>
-                    <label className="transform-toggle" title={conflictDisabled ? `Adds the ${t.injected_axis_tag} axis, already added by "${owner.name}". Turn that off first.` : t.description}>
-                      <input
-                        type="checkbox"
-                        checked={!!t.enabled}
-                        disabled={busy || conflictDisabled}
-                        onChange={(e) => onToggleTransform && onToggleTransform(t.id, e.target.checked)}
-                      />
-                      <span className="transform-name">{t.name}</span>
-                    </label>
-                    {t.description && <div className="transform-desc">{t.description}</div>}
-                    {t.enabled && (t.params_schema || []).length > 0 && (
-                      <div className="transform-params">
-                        {(t.params_schema || []).map(p => (
-                          <label key={p.key} className="transform-param">
-                            <span className="transform-param-label">{p.label}</span>
-                            {p.type === 'select' ? (
-                              <select
-                                className="transform-param-input"
-                                value={t.params?.[p.key] ?? p.default}
-                                disabled={busy}
-                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
-                              >
-                                {(p.options || []).map(o => (
-                                  <option key={o.value} value={o.value}>{o.label}</option>
-                                ))}
-                              </select>
-                            ) : p.type === 'bool' ? (
-                              <input
-                                type="checkbox"
-                                checked={!!(t.params?.[p.key] ?? p.default)}
-                                disabled={busy}
-                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.checked)}
-                              />
-                            ) : (
-                              <input
-                                type="number"
-                                className="transform-param-input"
-                                value={t.params?.[p.key] ?? p.default}
-                                min={p.min ?? undefined}
-                                max={p.max ?? undefined}
-                                step={p.type === 'float' ? 0.1 : 1}
-                                disabled={busy}
-                                // Pass the RAW string so clearing the field or
-                                // typing a leading '-' isn't coerced to 0 — the
-                                // server coerces/clamps against the ParamSpec on
-                                // commit (empty → default).
-                                onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
-                              />
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="btn btn-load-font"
+                disabled={busy}
+                title="Post-build transforms — run on the compiled font and rebuild. Off by default."
+              >
+                Transforms{enabledCount > 0 ? ` (${enabledCount})` : ''} ▾
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="load-font-menu transforms-menu" align="end">
+              <div className="load-font-section-label">Post-build transforms</div>
+              {transforms.map(t => {
+                // Client-side mirror of the server's one-injector-per-axis
+                // rule: if another enabled transform already adds this
+                // transform's fvar axis, disable this toggle (the server
+                // would 400 anyway) and explain why.
+                const owner = t.injected_axis_tag
+                  ? transforms.find(o => o.id !== t.id && o.enabled && o.injected_axis_tag === t.injected_axis_tag)
+                  : null;
+                const conflictDisabled = !t.enabled && !!owner;
+                return (
+                <div key={t.id} className={`transform-row${conflictDisabled ? ' transform-row-disabled' : ''}`}>
+                  <label className="transform-toggle" title={conflictDisabled ? `Adds the ${t.injected_axis_tag} axis, already added by "${owner.name}". Turn that off first.` : t.description}>
+                    <input
+                      type="checkbox"
+                      checked={!!t.enabled}
+                      disabled={busy || conflictDisabled}
+                      onChange={(e) => onToggleTransform && onToggleTransform(t.id, e.target.checked)}
+                    />
+                    <span className="transform-name">{t.name}</span>
+                  </label>
+                  {t.description && <div className="transform-desc">{t.description}</div>}
+                  {t.enabled && (t.params_schema || []).length > 0 && (
+                    <div className="transform-params">
+                      {(t.params_schema || []).map(p => (
+                        <label key={p.key} className="transform-param">
+                          <span className="transform-param-label">{p.label}</span>
+                          {p.type === 'select' ? (
+                            <select
+                              className="transform-param-input"
+                              value={t.params?.[p.key] ?? p.default}
+                              disabled={busy}
+                              onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
+                            >
+                              {(p.options || []).map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                          ) : p.type === 'bool' ? (
+                            <input
+                              type="checkbox"
+                              checked={!!(t.params?.[p.key] ?? p.default)}
+                              disabled={busy}
+                              onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.checked)}
+                            />
+                          ) : (
+                            <input
+                              type="number"
+                              className="transform-param-input"
+                              value={t.params?.[p.key] ?? p.default}
+                              min={p.min ?? undefined}
+                              max={p.max ?? undefined}
+                              step={p.type === 'float' ? 0.1 : 1}
+                              disabled={busy}
+                              // Pass the RAW string so clearing the field or
+                              // typing a leading '-' isn't coerced to 0 — the
+                              // server coerces/clamps against the ParamSpec on
+                              // commit (empty → default).
+                              onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.value)}
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {familyName && (
           <div className="config-dropdown" ref={configRef}>

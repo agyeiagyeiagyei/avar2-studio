@@ -1,3 +1,19 @@
+/* Tailwind v4 — theme + utilities only. Preflight is intentionally NOT
+   imported: the app's hand-written CSS must not be reset. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Radix DropdownMenu positions its content via its own popper wrapper.
+   Neutralize the absolute offsets baked into .load-font-menu (they were
+   relative to the old hand-rolled dropdown container) when the class is
+   reused on Radix content, e.g. the Header's transforms menu. */
+.load-font-menu[data-slot="dropdown-menu-content"] {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

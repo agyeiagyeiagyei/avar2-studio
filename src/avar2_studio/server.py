@@ -101,8 +101,13 @@ def _serve_ui_index():
 
 @app.route('/static/<path:filename>')
 def _serve_ui_static_asset(filename):
-    """CRA-built JS/CSS/images live under ``static/static/``."""
-    return send_from_directory(str(_BUNDLE_DIR / "static"), filename)
+    """Vite-built JS/CSS/images, served from the bundle root.
+
+    The CRA build nested assets under ``static/static/``; the Vite bundle
+    keeps them in ``static/assets/`` with URLs already rooted at
+    ``/static/`` (vite.config's ``base``), so the route serves the bundle
+    directory itself."""
+    return send_from_directory(str(_BUNDLE_DIR), filename)
 
 
 @app.route('/asset-manifest.json')
