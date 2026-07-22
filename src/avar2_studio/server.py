@@ -5107,6 +5107,147 @@ def list_examples():
     return jsonify({"examples": out})
 
 
+def _load_project_zip(upload):
+    """Load a whole project from a .zip archive: locate the source
+    (.designspace with its UFOs, or a .glyphs) anywhere in the
+    archive's folder structure, harvest the studio files sitting next
+    to it (mappings, secondary axes, transforms, axis metadata), and
+    stage everything into the font's per-upload workspace so the
+    designer continues where they left off. Existing workspace studio
+    data is preserved unless the archive carries a replacement —
+    which is backed up first, same as every sidecar write."""
+    import shutil
+    import tempfile
+    import zipfile
+    import re as _re
+
+    tmp = Path(tempfile.mkdtemp(prefix="avar2-upload-"))
+    try:
+        zip_path = tmp / "upload.zip"
+        upload.save(str(zip_path))
+        with zipfile.ZipFile(zip_path) as zf:
+            for m in zf.infolist():
+                p = Path(m.filename)
+                if p.is_absolute() or ".." in p.parts:
+                    raise ValueError(f"Unsafe path in archive: {m.filename}")
+            zf.extractall(tmp / "x")
+        root = tmp / "x"
+
+        def _candidates(suffix):
+            # .avar2-studio is tool-managed — its shadow copies would
+            # otherwise read as second sources.
+            return [
+                p for p in sorted(root.rglob(f"*{suffix}"))
+                if "__MACOSX" not in p.parts
+                and ".avar2-studio" not in p.parts
+                and not p.name.startswith("._")
+            ]
+
+        ds, gl = _candidates(".designspace"), _candidates(".glyphs")
+        if len(ds) == 1:
+            source = ds[0]
+        elif not ds and len(gl) == 1:
+            source = gl[0]
+        else:
+            found = f"{len(ds)} .designspace and {len(gl)} .glyphs"
+            raise ValueError(
+                f"The archive must contain exactly one project "
+                f"(one .designspace or one .glyphs) — found {found}."
+            )
+
+        # A designspace must travel with its UFOs.
+        if source.suffix.lower() == ".designspace":
+            from fontTools.designspaceLib import DesignSpaceDocument
+            doc = DesignSpaceDocument.fromfile(str(source))
+            missing = [
+                s.filename or s.path for s in doc.sources
+                if not (source.parent / (s.filename or "")).exists()
+                and not (s.path and Path(s.path).exists())
+            ]
+            if missing:
+                raise ValueError(
+                    "The archive's .designspace references sources that "
+                    f"aren't in it: {', '.join(str(m) for m in missing[:4])}. "
+                    "Zip the whole project folder so the UFOs travel too."
+                )
+
+        stem = source.stem
+        slug = _re.sub(r'[^A-Za-z0-9._-]+', '_', stem) or "font"
+        workspace = Path.home() / ".avar2-studio" / "workspace" / "uploads" / slug
+        workspace.mkdir(parents=True, exist_ok=True)
+        src_dir = source.parent
+        attached = []
+
+        # Archive the outgoing source file before replacing it.
+        source_dest = workspace / source.name
+        if source_dest.exists():
+            archive = workspace / ".avar2-studio" / "archive"
+            archive.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            shutil.move(str(source_dest), str(archive / f"{stamp}-{source.name}"))
+            for old in sorted(archive.glob(f"*-{source.name}"))[:-5]:
+                old.unlink()
+
+        for item in sorted(src_dir.iterdir()):
+            name = item.name
+            if name.startswith("._"):
+                continue
+            if item.is_dir():
+                if name == ".avar2-studio":
+                    # Take the axis metadata; build/shadow/archive are
+                    # regenerable or history, never imported.
+                    meta = item / "axis-metadata.json"
+                    if meta.exists():
+                        dest = workspace / ".avar2-studio" / "axis-metadata.json"
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        _csv_io.backup_sidecar(dest)
+                        shutil.copy2(meta, dest)
+                        attached.append("axis metadata")
+                elif name.lower().endswith(".ufo"):
+                    dest = workspace / name
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(item, dest)
+                # other directories: not part of a project we understand
+                continue
+            lower = name.lower()
+            if name == source.name:
+                shutil.copy2(item, source_dest)
+            elif lower.endswith("-avar.csv"):
+                dest = workspace / f"{stem}-avar.csv"
+                _csv_io.backup_sidecar(dest)
+                shutil.copy2(item, dest)
+                attached.append("avar2 mappings")
+            elif lower.endswith("-control.json"):
+                dest = workspace / f"{stem}-control.json"
+                _csv_io.backup_sidecar(dest)
+                shutil.copy2(item, dest)
+                attached.append("secondary parametric axes")
+            elif lower.endswith("-transforms.json"):
+                dest = workspace / f"{stem}-transforms.json"
+                _csv_io.backup_sidecar(dest)
+                shutil.copy2(item, dest)
+                attached.append("transforms")
+            elif lower == "avar2-axis-metadata.json" or lower.endswith("-axis-metadata.json"):
+                dest = workspace / ".avar2-studio" / "axis-metadata.json"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                _csv_io.backup_sidecar(dest)
+                shutil.copy2(item, dest)
+                attached.append("axis metadata")
+            else:
+                # Plain project files (feature files, notes) ride along.
+                shutil.copy2(item, workspace / name)
+
+        _apply_source_path(source_dest)
+        return jsonify({
+            "success": True,
+            "path": str(source_dest),
+            "attached": sorted(set(attached)),
+        })
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 @app.route('/api/load-source', methods=['POST'])
 def load_source():
     """Swap the active source at runtime. Two modes:
@@ -5130,6 +5271,19 @@ def load_source():
             import re as _re
             import shutil
 
+            # A .zip is a whole project archive — source + UFOs +
+            # studio files discovered inside its folder structure.
+            zips = [
+                f for f in uploaded
+                if (f.filename or '').lower().endswith('.zip')
+            ]
+            if zips:
+                if len(uploaded) > 1:
+                    return jsonify({
+                        "error": "Upload the project .zip by itself."
+                    }), 400
+                return _load_project_zip(zips[0])
+
             glyphs_name: Optional[str] = None
             staged: list = []
             extras_skipped: list = []
@@ -5146,9 +5300,9 @@ def load_source():
 
             if glyphs_name is None:
                 return jsonify({
-                    "error": "No .glyphs file in the upload. Pick your .glyphs "
-                             "source file — studio data imports via Config → "
-                             "Import configuration."
+                    "error": "No source in the upload. Pick a .glyphs file, or "
+                             "a .zip of your project folder (required for "
+                             ".designspace so its UFOs travel too)."
                 }), 400
 
             slug = _re.sub(r'[^A-Za-z0-9._-]+', '_', Path(glyphs_name).stem) or "font"

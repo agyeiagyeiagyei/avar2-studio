@@ -225,9 +225,10 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 className="load-font-item load-font-item-upload"
                 onClick={handleUploadClick}
               >
-                <div className="load-font-item-name">Upload .glyphs file…</div>
+                <div className="load-font-item-name">Upload .glyphs or project .zip…</div>
                 <div className="load-font-item-subtitle">
-                  Mappings, axes, and transforms import separately via Config.
+                  Zip a project folder to continue where you left off — saved
+                  studio data comes along (.designspace projects need the zip).
                 </div>
               </button>
             </div>
