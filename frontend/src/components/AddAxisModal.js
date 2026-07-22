@@ -156,7 +156,7 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
               className={errors.axisName ? 'error' : ''}
             />
             {errors.axisName && <span className="error-message">{errors.axisName}</span>}
-            <small>4 lowercase alphanumeric characters (becomes CSV column name)</small>
+            <small>4 lowercase alphanumeric characters</small>
           </div>
           
           <div className="form-row">

@@ -10,6 +10,25 @@ Follow `rules/precision-thoroughness.mdc` (alwaysApply): root-cause fixes,
 evidence before changes, no swallowed errors, no unverified "done".
 In addition to that file, these repo-specific rules apply.
 
+## Execution style
+
+- **Think before coding.** State assumptions explicitly; if uncertain or
+  multiple interpretations exist, ask or present them — never pick silently.
+  If something is confusing, stop and name it. Surface tradeoffs; push back
+  when a simpler approach exists.
+- **Simplicity first.** Minimum code that solves the problem: no features
+  beyond what was asked, no abstractions for single-use code, no
+  "flexibility"/"configurability" that wasn't requested, no error handling
+  for impossible scenarios. If 200 lines could be 50, rewrite it.
+- **Surgical changes.** Touch only what the request requires: don't
+  "improve" adjacent code, comments, or formatting; don't refactor what
+  isn't broken; match existing style. Clean up only orphans YOUR change
+  created (imports/variables your edit made unused); mention pre-existing
+  dead code, don't delete it. Every changed line traces to the request.
+- **Goal-driven execution.** Turn tasks into verifiable goals ("fix the
+  bug" → reproduce it, then make the repro pass). For multi-step work,
+  state a brief plan with a verify check per step, and loop until verified.
+
 ## Environment (traps that bite)
 
 - **Use only the repo `.venv`.** It has avar2-studio editable + `flask-sock`

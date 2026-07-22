@@ -146,7 +146,7 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
         <div className="build-avar2-modal-content">
           {isUnsynced && (
             <div className="sync-warning">
-              <strong>⚠️ CSV is not synced with Glyphs file</strong>
+              <strong>⚠️ Studio mappings are not synced with the source file</strong>
               <p>{syncStatus.message}</p>
               <p>You can build anyway, but the font may not match the current Glyphs file state.</p>
             </div>
@@ -154,7 +154,7 @@ function BuildAvar2Modal({ isOpen, onClose, onBuild, syncStatus, avar2Axes }) {
 
           {syncStatus && syncStatus.synced && (
             <div className="sync-success">
-              ✓ CSV is synced with Glyphs file
+              ✓ Studio mappings are in sync with the source file
             </div>
           )}
 

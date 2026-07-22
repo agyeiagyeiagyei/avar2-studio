@@ -227,7 +227,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               >
                 <div className="load-font-item-name">Upload .glyphs file…</div>
                 <div className="load-font-item-subtitle">
-                  Optionally select the sibling -avar.csv and avar2-axis-metadata.json in the same picker.
+                  If you have saved studio files for this font, select them along with it.
                 </div>
               </button>
             </div>

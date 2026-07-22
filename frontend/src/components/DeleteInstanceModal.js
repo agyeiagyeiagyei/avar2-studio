@@ -28,8 +28,8 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
         <h3>Delete instance</h3>
         <p className="delete-instance-message">
           {deleteFromGlyphs
-            ? `Delete "${instanceName}" from the source file and the avar2 mapping CSV.`
-            : `Remove "${instanceName}" from the avar2 mapping CSV. The source-file instance stays.`}
+            ? `Delete "${instanceName}" from the source file and the studio.`
+            : `Remove "${instanceName}" from the studio. The source-file instance stays.`}
         </p>
         {deleteFromGlyphs && (
           <p className="delete-instance-warning">
@@ -64,7 +64,7 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
             onClick={handleConfirm}
             disabled={isDisabled}
           >
-            {deleteFromGlyphs ? 'Delete from source + CSV' : 'Remove from CSV only'}
+            {deleteFromGlyphs ? 'Delete from source + studio' : 'Remove from studio only'}
           </button>
         </div>
       </div>
