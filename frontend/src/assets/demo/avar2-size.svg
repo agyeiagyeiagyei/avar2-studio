@@ -1,16 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="File size comparison: 52 KB as avar2 versus 324 KB with mappings flattened into deltas">
-  <rect width="900" height="430" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-label="File size comparison: avar 324 KB versus avar2 52 KB">
+  <rect width="900" height="360" fill="#ffffff"/>
   <g font-family="'SF Mono', 'Menlo', 'Consolas', monospace">
-    <text x="48" y="66" font-size="15" fill="#6b6b6b">same designspace, two compiles</text>
+    <text x="60" y="128" font-size="20" fill="#1a1a1a">avar</text>
+    <rect x="150" y="96" width="640" height="56" rx="6" fill="#ccd2da"/>
+    <text x="778" y="132" font-size="20" font-weight="600" fill="#1a1a1a" text-anchor="end">324 KB</text>
 
-    <text x="48" y="126" font-size="16" fill="#1a1a1a">avar2 · parametric masters + mapping table</text>
-    <rect x="48" y="144" width="127" height="56" rx="6" fill="#1668dc"/>
-    <text x="191" y="180" font-size="21" font-weight="600" fill="#1a1a1a">52 KB</text>
-
-    <text x="48" y="268" font-size="16" fill="#1a1a1a">mappings flattened into per-axis outline deltas</text>
-    <rect x="48" y="286" width="790" height="56" rx="6" fill="#ccd2da"/>
-    <text x="826" y="322" font-size="21" font-weight="600" fill="#1a1a1a" text-anchor="end">324 KB</text>
-
-    <text x="48" y="394" font-size="13.5" fill="#6b6b6b">measured on the CrispyMini exemplar — identical rendering, 6× smaller</text>
+    <text x="60" y="248" font-size="20" fill="#1a1a1a">avar2</text>
+    <rect x="150" y="216" width="103" height="56" rx="6" fill="#1668dc"/>
+    <text x="269" y="252" font-size="20" font-weight="600" fill="#1a1a1a">52 KB</text>
   </g>
 </svg>
