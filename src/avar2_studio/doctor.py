@@ -154,12 +154,140 @@ def check_static_bundle() -> CheckResult:
     )
 
 
+def check_stale_processes() -> CheckResult:
+    """Listening processes that look like avar2-studio servers or
+    Fontra. A forgotten server from an old session squats its port and
+    serves stale code (or, on Fontra's fixed :8001, silently kills the
+    embedded editor's next launch: the fresh spawn dies on bind while
+    the port probe sees the squatter and reports success)."""
+    import os
+
+    try:
+        proc = subprocess.run(
+            ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return CheckResult(
+            name="stale processes", ok=True,
+            detail="lsof unavailable — check skipped",
+        )
+
+    # -F output: repeated blocks of "p<pid>" then "n<addr:port>" lines.
+    listeners: dict = {}
+    pid = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            port = line.rsplit(":", 1)[-1]
+            if port.isdigit():
+                listeners.setdefault(pid, set()).add(int(port))
+
+    me = os.getpid()
+    suspects = []
+    fontra_squatter = False
+    for lpid, ports in sorted(listeners.items()):
+        if lpid == me:
+            continue
+        try:
+            ps = subprocess.run(
+                ["ps", "-p", str(lpid), "-o", "etime=,command="],
+                capture_output=True, text=True, timeout=5,
+            )
+            info = ps.stdout.strip()
+        except (subprocess.TimeoutExpired, OSError):
+            info = ""
+        cmd = info.split(None, 1)[1] if len(info.split(None, 1)) == 2 else ""
+        if not ("avar2_studio" in cmd or "avar2-studio" in cmd
+                or "fontra" in cmd.lower()):
+            continue
+        age = info.split(None, 1)[0] if info else "?"
+        plist = ",".join(str(p) for p in sorted(ports))
+        suspects.append(f"pid {lpid} (up {age}) on :{plist}")
+        if 8001 in ports:
+            fontra_squatter = True
+
+    if not suspects:
+        return CheckResult(
+            name="stale processes", ok=True, detail="none listening",
+        )
+    listing = "; ".join(suspects)
+    if fontra_squatter:
+        return CheckResult(
+            name="stale processes", ok=False,
+            detail=f"a process holds Fontra's port 8001 — {listing}",
+            fix="kill <pid>  # the embedded editor cannot launch while :8001 is taken",
+        )
+    return CheckResult(
+        name="stale processes", ok=True,
+        detail=f"found: {listing} — fine if it's a session you're using; "
+               "otherwise kill <pid>",
+    )
+
+
+def check_install_shadowing() -> CheckResult:
+    """A concrete site-packages copy of avar2_studio coexisting with a
+    different active import path — a stale ``pip install`` (vs the
+    editable checkout) serves old code and an old frontend bundle,
+    which surfaces as the UI calling the wrong API port."""
+    import site
+
+    from . import __file__ as pkg_init
+    active = Path(pkg_init).parent.resolve()
+
+    site_dirs = []
+    try:
+        site_dirs.extend(site.getsitepackages())
+    except Exception:
+        pass
+    if site.getusersitepackages():
+        site_dirs.append(site.getusersitepackages())
+
+    for sp in site_dirs:
+        candidate = Path(sp) / "avar2_studio"
+        # Editable installs may plant a package-data helper dir here
+        # (e.g. static/ only) — only a copy with __init__.py can
+        # actually shadow the import.
+        if (candidate / "__init__.py").exists() and candidate.resolve() != active:
+            return CheckResult(
+                name="install shadowing", ok=False,
+                detail=f"active import is {active}, but a second install "
+                       f"exists at {candidate}",
+                fix=f"{sys.executable} -m pip uninstall avar2-studio  "
+                    "# removes the stale copy",
+            )
+    return CheckResult(
+        name="install shadowing", ok=True, detail=f"single install: {active}",
+    )
+
+
+def check_fontra() -> CheckResult:
+    """Fontra powers the embedded outline editor. Optional — the rest
+    of the studio works without it."""
+    have = importlib.util.find_spec("fontra") is not None
+    have_glyphs = importlib.util.find_spec("fontra_glyphs") is not None
+    if have and have_glyphs:
+        return CheckResult(name="fontra (optional)", ok=True, detail="installed")
+    missing = [n for n, ok in (("fontra", have), ("fontra-glyphs", have_glyphs)) if not ok]
+    return CheckResult(
+        name="fontra (optional)", ok=True,
+        detail=f"{' + '.join(missing)} not installed — the embedded outline "
+               "editor is disabled. To enable: pip install "
+               "git+https://github.com/fontra/fontra.git "
+               "git+https://github.com/fontra/fontra-glyphs.git",
+    )
+
+
 CHECKS: List[Callable[[], CheckResult]] = [
     check_python,
     check_fontc,
     check_gftools,
     check_glyphslib,
     check_static_bundle,
+    check_fontra,
+    check_install_shadowing,
+    check_stale_processes,
 ]
 
 
