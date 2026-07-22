@@ -111,18 +111,10 @@ function DemoLanding({ familyId, fontLoaded, onEnter }) {
             <h1>Visual authoring and preview for avar2 variable fonts.</h1>
             <p>
               Point it at a <code>.glyphs</code> or <code>.designspace</code> file
-              and author the mapping from familiar axes onto the parametric axes
-              that shape the strokes. Every preview is the actual compiled font.
+              whose masters have interpolable glyphs, and author the mapping from
+              familiar axes onto the parametric axes that shape the strokes.
+              Every preview is the actual compiled font.
             </p>
-            <p className="dl-note">
-              Limited-time hosted demo, loaded with the CrispyMini exemplar —
-              one shared session, resets periodically. For real work, run it
-              locally:
-            </p>
-            <pre className="dl-cmd">
-              pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev6-py3-none-any.whl{'\n'}
-              avar2-studio MyFont.glyphs
-            </pre>
             <button className="dl-enter dl-enter-big" onClick={onEnter}>
               Enter the studio →
             </button>

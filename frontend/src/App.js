@@ -1876,11 +1876,7 @@ function App() {
             onCreateControlAxis={handleCreateControlAxis}
             onUpdateControlAxis={handleUpdateControlAxis}
             onDeleteControlAxis={handleDeleteControlAxis}
-            controlAxisAuthoringDisabledReason={
-              sourceFormat && sourceFormat !== 'glyphs'
-                ? 'Secondary-parametric-axis authoring is only supported for .glyphs sources right now. .designspace brace-layer authoring is not yet implemented.'
-                : null
-            }
+            controlAxisAuthoringDisabledReason={null}
             onSetControlAxisLayers={handleSetControlAxisLayers}
             onControlAxisLayerDelta={handleControlAxisLayerDelta}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
