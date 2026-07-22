@@ -5146,8 +5146,9 @@ def load_source():
 
             if glyphs_name is None:
                 return jsonify({
-                    "error": "No .glyphs file in the upload. Required: one .glyphs source. "
-                             "Optional: a sibling -avar.csv and/or avar2-axis-metadata.json."
+                    "error": "No .glyphs file in the upload. Pick your .glyphs "
+                             "source file — studio data imports via Config → "
+                             "Import configuration."
                 }), 400
 
             slug = _re.sub(r'[^A-Za-z0-9._-]+', '_', Path(glyphs_name).stem) or "font"

@@ -227,7 +227,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               >
                 <div className="load-font-item-name">Upload .glyphs file…</div>
                 <div className="load-font-item-subtitle">
-                  If you have saved studio files for this font, select them along with it.
+                  Mappings, axes, and transforms import separately via Config.
                 </div>
               </button>
             </div>
@@ -244,7 +244,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           <input
             ref={fileInputRef}
             type="file"
-            multiple
             style={{ position: 'fixed', left: '-9999px', width: 1, height: 1, opacity: 0 }}
             onChange={handleFileChange}
           />
