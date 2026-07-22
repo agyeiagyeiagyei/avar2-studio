@@ -1820,6 +1820,9 @@ def health():
 
         return jsonify({
             "status": "ok",
+            # Hosted shared-demo instance (AVAR2_STUDIO_DEMO=1): the
+            # frontend shows the landing overlay + shared-session note.
+            "demo": os.environ.get("AVAR2_STUDIO_DEMO") == "1",
             "glyphs_path": str(GLYPHS_PATH) if GLYPHS_PATH else None,
             # original_path is the path the USER pointed at. glyphs_path
             # is the ACTIVE build/read path which becomes the shadow

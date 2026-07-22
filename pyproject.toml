@@ -35,6 +35,8 @@ dependencies = [
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",
     "gftools>=0.9",
+    "flask-sock>=0.7",
+    "websocket-client>=1.7",
 ]
 
 [project.optional-dependencies]

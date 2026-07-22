@@ -7,6 +7,7 @@ import InstanceRows from './components/InstanceRows';
 import PreviewTab from './components/PreviewTab';
 import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
+import DemoLanding from './components/DemoLanding';
 
 // Default sample text uses only ASCII letters, digits, and space so it
 // renders cleanly against minimal fixtures (e.g. examples/crispy-mini,
@@ -85,6 +86,10 @@ function App() {
   // Font family used for FontFace registration; comes from /api/health so the
   // tool works on any .glyphs file, not just Crispy.
   const [vfFamilyId, setVfFamilyId] = useState(null);
+  // Hosted shared-demo instance (health.demo).
+  const [demoMode, setDemoMode] = useState(false);
+  const [showLanding, setShowLanding] = useState(false);
+  const demoInitRef = useRef(false);
   // Built avar2 font filename (used for the download button); from /api/health.
   const [builtFontFilename, setBuiltFontFilename] = useState(null);
   const [lastBuildTime, setLastBuildTime] = useState(null);
@@ -184,6 +189,16 @@ function App() {
           api.glyphsFileStatus().catch(() => ({ has_unsaved_changes: false }))
         ]);
         
+        // Hosted shared-demo instance: show the landing overlay once
+        // per visit, and the persistent pill after it's dismissed.
+        if (health.demo && !demoInitRef.current) {
+          demoInitRef.current = true;
+          setDemoMode(true);
+          if (!sessionStorage.getItem('avar2.landingDismissed')) {
+            setShowLanding(true);
+          }
+        }
+
         setBuilding(health.building || false);
         setAvar2Error(health.avar2_error || null);
         setBuildStale(health.build_stale || false);
@@ -1749,6 +1764,22 @@ function App() {
 
   return (
     <div className="App">
+      {showLanding && (
+        <DemoLanding
+          familyId={vfFamilyId}
+          fontLoaded={fontLoaded}
+          onEnter={() => {
+            sessionStorage.setItem('avar2.landingDismissed', '1');
+            setShowLanding(false);
+          }}
+        />
+      )}
+      {demoMode && !showLanding && (
+        <div className="demo-pill">
+          shared demo · resets periodically
+          <button onClick={() => setShowLanding(true)}>about</button>
+        </div>
+      )}
       <FontraEditorModal
         editor={fontraEditor}
         onClose={handleCloseFontraEditor}
