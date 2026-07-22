@@ -3,6 +3,7 @@ import './DemoLanding.css';
 import howItWorksGif from '../assets/demo/how-it-works.gif';
 import secondaryAxesGif from '../assets/demo/secondary-axes.gif';
 import customAxesGif from '../assets/demo/custom-axes.gif';
+import avar2SizeSvg from '../assets/demo/avar2-size.svg';
 
 /**
  * Landing overlay for the hosted shared-demo instance (health.demo).
@@ -17,6 +18,7 @@ const SECTIONS = [
   { id: 'how', label: 'How it works' },
   { id: 'secondary', label: 'Set up secondary axes' },
   { id: 'custom', label: 'Define custom axes' },
+  { id: 'avar2', label: 'Why avar2' },
 ];
 
 const FEATURES = [
@@ -51,6 +53,20 @@ const FEATURES = [
       'Add any user-facing axis — weight, width, grade, or your own.',
       'Map instances onto it with sliders, no numbers to hand-edit.',
       'The avar2 table is rebuilt around your mapping.',
+    ],
+  },
+  {
+    id: 'avar2',
+    title: 'Why avar2',
+    gif: avar2SizeSvg,
+    alt: 'Bar chart: the same designspace is 52 KB compiled with avar2 versus 324 KB with mappings flattened into deltas',
+    intro: 'avar2 is the second-generation axis mapping: the font keeps its '
+      + 'compact parametric masters plus one small table that re-projects '
+      + 'user coordinates onto them at render time.',
+    bullets: [
+      'One entry per authored style — user location in, parametric location out.',
+      'The traditional route bakes every mapping into outline deltas: delta regions multiply and gvar balloons.',
+      'Identical rendering, 6× smaller.',
     ],
   },
 ];
@@ -126,6 +142,7 @@ function DemoLanding({ familyId, fontLoaded, onEnter }) {
             <div className="dl-feature-grid">
               <div className="dl-feature-text">
                 <h2>{f.title}</h2>
+                {f.intro && <p className="dl-feature-intro">{f.intro}</p>}
                 <ul>
                   {f.bullets.map((t) => <li key={t}>{t}</li>)}
                 </ul>
