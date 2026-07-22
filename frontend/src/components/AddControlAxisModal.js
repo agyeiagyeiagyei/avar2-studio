@@ -137,7 +137,7 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
         <p className="modal-help">
           {isEdit
             ? 'Change the display name, range, or default. Tag is immutable — every applicable glyph\'s brace-layer location is keyed by it. Narrowing min/max is refused if any existing layer would fall outside the new range.'
-            : 'Declares an axis the designer controls — separate from AVAR2 MAPPINGS. Coverage glyphs + brace-layer drawings arrive in later v2 slices; for now this just records the axis range.'}
+            : 'Declares an axis the designer controls — separate from AVAR2 MAPPINGS. After creating it, add applicable glyphs and draw their brace layers in the embedded editor. Your source file is never modified.'}
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
