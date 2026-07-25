@@ -858,39 +858,36 @@ function App() {
     commitGrade({ enabled }, prev);
   };
 
+  // The default only seeds NEW grades, so it never changes the built font —
+  // persist it (debounced) with no rebuild. The backend skips the rebuild for
+  // a default-only change.
   const handleGradeDefault = (pct) => {
-    const prev = grade;
     setGrade(g => ({ ...g, default_pct: pct }));   // immediate input feedback
     if (gradeCommitTimer.current) clearTimeout(gradeCommitTimer.current);
     gradeCommitTimer.current = setTimeout(() => {
       gradeCommitTimer.current = null;
-      commitGrade({ default_pct: pct }, prev);
-    }, 800);
+      api.setGrade({ default_pct: pct }).catch(err => setError(err.message));
+    }, 600);
   };
 
-  // Per-instance grade% — set/update (pct=undefined uses the global default),
-  // or remove. Each rebuilds (debounced for slider drags on set).
-  const handleSetInstanceGrade = (instanceName, pct) => {
+  // Per-instance grade% — committed ONLY on an explicit Save from the badge
+  // popover (no rebuild while the user types). One save → one rebuild.
+  const handleSaveInstanceGrade = async (instanceName, pct) => {
     const prev = grade;
     setGrade(g => {
       const others = g.instances.filter(e => e.name !== instanceName);
-      const value = pct == null ? g.default_pct : pct;
-      return { ...g, instances: [...others, { name: instanceName, pct: value }] };
+      return { ...g, instances: [...others, { name: instanceName, pct }] };
     });
-    if (gradeCommitTimer.current) clearTimeout(gradeCommitTimer.current);
-    gradeCommitTimer.current = setTimeout(async () => {
-      gradeCommitTimer.current = null;
-      try {
-        setBuilding(true);
-        await api.setInstanceGrade(instanceName, pct);
-        await loadData();
-      } catch (err) {
-        setGrade(prev);
-        setError(err.message);
-      } finally {
-        setBuilding(false);
-      }
-    }, 800);
+    try {
+      setBuilding(true);
+      await api.setInstanceGrade(instanceName, pct);
+      await loadData();
+    } catch (err) {
+      setGrade(prev);
+      setError(err.message);
+    } finally {
+      setBuilding(false);
+    }
   };
 
   const handleRemoveInstanceGrade = async (instanceName) => {
@@ -1994,7 +1991,7 @@ function App() {
             disabledControlAxes={disabledControlAxes}
             axisDefaults={axisDefaults}
             grade={grade}
-            onSetInstanceGrade={handleSetInstanceGrade}
+            onSaveInstanceGrade={handleSaveInstanceGrade}
             onRemoveInstanceGrade={handleRemoveInstanceGrade}
           />
         </div>

@@ -786,6 +786,31 @@ def get_axes():
             except Exception as overlay_exc:
                 print(f"Warning: control-axes overlay on /api/axes failed: {overlay_exc}", file=sys.stderr)
 
+        # GRADE axis overlay. GRAD lives in the shadow but its range comes from
+        # VIRTUAL masters (no real master spans it), so get_axes_from_glyphs
+        # reports it as [0,0] — and the built-font overlay below then skips it
+        # as "already present". When grade is enabled with ≥1 graded instance,
+        # surface the real -10..+10 range so the sidebar renders a usable
+        # slider. Like SPAC it's a live-preview axis (transform_injected), not
+        # per-instance data.
+        if ORIGINAL_PATH is not None:
+            try:
+                if _grade.list_graded_instances(ORIGINAL_PATH):
+                    tag_lower = _grade.GRAD_TAG.lower()
+                    entry = next((a for a in axes if str(a.get("tag", "")).lower() == tag_lower), None)
+                    if entry is None:
+                        entry = {"tag": _grade.GRAD_TAG}
+                        axes.append(entry)
+                    entry["name"] = _grade.GRAD_NAME
+                    entry["min"] = _grade.GRAD_MIN
+                    entry["default"] = _grade.GRAD_DEFAULT
+                    entry["max"] = _grade.GRAD_MAX
+                    entry["has_master_coverage"] = True
+                    entry["transform_injected"] = True
+                    entry["is_grade_axis"] = True
+            except Exception as grade_exc:
+                print(f"Warning: grade overlay on /api/axes failed: {grade_exc}", file=sys.stderr)
+
         # BUILT-FONT overlay. Post-build transforms (e.g. SPAC) inject fvar
         # axes that have no source master, so get_axes_from_glyphs can't see
         # them. Read the built font's fvar and surface any tag not already
@@ -3126,13 +3151,18 @@ def set_grade():
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     try:
+        rebuild = False
         if "enabled" in data:
             _grade.set_enabled(ORIGINAL_PATH, bool(data["enabled"]))
+            rebuild = True  # toggling adds/removes the GRAD axis
         if "default_pct" in data:
+            # The default only seeds NEW grades; changing it never alters the
+            # built font, so persist without a rebuild.
             _grade.set_default_pct(ORIGINAL_PATH, data["default_pct"])
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    schedule_shadow_rebuild()
+    if rebuild:
+        schedule_shadow_rebuild()
     return jsonify(_grade_state_payload())
 
 

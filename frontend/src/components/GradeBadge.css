@@ -1,0 +1,130 @@
+.grade-badge-wrap {
+  position: relative;
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.grade-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.grade-badge-on {
+  background: var(--zinc-800);
+  color: #fff;
+  border-color: var(--zinc-800);
+}
+
+.grade-badge-on:hover {
+  background: var(--zinc-700, #3f3f46);
+}
+
+.grade-badge-off {
+  background: transparent;
+  color: var(--zinc-400);
+  border-color: var(--zinc-200);
+}
+
+.grade-badge-off:hover {
+  color: var(--zinc-700);
+  border-color: var(--zinc-300, #d4d4d8);
+}
+
+/* Popover anchored under the badge */
+.grade-popover {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 10000;
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px -2px rgb(0 0 0 / 0.06), 0 6px 16px -6px rgb(0 0 0 / 0.12);
+  padding: 0.7rem;
+  min-width: 11rem;
+}
+
+.grade-popover-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.grade-popover-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--zinc-700);
+  flex: 1;
+}
+
+.grade-popover-input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--zinc-300, #d4d4d8);
+  border-radius: 6px;
+  text-align: right;
+  outline: none;
+}
+
+.grade-popover-input:focus {
+  border-color: var(--primary-strong);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.grade-popover-unit {
+  font-size: 0.75rem;
+  color: var(--zinc-500, #71717a);
+}
+
+.grade-popover-hint {
+  margin-top: 0.35rem;
+  font-size: 0.62rem;
+  color: var(--zinc-400);
+}
+
+.grade-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.grade-popover-save,
+.grade-popover-remove {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.grade-popover-save {
+  background: var(--primary-strong);
+  color: #fff;
+}
+
+.grade-popover-save:hover {
+  filter: brightness(1.05);
+}
+
+.grade-popover-remove {
+  background: transparent;
+  color: var(--red-700);
+  border-color: var(--zinc-200);
+}
+
+.grade-popover-remove:hover {
+  background: var(--red-50);
+}

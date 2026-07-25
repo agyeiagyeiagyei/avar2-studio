@@ -347,6 +347,13 @@
   border-color: var(--primary-border);
 }
 
+/* Grade indicator — this style carries a grade (darkening at fixed advance). */
+.origin-badge-grade {
+  background: var(--zinc-800);
+  color: #fff;
+  border-color: var(--zinc-800);
+}
+
 .instance-row-content .instance-coordinates {
   margin-top: 0.6rem;
   padding-top: 0.5rem;

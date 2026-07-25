@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSetInstanceGrade, onRemoveInstanceGrade }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -144,8 +144,9 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             gradeEnabled={!!grade?.enabled}
             gradePct={(grade?.instances || []).find(e => e.name === instance.name)?.pct ?? null}
             gradeMaxPct={grade?.max_pct?.[instance.name]}
-            onSetInstanceGrade={onSetInstanceGrade ? (pct) => onSetInstanceGrade(instance.name, pct) : undefined}
-            onRemoveInstanceGrade={onRemoveInstanceGrade ? () => onRemoveInstanceGrade(instance.name) : undefined}
+            gradeDefaultPct={grade?.default_pct ?? 0.25}
+            onSaveInstanceGrade={onSaveInstanceGrade}
+            onRemoveInstanceGrade={onRemoveInstanceGrade}
           />
         </div>
       ))}
