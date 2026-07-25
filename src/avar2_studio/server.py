@@ -59,6 +59,8 @@ from . import glyph_coverage as _glyph_coverage
 from . import control_axes as _control_axes
 from . import config_port as _config_port
 from . import transforms as _transforms
+from . import grade as _grade
+from . import grade_shadow as _grade_shadow
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -914,7 +916,29 @@ def _run_shadow_regen_and_build():
             any_layers = any(ax.get("layers") for ax in sidecar_after)
         except Exception:  # noqa: BLE001
             any_layers = False
-        GLYPHS_PATH = shadow if (shadow is not None and any_layers) else ORIGINAL_PATH
+
+        # GRADE overlay. A grade is source-level (like control axes, not a
+        # post-build transform): it injects GRAD brace layers + virtual masters
+        # onto the SAME shadow, composing AFTER regenerate_shadow. When no
+        # control axes exist, regenerate_shadow returns None and grade makes a
+        # fresh shadow itself (fresh_shadow flips off only when control just
+        # rebuilt it, so re-runs never stack braces).
+        any_grades = False
+        try:
+            graded = _grade.list_graded_instances(ORIGINAL_PATH)
+            if graded:
+                coords = _grade_instance_coords()
+                grade_shadow = _grade_shadow.apply_grades(
+                    ORIGINAL_PATH, coords, fresh_shadow=(shadow is None)
+                )
+                if grade_shadow is not None:
+                    shadow = grade_shadow
+                    any_grades = True
+                    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
+
+        GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades)) else ORIGINAL_PATH
         try:
             trigger_build()
         except Exception as exc:  # noqa: BLE001
@@ -1614,6 +1638,11 @@ def rename_instance(instance_name: str):
             success = True
 
         if success:
+            # Keep any grade attached to this instance across the rename.
+            try:
+                _grade.rename_instance(ORIGINAL_PATH, instance_name, new_name)
+            except Exception:  # noqa: BLE001
+                pass
             # Update preview CSV if it exists
             csv_path = _get_preview_csv_path()
             if csv_path and csv_path.exists():
@@ -3003,6 +3032,137 @@ def update_transforms():
 
 
 # ----------------------------------------------------------------------
+# GRADE transform — per-source ``<basename>-grade.json``
+#
+# The Transforms "Grade" toggle + per-instance grade%. A grade is
+# source-level (injects GRAD brace layers onto the shadow, like control
+# axes — NOT a post-build VF→VF transform), so its endpoints live here and
+# schedule a shadow rebuild rather than going through the transforms
+# registry. Per-instance grades persist regardless of the toggle.
+# ----------------------------------------------------------------------
+
+
+def _grade_instance_coords():
+    """Parametric {XTRA,XOPQ,YOPQ} for EVERY instance — source-defined AND
+    studio-only (CSV rows) alike — keyed by name, since a grade can target
+    either kind. Source coords win; the CSV supplies studio-only rows (and any
+    parametric tag a source instance happens to lack). CrispyMini, for example,
+    has zero source instances — all live in the CSV — so reading source alone
+    (the original bug) found no coords and every grade was skipped."""
+    coords = {}
+    try:
+        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
+        for inst in _source_font.get_source_instances(font):
+            coords[inst["name"]] = dict(inst.get("coordinates", {}))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        csv_path = _get_preview_csv_path()
+        if csv_path and csv_path.exists():
+            import csv as _csvmod
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in _csvmod.DictReader(f):
+                    name = (row.get("Instance Name") or "").strip()
+                    if not name:
+                        continue
+                    c = coords.setdefault(name, {})
+                    for tag in _grade.PARAM_TAGS:
+                        if tag in c:
+                            continue
+                        v = row.get(tag)
+                        if v not in (None, ""):
+                            try:
+                                c[tag] = float(v)
+                            except (TypeError, ValueError):
+                                pass
+    except Exception:  # noqa: BLE001
+        pass
+    return coords
+
+
+def _grade_state_payload():
+    """Grade sidecar + per-instance slider caps for the UI."""
+    data = _grade.load(ORIGINAL_PATH)
+    # bound each graded instance's slider by its own axis headroom
+    try:
+        param_ranges = {}
+        axes = _source_font.get_axes(_source_font.load_source(ORIGINAL_PATH)[0])
+        by_tag = {a["tag"].upper(): a for a in axes}
+        for t in _grade.PARAM_TAGS:
+            if t in by_tag:
+                param_ranges[t] = (by_tag[t]["min"], by_tag[t]["max"])
+        coords = _grade_instance_coords()
+        caps = {
+            name: _grade.max_pct_for(coords[name], param_ranges)
+            for name in coords if param_ranges
+        }
+    except Exception:  # noqa: BLE001
+        caps = {}
+    data["max_pct"] = caps
+    data["sidecar_path"] = str(_grade.sidecar_path_for(ORIGINAL_PATH))
+    return data
+
+
+@app.route('/api/transforms/grade', methods=['GET'])
+def get_grade():
+    """Return the grade toggle, default, per-instance grades, and slider caps."""
+    if ORIGINAL_PATH is None:
+        return jsonify(_grade._empty())
+    try:
+        return jsonify(_grade_state_payload())
+    except Exception as e:  # noqa: BLE001
+        print(f"Error reading grade: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/transforms/grade', methods=['PUT'])
+def set_grade():
+    """Set the Grade toggle and/or global default. Body::
+
+        { "enabled": true, "default_pct": 0.25 }
+
+    Either field optional. Rebuilds so the GRAD axis (dis)appears."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        if "enabled" in data:
+            _grade.set_enabled(ORIGINAL_PATH, bool(data["enabled"]))
+        if "default_pct" in data:
+            _grade.set_default_pct(ORIGINAL_PATH, data["default_pct"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    schedule_shadow_rebuild()
+    return jsonify(_grade_state_payload())
+
+
+@app.route('/api/instances/<instance_name>/grade', methods=['PUT'])
+def set_instance_grade(instance_name: str):
+    """Add or update a grade on one instance. Body ``{"pct": 0.25}`` — omit
+    ``pct`` to use the global default. Rebuilds."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        entry = _grade.set_instance_grade(ORIGINAL_PATH, instance_name, data.get("pct"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    schedule_shadow_rebuild()
+    return jsonify(entry)
+
+
+@app.route('/api/instances/<instance_name>/grade', methods=['DELETE'])
+def delete_instance_grade(instance_name: str):
+    """Remove a grade from one instance. Rebuilds."""
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    removed = _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
+    if removed:
+        schedule_shadow_rebuild()
+    return jsonify({"removed": removed})
+
+
+# ----------------------------------------------------------------------
 # CONTROL AXES sidecar — v2 slice 1 (declaration only)
 #
 # These endpoints manage the per-source ``<basename>-control.json``
@@ -4230,6 +4390,15 @@ def delete_instance(instance_name: str):
     try:
         global EDITING_INSTANCES
         EDITING_INSTANCES.discard(instance_name)
+
+        # A full delete (not a demote / csv-only) removes the instance
+        # entirely, so drop any grade attached to it. Demote/csv-only keep
+        # the instance around, so the grade stays.
+        if not csv_only_flag and not source_only_flag:
+            try:
+                _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
+            except Exception:  # noqa: BLE001
+                pass
 
         # Source-file delete fires for default + source_only. CSV-only
         # skips it (the row was never in the source).

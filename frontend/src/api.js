@@ -344,6 +344,51 @@ export const api = {
     return parseJSON(response);
   },
 
+  // ---- Grade transform (source-level; toggle + per-instance grade%) ----
+  async getGrade() {
+    const response = await fetch(`${API_BASE}/transforms/grade`);
+    if (!response.ok) {
+      throw new Error(`Failed to get grade: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async setGrade(patch) {
+    const response = await fetch(`${API_BASE}/transforms/grade`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to update grade: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async setInstanceGrade(instanceName, pct) {
+    const response = await fetch(`${API_BASE}/instances/${encodeURIComponent(instanceName)}/grade`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pct === undefined || pct === null ? {} : { pct }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Failed to set instance grade: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async removeInstanceGrade(instanceName) {
+    const response = await fetch(`${API_BASE}/instances/${encodeURIComponent(instanceName)}/grade`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to remove instance grade: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async createControlAxis(axis) {
     const response = await fetch(`${API_BASE}/control-axes`, {
       method: 'POST',

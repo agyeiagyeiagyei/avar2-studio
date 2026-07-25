@@ -60,3 +60,58 @@
 .flyout-item-demote:hover {
   background: var(--red-50);
 }
+
+/* Grade section — per-instance grade% (shown when the Grade transform is on) */
+.flyout-grade {
+  border-top: 1px solid var(--zinc-100);
+}
+
+.flyout-grade-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.6375rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--zinc-700);
+}
+
+.flyout-grade-label {
+  flex: 1;
+}
+
+.flyout-grade-input {
+  width: 3rem;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.6375rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--zinc-200);
+  border-radius: 4px;
+  text-align: right;
+  outline: none;
+}
+
+.flyout-grade-input:focus {
+  border-color: var(--primary-strong);
+}
+
+.flyout-grade-unit {
+  color: var(--zinc-400);
+}
+
+.flyout-item-grade {
+  color: var(--primary-strong);
+}
+
+.flyout-item-grade:hover {
+  background: var(--primary-soft);
+}
+
+.flyout-item-grade-remove {
+  color: var(--red-700);
+}
+
+.flyout-item-grade-remove:hover {
+  background: var(--red-50);
+}

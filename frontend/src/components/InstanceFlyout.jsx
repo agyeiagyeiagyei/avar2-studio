@@ -18,7 +18,7 @@ import './InstanceFlyout.css';
  *     mapping is preserved. Shown only for source rows (the operation
  *     is meaningless on a row that isn't in source).
  */
-function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDemoteFromSource, instanceOrigin = 'source', syncStatus = 'green', position }) {
+function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDemoteFromSource, instanceOrigin = 'source', syncStatus = 'green', position, gradeEnabled = false, gradePct = null, gradeMaxPct, onSetInstanceGrade, onRemoveInstanceGrade }) {
   const flyoutRef = useRef(null);
 
   useEffect(() => {
@@ -117,6 +117,51 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
         >
           Remove from source file
         </button>
+      )}
+      {gradeEnabled && typeof onSetInstanceGrade === 'function' && (
+        <div className="flyout-grade">
+          {gradePct == null ? (
+            <button
+              className="flyout-item flyout-item-grade"
+              onClick={() => {
+                onSetInstanceGrade();   // undefined → server uses the default grade %
+                onClose();
+              }}
+              title="Add a grade to this style — a same-width darkening, using the default grade %."
+            >
+              + Add grade
+            </button>
+          ) : (
+            <>
+              <label className="flyout-grade-control" title="Grade strength for this style, as a percentage. Bounded by how much room this style's axes have.">
+                <span className="flyout-grade-label">Grade</span>
+                <input
+                  type="number"
+                  className="flyout-grade-input"
+                  value={Math.round(gradePct * 100)}
+                  min={1}
+                  max={gradeMaxPct ? Math.floor(gradeMaxPct * 100) : 100}
+                  step={1}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!Number.isNaN(v)) onSetInstanceGrade(v / 100);
+                  }}
+                />
+                <span className="flyout-grade-unit">%</span>
+              </label>
+              <button
+                className="flyout-item flyout-item-grade-remove"
+                onClick={() => {
+                  onRemoveInstanceGrade && onRemoveInstanceGrade();
+                  onClose();
+                }}
+                title="Remove this style's grade."
+              >
+                Remove grade
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

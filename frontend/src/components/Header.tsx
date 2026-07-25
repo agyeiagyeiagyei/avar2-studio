@@ -55,6 +55,18 @@ interface HeaderProps {
   transforms?: TransformEntry[];
   onToggleTransform?: (id: string, enabled: boolean) => void;
   onTransformParam?: (id: string, key: string, value: any) => void;
+  grade?: GradeState;
+  onToggleGrade?: (enabled: boolean) => void;
+  onGradeDefault?: (pct: number) => void;
+}
+
+// Grade transform — source-level (adds a GRAD axis); toggle + global default
+// here, per-instance grade% in each style's row menu.
+interface GradeState {
+  enabled?: boolean;
+  default_pct?: number;
+  instances?: { name: string; pct: number }[];
+  max_pct?: Record<string, number>;
 }
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
@@ -74,7 +86,8 @@ interface HeaderProps {
 // transforms-menu markup and styling hooks. The Load Font and Config
 // dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
-                 transforms = [], onToggleTransform, onTransformParam }: HeaderProps) {
+                 transforms = [], onToggleTransform, onTransformParam,
+                 grade, onToggleGrade, onGradeDefault }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -117,7 +130,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [configOpen]);
 
-  const enabledCount = transforms.filter(t => t.enabled).length;
+  const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0);
 
   const handleLoadExample = async (id: string, name: string) => {
     setOpen(false);
@@ -296,19 +309,61 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             onChange={handleFileChange}
           />
         </div>
-        {familyName && transforms.length > 0 && (
+        {familyName && (transforms.length > 0 || grade) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 className="btn btn-load-font"
                 disabled={busy}
-                title="Post-build transforms — run on the compiled font and rebuild. Off by default."
+                title="Transforms — Grade (adds a same-width darkening axis) and post-build steps like SPAC. Off by default."
               >
                 Transforms{enabledCount > 0 && <span className="count-flag">{enabledCount}</span>} ▾
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="load-font-menu transforms-menu" align="end">
-              <div className="load-font-section-label">Post-build transforms</div>
+              {grade && (
+                <>
+                  <div className="load-font-section-label">Grade</div>
+                  <div className="transform-row">
+                    <label
+                      className="transform-toggle"
+                      title="Darken or lighten styles without changing advance widths. Adds a Grade axis; add a grade to individual styles from their row menu."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!grade.enabled}
+                        disabled={busy}
+                        onChange={(e) => onToggleGrade && onToggleGrade(e.target.checked)}
+                      />
+                      <span className="transform-name">Grade</span>
+                    </label>
+                    <div className="transform-desc">
+                      Same-width darkening. Turn on, then add a grade to individual styles.
+                    </div>
+                    {grade.enabled && (
+                      <div className="transform-params">
+                        <label className="transform-param">
+                          <span className="transform-param-label">Default grade %</span>
+                          <input
+                            type="number"
+                            className="transform-param-input"
+                            value={Math.round((grade.default_pct ?? 0.25) * 100)}
+                            min={1}
+                            max={100}
+                            step={1}
+                            disabled={busy}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (!Number.isNaN(v) && onGradeDefault) onGradeDefault(v / 100);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+              {transforms.length > 0 && <div className="load-font-section-label">Post-build transforms</div>}
               {transforms.map(t => {
                 // Client-side mirror of the server's one-injector-per-axis
                 // rule: if another enabled transform already adds this

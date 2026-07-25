@@ -3,7 +3,7 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, onSetInstanceGrade, onRemoveInstanceGrade }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -304,6 +304,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
                   instanceOrigin={instance.origin || 'source'}
                   syncStatus={syncStatus}
                   position={positionObj}
+                  gradeEnabled={gradeEnabled}
+                  gradePct={gradePct}
+                  gradeMaxPct={gradeMaxPct}
+                  onSetInstanceGrade={onSetInstanceGrade}
+                  onRemoveInstanceGrade={onRemoveInstanceGrade}
                 />
               );
             })()}

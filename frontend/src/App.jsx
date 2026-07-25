@@ -44,6 +44,9 @@ function App() {
   // Post-build transforms (e.g. SPAC): available list merged with this
   // project's enabled state + params, from GET /api/transforms.
   const [transforms, setTransforms] = useState([]);
+  // Grade transform (source-level, its own /api/transforms/grade sidecar):
+  // { enabled, default_pct, instances: [{name, pct}], max_pct: {name: cap} }.
+  const [grade, setGrade] = useState({ enabled: false, default_pct: 0.25, instances: [], max_pct: {} });
   const [axes, setAxes] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [editingCoordinates, setEditingCoordinates] = useState({});
@@ -310,17 +313,24 @@ function App() {
         }
       }
       
-      const [instancesData, axesData, mastersData, transformsData] = await Promise.all([
+      const [instancesData, axesData, mastersData, transformsData, gradeData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
         api.getMasters().catch(() => ({ masters: [] })),
         api.getTransforms().catch(() => ({ transforms: [] })),
+        api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, instances: [], max_pct: {} })),
       ]);
 
       setInstances(instancesData.instances);
       setMasters(mastersData.masters || []);
       setAxes(axesData.axes || []);
       setTransforms(transformsData.transforms || []);
+      setGrade({
+        enabled: !!gradeData.enabled,
+        default_pct: gradeData.default_pct ?? 0.25,
+        instances: gradeData.instances || [],
+        max_pct: gradeData.max_pct || {},
+      });
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
       setSourceFormat(health.source_format || null);
@@ -820,6 +830,82 @@ function App() {
       transformCommitTimer.current = null;
       commitTransforms(_transformEntries(next), prev);
     }, 800);
+  };
+
+  // ---- Grade transform (source-level; toggle + default + per-instance) ----
+  const gradeCommitTimer = useRef(null);
+
+  // Toggle / default. Toggling (dis)appears the GRAD axis, so rebuild now.
+  const commitGrade = async (patch, prevGrade) => {
+    try {
+      setBuilding(true);
+      setError(null);
+      const result = await api.setGrade(patch);
+      setGrade(g => ({ ...g, ...result }));
+      await loadData();
+    } catch (err) {
+      if (prevGrade) setGrade(prevGrade);
+      setError(err.message);
+      console.error('Grade update failed:', err);
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  const handleToggleGrade = (enabled) => {
+    const prev = grade;
+    setGrade(g => ({ ...g, enabled }));   // immediate checkbox feedback
+    commitGrade({ enabled }, prev);
+  };
+
+  const handleGradeDefault = (pct) => {
+    const prev = grade;
+    setGrade(g => ({ ...g, default_pct: pct }));   // immediate input feedback
+    if (gradeCommitTimer.current) clearTimeout(gradeCommitTimer.current);
+    gradeCommitTimer.current = setTimeout(() => {
+      gradeCommitTimer.current = null;
+      commitGrade({ default_pct: pct }, prev);
+    }, 800);
+  };
+
+  // Per-instance grade% — set/update (pct=undefined uses the global default),
+  // or remove. Each rebuilds (debounced for slider drags on set).
+  const handleSetInstanceGrade = (instanceName, pct) => {
+    const prev = grade;
+    setGrade(g => {
+      const others = g.instances.filter(e => e.name !== instanceName);
+      const value = pct == null ? g.default_pct : pct;
+      return { ...g, instances: [...others, { name: instanceName, pct: value }] };
+    });
+    if (gradeCommitTimer.current) clearTimeout(gradeCommitTimer.current);
+    gradeCommitTimer.current = setTimeout(async () => {
+      gradeCommitTimer.current = null;
+      try {
+        setBuilding(true);
+        await api.setInstanceGrade(instanceName, pct);
+        await loadData();
+      } catch (err) {
+        setGrade(prev);
+        setError(err.message);
+      } finally {
+        setBuilding(false);
+      }
+    }, 800);
+  };
+
+  const handleRemoveInstanceGrade = async (instanceName) => {
+    const prev = grade;
+    setGrade(g => ({ ...g, instances: g.instances.filter(e => e.name !== instanceName) }));
+    try {
+      setBuilding(true);
+      await api.removeInstanceGrade(instanceName);
+      await loadData();
+    } catch (err) {
+      setGrade(prev);
+      setError(err.message);
+    } finally {
+      setBuilding(false);
+    }
   };
 
   const [originalCoordinates, setOriginalCoordinates] = useState({});
@@ -1783,6 +1869,9 @@ function App() {
         transforms={transforms}
         onToggleTransform={handleToggleTransform}
         onTransformParam={handleTransformParam}
+        grade={grade}
+        onToggleGrade={handleToggleGrade}
+        onGradeDefault={handleGradeDefault}
       />
 
       <DeleteInstanceModal
@@ -1838,6 +1927,7 @@ function App() {
             Preview
           </button>
         </div>
+        <div className={`build-scope${building ? ' is-building' : ''}`}>
         {mainTab === 'instances' ? (
         <div className="content-area">
           <Sidebar
@@ -1903,6 +1993,9 @@ function App() {
             onDemoteFromSource={handleDemoteFromSource}
             disabledControlAxes={disabledControlAxes}
             axisDefaults={axisDefaults}
+            grade={grade}
+            onSetInstanceGrade={handleSetInstanceGrade}
+            onRemoveInstanceGrade={handleRemoveInstanceGrade}
           />
         </div>
         ) : (
@@ -1920,6 +2013,13 @@ function App() {
             onFontSizeChange={setFontSize}
           />
         )}
+        {building && (
+          <div className="build-veil" aria-live="polite">
+            <img className="build-veil-logo" src="/static/logo.gif" alt="" />
+            <span className="build-veil-text">Rebuilding — hold your edits…</span>
+          </div>
+        )}
+        </div>
         </>
         )}
       </div>
