@@ -8,6 +8,8 @@ of the same source):
     declarations  ← ``<basename>-control.json``
   - avar2 mappings                              ← the avar2 CSV
   - transforms on/off + params                  ← ``<basename>-transforms.json``
+  - grade transform (toggle + default + per-instance grade%)
+                                                ← ``<basename>-grade.json``
 
 Drawn outlines are NOT part of the bundle (model β: they live in the
 source's ``.avar2-studio/shadow/`` workdir). Imported brace layers are
@@ -38,6 +40,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import control_axes as _control_axes
 from . import csv_io as _csv_io
+from . import grade as _grade
 from . import source_font as _source_font
 from .transforms import config as _tx_config
 from .transforms import registry as _tx_registry
@@ -106,6 +109,7 @@ def build_export(source_path: Path, csv_path: Optional[Path]) -> Dict:
         "control_axes": _control_axes.load(source_path),
         "avar2_csv": csv_text,
         "transforms": _tx_config.load(source_path),
+        "grade": _grade.load(source_path),
     }
 
 
@@ -127,7 +131,7 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
     """
     errors: List[str] = []
     warnings: List[str] = []
-    summary = {"axes": 0, "layers": 0, "mapping_rows": 0, "transforms": 0}
+    summary = {"axes": 0, "layers": 0, "mapping_rows": 0, "transforms": 0, "grades": 0}
 
     if not isinstance(bundle, dict) or bundle.get("format") != FORMAT:
         return {
@@ -295,6 +299,34 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
         except ValueError as e:
             errors.append(f"transforms: {e}")
 
+    # ---- grade ----------------------------------------------------------
+    # Grade entries reference instances by name; a graded name absent on the
+    # target is harmless (the build skips instances it can't resolve), so we
+    # only validate structure here and warn about unknown names.
+    gr = bundle.get("grade") or {}
+    grade_instances = [g for g in (gr.get("instances") or []) if isinstance(g, dict)]
+    summary["grades"] = len(grade_instances)
+    known_names = {i.get("name") for i in _source_font.get_source_instances(font)}
+    try:
+        csv_names_text = bundle.get("avar2_csv") or ""
+        if csv_names_text.strip():
+            for row in csv.DictReader(io.StringIO(csv_names_text)):
+                known_names.add((row.get("Instance Name") or "").strip())
+    except Exception:
+        pass
+    for g in grade_instances:
+        name = g.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("grade: an entry is missing an instance name.")
+            continue
+        if _num(g.get("pct")) is None:
+            errors.append(f"grade '{name}': grade% is not a number ({g.get('pct')!r}).")
+        elif known_names and name not in known_names:
+            warnings.append(
+                f"grade targets instance '{name}', which isn't in this source or its "
+                f"avar2 mappings — it will be ignored until that instance exists."
+            )
+
     return {"ok": not errors, "errors": errors, "warnings": warnings, "summary": summary}
 
 
@@ -326,5 +358,8 @@ def apply_bundle(bundle: Dict, source_path: Path, csv_path: Optional[Path]) -> D
     _tx_registry.discover()
     cleaned = _tx_registry.validate(bundle.get("transforms", {}).get("transforms") or [])
     _tx_config.save(source_path, cleaned)
+
+    # Grade is replaced wholesale, same as transforms.
+    _grade.save_all(source_path, bundle.get("grade") or {})
 
     return report

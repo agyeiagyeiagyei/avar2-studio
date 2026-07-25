@@ -164,6 +164,14 @@ def remove_instance_grade(source_path: Path, name: str) -> bool:
     return True
 
 
+def save_all(source_path: Path, data: Dict) -> Dict:
+    """Replace the WHOLE grade sidecar with ``data`` (normalised first).
+    Returns the stored payload. Used by config-bundle import; the per-field
+    setters above stay the interactive API."""
+    _save(source_path, data if isinstance(data, dict) else _empty())
+    return load(source_path)
+
+
 def rename_instance(source_path: Path, old_name: str, new_name: str) -> bool:
     """Keep a grade attached to its instance across a rename. Returns True if
     an entry was renamed."""
