@@ -189,14 +189,12 @@ function App() {
           api.glyphsFileStatus().catch(() => ({ has_unsaved_changes: false }))
         ]);
         
-        // Hosted shared-demo instance: show the landing overlay once
-        // per visit, and the persistent pill after it's dismissed.
+        // Hosted shared-demo instance: show the landing overlay on
+        // every page load; Enter dismisses it until the next load.
         if (health.demo && !demoInitRef.current) {
           demoInitRef.current = true;
           setDemoMode(true);
-          if (!sessionStorage.getItem('avar2.landingDismissed')) {
-            setShowLanding(true);
-          }
+          setShowLanding(true);
         }
 
         setBuilding(health.building || false);
@@ -1768,17 +1766,8 @@ function App() {
         <DemoLanding
           familyId={vfFamilyId}
           fontLoaded={fontLoaded}
-          onEnter={() => {
-            sessionStorage.setItem('avar2.landingDismissed', '1');
-            setShowLanding(false);
-          }}
+          onEnter={() => setShowLanding(false)}
         />
-      )}
-      {demoMode && !showLanding && (
-        <div className="demo-pill">
-          shared demo · resets periodically
-          <button onClick={() => setShowLanding(true)}>about</button>
-        </div>
       )}
       <FontraEditorModal
         editor={fontraEditor}
@@ -1859,6 +1848,7 @@ function App() {
             sampleText={sampleText}
             onSampleTextChange={setSampleText}
             selectedInstance={selectedInstance}
+            familyName={familyName}
             onUpdateInstance={handleUpdateInstance}
             onResetCoordinates={handleResetCoordinates}
             originalCoordinates={originalCoordinates}

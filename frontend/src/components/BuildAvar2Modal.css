@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12,19 +12,19 @@
 }
 
 .build-avar2-modal {
-  background: white;
+  background: #ffffff;
   border-radius: 8px;
   width: 90%;
   max-width: 600px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.14);
 }
 
 .build-avar2-modal-header {
-  padding: 20px;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--zinc-200);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -32,15 +32,17 @@
 
 .build-avar2-modal-header h2 {
   margin: 0;
-  font-size: 1.5em;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--zinc-900);
 }
 
 .close-button {
   background: none;
   border: none;
-  font-size: 2em;
+  font-size: 1.4rem;
   cursor: pointer;
-  color: #666;
+  color: var(--zinc-500);
   padding: 0;
   width: 30px;
   height: 30px;
@@ -48,10 +50,13 @@
   align-items: center;
   justify-content: center;
   line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
 }
 
 .close-button:hover {
-  color: #000;
+  color: var(--zinc-900);
+  background: var(--zinc-100);
 }
 
 .close-button:disabled {
@@ -60,38 +65,38 @@
 }
 
 .build-avar2-modal-content {
-  padding: 20px;
+  padding: 16px 20px;
   overflow-y: auto;
   flex: 1;
 }
 
 .sync-warning {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 4px;
-  padding: 15px;
+  background: var(--amber-50);
+  border: 1px solid var(--amber-300);
+  border-radius: 6px;
+  padding: 12px 15px;
   margin-bottom: 20px;
 }
 
 .sync-warning strong {
   display: block;
   margin-bottom: 8px;
-  color: #856404;
+  color: var(--amber-800);
 }
 
 .sync-warning p {
   margin: 5px 0;
-  color: #856404;
+  color: var(--amber-800);
   font-size: 0.9em;
 }
 
 .sync-success {
-  background: #d4edda;
-  border: 1px solid #28a745;
-  border-radius: 4px;
+  background: var(--green-50);
+  border: 1px solid var(--green-200);
+  border-radius: 6px;
   padding: 10px 15px;
   margin-bottom: 20px;
-  color: #155724;
+  color: var(--green-700);
 }
 
 .axis-selection-section {
@@ -100,13 +105,14 @@
 
 .axis-selection-section h3 {
   margin: 0 0 10px 0;
-  font-size: 1.1em;
-  color: #333;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--zinc-800);
 }
 
 .axis-description {
   margin: 5px 0 15px 0;
-  color: #666;
+  color: var(--zinc-500);
   font-size: 0.9em;
 }
 
@@ -122,17 +128,17 @@
   gap: 10px;
   cursor: pointer;
   padding: 8px;
-  border-radius: 4px;
-  transition: background 0.2s;
+  border-radius: 6px;
+  transition: background 0.15s;
 }
 
 .axis-checkbox:hover {
-  background: #f5f5f5;
+  background: var(--zinc-100);
 }
 
 .axis-checkbox input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   cursor: pointer;
 }
 
@@ -145,47 +151,56 @@
 }
 
 .error-message {
-  background: #f8d7da;
-  border: 1px solid #f5c6cb;
-  border-radius: 4px;
+  background: var(--red-50);
+  border: 1px solid var(--red-200);
+  border-radius: 6px;
   padding: 10px 15px;
   margin-top: 15px;
-  color: #721c24;
+  color: var(--red-800);
 }
 
 .build-avar2-modal-footer {
-  padding: 20px;
-  border-top: 1px solid #e0e0e0;
+  padding: 16px 20px;
+  border-top: 1px solid var(--zinc-200);
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
 
+/* Same button system as the header's .btn — the two definitions agree
+   no matter which stylesheet wins the cascade. */
 .btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
+  padding: 0.42rem 0.85rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--zinc-700);
   cursor: pointer;
-  font-size: 1em;
-  transition: background 0.2s;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--zinc-50);
+  border-color: var(--zinc-400);
 }
 
 .btn-primary {
-  background: #007bff;
-  color: white;
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #0056b3;
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
 }
 
 .btn-secondary {
-  background: #6c757d;
-  color: white;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #545b62;
+  background: #ffffff;
+  color: var(--zinc-700);
 }
 
 .btn:disabled {

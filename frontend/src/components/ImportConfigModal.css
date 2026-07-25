@@ -7,7 +7,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -15,36 +15,36 @@
 }
 
 .import-config-modal {
-  background: white;
+  background: #ffffff;
   border-radius: 8px;
   padding: 1.5rem;
   max-width: 500px;
   width: 90%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.14);
 }
 
 .import-config-modal h3 {
   margin: 0 0 1rem 0;
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  color: #333;
+  color: var(--zinc-900);
 }
 
 .import-config-summary {
   margin: 0 0 1rem 0;
-  font-size: 0.875rem;
-  color: #666;
+  font-size: 0.8125rem;
+  color: var(--zinc-600);
   line-height: 1.5;
 }
 
 .import-config-note {
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  color: #333;
+  background: var(--zinc-50);
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--zinc-700);
   line-height: 1.5;
 }
 
@@ -52,21 +52,21 @@
 .import-config-warnings {
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 
 .import-config-errors {
-  background: #f8d7da;
-  border: 1px solid #dc3545;
-  color: #721c24;
+  background: var(--red-50);
+  border: 1px solid var(--red-200);
+  color: var(--red-800);
 }
 
 .import-config-warnings {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  color: #856404;
+  background: var(--amber-50);
+  border: 1px solid var(--amber-300);
+  color: var(--amber-800);
 }
 
 .import-config-list-title {
@@ -94,36 +94,43 @@
 
 .import-config-cancel,
 .import-config-confirm {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.875rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
 .import-config-cancel {
-  background: #f8f9fa;
-  color: #333;
+  background: #ffffff;
+  border: 1px solid var(--zinc-300);
+  color: var(--zinc-700);
 }
 
 .import-config-cancel:hover:not(:disabled) {
-  background: #e9ecef;
+  background: var(--zinc-50);
+  border-color: var(--zinc-400);
 }
 
 .import-config-confirm {
-  background: #007bff;
-  color: white;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
 }
 
 .import-config-confirm:hover:not(:disabled) {
-  background: #0056b3;
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
 }
 
 .import-config-cancel:disabled,
 .import-config-confirm:disabled {
-  background: #ccc;
+  background: var(--zinc-300);
+  border-color: var(--zinc-300);
+  box-shadow: none;
+  color: var(--zinc-500);
   cursor: not-allowed;
   opacity: 0.6;
 }

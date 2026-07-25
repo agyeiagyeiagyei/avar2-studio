@@ -237,7 +237,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     <>
     <header className="header">
       <div className="header-title">
-        {familyName ? <h1>{familyName}</h1> : <h1 className="header-title-empty">avar2-studio</h1>}
+        <img className="header-logo" src="/static/logo.gif" alt="avar2 studio" />
         {loadingMsg && <span className="header-loading-msg">{loadingMsg}</span>}
       </div>
       <div className="header-actions">
@@ -304,7 +304,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 disabled={busy}
                 title="Post-build transforms — run on the compiled font and rebuild. Off by default."
               >
-                Transforms{enabledCount > 0 ? ` (${enabledCount})` : ''} ▾
+                Transforms{enabledCount > 0 && <span className="count-flag">{enabledCount}</span>} ▾
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="load-font-menu transforms-menu" align="end">
@@ -427,9 +427,9 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           <button
             onClick={onBuildFont}
             disabled={building}
-            className="btn btn-primary"
+            className="btn btn-3d btn-rebuild"
           >
-            {building ? 'Building...' : fontLoaded ? 'Rebuild Font' : 'Build Font'}
+            {building ? 'Building...' : fontLoaded ? 'Rebuild' : 'Build'}
           </button>
         )}
       </div>

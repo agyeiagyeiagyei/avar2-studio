@@ -18,7 +18,7 @@
 
 .instance-row-wrapper.drag-over {
   transform: translateY(10px);
-  border-top: 2px dashed #007bff;
+  border-top: 2px dashed var(--primary);
   margin-top: -2px;
 }
 
@@ -33,6 +33,6 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--zinc-500);
   font-size: 1.1rem;
 }

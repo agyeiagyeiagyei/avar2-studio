@@ -384,7 +384,7 @@ function PreviewTab({
         <div className="preview-tab-download">
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-3d"
             onClick={() => { setExportError(null); setShowExportModal(true); }}
             disabled={!fontLoaded}
             title="Download the built variable font — choose hidden axes and an optional opening location first"

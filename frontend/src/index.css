@@ -4,6 +4,100 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 
+/* ------------------------------------------------------------------
+   Design tokens — modern neutral tool aesthetic (Linear/Figma-adjacent).
+
+   Two faces of ONE palette:
+   - @theme feeds the Tailwind utilities used by the vendored shadcn
+     components (bg-primary, bg-popover, text-muted-foreground, ring-ring,
+     rounded-md, shadow-md, ...). Values here must be literals.
+   - :root custom properties are referenced by the hand-written
+     per-component CSS files. Keep the hex values in sync with @theme.
+------------------------------------------------------------------- */
+@theme {
+  /* Accent — single blue, evolution of the app's legacy #007bff. */
+  --color-primary: #0a84ff;
+  --color-primary-foreground: #ffffff;
+
+  /* Zinc neutrals (semantic aliases used by shadcn utilities). */
+  --color-background: #ffffff;
+  --color-foreground: #27272a;            /* zinc-800 */
+  --color-popover: #ffffff;
+  --color-popover-foreground: #27272a;
+  --color-secondary: #f4f4f5;             /* zinc-100 */
+  --color-secondary-foreground: #3f3f46;  /* zinc-700 */
+  --color-muted: #fafafa;                 /* zinc-50 */
+  --color-muted-foreground: #71717a;      /* zinc-500 */
+  --color-accent: #f4f4f5;                /* shadcn hover surface — zinc-100 */
+  --color-accent-foreground: #27272a;
+  --color-destructive: #dc2626;           /* red-600 */
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e4e4e7;                /* structural hairlines — zinc-200 */
+  --color-input: #d4d4d8;                 /* control borders — zinc-300 */
+  --color-ring: rgba(10, 132, 255, 0.45); /* accent-tinted focus ring */
+
+  /* Radius scale: chips/badges 4px, buttons/inputs 6px, cards/menus 8px. */
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Soft shadows — floating elements only (menus, modals, pills). */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-md: 0 2px 6px -2px rgb(0 0 0 / 0.06), 0 6px 16px -6px rgb(0 0 0 / 0.10);
+  --shadow-lg: 0 4px 12px -4px rgb(0 0 0 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.14);
+}
+
+:root {
+  /* Type */
+  --font-sans: 'Velarium', -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter,
+    "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    monospace;
+
+  /* Accent (mirror of @theme --color-primary + derived steps) */
+  --primary: #0a84ff;
+  --primary-strong: #0066d6;   /* hover fill / accent text on white */
+  --primary-soft: #e6f2ff;     /* tinted surface */
+  --primary-soft-hover: #d3e9ff;
+  --primary-border: #b3d9ff;   /* tinted hairline */
+  --focus-ring: rgba(10, 132, 255, 0.22);
+
+  /* Zinc neutrals */
+  --zinc-50: #fafafa;
+  --zinc-100: #f4f4f5;
+  --zinc-200: #e4e4e7;
+  --zinc-300: #d4d4d8;
+  --zinc-400: #a1a1aa;
+  --zinc-500: #71717a;
+  --zinc-600: #52525b;
+  --zinc-700: #3f3f46;
+  --zinc-800: #27272a;
+  --zinc-900: #18181b;
+
+  /* Semantic status (sync dots, banners, badges — not chrome) */
+  --red-50: #fef2f2;
+  --red-100: #fee2e2;
+  --red-200: #fecaca;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+  --red-800: #991b1b;
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-300: #fcd34d;
+  --amber-500: #f59e0b;
+  --amber-700: #b45309;
+  --amber-800: #92400e;
+  --green-50: #f0fdf4;
+  --green-200: #bbf7d0;
+  --green-600: #16a34a;
+  --green-700: #15803d;
+
+  --overlay-bg: rgba(9, 9, 11, 0.45);
+}
+
 /* Radix DropdownMenu positions its content via its own popper wrapper.
    Neutralize the absolute offsets baked into .load-font-menu (they were
    relative to the old hand-rolled dropdown container) when the class is
@@ -21,14 +115,182 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-sans);
+  font-size: 13px; /* ~13px base UI text; components sizing in rem are unaffected */
+  color: var(--zinc-800);
+  background: #ffffff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Buttons/inputs don't inherit the page font from body by default —
+   give them the same Velarium stack as the rest of the UI. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: var(--font-mono);
+}
+
+/* Checkboxes/radios pick up the single accent instead of the OS default. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--primary);
+}
+
+/* Range inputs — one slider recipe for the whole app (axis sliders,
+   font-size, SPAC, pin sliders). Modern look: thin zinc track, white
+   thumb with accent ring + soft shadow, gentle hover scale, tinted focus
+   ring. Firefox gets an accent progress fill via -moz-range-progress;
+   WebKit shows the clean track (no JS progress fill — accent-color is
+   incompatible with -webkit-appearance:none). */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--zinc-200);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  cursor: grab;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+input[type="range"]::-webkit-slider-thumb:active {
+  cursor: grabbing;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.24);
+}
+
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  cursor: grab;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+input[type="range"]::-moz-range-thumb:active {
+  cursor: grabbing;
+}
+
+input[type="range"]:hover::-moz-range-thumb,
+input[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.1);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.24);
+}
+
+input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--zinc-200);
+  border-radius: 2px;
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 4px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Numeric readouts render with tabular figures. Scoped to value classes
+   only — a global rule would leak tnum into the font specimens. */
+.axis-values,
+.axis-current,
+.axis-current-editing,
+.traditional-axis-value,
+.traditional-axis-value-input,
+.coordinate,
+.control-axis-count,
+.control-axis-range,
+.pin-value,
+.pin-slider-ticks,
+.modal-axis-input,
+.advance-width-display {
+  font-variant-numeric: tabular-nums;
+}
+
+/* "3d button" (https://codepen.io/veronicadev/pen/GyGLyN — MIT) for the
+   primary CTAs (Rebuild, Download font…): thick black border + stepped
+   hard shadow, yellow fade-in on hover, presses down-right on click.
+   Border scaled 5px→3px and corners rounded (8px) for the denser UI;
+   shadow steps/press kept at 5px. The doubled .btn class outranks
+   Header.css's .btn/.btn-primary rules (incl. their :hover/:active)
+   without !important. */
+.btn.btn-3d {
+  position: relative;
+  isolation: isolate; /* keep the ::after fill above our opaque chrome
+                         (the pen assumes transparent ancestors) */
+  background: #ffffff;
+  color: #000000;
+  border: 3px solid #000000;
+  border-radius: 8px;
+  box-shadow: 1px 1px 0, 2px 2px 0, 3px 3px 0, 4px 4px 0, 5px 5px 0;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.btn.btn-3d::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  z-index: -1;
+  border-radius: 5px; /* nest inside the border curve: 8px − 3px border */
+  background-color: #ffffff;
+  transition: all 0.5s;
+}
+
+.btn.btn-3d:hover:not(:disabled) {
+  background-color: transparent;
+}
+
+.btn.btn-3d:hover:not(:disabled)::after {
+  background-color: #f6d51e;
+}
+
+.btn.btn-3d:active:not(:disabled) {
+  top: 5px;
+  left: 5px;
+  box-shadow: 0 0 0 0;
 }

@@ -1,7 +1,7 @@
 .control-axes {
   margin-top: 1.25rem;
   padding-top: 1rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--zinc-200);
 }
 
 .control-axes-header-row {
@@ -25,34 +25,45 @@
 }
 
 .control-axes-add-btn {
-  background: white;
-  border: 1px solid #b6d4fe;
-  color: #0b4a8f;
+  background: #ffffff;
+  border: 1px solid var(--zinc-300);
+  color: var(--zinc-700);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
   cursor: pointer;
   font-family: inherit;
   letter-spacing: 0.02em;
+  transition: background-color 0.15s, box-shadow 0.15s;
 }
 
 .control-axes-add-btn:hover:not(:disabled) {
-  background: #eef3fb;
+  background: var(--zinc-50);
+}
+
+.control-axes-add-btn:active:not(:disabled) {
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.control-axes-add-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .control-axes-add-btn:disabled {
-  border-color: #ddd;
-  color: #aaa;
+  border-color: var(--zinc-200);
+  color: var(--zinc-400);
   cursor: not-allowed;
 }
 
 .control-axes-header:hover .control-axes-title {
-  color: #333;
+  color: var(--zinc-800);
 }
 
 .control-axes-section-caret {
-  color: #888;
+  color: var(--zinc-400);
   width: 0.9em;
   font-size: 0.8em;
 }
@@ -61,27 +72,27 @@
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #555;
+  color: var(--zinc-600);
   margin: 0;
 }
 
 .control-axes-count {
   display: inline-block;
   padding: 0.02rem 0.32rem;
-  background: #eef2f7;
-  color: #2c5aa0;
+  background: var(--zinc-100);
+  color: var(--zinc-600);
   border-radius: 8px;
   font-size: 0.6rem;
   font-weight: 700;
-  font-family: monospace;
+  font-family: var(--font-mono);
   line-height: 1.2;
 }
 
 .control-axes-disabled-count {
   display: inline-block;
   padding: 0.02rem 0.32rem;
-  background: #fdecea;
-  color: #b8350c;
+  background: var(--red-50);
+  color: var(--red-700);
   border-radius: 8px;
   font-size: 0.6rem;
   font-weight: 700;
@@ -91,7 +102,7 @@
 
 .control-axes-subtitle {
   font-size: 0.6rem;
-  color: #999;
+  color: var(--zinc-400);
   font-style: italic;
   margin-left: auto;
 }
@@ -103,9 +114,9 @@
 }
 
 .control-axis-row {
-  border: 1px solid #e5e5e5;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
+  background: var(--zinc-50);
   overflow: hidden;
   transition: opacity 0.15s;
 }
@@ -125,24 +136,24 @@
 }
 
 .control-axis-header:hover {
-  background-color: #f0f0f0;
+  background-color: var(--zinc-100);
 }
 
 .control-axis-caret {
-  color: #888;
+  color: var(--zinc-400);
   width: 0.9em;
   font-size: 0.85em;
 }
 
 .control-axis-tag {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
-  color: #333;
+  color: var(--zinc-800);
   letter-spacing: 0.02em;
 }
 
 .control-axis-name {
-  color: #666;
+  color: var(--zinc-500);
   font-size: 0.65rem;
   flex: 1;
 }
@@ -150,7 +161,7 @@
 .kind-badge {
   display: inline-block;
   padding: 0.05rem 0.35rem;
-  border-radius: 2px;
+  border-radius: 4px;
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -159,57 +170,57 @@
 }
 
 .kind-scoped {
-  background: #e7f1ff;
-  color: #0b4a8f;
-  border-color: #b6d4fe;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  border-color: var(--primary-border);
 }
 
 .kind-studio {
-  background: #f1eef9;
-  color: #5b3a8f;
-  border-color: #d6cdf0;
+  background: var(--zinc-100);
+  color: var(--zinc-600);
+  border-color: var(--zinc-300);
 }
 
 .control-axis-delete {
   background: none;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
+  border: 1px solid var(--red-200);
+  border-radius: 4px;
   padding: 0.05rem 0.3rem;
   cursor: pointer;
   font-size: 0.7rem;
   line-height: 1;
-  color: #b8350c;
+  color: var(--red-700);
 }
 
 .control-axis-delete:hover {
-  background: #fdecea;
+  background: var(--red-50);
 }
 
 .control-axis-edit {
   background: none;
-  border: 1px solid #ccc;
-  border-radius: 3px;
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
   padding: 0.05rem 0.3rem;
   cursor: pointer;
   font-size: 0.7rem;
   line-height: 1;
-  color: #555;
+  color: var(--zinc-600);
 }
 
 .control-axis-edit:hover {
-  background: #f0f0f0;
+  background: var(--zinc-100);
 }
 
 .control-axis-count {
-  color: #999;
+  color: var(--zinc-400);
   font-size: 0.6rem;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .control-axis-disable {
   background: none;
-  border: 1px solid #ccc;
-  border-radius: 3px;
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
   padding: 0.1rem 0.3rem;
   cursor: pointer;
   font-size: 0.7rem;
@@ -217,22 +228,22 @@
 }
 
 .control-axis-disable.on {
-  background: #fdecea;
-  border-color: #f1c0c0;
+  background: var(--red-50);
+  border-color: var(--red-200);
 }
 
 .control-axis-disable:hover {
-  background: #f0f0f0;
+  background: var(--zinc-100);
 }
 
 .control-axis-disable.on:hover {
-  background: #f9d4d2;
+  background: var(--red-100);
 }
 
 .control-axis-body {
   padding: 0.4rem 0.6rem 0.6rem;
-  border-top: 1px dashed #ddd;
-  background: white;
+  border-top: 1px dashed var(--zinc-300);
+  background: #ffffff;
 }
 
 .control-axis-glyphs {
@@ -244,34 +255,34 @@
 .control-axis-glyph {
   display: inline-block;
   padding: 0.05rem 0.3rem;
-  background: #f0f3f9;
-  border-radius: 2px;
-  font-family: monospace;
+  background: var(--primary-soft);
+  border-radius: 4px;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
-  color: #2c5aa0;
+  color: var(--primary-strong);
 }
 
 .control-axis-glyphs-empty {
   font-size: 0.65rem;
-  color: #888;
+  color: var(--zinc-400);
   font-style: italic;
 }
 
 .control-axis-range {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.6rem;
-  color: #5b3a8f;
-  background: #f8f5fc;
+  color: var(--zinc-600);
+  background: var(--zinc-50);
   padding: 0.02rem 0.3rem;
-  border-radius: 2px;
-  border: 1px solid #ece5f5;
+  border-radius: 4px;
+  border: 1px solid var(--zinc-200);
 }
 
 .control-axis-extrapolate {
   font-size: 0.6rem;
-  color: #6b3d00;
-  background: #fff3cd;
-  border: 1px solid #ffe69c;
+  color: var(--amber-800);
+  background: var(--amber-50);
+  border: 1px solid var(--amber-200);
   padding: 0.05rem 0.4rem;
   border-radius: 8px;
   cursor: help;
@@ -284,12 +295,12 @@
   z-index: 1000;
   max-width: 300px;
   padding: 0.45rem 0.6rem;
-  background: #2b2b2b;
-  color: #f5f5f5;
+  background: var(--zinc-900);
+  color: var(--zinc-50);
   font-size: 0.68rem;
   line-height: 1.4;
-  border-radius: 4px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
   pointer-events: none;
 }
 
@@ -297,33 +308,34 @@
   display: flex;
   gap: 1rem;
   font-size: 0.7rem;
-  color: #555;
+  color: var(--zinc-600);
   margin-bottom: 0.4rem;
   padding-bottom: 0.4rem;
-  border-bottom: 1px dashed #eee;
+  border-bottom: 1px dashed var(--zinc-200);
 }
 
 .control-axis-meta strong {
-  color: #333;
+  color: var(--zinc-800);
   font-weight: 600;
   margin-right: 0.25rem;
 }
 
 .control-axis-delete-btn {
   margin-top: 0.5rem;
-  background: white;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
-  color: #b8350c;
+  background: #ffffff;
+  border: 1px solid var(--red-200);
+  border-radius: 6px;
+  color: var(--red-700);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.25rem 0.55rem;
   cursor: pointer;
   letter-spacing: 0.02em;
+  transition: background-color 0.15s;
 }
 
 .control-axis-delete-btn:hover {
-  background: #fdecea;
+  background: var(--red-50);
 }
 
 .coverage-editor {
@@ -336,7 +348,7 @@
 .coverage-editor-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #444;
+  color: var(--zinc-700);
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -344,34 +356,35 @@
 
 .coverage-editor-hint {
   font-weight: 400;
-  color: #999;
+  color: var(--zinc-400);
   font-size: 0.62rem;
 }
 
 .coverage-editor-hint code {
-  background: #f0f0f0;
+  background: var(--zinc-100);
   padding: 0 0.2rem;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 .coverage-editor-textarea {
   width: 100%;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   padding: 0.45rem 0.55rem;
-  border: 1px solid #ddd;
-  border-radius: 3px;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
   resize: vertical;
   box-sizing: border-box;
   line-height: 1.45;
-  background: #fafafa;
+  background: var(--zinc-50);
+  color: var(--zinc-800);
 }
 
 .coverage-editor-textarea:focus {
   outline: none;
-  border-color: #2c5aa0;
-  background: white;
-  box-shadow: 0 0 0 2px rgba(44, 90, 160, 0.18);
+  border-color: var(--primary);
+  background: #ffffff;
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .coverage-editor-actions {
@@ -388,18 +401,19 @@
 }
 
 .coverage-editor-open {
-  background: white;
-  color: #5b3a8f;
-  border: 1px solid #d6cdf0;
+  background: #ffffff;
+  color: var(--zinc-700);
+  border: 1px solid var(--zinc-300);
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.3rem 0.7rem;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: background-color 0.15s;
 }
 
 .coverage-editor-open:hover:not(:disabled) {
-  background: #f1eef9;
+  background: var(--zinc-50);
 }
 
 .coverage-editor-open:disabled {
@@ -409,41 +423,44 @@
 
 .coverage-editor-count {
   font-size: 0.65rem;
-  color: #666;
+  color: var(--zinc-500);
 }
 
 .coverage-editor-save {
-  background: #2c5aa0;
-  color: white;
+  background: var(--primary);
+  color: #ffffff;
   border: none;
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.3rem 0.7rem;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  transition: background-color 0.15s;
 }
 
 .coverage-editor-save:disabled {
-  background: #c5cdd9;
+  background: var(--zinc-300);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
 .coverage-editor-save:hover:not(:disabled) {
-  background: #224a85;
+  background: var(--primary-strong);
 }
 
 .coverage-editor-error {
   font-size: 0.7rem;
-  color: #b8350c;
-  background: #fdecea;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
+  color: var(--red-700);
+  background: var(--red-50);
+  border: 1px solid var(--red-200);
+  border-radius: 6px;
   padding: 0.3rem 0.5rem;
 }
 
 .extra-locations {
   margin-top: 0.7rem;
-  border-top: 1px dashed #ddd;
+  border-top: 1px dashed var(--zinc-300);
   padding-top: 0.5rem;
 }
 
@@ -458,29 +475,30 @@
 .extra-locations-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #444;
+  color: var(--zinc-700);
 }
 
 .extra-locations-hint {
   font-weight: 400;
-  color: #999;
+  color: var(--zinc-400);
   font-size: 0.62rem;
 }
 
 .extra-locations-add {
-  background: white;
-  border: 1px solid #d6cdf0;
-  color: #5b3a8f;
+  background: #ffffff;
+  border: 1px solid var(--zinc-300);
+  color: var(--zinc-700);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
   flex-shrink: 0;
+  transition: background-color 0.15s;
 }
 
 .extra-locations-add:hover {
-  background: #f1eef9;
+  background: var(--zinc-50);
 }
 
 .extra-locations-list {
@@ -497,33 +515,33 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 0.45rem;
-  background: #fafafa;
-  border: 1px solid #eee;
-  border-radius: 3px;
+  background: var(--zinc-50);
+  border: 1px solid var(--zinc-200);
+  border-radius: 4px;
   font-size: 0.7rem;
 }
 
 .extra-location-glyph {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
-  color: #2c5aa0;
-  background: #eef3fb;
+  color: var(--primary-strong);
+  background: var(--primary-soft);
   padding: 0.05rem 0.3rem;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 .extra-location-coords {
   flex: 1;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.65rem;
-  color: #5b3a8f;
+  color: var(--zinc-600);
 }
 
 .extra-location-remove {
   background: none;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
-  color: #b8350c;
+  border: 1px solid var(--red-200);
+  border-radius: 4px;
+  color: var(--red-700);
   font-size: 0.65rem;
   padding: 0.05rem 0.35rem;
   cursor: pointer;
@@ -531,26 +549,26 @@
 }
 
 .extra-location-remove:hover {
-  background: #fdecea;
+  background: var(--red-50);
 }
 
 .extra-locations-empty {
   font-size: 0.65rem;
-  color: #888;
+  color: var(--zinc-400);
   font-style: italic;
   padding: 0.2rem 0;
 }
 
 .brace-layers {
   margin-top: 0.7rem;
-  border-top: 1px dashed #ddd;
+  border-top: 1px dashed var(--zinc-300);
   padding-top: 0.6rem;
 }
 
 .brace-layers-header {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #444;
+  color: var(--zinc-700);
   margin-bottom: 0.45rem;
   display: flex;
   flex-direction: column;
@@ -559,25 +577,25 @@
 
 .brace-layers-hint {
   font-weight: 400;
-  color: #999;
+  color: var(--zinc-400);
   font-size: 0.6rem;
 }
 
 .brace-layers-glyph {
   margin-bottom: 0.6rem;
-  border: 1px solid #eee;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
+  background: var(--zinc-50);
 }
 
 .brace-layers-glyph-name {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
-  color: #2c5aa0;
+  color: var(--primary-strong);
   padding: 0.3rem 0.55rem 0.25rem;
-  background: #eef3fb;
-  border-bottom: 1px solid #d9e3ef;
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary-border);
 }
 
 .brace-layers-list {
@@ -594,7 +612,7 @@
   padding: 0.3rem 0.55rem;
   font-size: 0.7rem;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--zinc-100);
   transition: background-color 0.12s;
 }
 
@@ -603,34 +621,34 @@
 }
 
 .brace-layer-row:hover {
-  background-color: #f5f8ff;
+  background-color: var(--zinc-50);
 }
 
 .brace-layer-coords {
-  font-family: monospace;
-  color: #5b3a8f;
+  font-family: var(--font-mono);
+  color: var(--zinc-600);
 }
 
 .brace-layer-tag {
-  background: #ece5f5;
-  color: #5b3a8f;
+  background: var(--zinc-100);
+  color: var(--zinc-600);
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 0.05rem 0.3rem;
-  border-radius: 2px;
+  border-radius: 4px;
   text-transform: uppercase;
 }
 
 .brace-layer-auto .brace-layer-coords {
-  color: #555;
+  color: var(--zinc-500);
 }
 
 .brace-layer-remove {
   background: none;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
-  color: #b8350c;
+  border: 1px solid var(--red-200);
+  border-radius: 4px;
+  color: var(--red-700);
   font-size: 0.65rem;
   padding: 0.05rem 0.35rem;
   cursor: pointer;
@@ -638,29 +656,30 @@
 }
 
 .brace-layer-remove:hover {
-  background: #fdecea;
+  background: var(--red-50);
 }
 
 .brace-layer-add-row {
   padding: 0.3rem 0.55rem;
-  border-top: 1px dashed #e6e6e6;
+  border-top: 1px dashed var(--zinc-200);
 }
 
 .brace-layer-add {
   background: none;
-  border: 1px dashed #d6cdf0;
-  border-radius: 3px;
-  color: #5b3a8f;
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
+  color: var(--zinc-500);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.2rem 0.55rem;
   cursor: pointer;
   width: 100%;
   text-align: center;
+  transition: background-color 0.15s;
 }
 
 .brace-layer-add:hover {
-  background: #f1eef9;
+  background: var(--zinc-50);
 }
 
 /* v2.7 unified LayersEditor — replaces CoverageEditor + the older
@@ -676,7 +695,7 @@
 .layers-editor-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #444;
+  color: var(--zinc-700);
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -684,25 +703,25 @@
 
 .layers-editor-hint {
   font-weight: 400;
-  color: #999;
+  color: var(--zinc-400);
   font-size: 0.62rem;
 }
 
 .layers-editor-empty {
   font-size: 0.7rem;
-  color: #777;
-  background: #fafafa;
-  border: 1px dashed #ddd;
-  border-radius: 3px;
+  color: var(--zinc-500);
+  background: var(--zinc-50);
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
   padding: 0.6rem 0.8rem;
   margin-bottom: 0.5rem;
 }
 
 .layers-glyph-block {
   margin-bottom: 0.45rem;
-  border: 1px solid #eee;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
+  background: var(--zinc-50);
 }
 
 .layers-glyph-header {
@@ -712,42 +731,42 @@
   padding: 0.35rem 0.55rem;
   cursor: pointer;
   user-select: none;
-  background: #eef3fb;
-  border-bottom: 1px solid #d9e3ef;
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary-border);
 }
 
 .layers-glyph-header:hover {
-  background: #e3ecf8;
+  background: var(--primary-soft-hover);
 }
 
 .layers-glyph-caret {
-  color: #2c5aa0;
+  color: var(--primary-strong);
   font-size: 0.7rem;
   width: 0.9em;
 }
 
 .layers-glyph-name {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 700;
-  color: #2c5aa0;
+  color: var(--primary-strong);
   flex: 1;
 }
 
 .layers-glyph-count {
   font-size: 0.6rem;
-  color: #2c5aa0;
-  background: #d9e3ef;
+  color: var(--primary-strong);
+  background: #ffffff;
   padding: 0.05rem 0.4rem;
   border-radius: 8px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .layers-glyph-warning {
   font-size: 0.6rem;
-  color: #6b3d00;
-  background: #fff3cd;
-  border: 1px solid #ffe69c;
+  color: var(--amber-800);
+  background: var(--amber-50);
+  border: 1px solid var(--amber-200);
   padding: 0.05rem 0.4rem;
   border-radius: 8px;
   cursor: help;
@@ -756,14 +775,14 @@
 }
 
 .layers-glyph-block.needs-more .layers-glyph-header {
-  background: #fff8e0;
-  border-bottom-color: #f0e3a8;
+  background: var(--amber-50);
+  border-bottom-color: var(--amber-200);
 }
 
 .layers-glyph-diagnostic {
   padding: 0.45rem 0.6rem;
-  background: #fffbed;
-  border-bottom: 1px solid #f0e3a8;
+  background: var(--amber-50);
+  border-bottom: 1px solid var(--amber-200);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -771,24 +790,25 @@
 
 .diagnostic-text {
   font-size: 0.65rem;
-  color: #6b3d00;
+  color: var(--amber-800);
   line-height: 1.5;
 }
 
 .diagnostic-pin {
   align-self: flex-start;
-  background: white;
-  color: #6b3d00;
-  border: 1px solid #f0e3a8;
+  background: #ffffff;
+  color: var(--amber-800);
+  border: 1px solid var(--amber-200);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.22rem 0.6rem;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: background-color 0.15s;
 }
 
 .diagnostic-pin:hover {
-  background: #fff3cd;
+  background: var(--amber-50);
 }
 
 .layers-glyph-list {
@@ -805,7 +825,7 @@
   padding: 0.35rem 0.55rem;
   font-size: 0.7rem;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--zinc-100);
   transition: background-color 0.12s;
 }
 
@@ -818,11 +838,11 @@
   height: 40px;
   font-size: 26px;
   line-height: 1;
-  border: 1px solid #eee;
-  border-radius: 3px;
-  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: 4px;
+  background: #ffffff;
   overflow: hidden;
-  color: #333;
+  color: var(--zinc-700);
 }
 
 .layer-row .layer-coords {
@@ -831,7 +851,7 @@
 }
 
 .layer-row:hover {
-  background-color: #f5f8ff;
+  background-color: var(--zinc-50);
 }
 
 .layer-coords {
@@ -846,9 +866,9 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: #5b3a8f;
+  color: var(--zinc-700);
 }
 
 .layer-coords-control-tag {
@@ -857,7 +877,7 @@
 }
 
 .layer-coords-control-eq {
-  color: #888;
+  color: var(--zinc-400);
 }
 
 .layer-coords-control-val {
@@ -867,10 +887,10 @@
 .layer-coords-studio-badge {
   margin-left: 0.4rem;
   padding: 0.02rem 0.32rem;
-  background: #ece5f5;
-  color: #5b3a8f;
-  border: 1px solid #d6cdf0;
-  border-radius: 2px;
+  background: var(--zinc-100);
+  color: var(--zinc-600);
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -883,10 +903,10 @@
 .layer-coords-source-badge {
   margin-left: 0.4rem;
   padding: 0.02rem 0.32rem;
-  background: #eef2ee;
-  color: #3a6b3a;
-  border: 1px solid #cfe0cf;
-  border-radius: 2px;
+  background: var(--green-50);
+  color: var(--green-700);
+  border: 1px solid var(--green-200);
+  border-radius: 4px;
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -907,13 +927,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.05rem 0.45rem;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
-  color: #888;
+  color: var(--zinc-500);
 }
 
 .layer-coords-context-prefix {
-  color: #aaa;
+  color: var(--zinc-400);
   font-style: italic;
   margin-right: 0.15rem;
 }
@@ -924,12 +944,12 @@
 }
 
 .layer-coords-axis-tag {
-  color: #2c5aa0;
+  color: var(--primary-strong);
   cursor: help;
 }
 
 .layer-coords-axis-val {
-  color: #555;
+  color: var(--zinc-600);
 }
 
 .layer-actions {
@@ -940,9 +960,9 @@
 
 .layer-open-fontra {
   background: none;
-  border: 1px solid #d6cdf0;
-  border-radius: 3px;
-  color: #5b3a8f;
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
+  color: var(--zinc-600);
   font-size: 0.7rem;
   padding: 0.05rem 0.35rem;
   cursor: pointer;
@@ -950,7 +970,7 @@
 }
 
 .layer-open-fontra:hover {
-  background: #f1eef9;
+  background: var(--zinc-100);
 }
 
 .control-axes-building {
@@ -960,15 +980,15 @@
   margin-left: 0.4rem;
   font-size: 0.6rem;
   font-style: italic;
-  color: #6b7280;
+  color: var(--zinc-500);
   white-space: nowrap;
 }
 
 .control-axes-spinner {
   width: 0.55rem;
   height: 0.55rem;
-  border: 1.5px solid #d0d3d9;
-  border-top-color: #5b3a8f;
+  border: 1.5px solid var(--zinc-300);
+  border-top-color: var(--zinc-500);
   border-radius: 50%;
   animation: control-axes-spin 0.7s linear infinite;
   flex-shrink: 0;
@@ -984,9 +1004,9 @@
 
 .layer-duplicate {
   background: none;
-  border: 1px solid #d5d5d5;
-  border-radius: 3px;
-  color: #555;
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
+  color: var(--zinc-600);
   font-size: 0.7rem;
   padding: 0.05rem 0.35rem;
   cursor: pointer;
@@ -994,15 +1014,15 @@
 }
 
 .layer-duplicate:hover {
-  background: #f0f0f0;
-  border-color: #b9b9b9;
+  background: var(--zinc-100);
+  border-color: var(--zinc-400);
 }
 
 .layer-remove {
   background: none;
-  border: 1px solid #f1c0c0;
-  border-radius: 3px;
-  color: #b8350c;
+  border: 1px solid var(--red-200);
+  border-radius: 4px;
+  color: var(--red-700);
   font-size: 0.65rem;
   padding: 0.05rem 0.35rem;
   cursor: pointer;
@@ -1010,29 +1030,30 @@
 }
 
 .layer-remove:hover {
-  background: #fdecea;
+  background: var(--red-50);
 }
 
 .layers-glyph-add-row {
   padding: 0.3rem 0.55rem;
-  border-top: 1px dashed #e6e6e6;
+  border-top: 1px dashed var(--zinc-200);
 }
 
 .layer-add-for-glyph {
   background: none;
-  border: 1px dashed #d6cdf0;
-  border-radius: 3px;
-  color: #5b3a8f;
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
+  color: var(--zinc-500);
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.22rem 0.55rem;
   cursor: pointer;
   width: 100%;
   text-align: center;
+  transition: background-color 0.15s;
 }
 
 .layer-add-for-glyph:hover {
-  background: #f1eef9;
+  background: var(--zinc-50);
 }
 
 .layers-editor-toplevel-add {
@@ -1040,25 +1061,27 @@
 }
 
 .layer-add-toplevel {
-  background: #2c5aa0;
-  color: white;
+  background: var(--primary);
+  color: #ffffff;
   border: none;
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.4rem 0.85rem;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
   width: 100%;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  transition: background-color 0.15s;
 }
 
 .layer-add-toplevel:hover {
-  background: #224a85;
+  background: var(--primary-strong);
 }
 
 .glyphs-preview {
   font-weight: 400;
-  color: #5b3a8f;
-  font-family: monospace;
+  color: var(--zinc-500);
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   margin-left: 0.4rem;
 }

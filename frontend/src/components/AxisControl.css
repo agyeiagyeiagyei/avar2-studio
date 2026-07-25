@@ -14,25 +14,25 @@
   flex: 1;                 /* pushes the control badge + tag to the right */
   font-weight: 500;
   font-size: 0.6375rem;
-  font-family: monospace;
-  color: #666;
+  font-family: var(--font-mono);
+  color: var(--zinc-500);
 }
 
 .axis-tag {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.6375rem;
-  color: #666;
-  background-color: #f0f0f0;
+  color: var(--zinc-600);
+  background-color: var(--zinc-100);
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .axis-control-badge {
   padding: 0.08rem 0.4rem;
-  background: #f1eef9;
-  color: #5b3a8f;
-  border: 1px solid #d6cdf0;
-  border-radius: 3px;
+  background: var(--zinc-100);
+  color: var(--zinc-600);
+  border: 1px solid var(--zinc-300);
+  border-radius: 4px;
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -47,36 +47,7 @@
 }
 
 .axis-slider {
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: #ddd;
-  outline: none;
-  -webkit-appearance: none;
-}
-
-.axis-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #007bff;
-  cursor: pointer;
-}
-
-.axis-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #007bff;
-  cursor: pointer;
-  border: none;
-}
-
-.axis-slider:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  margin-bottom: 0.1rem;
 }
 
 .axis-values {
@@ -87,8 +58,8 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   font-size: 0.6375rem;
-  font-family: monospace;
-  color: #666;
+  font-family: var(--font-mono);
+  color: var(--zinc-500);
 }
 
 .axis-min {
@@ -101,29 +72,29 @@
 
 .axis-current {
   font-weight: 600;
-  color: #333;
+  color: var(--zinc-800);
   text-align: center;
 }
 
 .axis-current-clickable {
   cursor: pointer;
   padding: 0.1rem 0.2rem;
-  border-radius: 3px;
-  transition: background-color 0.2s;
+  border-radius: 4px;
+  transition: background-color 0.15s;
 }
 
 .axis-current-clickable:hover {
-  background-color: #f0f0f0;
+  background-color: var(--zinc-100);
 }
 
 .axis-current-editing {
   font-weight: 600;
-  color: #333;
-  font-family: monospace;
+  color: var(--zinc-800);
+  font-family: var(--font-mono);
   font-size: 0.6375rem;
-  background-color: #fff;
-  border: 1px solid #007bff;
-  border-radius: 3px;
+  background-color: #ffffff;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
   padding: 0.1rem 0.2rem;
   width: 4rem;
   text-align: center;
@@ -131,13 +102,13 @@
 }
 
 .axis-current-editing:focus {
-  border-color: #0056b3;
-  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .axis-control-empty .axis-name,
 .axis-control-empty .axis-tag {
-  color: #999;
+  color: var(--zinc-400);
 }
 
 .axis-control-empty .axis-slider {
@@ -147,16 +118,16 @@
 .axis-control-empty .axis-current,
 .axis-control-empty .axis-min,
 .axis-control-empty .axis-max {
-  color: #aaa;
+  color: var(--zinc-400);
 }
 
 .axis-empty-prompt {
   margin-top: 0.4rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.72rem;
-  color: #6b3d00;
-  background: #fff8e1;
-  border: 1px solid #ffe69c;
-  border-radius: 3px;
+  color: var(--amber-800);
+  background: var(--amber-50);
+  border: 1px solid var(--amber-200);
+  border-radius: 4px;
   line-height: 1.35;
 }

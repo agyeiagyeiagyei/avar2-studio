@@ -1,3 +1,23 @@
+/* Velarium — the project's own face. Declared globally: used as the
+   landing's brand/display font and as the app's UI font via --font-sans.
+   Served from the bundle root by Flask's /static/ route (Vite copies
+   public/ to the build root; in `vite dev` these URLs don't resolve —
+   demo/preview is served by Flask anyway). */
+@font-face {
+  font-family: 'Velarium';
+  src: url('/static/Velarium-Yellow-VF.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Velarium';
+  src: url('/static/Velarium-Yellow-Italic-VF.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 .demo-landing {
   position: fixed;
   inset: 0;
@@ -15,24 +35,25 @@
   padding: 14px 28px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
-  border-bottom: 1px solid #ececec;
+  border-bottom: 1px solid var(--zinc-200);
 }
 
 .dl-brand {
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: 'Velarium', var(--font-sans);
   font-weight: 600;
   font-size: 16px;
+  color: var(--zinc-900);
 }
 
 .dl-gh {
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13.5px;
-  color: #6b6b6b;
+  color: var(--zinc-500);
   text-decoration: none;
   margin-right: 18px;
 }
 
-.dl-gh:hover { color: #1668dc; }
+.dl-gh:hover { color: var(--primary-strong); }
 
 .dl-enter {
   font-size: 14px;
@@ -40,12 +61,14 @@
   padding: 8px 18px;
   border: none;
   border-radius: 8px;
-  background: #1668dc;
-  color: #fff;
+  background: var(--primary);
+  color: #ffffff;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  transition: background-color 0.15s;
 }
 
-.dl-enter:hover { background: #0f56b8; }
+.dl-enter:hover { background: var(--primary-strong); }
 .dl-enter-big { font-size: 15px; padding: 11px 24px; margin-top: 6px; }
 
 .dl-scroll {
@@ -76,25 +99,27 @@
 }
 
 .dl-hero h1 {
+  font-family: 'Velarium', var(--font-sans);
   font-size: 23px;
   font-weight: 650;
   line-height: 1.3;
+  color: var(--zinc-900);
   margin: 0 0 12px;
 }
 
 .dl-hero p {
   font-size: 15.5px;
   line-height: 1.6;
-  color: #333;
+  color: var(--zinc-700);
   margin: 0 0 12px;
 }
 
-.dl-note { color: #6b6b6b !important; font-size: 14px !important; }
+.dl-note { color: var(--zinc-500) !important; font-size: 14px !important; }
 
 .dl-cmd {
-  background: #14161a;
+  background: var(--zinc-900);
   color: #e8e8e8;
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.7;
   padding: 13px 17px;
@@ -115,8 +140,10 @@
 }
 
 .dl-feature-text h2 {
+  font-family: 'Velarium', var(--font-sans);
   font-size: 28px;
   font-weight: 650;
+  color: var(--zinc-900);
   margin: 0 0 18px;
 }
 
@@ -130,14 +157,14 @@
 .dl-feature-text li {
   font-size: 15.5px;
   line-height: 1.55;
-  color: #333;
+  color: var(--zinc-700);
 }
 
 .dl-feature img {
   width: 100%;
   max-height: 74vh;
   object-fit: contain;
-  border: 1px solid #e4e4e4;
+  border: 1px solid var(--zinc-200);
   border-radius: 10px;
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.07);
 }
@@ -163,43 +190,17 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1px solid #bbb;
-  background: #fff;
+  border: 1px solid var(--zinc-400);
+  background: #ffffff;
   padding: 0;
   cursor: pointer;
 }
 
-.dl-dot.on { background: #1668dc; border-color: #1668dc; }
-
-/* persistent pill after dismissal (unchanged) */
-.demo-pill {
-  position: fixed;
-  right: 14px;
-  bottom: 14px;
-  z-index: 3000;
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11.5px;
-  color: #6b6b6b;
-  background: #fff;
-  border: 1px solid #e4e4e4;
-  border-radius: 999px;
-  padding: 6px 12px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-}
-
-.demo-pill button {
-  border: none;
-  background: none;
-  color: #1668dc;
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-  margin-left: 6px;
-}
+.dl-dot.on { background: var(--primary); border-color: var(--primary); }
 
 .dl-feature-intro {
   font-size: 15.5px;
   line-height: 1.6;
-  color: #333;
+  color: var(--zinc-700);
   margin: 0 0 14px;
 }

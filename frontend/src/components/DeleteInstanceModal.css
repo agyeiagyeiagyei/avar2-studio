@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12,63 +12,63 @@
 }
 
 .delete-instance-modal {
-  background: white;
+  background: #ffffff;
   border-radius: 8px;
   padding: 1.5rem;
   max-width: 500px;
   width: 90%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.14);
 }
 
 .delete-instance-modal h3 {
   margin: 0 0 1rem 0;
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  color: #333;
+  color: var(--zinc-900);
 }
 
 .delete-instance-message {
   margin: 0 0 1rem 0;
-  font-size: 0.875rem;
-  color: #666;
+  font-size: 0.8125rem;
+  color: var(--zinc-600);
   line-height: 1.5;
 }
 
 .delete-instance-warning {
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  color: #856404;
+  background: var(--amber-50);
+  border: 1px solid var(--amber-300);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--amber-800);
   line-height: 1.5;
 }
 
 .delete-instance-error {
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  background: #f8d7da;
-  border: 1px solid #dc3545;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  color: #721c24;
+  background: var(--red-50);
+  border: 1px solid var(--red-200);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--red-800);
   line-height: 1.5;
 }
 
 .delete-instance-checkbox {
   margin: 1rem 0;
   padding: 0.75rem;
-  background: #f8f9fa;
-  border-radius: 4px;
+  background: var(--zinc-50);
+  border-radius: 6px;
 }
 
 .delete-instance-checkbox label {
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 0.875rem;
-  color: #333;
+  font-size: 0.8125rem;
+  color: var(--zinc-700);
 }
 
 .delete-instance-checkbox input[type="checkbox"] {
@@ -96,35 +96,39 @@
 
 .delete-instance-cancel,
 .delete-instance-confirm {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.875rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
 .delete-instance-cancel {
-  background: #f8f9fa;
-  color: #333;
+  background: #ffffff;
+  border: 1px solid var(--zinc-300);
+  color: var(--zinc-700);
 }
 
 .delete-instance-cancel:hover {
-  background: #e9ecef;
+  background: var(--zinc-50);
+  border-color: var(--zinc-400);
 }
 
 .delete-instance-confirm {
-  background: #dc3545;
-  color: white;
+  background: var(--red-600);
+  border: 1px solid var(--red-600);
+  color: #ffffff;
 }
 
 .delete-instance-confirm:hover:not(:disabled) {
-  background: #c82333;
+  background: var(--red-700);
+  border-color: var(--red-700);
 }
 
 .delete-instance-confirm:disabled {
-  background: #ccc;
+  background: var(--zinc-300);
+  border-color: var(--zinc-300);
   cursor: not-allowed;
   opacity: 0.6;
 }

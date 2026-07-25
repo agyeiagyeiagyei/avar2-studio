@@ -1,23 +1,23 @@
 .instance-row {
-  border: 2px solid #ddd;
-  border-radius: 4px;
-  padding: 1rem;
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  padding: 0.9rem;
   cursor: pointer;
-  transition: all 0.2s;
-  background: white;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  background: #ffffff;
   position: relative;
   overflow: visible;
 }
 
 .instance-row:hover {
-  border-color: #999;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-color: var(--zinc-300);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
 }
 
 .instance-row.selected {
-  border-color: #007bff;
-  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
-  background-color: white;
+  border-color: var(--primary);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 0 0 3px rgba(10, 132, 255, 0.12);
+  background-color: #ffffff;
 }
 
 .instance-row-header {
@@ -56,8 +56,8 @@
   border-radius: 50%;
   flex-shrink: 0;
   display: block;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   transition: transform 0.2s;
 }
 
@@ -66,25 +66,25 @@
 }
 
 .sync-status-green {
-  background-color: #28a745;
+  background-color: var(--green-600);
 }
 
 .sync-status-orange {
-  background-color: #ff9800;
+  background-color: var(--amber-500);
 }
 
 .sync-status-red {
-  background-color: #dc3545;
+  background-color: var(--red-600);
 }
 
 
 .instance-name {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.6375rem; /* 0.85rem * 0.75 = 25% reduction */
-  color: #666;
-  background-color: #f0f0f0;
+  color: var(--zinc-600);
+  background-color: var(--zinc-100);
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
+  border-radius: 4px;
   margin: 0;
   display: inline-block;
 }
@@ -94,17 +94,18 @@
 }
 
 .instance-name.clickable:hover {
-  background-color: #e0e0e0;
+  background-color: var(--zinc-200);
 }
 
 .instance-name-input {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.6375rem;
-  color: #333;
-  background-color: white;
+  color: var(--zinc-800);
+  background-color: #ffffff;
   padding: 0.2rem 0.4rem;
-  border: 2px solid #007bff;
-  border-radius: 3px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--focus-ring);
   margin: 0;
   min-width: 100px;
   outline: none;
@@ -117,16 +118,16 @@
 }
 
 .coordinate {
-  font-family: monospace;
-  color: #666;
-  background-color: #f0f0f0;
+  font-family: var(--font-mono);
+  color: var(--zinc-600);
+  background-color: var(--zinc-100);
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .coordinate.advance-width-coordinate {
-  background-color: #e3f2fd;
-  color: #1976d2;
+  background-color: var(--primary-soft);
+  color: var(--primary-strong);
   font-weight: 500;
 }
 
@@ -134,15 +135,15 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background-color: #fff3cd;
-  color: #856404;
+  background-color: var(--amber-50);
+  color: var(--amber-800);
 }
 
 .advance-width-spinner {
   display: inline-block;
   width: 0.6rem;
   height: 0.6rem;
-  border: 2px solid #856404;
+  border: 2px solid var(--amber-700);
   border-top-color: transparent;
   border-radius: 50%;
   animation: advance-width-spin 0.6s linear infinite;
@@ -161,8 +162,8 @@
   font-size: 1.2rem;
   cursor: pointer;
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
-  transition: background-color 0.2s;
+  border-radius: 4px;
+  transition: background-color 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -173,27 +174,27 @@
 }
 
 .move-instance-btn:hover {
-  background-color: #eef;
+  background-color: var(--zinc-100);
 }
 
 .move-instance-btn:active {
-  background-color: #ddf;
+  background-color: var(--zinc-200);
 }
 
 .delete-instance-btn:hover {
-  background-color: #fee;
+  background-color: var(--red-50);
 }
 
 .delete-instance-btn:active {
-  background-color: #fcc;
+  background-color: var(--red-100);
 }
 
 .move-controls {
   margin-top: 0.5rem;
   padding: 0.5rem;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  background-color: var(--zinc-50);
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
 }
 
 .move-controls-row {
@@ -206,10 +207,11 @@
 .move-position-select,
 .move-target-select {
   padding: 0.3rem 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  font-size: 0.85rem;
-  background: white;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--zinc-800);
+  background: #ffffff;
   cursor: pointer;
 }
 
@@ -225,21 +227,24 @@
 .move-apply-btn,
 .move-cancel-btn {
   padding: 0.3rem 0.8rem;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-  font-size: 0.85rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
 .move-apply-btn {
-  background-color: #007bff;
-  color: white;
-  border-color: #007bff;
+  background-color: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
 }
 
 .move-apply-btn:hover:not(:disabled) {
-  background-color: #0056b3;
+  background-color: var(--primary-strong);
+  border-color: var(--primary-strong);
 }
 
 .move-apply-btn:disabled {
@@ -248,12 +253,13 @@
 }
 
 .move-cancel-btn {
-  background-color: white;
-  color: #666;
+  background-color: #ffffff;
+  color: var(--zinc-700);
 }
 
 .move-cancel-btn:hover {
-  background-color: #f5f5f5;
+  background-color: var(--zinc-50);
+  border-color: var(--zinc-400);
 }
 
 .instance-row-content {
@@ -270,12 +276,12 @@
   white-space: nowrap;
   padding: 0.5rem 0;
   min-height: 3rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--zinc-200);
   padding-top: 0.5rem;
   text-align: left !important;
   background: transparent !important;
   border: none !important;
-  border-top: 1px solid #eee !important;
+  border-top: 1px solid var(--zinc-200) !important;
   border-radius: 0 !important;
   display: block !important;
   padding-left: 0 !important;
@@ -287,27 +293,27 @@
 }
 
 .instance-row .preview-text::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: var(--zinc-100);
   border-radius: 3px;
 }
 
 .instance-row .preview-text::-webkit-scrollbar-thumb {
-  background: #888;
+  background: var(--zinc-400);
   border-radius: 3px;
 }
 
 .instance-row .preview-text::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: var(--zinc-500);
 }
 
 .advance-width-display {
   font-size: 0.75rem;
-  color: #666;
-  font-family: monospace;
+  color: var(--zinc-600);
+  font-family: var(--font-mono);
   padding: 0.25rem 0.5rem;
-  background-color: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 3px;
+  background-color: var(--zinc-50);
+  border: 1px solid var(--zinc-200);
+  border-radius: 4px;
   margin-top: 0.5rem;
   display: inline-block;
   align-self: flex-start;
@@ -324,7 +330,7 @@
   display: inline-block;
   padding: 0.1rem 0.4rem;
   margin-right: 0.4rem;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -336,15 +342,15 @@
 }
 
 .origin-badge-source {
-  background: #e7f1ff;
-  color: #0b4a8f;
-  border-color: #b6d4fe;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  border-color: var(--primary-border);
 }
 
 .instance-row-content .instance-coordinates {
   margin-top: 0.6rem;
   padding-top: 0.5rem;
-  border-top: 1px dashed #eee;
+  border-top: 1px dashed var(--zinc-200);
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
