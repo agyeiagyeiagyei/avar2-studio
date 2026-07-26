@@ -65,6 +65,7 @@ The tool keeps its artifacts in sibling files next to your source:
 ├── MyFont-avar.csv           # avar2 mappings — commit
 ├── MyFont-control.json       # secondary parametric axes + brace layers — commit
 ├── MyFont-transforms.json    # enabled transforms + params — commit
+├── MyFont-grade.json         # grade toggle + per-instance grade% — commit
 └── .avar2-studio/            # tool-managed (config, build output, shadow source) — gitignore
 ```
 
@@ -129,6 +130,21 @@ the font's origin — the source file is never touched.
 
 <img src="docs/images/export-modal.gif" width="450" alt="Export dialog: mark axes hidden, set the default location">
 
+### Grade
+
+Darken or lighten a style **without changing its advance widths** — a weight
+nudge that never reflows text.
+
+- Turn **Grade** on in the **Transforms** menu (sets a default strength).
+- Click a style's **`G`** badge to add a grade; the badge shows its %, and the
+  popover edits it — nothing rebuilds until you **Save**.
+- Grades interpolate between the styles you set, so you grade a few anchors,
+  not every style.
+
+Settings save to `<basename>-grade.json` and travel with Config export/import.
+How it works — the weight model and advance-holding — is in
+[docs/grade.md](./docs/grade.md).
+
 ### Post-build transforms
 
 The **Transforms** menu in the header holds optional VF→VF steps that
@@ -158,8 +174,9 @@ next launch.
 The **Config** menu moves a whole studio configuration between sources
 or machines. **Export** downloads a single
 `<family>-avar2studio.json` bundle: the secondary parametric axes and
-their brace-layer declarations, the avar2 mappings, and the transform
-settings (drawn outlines are re-seeded by interpolation on import).
+their brace-layer declarations, the avar2 mappings, the transform
+settings, and the grade configuration (drawn outlines are re-seeded by
+interpolation on import).
 **Import** validates first and is all-or-nothing — a report lists
 anything the loaded source is missing, and nothing is applied until
 you confirm. Importing replaces the current studio configuration.
