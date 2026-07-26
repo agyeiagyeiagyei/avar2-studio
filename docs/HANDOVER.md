@@ -8,8 +8,10 @@ doesn't repeat them:
   working-tree layout, axis surface, Preview tab, transforms (user-facing)
 - [docs/authoring-instances.md](./authoring-instances.md) — the
   instance/mapping authoring workflow, both example fixtures
-- [docs/secondary-parametric-axes.md](./secondary-parametric-axes.md) — secondary parametric
-  ("control") axes: design + implementation, tagged SHIPPED/DESIGN-ONLY
+- [docs/secondary-parametric-axes.md](./secondary-parametric-axes.md) — secondary
+  parametric ("control") axes: the user reference (authoring, coverage, editing)
+- [docs/design-notes.md](./design-notes.md) — the same feature's design record:
+  what isn't built, alternatives weighed, the Fontra integration paths
 
 Everything below is tribal knowledge as of this handover.
 
@@ -17,23 +19,18 @@ Everything below is tribal knowledge as of this handover.
 
 ## 1. Repo state at handover
 
-- **Active branch: `glyph-scoped-axes`** — all recent work lands here
-  first. At handover it has **unpushed commits ahead of
-  `origin/glyph-scoped-axes` and of `main`** (mapping sliders + rename +
-  source-derived layers panel; axis-map inversion; glyph-name thumbnails;
-  two upload fixes; this doc).
-  Nothing is lost if you just push the branch and fast-forward main —
-  that has been the merge pattern throughout (no PRs, ff-only).
-- Other branches: `grade-comparison` (parked WIP — grade-master
-  comparison sidebar using uharfbuzz advances), `designspace-support` /
-  `collapse-helper-scripts` / `example-roboto-delta-demo` (historical,
-  already merged or superseded).
-- **Releases:** latest GitHub release is `v0.1.0.dev6`; `pyproject.toml`
-  says `0.1.0.dev7` (never tagged). Pushing a `v0.1.0.devN` tag triggers
+- **Branching:** work lands on a feature branch first, then
+  fast-forwards to `main` — no PRs, ff-only throughout. Check
+  `git log --oneline --all` and `git status` for the current branch and
+  any unpushed commits; that snapshot rots too fast to record here.
+- Notable parked branch: `grade-comparison` (WIP — grade-master
+  comparison sidebar using uharfbuzz advances).
+- **Releases:** pushing a `v0.1.0.devN` tag triggers
   `.github/workflows/release.yml`, which builds the React bundle,
   assembles the wheel (bundle force-included at
-  `src/avar2_studio/static/`), and attaches it to a GitHub Release.
-  Not on PyPI yet.
+  `src/avar2_studio/static/`), and attaches it to a GitHub Release. The
+  released wheel lags the repo, and it's not on PyPI yet — check the
+  Releases page and `pyproject.toml` for current versions.
 - **The Crispy repo** (`~/Documents/Crispy`) is the parent project this
   tool was extracted from. Its `preview-app/` is the **legacy
   predecessor — do not develop there**; avar2-studio is canonical. The

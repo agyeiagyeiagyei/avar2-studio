@@ -1,45 +1,17 @@
 # Authoring instances from parametric axes
 
 avar2-studio works on top of any source file whose designspace is
-intended to be parametric. That is, it takes pre-defined masters and treats them as elemental components of conventional axes, such as Weight, Width, etc. 
-
-Instead avar2 Studio is 
-
-This doc walks through the workflow it exists to
-support — translating parametric stroke vocabulary into named
-stylistic instances — using the two real-world fonts in the studio's
-[`examples/`](../examples/) directory as concrete demonstrations.
+parametric — one whose masters are elemental letterform components
+(stroke weight, counter width, x-height) rather than finished styles.
+This doc walks the workflow it exists to support — translating that
+parametric stroke vocabulary into named stylistic instances — using
+the two real-world fonts in the studio's [`examples/`](../examples/)
+directory as concrete demonstrations.
 
 The two examples are not an exhaustive listing of approaches, but are two established ones, intended to show **two ways designers can lay out
 the parametric axes underneath**. The avar2 csv table the studio
 produces is identical in shape between them; the difference is in
 how many axes each font ships and what each one deforms.
-
-## Design approach — multiple-master heritage vs. duovar / parametric (STUB)
-
-> **Placeholder — to be expanded when we revisit the authoring
-> instances walkthrough.** This section will frame both Crispy and
-> Roboto Delta as descendants of Adobe's Multiple Master (MM) lineage
-> — designs whose axes are deformations of basic letterform attributes
-> (stroke weight, optical size, x-height, contrast) rather than
-> named styles — and contrast that with the more common "one axis
-> per user-facing dimension" (duovar / wght × wdth) approach. The
-> point will be that parametric axes are a *substrate* for the
-> conventional axes the user sees via avar2, not a competitor to them.
->
-> Reference reading parked here:
->
-> - Wikipedia, *Multiple master fonts* — https://en.wikipedia.org/wiki/Multiple_master_fonts
-> - Adobe community thread, *More information on variable type* —
->   https://community.adobe.com/questions-94/more-information-on-variable-type-1503356
-> - Eye on Design, *Parametric and variable typeface systems —
->   shape-shifters for letterforms* —
->   https://eyeondesign.aiga.org/parametric-and-variable-typeface-systems-shape-shifters-for-letterforms/
-> - Donald Berry / University of Waterloo lecture notes on Adobe's MM
->   model — https://cs.uwaterloo.ca/~dberry/COURSES/electronic.pub/fishler/multiple.htm
->
-> Crispy and Roboto Delta will serve as the two worked examples for
-> the unified vs case-split decompositions inside this lineage.
 
 ## What both approaches share
 
@@ -100,8 +72,6 @@ values need to land elsewhere in the designspace.
 | Default (corner) | — | — | 94 | 2 | 2 |
 | Regular Condensed | 400 | 40 | 456.3 | 228.9 | 164.8 |
 
-{lets include an animation here showing the individual axes, so, this would be four glyphs next to each other, each the same glyph and morphing from min-target, showing the individual axes as the first 3 and the final stylistic axis going from N/A fo finally 400 for Regular, shoing that this isn't just a morphing from 100 to 400 Wieght}
-
 The `wght`/`wdth` columns are what end users see — a familiar
 `wght=400 wdth=40` pair. The parametric columns are where in
 parametric space the studio actually drives the font. The avar2
@@ -109,10 +79,6 @@ mapping bridges them: once this row lands in the CSV, the build
 pipeline writes a table so `wght=400 wdth=40` resolves to
 `(XTRA=456.3, XOPQ=228.9, YOPQ=164.8)` at render time. By default, the end user
 never sees the parametric axes, though they can be enabled as "hidden" axes.
-
-{next let's show two glyphs, both the same one being moved from regular weight (as desribed with the coordinates below, to a bold weight, using these coordinates
-
-XOPQ = }
 
 What the parametric move does, axis by axis:
 
@@ -198,19 +164,15 @@ tradeoff curve:
 | Best fit | Display / geometric designs with even tone | Text / system fonts that must read across a wide optical-size range |
 | What enables it | Letterforms drawn to share a stroke vocabulary across cases | Letterforms designed with case-distinct optical compensation in mind |
 
-A useful heuristic: **the case-split approach is needed when the
+A useful rule of thumb: **the case-split approach is needed when the
 font has to work small.** At display sizes the eye forgives shared
-stroke weight; at 8–10 pt it doesn't — caps lock up, counter shapes
-in lowercase fill in, digits become hard to count. Roboto Delta's
-brief was an 8 pt UI font through display sizes, so it had to ship
-the per-case knobs. Crispy's brief was a much narrower size range
-with even tone built into the drawing, so it didn't.
-
-If you're picking the approach for your own source: read the font's
-brief, then count cases where you'd want a Bold a slightly thinner
-than a Bold A (or vice versa). One or two — try unified first; the
-authoring is cheap to revisit. More than a handful — start
-case-split.
+stroke weight; at 8–10 pt it doesn't — caps lock up, lowercase
+counters fill in, digits get hard to count. So read the font's brief
+and count the cases where you'd want a Bold a slightly thinner than a
+Bold A: one or two, try unified first (it's cheap to revisit); more
+than a handful, start case-split. Roboto Delta ran from 8 pt UI to
+display, so it shipped the per-case knobs; Crispy's narrower range,
+with even tone built into the drawing, didn't need them.
 
 ## What "a couple of instances" actually buys you
 
