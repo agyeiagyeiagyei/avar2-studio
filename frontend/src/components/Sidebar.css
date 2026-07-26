@@ -186,7 +186,7 @@
 /* Same visual treatment as ``.axis-group-heading`` (Core / parametric
    axes header) so the two sidebar sections read as siblings. */
 .avar2-section-title {
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -482,7 +482,7 @@
 }
 
 .axis-group-heading {
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;

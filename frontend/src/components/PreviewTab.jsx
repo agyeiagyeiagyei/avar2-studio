@@ -75,7 +75,33 @@ function PreviewTab({
   const parametricPromoted = userAxes.length === 0 && parametricAxes.length > 0;
 
   const [coords, setCoords] = useState({});
-  const [showParametric, setShowParametric] = useState(false);
+  const [showParametric, setShowParametric] = useState(true);
+
+  // Auto optical size — mimics browsers'/Google Fonts'
+  // font-optical-sizing:auto: opsz tracks the font size (in pt),
+  // clamped to the axis range. On by default; the opsz slider is
+  // disabled while linked and resumes from the tracked value when
+  // unchecked. Only meaningful for fonts with an opsz user axis.
+  const [autoOpsz, setAutoOpsz] = useState(true);
+  const opszAxis = userAxes.find(a => a.tag === 'opsz');
+  const linkedOpsz = opszAxis
+    ? Math.min(opszAxis.max, Math.max(opszAxis.min, roundHalf(remToPt(fontSize))))
+    : null;
+  const effectiveCoords = useMemo(
+    () => (autoOpsz && opszAxis ? { ...coords, opsz: linkedOpsz } : coords),
+    [autoOpsz, opszAxis, coords, linkedOpsz]
+  );
+
+  // Start each font's preview at the bottom of its opsz range — with
+  // auto-opsz on, the opening view is the axis's intended small-size
+  // cut, and it matches what a browser would render at that size.
+  // Once per font, so later manual font-size moves are never undone.
+  const sizeInitRef = useRef(null);
+  useEffect(() => {
+    if (!opszAxis || sizeInitRef.current === vfFamilyId) return;
+    sizeInitRef.current = vfFamilyId;
+    onFontSizeChange(ptToRem(opszAxis.min));
+  }, [opszAxis, vfFamilyId, onFontSizeChange]);
 
   // Editable specimen: the canvas IS the text input (the sidebar
   // textarea is gone on this tab). Uncontrolled contentEditable —
@@ -112,7 +138,7 @@ function PreviewTab({
     clearTimeout(mapTimer.current);
     mapTimer.current = setTimeout(async () => {
       try {
-        const res = await api.getMappedLocation(coords);
+        const res = await api.getMappedLocation(effectiveCoords);
         setMappedParams(res.mapped || {});
       } catch {
         // No built font / transient error — sliders fall back to inputs.
@@ -120,7 +146,7 @@ function PreviewTab({
       }
     }, 120);
     return () => clearTimeout(mapTimer.current);
-  }, [coords, fontLoaded]);
+  }, [effectiveCoords, fontLoaded]);
 
   // Seed each axis at its default the first time it appears; leave
   // designer edits untouched on subsequent axis-list changes.
@@ -177,8 +203,8 @@ function PreviewTab({
   // XTRA/XOPQ/YOPQ stay uppercase, crbr/wght stay as declared. (Matches
   // the working layer thumbnails; do NOT lowercase.)
   const fvs = useMemo(
-    () => (axes || []).map(a => `"${a.tag}" ${coords[a.tag] ?? a.default}`).join(', '),
-    [axes, coords]
+    () => (axes || []).map(a => `"${a.tag}" ${effectiveCoords[a.tag] ?? a.default}`).join(', '),
+    [axes, effectiveCoords]
   );
 
   // Export options: axes to flag HIDDEN in the exported fvar, and an
@@ -239,15 +265,37 @@ function PreviewTab({
     }
   };
 
-  const renderAxis = (a) => (
-    <AxisControl
-      key={a.tag}
-      axis={a}
-      value={coords[a.tag] ?? a.default}
-      onChange={(v) => setAxis(a.tag, v)}
-      treatEmptyAsActive
-    />
-  );
+  const renderAxis = (a) => {
+    // While auto-opsz is on, the opsz slider tracks the font size and
+    // is display-only — manual input resumes from the tracked value
+    // when the toggle is unchecked.
+    if (autoOpsz && opszAxis && a.tag === 'opsz') {
+      return (
+        <div
+          key={a.tag}
+          className="preview-axis-reflected"
+          title="Tracking font size (font-optical-sizing: auto, like Google Fonts) — uncheck Auto optical size to set it manually."
+        >
+          <AxisControl
+            axis={a}
+            value={linkedOpsz}
+            onChange={(v) => setAxis(a.tag, v)}
+            disabled
+            treatEmptyAsActive
+          />
+        </div>
+      );
+    }
+    return (
+      <AxisControl
+        key={a.tag}
+        axis={a}
+        value={coords[a.tag] ?? a.default}
+        onChange={(v) => setAxis(a.tag, v)}
+        treatEmptyAsActive
+      />
+    );
+  };
 
   // Parametric sliders reflect the avar2 mapping unless overridden:
   // the displayed value is the post-mapping location, so they move as
@@ -290,7 +338,6 @@ function PreviewTab({
     <div className="preview-tab">
       <div className="preview-tab-panel">
         <div className="preview-tab-panel-head">
-          <h2>Preview</h2>
           <button
             type="button"
             className="preview-reset"
@@ -313,6 +360,26 @@ function PreviewTab({
             onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
             className="axis-slider"
           />
+          <label
+            className="auto-opsz-toggle"
+            title={opszAxis
+              ? 'Mimic browsers/Google Fonts: optical size follows the font size (font-optical-sizing: auto)'
+              : 'This font has no opsz axis to track'}
+          >
+            <input
+              type="checkbox"
+              checked={autoOpsz && !!opszAxis}
+              disabled={!opszAxis}
+              onChange={(e) => {
+                const on = e.target.checked;
+                // Resume manual control from the tracked value, not the
+                // stale pre-link one.
+                if (!on && opszAxis) setAxis('opsz', linkedOpsz);
+                setAutoOpsz(on);
+              }}
+            />
+            Auto optical size
+          </label>
         </div>
 
         {avar2Error && (
@@ -353,15 +420,7 @@ function PreviewTab({
           </section>
         )}
 
-        {parametricAxes.length > 0 && (parametricPromoted ? (
-          <section className="preview-axis-group">
-            <div className="preview-axis-group-head">
-              <h3>Parametric axes</h3>
-              <span className="preview-axis-group-sub">avar2-mapped — your mappings drive these</span>
-            </div>
-            {parametricAxes.map(renderParametricAxis)}
-          </section>
-        ) : (
+        {parametricAxes.length > 0 && (
           <section className="preview-axis-group">
             <button
               type="button"
@@ -371,7 +430,9 @@ function PreviewTab({
             >
               <span className="preview-axis-caret">{showParametric ? '▾' : '▸'}</span>
               <span className="preview-axis-group-title">Parametric axes</span>
-              <span className="preview-axis-group-sub">advanced · overrides the mapping</span>
+              {parametricPromoted && (
+                <span className="preview-axis-group-sub">avar2-mapped — your mappings drive these</span>
+              )}
             </button>
             {showParametric && (
               <div className="preview-axis-group-body">
@@ -379,19 +440,7 @@ function PreviewTab({
               </div>
             )}
           </section>
-        ))}
-
-        <div className="preview-tab-download">
-          <button
-            type="button"
-            className="btn btn-3d"
-            onClick={() => { setExportError(null); setShowExportModal(true); }}
-            disabled={!fontLoaded}
-            title="Download the built variable font — choose hidden axes and an optional opening location first"
-          >
-            Download font…
-          </button>
-        </div>
+        )}
 
         {showExportModal && (
           <div className="modal-overlay" onClick={() => !exporting && setShowExportModal(false)}>
@@ -500,6 +549,18 @@ function PreviewTab({
           }}
           title="Click and type to change the preview text"
         />
+      </div>
+
+      <div className="preview-tab-download">
+        <button
+          type="button"
+          className="btn btn-3d"
+          onClick={() => { setExportError(null); setShowExportModal(true); }}
+          disabled={!fontLoaded}
+          title="Download the built variable font — choose hidden axes and an optional opening location first"
+        >
+          Download font…
+        </button>
       </div>
     </div>
   );

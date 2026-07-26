@@ -3,6 +3,7 @@
   display: flex;
   flex-direction: row;
   overflow: hidden;
+  position: relative;
 }
 
 /* ---- left control panel ---- */
@@ -21,14 +22,7 @@
 .preview-tab-panel-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-}
-
-.preview-tab-panel-head h2 {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--zinc-800);
-  margin: 0;
+  justify-content: flex-end;
 }
 
 .preview-reset {
@@ -69,7 +63,7 @@
 }
 
 .preview-axis-group h3 {
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -116,7 +110,7 @@
 }
 
 .preview-axis-group-title {
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -129,13 +123,35 @@
   gap: 0.75rem;
 }
 
+/* Floats over the canvas' bottom-right corner; anchored to .preview-tab
+   (position:relative) so canvas scrolling doesn't move it. */
 .preview-tab-download {
-  margin-top: auto;
-  padding-top: 0.75rem;
+  position: absolute;
+  right: 2.5rem;
+  bottom: 2rem;
+  z-index: 5;
 }
 
-.preview-tab-download .btn {
-  width: 100%;
+/* Auto-opsz toggle under the font-size slider — mimics browsers'
+   font-optical-sizing:auto (Google Fonts behavior). */
+.auto-opsz-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--zinc-600);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-opsz-toggle input {
+  cursor: pointer;
+}
+
+.auto-opsz-toggle:has(input:disabled) {
+  color: var(--zinc-400);
+  cursor: default;
 }
 
 /* ---- right canvas ---- */

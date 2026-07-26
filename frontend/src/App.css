@@ -66,6 +66,52 @@
   overflow: hidden;
 }
 
+/* Build-in-flight veil: dims + freezes the workspace (the "pause your
+   edits" cue) with the animated logo until the new build lands. */
+.build-scope {
+  position: relative;
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.build-scope > .content-area,
+.build-scope > .preview-tab {
+  flex: 1;
+  min-width: 0;
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.build-scope.is-building > .content-area,
+.build-scope.is-building > .preview-tab {
+  opacity: 0.35;
+  filter: saturate(0.3);
+  pointer-events: none;
+  user-select: none;
+}
+
+.build-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.build-veil-logo {
+  height: 4rem;
+}
+
+.build-veil-text {
+  font-size: 0.75rem;
+  color: var(--zinc-600);
+  font-style: italic;
+}
+
 .content-empty-state {
   flex: 1;
   display: flex;
