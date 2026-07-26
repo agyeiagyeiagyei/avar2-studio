@@ -27,7 +27,8 @@ const DEFAULT_SAMPLE = 'Adhesion';
  *
  * Axis classification comes straight off /api/axes (the built font's
  * fvar surface):
- *   - is_control_axis            → Control axes
+ *   - is_grade_axis              → Grade (same-advance weight)
+ *   - is_control_axis            → Secondary parametric axes
  *   - has_master_coverage false  → User axes (avar2-mapped target)
  *   - otherwise                  → Parametric axes (advanced)
  *
@@ -53,16 +54,18 @@ function PreviewTab({
   fontSize,
   onFontSizeChange,
 }) {
-  const { userAxes, controlAxes, parametricAxes } = useMemo(() => {
+  const { userAxes, controlAxes, gradeAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];
+    const grade = [];
     const param = [];
     for (const a of (axes || [])) {
-      if (a.is_control_axis) control.push(a);
+      if (a.is_grade_axis) grade.push(a);
+      else if (a.is_control_axis) control.push(a);
       else if (a.has_master_coverage === false) user.push(a);
       else param.push(a);
     }
-    return { userAxes: user, controlAxes: control, parametricAxes: param };
+    return { userAxes: user, controlAxes: control, gradeAxes: grade, parametricAxes: param };
   }, [axes]);
 
   // A parametric-only font (avar2 mappings whose in: axes ARE the
@@ -417,6 +420,16 @@ function PreviewTab({
               <span className="preview-axis-group-sub">glyph-scoped</span>
             </div>
             {controlAxes.map(renderAxis)}
+          </section>
+        )}
+
+        {gradeAxes.length > 0 && (
+          <section className="preview-axis-group">
+            <div className="preview-axis-group-head">
+              <h3>Grade</h3>
+              <span className="preview-axis-group-sub">same advance — no reflow</span>
+            </div>
+            {gradeAxes.map(renderAxis)}
           </section>
         )}
 

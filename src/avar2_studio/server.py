@@ -915,55 +915,73 @@ def _apply_transform_chain(vf_path):
     return out
 
 
+def _resolve_active_source() -> Optional[Path]:
+    """Re-derive the active build source (``GLYPHS_PATH``) from the CURRENT
+    control-axis + grade state, without triggering a build. Sets and returns
+    the global.
+
+    The build reads a **shadow** of the original whenever a studio feature adds
+    per-glyph deltas the original lacks — control-axis brace layers and/or grade
+    braces — otherwise it reads the untouched original. Both features compose
+    onto the SAME shadow file (grade braces layered on top of the control
+    shadow), so this is the single authority on which source the build reads.
+
+    Sharing this everywhere ``GLYPHS_PATH`` is (re)pointed — load, control-axis
+    edits, grade edits — is what makes grade (and authored brace layers) survive
+    a restart or an unrelated rebuild. Previously the grade composition lived
+    ONLY on the grade-edit path, so a plain reload silently dropped the GRAD
+    axis from the built font.
+    """
+    global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL
+    if ORIGINAL_PATH is None:
+        return GLYPHS_PATH
+
+    # 1) control-axis shadow (brace layers). regenerate_shadow returns None
+    #    when the sidecar declares no control axes; a shadow with an axis but no
+    #    layers compiles to the original's fvar, so we only *use* it when some
+    #    axis actually has layers.
+    shadow = None
+    try:
+        shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+        # Regenerating rewrites the watched source file — the caller triggers
+        # the build itself, so suppress the watcher for it.
+        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+    try:
+        any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
+    except Exception:  # noqa: BLE001
+        any_layers = False
+
+    # 2) grade braces, composed onto the SAME shadow. fresh_shadow only when
+    #    there's no control shadow to build on, so re-runs never stack braces.
+    any_grades = False
+    try:
+        if _grade.list_graded_instances(ORIGINAL_PATH):
+            grade_shadow = _grade_shadow.apply_grades(
+                ORIGINAL_PATH, _grade_instance_coords(), fresh_shadow=(shadow is None)
+            )
+            if grade_shadow is not None:
+                shadow = grade_shadow
+                any_grades = True
+                _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
+
+    GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades)) else ORIGINAL_PATH
+    return GLYPHS_PATH
+
+
 def _run_shadow_regen_and_build():
-    """Regenerate the control-axis shadow, point the build at it, and rebuild.
+    """Re-resolve the active build source (control + grade shadow) and rebuild.
     Runs on the debounce timer — never call directly from a request."""
-    global GLYPHS_PATH, BACKGROUND_WORK, _REBUILD_TIMER
+    global BACKGROUND_WORK, _REBUILD_TIMER
     with _REBUILD_TIMER_LOCK:
         _REBUILD_TIMER = None
     try:
         if ORIGINAL_PATH is None:
             return
-        shadow = None
-        try:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-            # Regenerating rewrites the watched source file (the shadow IS
-            # GLYPHS_PATH while active) — this job already triggers the
-            # build, so suppress the watcher for it.
-            global _SUPPRESS_WATCHDOG_UNTIL
-            _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
-        except Exception as exc:  # noqa: BLE001
-            print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
-        # Build from the shadow only while some axis still has layers —
-        # otherwise the shadow carries an axis with no deltas.
-        try:
-            sidecar_after = _control_axes.list_axes(ORIGINAL_PATH)
-            any_layers = any(ax.get("layers") for ax in sidecar_after)
-        except Exception:  # noqa: BLE001
-            any_layers = False
-
-        # GRADE overlay. A grade is source-level (like control axes, not a
-        # post-build transform): it injects GRAD brace layers + virtual masters
-        # onto the SAME shadow, composing AFTER regenerate_shadow. When no
-        # control axes exist, regenerate_shadow returns None and grade makes a
-        # fresh shadow itself (fresh_shadow flips off only when control just
-        # rebuilt it, so re-runs never stack braces).
-        any_grades = False
-        try:
-            graded = _grade.list_graded_instances(ORIGINAL_PATH)
-            if graded:
-                coords = _grade_instance_coords()
-                grade_shadow = _grade_shadow.apply_grades(
-                    ORIGINAL_PATH, coords, fresh_shadow=(shadow is None)
-                )
-                if grade_shadow is not None:
-                    shadow = grade_shadow
-                    any_grades = True
-                    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
-        except Exception as exc:  # noqa: BLE001
-            print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
-
-        GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades)) else ORIGINAL_PATH
+        _resolve_active_source()
         try:
             trigger_build()
         except Exception as exc:  # noqa: BLE001
@@ -4073,16 +4091,14 @@ def delete_control_axis(tag: str):
         # current sidecar never emits, so gating on it left the build
         # stuck on the original.)
         try:
-            remaining = _control_axes.list_axes(ORIGINAL_PATH)
-            if remaining:
-                shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-                if shadow is not None and any(ax.get("layers") for ax in remaining):
-                    GLYPHS_PATH = shadow
-                else:
-                    GLYPHS_PATH = ORIGINAL_PATH
-            else:
+            # Re-derive the active source from the REMAINING control axes and
+            # any grades — grade must survive deleting an unrelated control axis.
+            _resolve_active_source()
+            # Drop the shadow dir only when NEITHER feature still needs it.
+            if (GLYPHS_PATH == ORIGINAL_PATH
+                    and not _control_axes.list_axes(ORIGINAL_PATH)
+                    and not _grade.list_graded_instances(ORIGINAL_PATH)):
                 _control_axes.remove_shadow(ORIGINAL_PATH)
-                GLYPHS_PATH = ORIGINAL_PATH
             # See set_control_axis_layers: keep the last-good font on failure.
             try:
                 trigger_build()
@@ -4157,20 +4173,15 @@ def import_config_bundle():
             print(f"Error applying config bundle: {e}", file=sys.stderr)
             return jsonify({"error": str(e)}), 500
 
-        # Same shadow + build dance as delete_control_axis: regenerate
-        # while the sidecar still has axes, drop it otherwise; keep the
-        # last-good font on build failure.
+        # Same shadow + build dance as delete_control_axis: re-derive the
+        # active source from the imported control axes AND grades, dropping the
+        # shadow only when neither needs it; keep the last-good font on failure.
         try:
-            remaining = _control_axes.list_axes(ORIGINAL_PATH)
-            if remaining:
-                shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-                if shadow is not None and any(ax.get("layers") for ax in remaining):
-                    GLYPHS_PATH = shadow
-                else:
-                    GLYPHS_PATH = ORIGINAL_PATH
-            else:
+            _resolve_active_source()
+            if (GLYPHS_PATH == ORIGINAL_PATH
+                    and not _control_axes.list_axes(ORIGINAL_PATH)
+                    and not _grade.list_graded_instances(ORIGINAL_PATH)):
                 _control_axes.remove_shadow(ORIGINAL_PATH)
-                GLYPHS_PATH = ORIGINAL_PATH
             try:
                 trigger_build()
             except Exception as build_exc:
@@ -5266,29 +5277,20 @@ def _apply_source_path(path: Path) -> None:
     # control axis in the editor on the new source.
     _stop_fontra()
 
-    # CONTROL AXES — keep the shadow in sync on load. If any axis has
-    # brace layers (= the shadow carries real per-glyph deltas), swap
-    # the active build path to the shadow so the compiled font
-    # actually carries the new axes. Axes with no layers live dormant
-    # in the sidecar; the build stays on the original since the shadow
-    # would compile to the same thing.
-    #
-    # Gate on ``layers`` (the flat {glyph, location} list), NOT the
-    # legacy ``coverage`` key the current sidecar never emits — the
-    # old gate meant a restart left the build on the original and
-    # dropped authored brace deltas from the preview until the user
-    # re-saved a layer.
-    try:
-        sidecar_axes = _control_axes.list_axes(ORIGINAL_PATH)
-        if sidecar_axes:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-            if shadow is not None and any(ax.get("layers") for ax in sidecar_axes):
-                GLYPHS_PATH = shadow
-    except Exception as exc:
-        print(f"Warning: failed to regenerate control-axes shadow on load: {exc}", file=sys.stderr)
-
     _initialize_preview_csv_from_glyphs()
     _initialize_preview_config_from_glyphs()
+
+    # Re-establish the active build source from the current control-axis AND
+    # grade state — a shadow of the original carrying brace layers and/or grade
+    # braces, or the original itself. Runs AFTER the CSV init because grade reads
+    # per-instance parametric coords from it. This is what makes grade (and
+    # authored brace layers) survive a restart: before, only a feature EDIT
+    # re-applied them, so a plain reload dropped the GRAD axis (and brace deltas)
+    # from the built font until the designer re-saved.
+    try:
+        _resolve_active_source()
+    except Exception as exc:
+        print(f"Warning: failed to resolve active build source on load: {exc}", file=sys.stderr)
 
     print(f"Auto-building font from {GLYPHS_PATH}...", file=sys.stderr)
     try:
