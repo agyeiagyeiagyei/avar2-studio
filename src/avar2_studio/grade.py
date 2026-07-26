@@ -43,17 +43,23 @@ GRAD_TAG = "GRAD"
 GRAD_NAME = "Grade"
 GRAD_MIN, GRAD_DEFAULT, GRAD_MAX = -10.0, 0.0, 10.0
 
-# --- grade model: one grade% knob drives all three parametric moves -------
-# All three scale against the instance's OWN base value, so the move is
-# inherently per-instance and never overshoots an axis at extreme aspect
-# ratios (an XOPQ tied to dXTRA collapses on wide-light instances). K_XOPQ is
-# calibrated so a Bold-Condensed grade matches the original ratio-based grade
-# (0.372 * grade% * XOPQ == old 0.476 * grade% * XTRA there). YOPQ moves 1:1
-# with grade% — cheap darkness, ~no advance cost. Advance is held exactly by
-# per-glyph equalisation downstream, so these are darkness choices, not
-# advance ones.
-K_XOPQ = 0.372
+# --- grade model: PURE WEIGHT (one grade% knob) ---------------------------
+# The grade adds WEIGHT: XOPQ (stems) + YOPQ (horizontals) are the driver, and
+# XTRA (counters) follows to hold the width — so it reads as a bolder weight,
+# not a condense. grade% is the stem-weight change; COMP_RATIO is the counter
+# tightening per unit of stem thickening needed to hold advance (~2.0, stable
+# across weights — 1 unit of XOPQ widens ~2 units, so XTRA reclaims ~2). YOPQ
+# tracks the stem weight 1:1. Advance is held EXACTLY by per-glyph equalisation
+# downstream; XTRA just keeps the equalisation trims small, so these are
+# darkness-character choices, not advance ones.
+#   dXOPQ = grade% * XOPQ            (stem weight, driver)
+#   dYOPQ = grade% * YOPQ            (horizontal weight, driver)
+#   dXTRA = COMP_RATIO * dXOPQ       (counters follow to hold width)
+# Because XTRA scales with the STEM move (small on light styles), the grade
+# stays weight-led across the range instead of leading with counter-tightening
+# on the light end.
 K_YOPQ = 1.0
+COMP_RATIO = 2.0
 PARAM_TAGS = ("XTRA", "XOPQ", "YOPQ")
 
 
@@ -200,13 +206,13 @@ def grade_coords(
 
     ``base`` and the returned dicts are keyed by parametric tag
     (XTRA/XOPQ/YOPQ). ``param_ranges`` maps tag → (min, max) for clamping so a
-    grade never asks for an out-of-range coordinate. Light = higher XTRA /
-    lower XOPQ / lower YOPQ; dark = the inverse.
+    grade never asks for an out-of-range coordinate. Dark = more weight (higher
+    XOPQ/YOPQ, lower XTRA); light = the inverse.
     """
     x, o, y = base.get("XTRA", 0.0), base.get("XOPQ", 0.0), base.get("YOPQ", 0.0)
-    dX = pct * x
-    dO = pct * K_XOPQ * o
-    dY = pct * K_YOPQ * y
+    dO = pct * o            # stem weight (driver)
+    dY = pct * K_YOPQ * y   # horizontal weight (driver)
+    dX = COMP_RATIO * dO    # counters follow to hold width
 
     def clamp(tag, v):
         lo, hi = param_ranges.get(tag, (float("-inf"), float("inf")))
@@ -229,17 +235,31 @@ def max_pct_for(base: Dict[str, float], param_ranges: Dict[str, Tuple[float, flo
     """Largest grade% before any axis would clamp at ``base`` — the value the
     UI uses to bound the slider so a grade the parametric space can't deliver
     is simply unreachable. Returns a generous cap (2.0) when nothing binds."""
+    o = base.get("XOPQ")
+    if o is None or o <= 0:
+        return 2.0
     caps = []
-    for tag, k in (("XTRA", 1.0), ("XOPQ", K_XOPQ), ("YOPQ", K_YOPQ)):
-        v = base.get(tag)
-        if v is None or v <= 0 or k <= 0:
-            continue
+
+    def bound(v, half_per_pct):
+        # half-move at a given pct = half_per_pct * pct; keep v in [lo, hi].
         lo, hi = param_ranges.get(tag, (float("-inf"), float("inf")))
-        # half-move = pct*k*v/2 must keep v within [lo, hi] on both sides
+        if half_per_pct <= 0:
+            return
         if lo > float("-inf"):
-            caps.append(2.0 * (v - lo) / (k * v))
+            caps.append((v - lo) / half_per_pct)
         if hi < float("inf"):
-            caps.append(2.0 * (hi - v) / (k * v))
+            caps.append((hi - v) / half_per_pct)
+
+    # XOPQ (driver): half-move = pct*o/2
+    tag = "XOPQ"; bound(o, o / 2.0)
+    # YOPQ (driver): half-move = pct*K_YOPQ*y/2
+    y = base.get("YOPQ")
+    if y and y > 0:
+        tag = "YOPQ"; bound(y, K_YOPQ * y / 2.0)
+    # XTRA (follower): half-move = COMP_RATIO*pct*o/2 — scales with XOPQ, not XTRA
+    x = base.get("XTRA")
+    if x and x > 0:
+        tag = "XTRA"; bound(x, COMP_RATIO * o / 2.0)
     return min([c for c in caps if c > 0] + [2.0])
 
 
