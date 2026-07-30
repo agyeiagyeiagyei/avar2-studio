@@ -151,6 +151,13 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
 
   const handleUploadClick = () => {
     setOpen(false);
+    if (staticMode) {
+      // No dead button: explain instead. (Disabled buttons swallow
+      // mouse events, so a title tooltip would never even show.)
+      setLoadingMsg('Uploads need the full app — the static demo can\u2019t build fonts');
+      setTimeout(() => setLoadingMsg(null), 4000);
+      return;
+    }
     fileInputRef.current && fileInputRef.current.click();
   };
 
@@ -287,7 +294,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               <button
                 className="load-font-item load-font-item-upload"
                 onClick={handleUploadClick}
-                disabled={staticMode}
                 title={staticMode ? 'Uploads trigger a build — they need the full app' : undefined}
               >
                 <div className="load-font-item-name">Upload .glyphs or project .zip…</div>
