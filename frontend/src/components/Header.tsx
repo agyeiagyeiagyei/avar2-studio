@@ -257,7 +257,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
         {loadingMsg && <span className="header-loading-msg">{loadingMsg}</span>}
       </div>
       <div className="header-actions">
-        {!staticMode && (<>
         <div className="load-font-dropdown" ref={dropdownRef}>
           <button
             className="btn btn-load-font"
@@ -288,6 +287,8 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               <button
                 className="load-font-item load-font-item-upload"
                 onClick={handleUploadClick}
+                disabled={staticMode}
+                title={staticMode ? 'Uploads trigger a build — they need the full app' : undefined}
               >
                 <div className="load-font-item-name">Upload .glyphs or project .zip…</div>
                 <div className="load-font-item-subtitle">
@@ -336,7 +337,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                       <input
                         type="checkbox"
                         checked={!!grade.enabled}
-                        disabled={busy}
+                        disabled={busy || staticMode}
                         onChange={(e) => onToggleGrade && onToggleGrade(e.target.checked)}
                       />
                       <span className="transform-name">Grade</span>
@@ -355,7 +356,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                             min={1}
                             max={100}
                             step={1}
-                            disabled={busy}
+                            disabled={busy || staticMode}
                             onChange={(e) => {
                               const v = parseFloat(e.target.value);
                               if (!Number.isNaN(v) && onGradeDefault) onGradeDefault(v / 100);
@@ -409,7 +410,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                             <input
                               type="checkbox"
                               checked={!!(t.params?.[p.key] ?? p.default)}
-                              disabled={busy}
+                              disabled={busy || staticMode}
                               onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.checked)}
                             />
                           ) : (
@@ -420,7 +421,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                               min={p.min ?? undefined}
                               max={p.max ?? undefined}
                               step={p.type === 'float' ? 0.1 : 1}
-                              disabled={busy}
+                              disabled={busy || staticMode}
                               // Pass the RAW string so clearing the field or
                               // typing a leading '-' isn't coerced to 0 — the
                               // server coerces/clamps against the ParamSpec on
@@ -460,6 +461,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     Control axes, avar2 mappings, transforms as one JSON file
                   </div>
                 </button>
+                {!staticMode && (
                 <button
                   className="load-font-item"
                   onClick={handleImportClick}
@@ -469,6 +471,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     Replace the current configuration from an exported JSON file. You review a validation report before anything is applied.
                   </div>
                 </button>
+                )}
               </div>
             )}
             {/* Same offscreen-not-display:none, no-accept-filter treatment
@@ -482,7 +485,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             />
           </div>
         )}
-        {fontLoaded !== undefined && familyName && (
+        {fontLoaded !== undefined && familyName && !staticMode && (
           <button
             onClick={onBuildFont}
             disabled={building}
@@ -491,7 +494,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             {building ? 'Building...' : fontLoaded ? 'Rebuild' : 'Build'}
           </button>
         )}
-        </>)}
       </div>
     </header>
     {importData && (
