@@ -1,18 +1,17 @@
 /* Velarium — the project's own face. Declared globally: used as the
    landing's brand/display font and as the app's UI font via --font-sans.
-   Served from the bundle root by Flask's /static/ route (Vite copies
-   public/ to the build root; in `vite dev` these URLs don't resolve —
-   demo/preview is served by Flask anyway). */
+   Imported from src/assets so Vite rewrites the URLs per build --base
+   (Flask's /static/ route and the GitHub Pages bundle both resolve). */
 @font-face {
   font-family: 'Velarium';
-  src: url('/static/Velarium-Yellow-VF.ttf') format('truetype-variations');
+  src: url('../assets/Velarium-Yellow-VF.ttf') format('truetype-variations');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: 'Velarium';
-  src: url('/static/Velarium-Yellow-Italic-VF.ttf') format('truetype-variations');
+  src: url('../assets/Velarium-Yellow-Italic-VF.ttf') format('truetype-variations');
   font-weight: 100 900;
   font-style: italic;
   font-display: swap;

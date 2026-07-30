@@ -143,3 +143,12 @@
   border-radius: 4px;
   font-size: 0.85em;
 }
+
+/* Static demo (GitHub Pages) — slim notice under the header. */
+.static-demo-banner {
+  padding: 0.35rem 1.25rem;
+  font-size: 0.72rem;
+  color: var(--zinc-600);
+  background: var(--zinc-50);
+  border-bottom: 1px solid var(--zinc-200);
+}

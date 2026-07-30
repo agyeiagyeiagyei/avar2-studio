@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './Header.css';
 import { api } from '../api';
+import logoGif from '../assets/logo.gif';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
 import {
   DropdownMenu,
@@ -58,6 +59,8 @@ interface HeaderProps {
   grade?: GradeState;
   onToggleGrade?: (enabled: boolean) => void;
   onGradeDefault?: (pct: number) => void;
+  // Static demo (GitHub Pages): hide every action that needs the backend.
+  staticMode?: boolean;
 }
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
@@ -87,7 +90,7 @@ interface GradeState {
 // dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
-                 grade, onToggleGrade, onGradeDefault }: HeaderProps) {
+                 grade, onToggleGrade, onGradeDefault, staticMode = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -250,10 +253,11 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     <>
     <header className="header">
       <div className="header-title">
-        <img className="header-logo" src="/static/logo.gif" alt="avar2 studio" />
+        <img className="header-logo" src={logoGif} alt="avar2 studio" />
         {loadingMsg && <span className="header-loading-msg">{loadingMsg}</span>}
       </div>
       <div className="header-actions">
+        {!staticMode && (<>
         <div className="load-font-dropdown" ref={dropdownRef}>
           <button
             className="btn btn-load-font"
@@ -487,6 +491,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             {building ? 'Building...' : fontLoaded ? 'Rebuild' : 'Build'}
           </button>
         )}
+        </>)}
       </div>
     </header>
     {importData && (

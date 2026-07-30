@@ -49,3 +49,7 @@ examples/crispy-mini/sources/.avar2-studio/*
 # Logs
 *.log
 /tmp/preview-server.log
+
+# GitHub Pages build artifacts (generated in CI)
+frontend/public/static-demo/
+frontend/dist-pages/

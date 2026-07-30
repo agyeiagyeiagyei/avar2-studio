@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
+import { isStaticMode } from './static-api';
+import logoGif from './assets/logo.gif';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
@@ -55,6 +57,9 @@ function App() {
   // Store original coordinates per instance for sync status comparison
   const [instanceOriginalCoordinates, setInstanceOriginalCoordinates] = useState({});
   const [fontLoaded, setFontLoaded] = useState(false);
+  // Static demo (GitHub Pages): the api object was swapped for the
+  // snapshot reader before render (index.jsx / static-api.js). Read-only.
+  const [staticMode] = useState(isStaticMode());
   const [fontUrl, setFontUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1869,6 +1874,7 @@ function App() {
         grade={grade}
         onToggleGrade={handleToggleGrade}
         onGradeDefault={handleGradeDefault}
+        staticMode={staticMode}
       />
 
       <DeleteInstanceModal
@@ -1891,6 +1897,13 @@ function App() {
       {lastBuildStatus === 'failed' && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
           Build failed — preview is stale. {lastBuildError}
+        </div>
+      )}
+
+      {staticMode && (
+        <div className="static-demo-banner">
+          Static demo — the live preview works in your browser; building,
+          saving, and authoring need the full app.
         </div>
       )}
 
@@ -1931,7 +1944,7 @@ function App() {
             axes={axes}
             coordinates={editingCoordinates}
             onAxisChange={handleAxisChange}
-            disabled={!selectedInstance}
+            disabled={staticMode || !selectedInstance}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}
             selectedInstance={selectedInstance}
@@ -2012,7 +2025,7 @@ function App() {
         )}
         {building && (
           <div className="build-veil" aria-live="polite">
-            <img className="build-veil-logo" src="/static/logo.gif" alt="" />
+            <img className="build-veil-logo" src={logoGif} alt="" />
             <span className="build-veil-text">Rebuilding — hold your edits…</span>
           </div>
         )}

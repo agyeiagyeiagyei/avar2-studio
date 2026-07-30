@@ -1,0 +1,60 @@
+# Deploy the static demo to GitHub Pages (see docs/migration-github-pages.md).
+# Modelled on fontspector's pages.yml: build artifacts in CI, deploy static.
+name: Deploy static demo to Pages
+
+on:
+  push:
+    branches: [main, github-pages]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Full toolchain — the snapshot boots the server, which builds the
+      # example font (fontc) before the API is captured.
+      - run: pip install -e .
+
+      # Captures /api/* responses + the built font into
+      # frontend/public/static-demo/ (gitignored build artifact).
+      - run: python scripts/snapshot_static_demo.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+        working-directory: frontend
+
+      # Base = the repo's project-Pages path; dist-pages is a separate
+      # outDir so this never clobbers the Flask-served build/.
+      - run: npx vite build --base=/avar2-studio/ --outDir dist-pages
+        working-directory: frontend
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
