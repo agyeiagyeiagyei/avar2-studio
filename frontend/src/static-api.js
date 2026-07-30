@@ -82,18 +82,30 @@ const activeVariant = async () => {
   return cur.length === 0 && !sameSet(cur, bakedEnabledIds) ? 'spac-off' : 'default';
 };
 
-// Files that differ between the baked variants. fontPath is tracked
-// synchronously so getFontUrl() can stay sync (App calls it directly,
-// but always after an awaited health()).
-let fontPath = null;
+// Files that differ between the baked variants.
 const variantFile = async (name) => {
   const dir = await datasetDir();
   const variant = await activeVariant();
-  const path = variant === 'spac-off'
+  return variant === 'spac-off'
     ? `${DATA}/${dir}/variants/spac-off/${name}`
     : `${DATA}/${dir}/${name}`;
-  if (name === 'demo.ttf') fontPath = path;
-  return path;
+};
+
+// getFontUrl() must stay SYNCHRONOUS (App calls it directly). Both
+// inputs are already set synchronously by the time it can be called:
+// `dataset` by loadExample, transformsState by updateTransforms (or by
+// the first health() via activeVariant).
+const syncVariant = () => {
+  if (!transformsState) return 'default';
+  const cur = enabledIds(transformsState);
+  return cur.length === 0 && !sameSet(cur, bakedEnabledIds) ? 'spac-off' : 'default';
+};
+
+const currentFontPath = () => {
+  const dir = dataset || 'crispy-mini';
+  return syncVariant() === 'spac-off'
+    ? `${DATA}/${dir}/variants/spac-off/demo.ttf`
+    : `${DATA}/${dir}/demo.ttf`;
 };
 
 const endpoint = (name) => async () => {
@@ -126,8 +138,8 @@ const staticOverrides = {
   getGlyphCoverage: endpoint('glyph-coverage.json'),
   listExamples: examplesIndex,
   checkSyncStatus: async () => ({ synced: true, message: 'Static demo snapshot' }),
-  getFontUrl: () => fontPath || `${DATA}/crispy-mini/demo.ttf`,
-  getAvar2FontUrl: () => fontPath || `${DATA}/crispy-mini/demo.ttf`,
+  getFontUrl: () => currentFontPath(),
+  getAvar2FontUrl: () => currentFontPath(),
   exportConfigUrl: () => `${datasetPath}/config-export.json`,
 
   // Load Font: swap the dataset; App's loadData() re-reads the new
