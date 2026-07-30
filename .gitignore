@@ -53,3 +53,7 @@ examples/crispy-mini/sources/.avar2-studio/*
 # GitHub Pages build artifacts (generated in CI)
 frontend/public/static-demo/
 frontend/dist-pages/
+
+# Rust/wasm build artifacts
+wasm/fontc-web/pkg/
+wasm/fontc-web/target/

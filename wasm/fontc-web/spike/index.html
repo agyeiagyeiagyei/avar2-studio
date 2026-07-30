@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>fontc-wasm spike</title>
+  <style>
+    body { font-family: monospace; padding: 2rem; }
+    #status { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>fontc-wasm spike</h1>
+  <div id="status">loading…</div>
+  <script type="module">
+    import init, { compile_glyphs } from '../pkg/fontc_web.js';
+    const status = (m) => document.getElementById('status').textContent = m;
+    try {
+      status('initializing wasm…');
+      await init();
+      status('fetching CrispyMini.glyphs…');
+      const src = await (await fetch('/examples/crispy-mini/sources/CrispyMini.glyphs')).text();
+      status(`compiling (${(src.length / 1024) | 0} KiB source)…`);
+      const t0 = performance.now();
+      const ttf = compile_glyphs(src);
+      const ms = performance.now() - t0;
+      const magic = Array.from(ttf.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      window.__ttf = ttf;
+      status(`OK — ${ttf.length} bytes in ${ms | 0}ms\nmagic: ${magic} (expect 00 01 00 00)`);
+      document.title = 'SPIKE-OK';
+    } catch (e) {
+      status(`FAILED: ${e.message || e}`);
+      document.title = 'SPIKE-FAIL';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>spike2 tiny</title>
+<style>body { font-family: monospace; padding: 2rem; }</style>
+</head>
+<body>
+<div id="status">loading…</div>
+<script type="module">
+  import init, { compile_glyphs } from '../pkg/fontc_web.js';
+  const status = (m) => { document.getElementById('status').textContent = m; console.log(m); };
+  // Minimal .glyphs (v3 format): one master, three glyphs, one axis.
+  const TINY = `{
+.appVersion = "1347";
+formatVersion = 3;
+axes = ({Tag = wght; Value = 400; },{Tag = wdth; Value = 100; });
+fontMaster = ({
+axesValues = (400,100);
+id = "M1";
+name = "Regular";
+});
+glyphs = (
+{ glyphname = A; layers = ({ layerId = "M1"; width = 600; shapes = ({ closed = 1; nodes = ((100,0,l),(300,700,l),(500,0,l)); }); }); },
+{ glyphname = B; layers = ({ layerId = "M1"; width = 600; shapes = ({ closed = 1; nodes = ((100,0,l),(100,700,l),(400,700,l),(400,0,l)); }); }); },
+{ glyphname = space; layers = ({ layerId = "M1"; width = 300; }); }
+);
+instances = ();
+unitsPerEm = 1000;
+}`;
+  try {
+    await init();
+    status('compiling tiny source…');
+    const t0 = performance.now();
+    const ttf = compile_glyphs(TINY);
+    const ms = performance.now() - t0;
+    status(`OK — ${ttf.length} bytes in ${ms | 0}ms`);
+    document.title = 'SPIKE2-OK';
+  } catch (e) {
+    status(`FAILED: ${e.message || e}`);
+    document.title = 'SPIKE2-FAIL';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[package]
+name = "fontc-web"
+version = "0.1.0"
+edition = "2021"
+description = "WASM wrapper around fontc for the avar2-studio static demo (Phase 2)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# fontc from git main: the crates.io 0.6.0 norayon executor deadlocks
+# under wasm32 (single-threaded compile never returns). main carries
+# the in-memory/wasm fixes (PRs #1478/#1796) and the public Input API.
+fontc = { git = "https://github.com/googlefonts/fontc.git", default-features = false }
+wasm-bindgen = "0.2"
+
+[profile.release]
+# Keep the blob small: static demo payload discipline (fontspector model).
+opt-level = "z"
+lto = true
