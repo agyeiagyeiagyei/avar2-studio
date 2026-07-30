@@ -1,0 +1,37 @@
+# avar2-studio app container — the full-tool demo (Flask server + fontc
+# builds + embedded Fontra), built from the root Dockerfile.
+#
+# First-time setup:
+#   fly auth login
+#   fly apps create avar2-studio      # or pick another name if taken
+#   fly deploy
+# Later deploys are just `fly deploy`. Fly's builders are amd64-native,
+# which the font toolchain (resvg-cli wheels) requires.
+
+app = "avar2-studio"
+primary_region = "fra" # Frankfurt — change with `fly regions` + this key
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Keep one machine warm: demo visitors never hit a cold start, and
+  # restarts double as the pristine-demo reset. Set to 0 to sleep when
+  # idle instead (cheaper, first hit stalls while it boots).
+  min_machines_running = 1
+
+  # Flask exposes /api/health already (the frontend polls it).
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
