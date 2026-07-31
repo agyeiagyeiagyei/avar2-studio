@@ -47,9 +47,11 @@ export function compileFont(source) {
   return send({ kind: 'compile', source });
 }
 
-/** TTF bytes + mappings CSV → TTF bytes with user axes + avar v2 table. */
-export function addAvar2(fontBytes, mappingsCsv) {
-  return send({ kind: 'avar2', fontBytes, csv: mappingsCsv });
+/** TTF bytes + mappings CSV → TTF bytes with user axes + avar v2 table.
+ *  Optional axisMetadata: {TAG: {min, default, max}} range overrides
+ *  for newly declared user axes (axis-metadata.json semantics). */
+export function addAvar2(fontBytes, mappingsCsv, axisMetadata = null) {
+  return send({ kind: 'avar2', fontBytes, csv: mappingsCsv, metadata: axisMetadata });
 }
 
 /** TTF bytes + control-axes JSON array → TTF bytes with the new fvar

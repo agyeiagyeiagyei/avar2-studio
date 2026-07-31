@@ -92,3 +92,25 @@ export function synthesizeFromFont(metaAxes, metaInstances) {
     })),
   };
 }
+
+/** Append a user-axis column with a default value in every row. */
+export function addColumn(parsed, tag, defaultValue) {
+  if (parsed.columns.includes(tag)) {
+    throw new Error(`Axis column "${tag}" already exists`);
+  }
+  parsed.columns.push(tag);
+  for (const row of parsed.rows) row.values[tag] = defaultValue === undefined ? '' : String(defaultValue);
+}
+
+// Column-name → registered tag (mirrors csv_io.normalize_in_axis_name).
+const AXIS_NAME_MAP = { WGHT: 'wght', WDTH: 'wdth', OPSZ: 'opsz', CONTRAST: 'cntr', CNTR: 'cntr' };
+export const normalizeInAxisName = (col) => AXIS_NAME_MAP[col.toUpperCase()] || col;
+
+/** Derived min/default/max of a column's non-empty values (gen_fvar_axes). */
+export function columnRange(parsed, tag) {
+  const vals = parsed.rows.map(r => r.values[tag]).filter(v => v !== '').map(parseFloat);
+  if (!vals.length) return null;
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  return { min, default: min, max };
+}

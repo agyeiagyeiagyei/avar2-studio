@@ -12,22 +12,29 @@
  *
  * Returns the font with updated fvar/name/avar/gvar/HVAR/GDEF/MVAR,
  * repacked as a valid TTF.
+ *
+ * `axis_metadata_json` (optional) is a JSON object
+ * `{TAG: {min, default, max}}` overriding the CSV-derived range for
+ * new user axes (the studio's avar2-axis-metadata.json semantics).
  * @param {Uint8Array} font_bytes
  * @param {string} mappings_csv
+ * @param {string | null} [axis_metadata_json]
  * @returns {Uint8Array}
  */
-export function add_avar2(font_bytes, mappings_csv) {
+export function add_avar2(font_bytes, mappings_csv, axis_metadata_json) {
     const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(mappings_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.add_avar2(ptr0, len0, ptr1, len1);
+    var ptr2 = isLikeNone(axis_metadata_json) ? 0 : passStringToWasm0(axis_metadata_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len2 = WASM_VECTOR_LEN;
+    const ret = wasm.add_avar2(ptr0, len0, ptr1, len1, ptr2, len2);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
+    return v4;
 }
 
 /**
@@ -177,6 +184,10 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
 }
 
 function passArray8ToWasm0(arg, malloc) {

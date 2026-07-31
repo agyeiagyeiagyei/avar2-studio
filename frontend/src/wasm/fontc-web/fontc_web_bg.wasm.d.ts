@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const add_avar2: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const add_avar2: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];

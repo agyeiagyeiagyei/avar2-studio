@@ -127,8 +127,8 @@ await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(el =>
-    el.children.length === 0 && el.textContent.trim() === 'WGHT')),
-  'USER AXES shows the CSV-derived WGHT axis');
+    el.children.length === 0 && el.textContent.trim() === 'wght')),
+  'USER AXES shows the CSV-derived wght axis (registered → lowercase)');
 // The parametric (compiled) wght follows the mapping: with WGHT at its
 // default (100 → wght 400), the reflected parametric wght reads 400.
 await page.waitForFunction(() => {
@@ -161,8 +161,8 @@ await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(el =>
-    el.children.length === 0 && el.textContent.trim() === 'OPSZ')),
-  'OPSZ user axis appears after mappings import');
+    el.children.length === 0 && el.textContent.trim() === 'opsz')),
+  'opsz user axis appears after mappings import (registered → lowercase)');
 
 // ---- 8. control axes + GRAD apply from a config bundle ----------------------
 console.log('8. control axes + GRAD apply from bundle');
@@ -334,6 +334,52 @@ await page.waitForFunction(
   { timeout: 15000 }
 );
 ok(true, 'instance deleted');
+
+// ---- 11. mapping authoring (declare axis + metadata range) -----------------
+console.log('11. mapping authoring (declare axis + metadata range)');
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', [
+  CRISPY_GLYPHS,
+  join(dirname(fileURLToPath(import.meta.url)), '../../examples/crispy-mini/sources/CrispyMini-avar.csv'),
+]);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent?.startsWith('Crispy'),
+  { timeout: 90000 }
+);
+await page.waitForFunction(
+  () => document.querySelectorAll('.instance-row').length === 8,
+  { timeout: 30000 }
+);
+ok(true, 'upload with mappings CSV (8 rows)');
+await page.click('.btn-add-axis-inline');
+await page.waitForSelector('.add-axis-modal input', { timeout: 10000 });
+const axisInputs = await page.$$('.add-axis-modal input');
+await axisInputs[0].fill('Roundness');
+await axisInputs[1].fill('rond');
+const numInputs = await page.$$('.add-axis-modal .axis-number-input');
+await numInputs[0].fill('-100');
+await numInputs[1].fill('100');
+// Default Value stays at its initial 0 (its input lacks the number class).
+await page.click('.add-axis-modal button[type="submit"]');
+await page.waitForFunction(() =>
+  [...document.querySelectorAll('.sidebar *')].some(
+    el => el.children.length === 0 && el.textContent.trim() === 'ROND'
+  ), { timeout: 60000 });
+ok(true, 'new user axis ROND declared and visible in mappings');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+// Custom unregistered axis: the tag stays verbatim uppercase (studio
+// semantics — only registered axes normalize to lowercase).
+await page.waitForFunction(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(
+    el => el.children.length === 0 && el.textContent.trim() === 'ROND'
+  ), { timeout: 20000 });
+ok(true, 'ROND user-axis slider in Preview');
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(
+    el => el.children.length === 0 && el.textContent.trim() === '-100'
+  )), 'ROND range from axis metadata (-100 … 100), not CSV-derived');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

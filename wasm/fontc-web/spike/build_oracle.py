@@ -17,9 +17,14 @@ def main():
     font_path, csv_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     font = TTFont(font_path)
     fvar_tags = {a.axisTag for a in font["fvar"].axes}
-    with open(csv_path, encoding="utf-8-sig", newline="") as fh:
-        rows = [r for r in csv.reader(fh) if r and any(c.strip() for c in r)]
+    fh = open(csv_path, "r", encoding="utf-8-sig", newline="")
+    rows = [r for r in csv.reader(fh) if r and any(c.strip() for c in r)]
+    fh.close()
     header = [c.strip() for c in rows[0]]
+    # csv_io.normalize_in_axis_name: registered traditional axes map
+    # onto lowercase registered tags; custom columns stay verbatim.
+    REGISTERED = {"WGHT": "wght", "WDTH": "wdth", "OPSZ": "opsz",
+                  "CONTRAST": "cntr", "CNTR": "cntr"}
     mapping = []
     for row in rows[1:]:
         in_loc, out_loc = {}, {}
@@ -27,8 +32,10 @@ def main():
             cell = row[i].strip() if i < len(row) else ""
             if not cell:
                 continue
-            target = out_loc if tag in fvar_tags else in_loc
-            target[tag] = float(cell)
+            if tag in fvar_tags and tag.upper() not in REGISTERED:
+                out_loc[tag] = float(cell)
+            else:
+                in_loc[REGISTERED.get(tag.upper(), tag)] = float(cell)
         mapping.append({"in": in_loc, "out": out_loc})
 
     # fontTools' VariationModel drops zero-valued entries from every

@@ -128,13 +128,31 @@ struct MappingRow {
 }
 
 /// A new fvar axis declared by a CSV column that is not already an fvar
-/// axis (gftools `gen_fvar_axes`: default == min).
+/// axis (gftools `gen_fvar_axes`: default == min, unless the optional
+/// axis-metadata JSON overrides it).
 struct NewAxis {
     tag: Tag,
-    /// Column header string, used as the name-table string.
+    /// Column header, used for the axis-metadata lookup.
+    col_name: String,
+    /// Name-table string: the axis tag (gen_avar2 semantics), or the
+    /// authored display_name when axis metadata provides one.
     name: String,
     min: f64,
+    default: f64,
     max: f64,
+}
+
+/// Column-name → registered axis tag (csv_io.normalize_in_axis_name):
+/// traditional axes map onto lowercase registered tags; anything else
+/// (custom columns, parametric tags) stays verbatim.
+fn normalize_in_axis_name(name: &str) -> &str {
+    match name.to_ascii_uppercase().as_str() {
+        "WGHT" => "wght",
+        "WDTH" => "wdth",
+        "OPSZ" => "opsz",
+        "CONTRAST" | "CNTR" => "cntr",
+        _ => name,
+    }
 }
 
 /// Add new user axes + an avar v2 table (and the supporting VarStore
@@ -148,8 +166,12 @@ struct NewAxis {
 ///
 /// Returns the font with updated fvar/name/avar/gvar/HVAR/GDEF/MVAR,
 /// repacked as a valid TTF.
+///
+/// `axis_metadata_json` (optional) is a JSON object
+/// `{TAG: {min, default, max}}` overriding the CSV-derived range for
+/// new user axes (the studio's avar2-axis-metadata.json semantics).
 #[wasm_bindgen]
-pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsError> {
+pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Option<String>) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
 
     // Existing fvar axes, in font order: tag + (min, default, max).
@@ -208,6 +230,21 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
         return Err(err("mappings CSV has no instance rows"));
     }
 
+    // Studio in/out classification (config_generator.validate_csv_structure):
+    // a column is an avar2 INPUT when its normalized tag differs from the
+    // column name (registered traditional axis) or it is not an fvar axis
+    // at all; otherwise it is a parametric OUTPUT column. col_axis[c] =
+    // (raw column tag, axis tag used in fvar/locations, is_input).
+    let col_axis: Vec<(Tag, Tag, bool)> = col_tags
+        .iter()
+        .map(|&raw| {
+            let axis = Tag::from_str(normalize_in_axis_name(&raw.to_string()).as_ref())
+                .map_err(|e| err(format!("bad axis tag '{raw}': {e}")))?;
+            let is_input = axis != raw || !existing_tags.contains(&raw);
+            Ok((raw, axis, is_input))
+        })
+        .collect::<Result<_, JsError>>()?;
+
     // ---- New (input) axes ---------------------------------------------
     // Axis order and ranges follow gftools gen_fvar_axes: axes appear in
     // order of first non-empty cell (rows top-to-bottom, columns
@@ -215,9 +252,11 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
     let mut new_axes: Vec<NewAxis> = Vec::new();
     for row in &csv_rows {
         for (c, cell) in row.iter().enumerate() {
+            let (_, axis_tag, is_input) = col_axis[c];
             if cell.is_none()
-                || existing_tags.contains(&col_tags[c])
-                || new_axes.iter().any(|a| a.tag == col_tags[c])
+                || !is_input
+                || existing_tags.contains(&axis_tag)
+                || new_axes.iter().any(|a| a.tag == axis_tag)
             {
                 continue;
             }
@@ -229,11 +268,45 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
                 }
             }
             new_axes.push(NewAxis {
-                tag: col_tags[c],
-                name: col_names[c].to_string(),
+                tag: axis_tag,
+                col_name: col_names[c].to_string(),
+                // gen_avar2 names new axes by their tag; an authored
+                // display_name (axis metadata) wins when present.
+                name: axis_tag.to_string(),
                 min,
+                default: min, // gftools: default == min (metadata may override below)
                 max,
             });
+        }
+    }
+
+    // Optional axis-metadata overrides: explicit min/default/max for
+    // declared user axes, replacing the CSV-derived (min, default=min,
+    // max) — the studio's avar2-axis-metadata.json semantics.
+    if let Some(json) = axis_metadata_json.as_deref() {
+        let meta: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| err(format!("invalid axis metadata JSON: {e}")))?;
+        if let Some(obj) = meta.as_object() {
+            for a in new_axes.iter_mut() {
+                // Metadata is keyed by CSV column header (uppercase).
+                if let Some(m) = obj.get(&a.col_name) {
+                    let get = |k: &str| m.get(k).and_then(serde_json::Value::as_f64);
+                    if let Some(v) = get("min") {
+                        a.min = v;
+                    }
+                    if let Some(v) = get("default") {
+                        a.default = v;
+                    }
+                    if let Some(v) = get("max") {
+                        a.max = v;
+                    }
+                    if let Some(dn) = m.get("display_name").and_then(serde_json::Value::as_str) {
+                        if !dn.is_empty() {
+                            a.name = dn.to_string();
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -244,7 +317,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
         .map(|(tag, min, default, max)| (*tag, (*min, *default, *max)))
         .collect();
     for a in &new_axes {
-        triples.insert(a.tag, (a.min, a.min, a.max));
+        triples.insert(a.tag, (a.min, a.default, a.max));
     }
 
     // ---- Normalized mapping rows --------------------------------------
@@ -259,14 +332,16 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
         let mut output_values = HashMap::new();
         for (c, cell) in csv_row.iter().enumerate() {
             let Some(v) = cell else { continue };
-            let tag = col_tags[c];
-            let (min, default, max) = triples[&tag];
+            let (raw_tag, axis_tag, is_input) = col_axis[c];
+            let (min, default, max) = triples[if is_input { &axis_tag } else { &raw_tag }];
             let nv = normalize(*v, min, default, max);
-            if existing_tags.contains(&tag) {
-                output_values.insert(tag, nv);
-            } else if nv != 0.0 {
-                input_values.insert(tag, nv);
-                input.insert(tag, NormalizedCoord::new(nv));
+            if is_input {
+                if nv != 0.0 {
+                    input_values.insert(axis_tag, nv);
+                    input.insert(axis_tag, NormalizedCoord::new(nv));
+                }
+            } else {
+                output_values.insert(raw_tag, nv);
             }
         }
         rows.push(MappingRow {
@@ -384,7 +459,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
             w_fvar::VariationAxisRecord::new(
                 a.tag,
                 Fixed::from_f64(a.min),
-                Fixed::from_f64(a.min), // default == min
+                Fixed::from_f64(a.default),
                 Fixed::from_f64(a.max),
                 0,
                 name_id,
@@ -400,7 +475,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
     }
     for inst in fvar.axis_instance_arrays.instances.iter_mut() {
         for a in &new_axes {
-            inst.coordinates.push(Fixed::from_f64(a.min));
+            inst.coordinates.push(Fixed::from_f64(a.default));
         }
     }
 

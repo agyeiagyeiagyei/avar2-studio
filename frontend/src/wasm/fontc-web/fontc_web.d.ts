@@ -13,8 +13,12 @@
  *
  * Returns the font with updated fvar/name/avar/gvar/HVAR/GDEF/MVAR,
  * repacked as a valid TTF.
+ *
+ * `axis_metadata_json` (optional) is a JSON object
+ * `{TAG: {min, default, max}}` overriding the CSV-derived range for
+ * new user axes (the studio's avar2-axis-metadata.json semantics).
  */
-export function add_avar2(font_bytes: Uint8Array, mappings_csv: string): Uint8Array;
+export function add_avar2(font_bytes: Uint8Array, mappings_csv: string, axis_metadata_json?: string | null): Uint8Array;
 
 /**
  * Add control (secondary parametric) axes from a config bundle to a
@@ -54,7 +58,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly add_avar2: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly add_avar2: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];

@@ -16,7 +16,7 @@ self.onmessage = async (e) => {
   try {
     await ready;
     if (e.data && e.data.kind === 'avar2') {
-      const ttf = add_avar2(e.data.fontBytes, e.data.csv);
+      const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'control') {
       const ttf = apply_control_axes(e.data.fontBytes, e.data.json);

@@ -50,7 +50,7 @@ fn braces_match_fonttools_oracle() {
         .expect("apply_control_axes");
     let grade =
         fontc_web::apply_grade(font_bytes.clone(), GRADE_JSON, COORDS_JSON).expect("apply_grade");
-    let full = fontc_web::add_avar2(font_bytes.clone(), &csv).expect("add_avar2");
+    let full = fontc_web::add_avar2(font_bytes.clone(), &csv, None).expect("add_avar2");
     let full = fontc_web::apply_control_axes(full, CONTROL_JSON).expect("pipeline control");
     let full = fontc_web::apply_grade(full, GRADE_JSON, COORDS_JSON).expect("pipeline grade");
 

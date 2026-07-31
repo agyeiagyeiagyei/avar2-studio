@@ -75,12 +75,13 @@ const datasetDir = async () => {
 
 let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
 
-const buildUploadDataset = async (glyphsFile, csvFile) => {
+const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
   const sourceText = await glyphsFile.text();
   let fontBytes = await compileFont(sourceText);
   let mappingsText = null;
   let userAxisTags = new Set();
   const compiledTags = new Set(parseFont(fontBytes).axes.map(a => a.tag));
+  const axisMetadata = metadataFile ? JSON.parse(await metadataFile.text()) : {};
   if (csvFile) {
     // avar2 generation in-browser: CSV mappings → avar v2 store in the
     // compiled font (fontc-web wasm). The user axes are the CSV columns
@@ -109,6 +110,7 @@ const buildUploadDataset = async (glyphsFile, csvFile) => {
     mappingsCsv: mappingsText,
     instancesCsv: csvParsed,
     parametricTags: new Set(compiledTags),
+    axisRanges: axisMetadata || {},
     fontUrl,
     axes: {
       axes: meta.axes.map(a => ({
@@ -158,17 +160,38 @@ const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
 // Every authoring mutation funnels here: if the CSV grew user columns
 // the avar2 store regenerates; parametric-only edits only move browser
 // state (identity mapping — a no-op table fontc would omit anyway).
+// axisRanges (axis-metadata semantics) overrides the CSV-derived range
+// for newly declared user axes.
 const regenerateFont = async (dataset) => {
   if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
     return;
   }
+  const ranges = Object.keys(dataset.axisRanges || {}).length
+    ? JSON.stringify(dataset.axisRanges)
+    : null;
   dataset.fontBytes = await addAvar2(
     dataset.fontBytes,
-    mappingsCsv.serializeMappingsCsv(dataset.instancesCsv)
+    mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
+    ranges
   );
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
+  // The fvar grew (new user axes): re-read so USER AXES sliders appear.
+  // Parametric tags keep master coverage; user columns don't; anything
+  // else the fvar carries (SPAC/GRAD/control axes from a bundle) is
+  // treated as non-master here too — bundle flags get refreshed on the
+  // next import, and the authoring flow never mixes with snapshots.
+  const meta = parseFont(dataset.fontBytes);
+  const userTags = new Set(mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]));
+  dataset.axes = {
+    axes: meta.axes.map(a => ({
+      tag: a.tag, name: a.name,
+      min: a.min, default: a.default, max: a.max,
+      has_master_coverage: dataset.parametricTags.has(a.tag) && !userTags.has(a.tag),
+      is_control_axis: false,
+    })),
+  };
 };
 
 // ---- transforms state (toggles → pre-baked variants) ------------------------
@@ -476,8 +499,58 @@ const staticOverrides = {
   getInstances: async () => (uploadDataset ? uploadDataset.instances : fetchJSON(await variantFile('instances.json'))),
   getMasters: async () => (uploadDataset ? { masters: [] } : endpoint('masters.json')()),
   getAxes: async () => (uploadDataset ? uploadDataset.axes : fetchJSON(await variantFile('axes.json'))),
-  getAvar2Instances: async () => (uploadDataset ? { instances: [] } : endpoint('avar2-instances.json')()),
-  getAvar2Axes: async () => (uploadDataset ? { axes: [] } : endpoint('avar2-axes.json')()),
+  getAvar2Instances: async () => {
+    if (!uploadDataset) return endpoint('avar2-instances.json')();
+    return {
+      instances: uploadDataset.instancesCsv.rows.map(row => ({
+        instance_name: row.name,
+        avar2_mapping: {
+          in: Object.fromEntries(
+            Object.entries(row.values)
+              .filter(([tag, v]) => v !== '' && !uploadDataset.parametricTags.has(tag))
+              .map(([tag, v]) => [mappingsCsv.normalizeInAxisName(tag), parseFloat(v)])
+          ),
+          out: Object.fromEntries(
+            Object.entries(row.values)
+              .filter(([tag, v]) => v !== '' && uploadDataset.parametricTags.has(tag))
+              .map(([tag, v]) => [tag, parseFloat(v)])
+          ),
+        },
+      })),
+    };
+  },
+  getAvar2Axes: async () => {
+    if (!uploadDataset) return endpoint('avar2-axes.json')();
+    const parsed = uploadDataset.instancesCsv;
+    const userCols = mappingsCsv.userColumns(parsed, [...uploadDataset.parametricTags]);
+    const metadata = {};
+    for (const col of userCols) {
+      const override = uploadDataset.axisRanges[col] || {};
+      const derived = mappingsCsv.columnRange(parsed, col) || { min: 0, default: 0, max: 0 };
+      metadata[col] = {
+        registered_tag: override.registered_tag || mappingsCsv.normalizeInAxisName(col),
+        display_name: override.display_name || col,
+        is_parametric: false,
+        min: override.min ?? derived.min,
+        default: override.default ?? derived.default,
+        max: override.max ?? derived.max,
+      };
+    }
+    // Parametric axes also carry metadata (display + ranges from the font).
+    for (const a of uploadDataset.axes.axes.filter(x => x.has_master_coverage)) {
+      metadata[a.tag] = {
+        registered_tag: mappingsCsv.normalizeInAxisName(a.tag),
+        display_name: a.name || a.tag,
+        is_parametric: true,
+        min: a.min, default: a.default, max: a.max,
+      };
+    }
+    return {
+      traditional_axes: { columns: userCols },
+      metadata,
+      parametric_axes: [...uploadDataset.parametricTags],
+    };
+  },
   getTransforms: async () => (uploadDataset ? { transforms: uploadDataset.transforms || [] } : { transforms: await transformsList() }),
   getGrade: async () => (uploadDataset
     ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
@@ -528,8 +601,9 @@ const staticOverrides = {
       throw new Error('No .glyphs file in the upload (sources must be .glyphs for now)');
     }
     const csvFile = list.find(f => f.name.toLowerCase().endsWith('-avar.csv')) || null;
-    const ignored = list.filter(f => f !== glyphsFile && f !== csvFile).map(f => f.name);
-    uploadDataset = await buildUploadDataset(glyphsFile, csvFile);
+    const metadataFile = list.find(f => f.name.toLowerCase().endsWith('axis-metadata.json')) || null;
+    const ignored = list.filter(f => f !== glyphsFile && f !== csvFile && f !== metadataFile).map(f => f.name);
+    uploadDataset = await buildUploadDataset(glyphsFile, csvFile, metadataFile);
     transformsState = [];
     bakedEnabledIds = [];
     return { ok: true, ignored_files: ignored };
@@ -645,9 +719,43 @@ const staticOverrides = {
     return {};
   },
   addInstanceToSource: unavailable('Saving to source'),
-  addAvar2Axis: unavailable('Adding mapping axes'),
-  updateAvar2Axis: unavailable('Editing mapping axes'),
-  updateAvar2Mapping: unavailable('Editing mappings'),
+  addAvar2Axis: async (axisData) => {
+    requireUpload();
+    // AddAxisModal payload: {axis_name (uppercase CSV column),
+    // display_name, registered_tag, default_value, min, max}.
+    const column = axisData.axis_name;
+    mappingsCsv.addColumn(uploadDataset.instancesCsv, column, axisData.default_value);
+    uploadDataset.axisRanges[column] = {
+      display_name: axisData.display_name,
+      registered_tag: axisData.registered_tag,
+      min: axisData.min,
+      default: axisData.default_value,
+      max: axisData.max,
+      is_parametric: false,
+    };
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return {};
+  },
+  updateAvar2Axis: async (axisName, axisData) => {
+    requireUpload();
+    // Range edit (EditAxisModal): merge into the axis-metadata entry.
+    uploadDataset.axisRanges[axisName] = {
+      ...(uploadDataset.axisRanges[axisName] || {}),
+      ...(axisData.min !== undefined ? { min: axisData.min } : {}),
+      ...(axisData.default_value !== undefined ? { default: axisData.default_value } : {}),
+      ...(axisData.max !== undefined ? { max: axisData.max } : {}),
+    };
+    await regenerateFont(uploadDataset);
+    return {};
+  },
+  updateAvar2Mapping: async (instanceName, axisName, value) => {
+    requireUpload();
+    mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, { [axisName]: value });
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return {};
+  },
   setGrade: unavailable('Editing grade'),
   setInstanceGrade: unavailable('Editing grade'),
   removeInstanceGrade: unavailable('Editing grade'),
