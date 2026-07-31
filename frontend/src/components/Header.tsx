@@ -64,6 +64,9 @@ interface HeaderProps {
   // Static demo showing a baked snapshot: nothing exists to rebuild
   // (uploaded sources recompile in-browser, so they keep the button).
   hideRebuild?: boolean;
+  // Static demo with an uploaded source: config import becomes
+  // available (bundles apply in-browser via the static provider).
+  allowImportInStatic?: boolean;
 }
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
@@ -94,7 +97,7 @@ interface GradeState {
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
-                 hideRebuild = false }: HeaderProps) {
+                 hideRebuild = false, allowImportInStatic = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -466,7 +469,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     Control axes, avar2 mappings, transforms as one JSON file
                   </div>
                 </button>
-                {!staticMode && (
+                {(!staticMode || allowImportInStatic) && (
                 <button
                   className="load-font-item"
                   onClick={handleImportClick}

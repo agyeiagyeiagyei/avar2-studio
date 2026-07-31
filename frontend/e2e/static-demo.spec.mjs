@@ -131,6 +131,33 @@ await page.waitForFunction(() => {
 }, { timeout: 20000 });
 ok(true, 'parametric wght reflects mapping (400 at WGHT default)');
 
+// ---- 7. config import onto an uploaded source -------------------------------
+console.log('7. config import onto an uploaded source');
+const CRISPY_GLYPHS = join(dirname(fileURLToPath(import.meta.url)), '../../examples/crispy-mini/sources/CrispyMini.glyphs');
+const CRISPY_BUNDLE = join(dirname(fileURLToPath(import.meta.url)), '../public/static-demo/crispy-mini/config-export.json');
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_GLYPHS);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent?.startsWith('Crispy'),
+  { timeout: 90000 }
+);
+ok(true, 'CrispyMini.glyphs compiles on upload');
+await page.click('button:has-text("Config")');
+await page.click('text=Import configuration…');
+await page.setInputFiles('.config-dropdown input[type=file]', CRISPY_BUNDLE);
+await page.waitForSelector('.import-config-confirm:not([disabled])', { timeout: 30000 });
+ok(true, 'bundle validates clean against the uploaded font');
+await page.click('.import-config-confirm');
+await page.waitForFunction(() => !document.querySelector('.import-config-confirm'), { timeout: 90000 });
+ok(true, 'bundle applied');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'OPSZ')),
+  'OPSZ user axis appears after mappings import');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

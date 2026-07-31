@@ -23,8 +23,9 @@
  */
 
 import { api } from './api';
-import { compileFont } from './fontc-compile';
+import { compileFont, addAvar2 } from './fontc-compile';
 import { parseFont } from './fvar';
+import { mappedLocation } from './avar2-eval';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -71,19 +72,35 @@ const datasetDir = async () => {
 
 let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
 
-const buildUploadDataset = async (file) => {
-  const sourceText = await file.text();
-  const ttf = await compileFont(sourceText);
-  const meta = parseFont(ttf);
-  const fontUrl = URL.createObjectURL(new Blob([ttf], { type: 'font/ttf' }));
+const buildUploadDataset = async (glyphsFile, csvFile) => {
+  const sourceText = await glyphsFile.text();
+  let fontBytes = await compileFont(sourceText);
+  let mappingsCsv = null;
+  let userAxisTags = new Set();
+  if (csvFile) {
+    // avar2 generation in-browser: CSV mappings → avar v2 store in the
+    // compiled font (fontc-web wasm). The user axes are the CSV columns
+    // that aren't already fvar axes in the compiled font.
+    const compiledTags = new Set(parseFont(fontBytes).axes.map(a => a.tag));
+    mappingsCsv = await csvFile.text();
+    fontBytes = await addAvar2(fontBytes, mappingsCsv);
+    const header = mappingsCsv.split('\n', 1)[0].replace(/^﻿/, '');
+    userAxisTags = new Set(
+      header.split(',').slice(1).map(s => s.trim()).filter(t => t && !compiledTags.has(t))
+    );
+  }
+  const meta = parseFont(fontBytes);
+  const fontUrl = URL.createObjectURL(new Blob([fontBytes], { type: 'font/ttf' }));
   return {
     sourceText,
+    fontBytes,
+    mappingsCsv,
     fontUrl,
     axes: {
       axes: meta.axes.map(a => ({
         tag: a.tag, name: a.name,
         min: a.min, default: a.default, max: a.max,
-        has_master_coverage: true, is_control_axis: false,
+        has_master_coverage: !userAxisTags.has(a.tag), is_control_axis: false,
       })),
     },
     instances: {
@@ -94,8 +111,8 @@ const buildUploadDataset = async (file) => {
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
-      glyphs_path: `upload:${file.name}:${Date.now()}`,
-      original_path: `upload:${file.name}`,
+      glyphs_path: `upload:${glyphsFile.name}:${Date.now()}`,
+      original_path: `upload:${glyphsFile.name}`,
       source_format: 'glyphs',
       family_name: meta.familyName,
       vf_family_id: `${meta.familyName}-VF`,
@@ -176,6 +193,99 @@ const unavailable = (what) => async () => {
   throw new Error(`${what} needs the full app — this static demo is read-only.`);
 };
 
+// ---- config bundle import (uploaded sources only) ---------------------------
+//
+// Validation gates on the target font supplying the bundle's core axis
+// data, mirroring config_port.validate_bundle: the parametric axes the
+// avar2 CSV maps onto, and the source axes brace-layer locations
+// reference. Apply is per-section: avar2 mappings are real (wasm
+// add_avar2); control axes / transforms / grade are recorded pending
+// their ports and reported as warnings, never silently dropped.
+
+const csvRowCount = (text) =>
+  text.split('\n').filter(l => l.trim() && !l.startsWith('﻿')).length - 1;
+
+const validateBundle = (bundle, dataset) => {
+  const errors = [];
+  const warnings = [];
+  if (!bundle || bundle.format !== 'avar2-studio-config') {
+    errors.push('Not an avar2-studio config bundle (missing format marker)');
+  } else if (bundle.format_version !== 1) {
+    errors.push(`Unsupported bundle version ${bundle.format_version} (expected 1)`);
+  }
+  const controlAxes = bundle?.control_axes?.axes || [];
+  const transforms = bundle?.transforms?.transforms || [];
+  const grade = bundle?.grade || {};
+  const avar2Csv = bundle?.avar2_csv || '';
+
+  const targetTags = new Set(
+    dataset.axes.axes.filter(a => a.has_master_coverage).map(a => a.tag)
+  );
+  if (!errors.length) {
+    for (const col of bundle.source?.avar2_out_columns || []) {
+      if (!targetTags.has(col)) {
+        errors.push(`Core axis '${col}' (avar2 out) is missing in the loaded font`);
+      }
+    }
+    for (const axis of controlAxes) {
+      for (const layer of axis.layers || []) {
+        for (const tag of Object.keys(layer.location || {})) {
+          if (!targetTags.has(tag)) {
+            errors.push(`Brace layer on '${layer.glyph}' references missing axis '${tag}'`);
+          }
+        }
+      }
+    }
+  }
+  if (controlAxes.length) warnings.push('Control axes: recorded, apply pending (source injection port)');
+  if (transforms.length) warnings.push('Transforms: recorded, apply pending (SPAC port)');
+  if (grade.enabled) warnings.push('Grade: recorded, apply pending (geometry port)');
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    summary: {
+      axes: controlAxes.length,
+      layers: controlAxes.reduce((n, a) => n + (a.layers || []).length, 0),
+      mapping_rows: avar2Csv ? csvRowCount(avar2Csv) : 0,
+      transforms: transforms.filter(t => t.enabled).length,
+      grades: (grade.instances || []).length,
+    },
+  };
+};
+
+const applyBundle = async (bundle, dataset) => {
+  const { addAvar2 } = await import('./fontc-compile');
+  const report = { ok: true, applied: [], warnings: validateBundle(bundle, dataset).warnings };
+  const avar2Csv = bundle.avar2_csv || '';
+  if (avar2Csv.trim()) {
+    const compiledTags = new Set(
+      dataset.axes.axes.filter(a => a.has_master_coverage).map(a => a.tag)
+    );
+    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv);
+    URL.revokeObjectURL(dataset.fontUrl);
+    dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+    dataset.mappingsCsv = avar2Csv;
+    // Re-read axes from the patched font: new user axes appear, and the
+    // CSV's in-columns are the non-parametric ones.
+    const header = avar2Csv.split('\n', 1)[0].replace(/^﻿/, '');
+    const userTags = new Set(
+      header.split(',').slice(1).map(s => s.trim()).filter(t => t && !compiledTags.has(t))
+    );
+    const meta = parseFont(dataset.fontBytes);
+    dataset.axes = {
+      axes: meta.axes.map(a => ({
+        tag: a.tag, name: a.name,
+        min: a.min, default: a.default, max: a.max,
+        has_master_coverage: !userTags.has(a.tag), is_control_axis: false,
+      })),
+    };
+    report.applied.push('avar2 mappings');
+  }
+  return report;
+};
+
 const staticOverrides = {
   health: async () => (uploadDataset ? uploadDataset.health : staticHealth()),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
@@ -205,8 +315,9 @@ const staticOverrides = {
     if (!glyphsFile) {
       throw new Error('No .glyphs file in the upload (sources must be .glyphs for now)');
     }
-    const ignored = list.filter(f => f !== glyphsFile).map(f => f.name);
-    uploadDataset = await buildUploadDataset(glyphsFile);
+    const csvFile = list.find(f => f.name.toLowerCase().endsWith('-avar.csv')) || null;
+    const ignored = list.filter(f => f !== glyphsFile && f !== csvFile).map(f => f.name);
+    uploadDataset = await buildUploadDataset(glyphsFile, csvFile);
     transformsState = [];
     bakedEnabledIds = [];
     return { ok: true, ignored_files: ignored };
@@ -261,9 +372,24 @@ const staticOverrides = {
     return { transforms: transformsState };
   },
 
-  // The parametric-slider reflection falls back to input coordinates —
-  // the avar2 evaluator hasn't been ported (Phase 2 in the plan).
-  getMappedLocation: async (coordinates) => ({ mapped: coordinates || {} }),
+  // The parametric-slider reflection falls back to input coordinates for
+  // snapshot datasets (their avar2 isn't parsed); uploads with a
+  // mappings CSV get a real client-side avar2 evaluation (avar2-eval.js).
+  getMappedLocation: async (coordinates) => {
+    if (uploadDataset) {
+      if (uploadDataset.mappingsCsv) {
+        return {
+          mapped: mappedLocation(
+            uploadDataset.fontBytes,
+            uploadDataset.axes.axes,
+            coordinates || {}
+          ),
+        };
+      }
+      return { mapped: coordinates || {} };
+    }
+    return { mapped: coordinates || {} };
+  },
 
   // Editing-registration is best-effort on the real server; no-op here.
   registerEditingInstance: async () => ({}),
@@ -290,7 +416,19 @@ const staticOverrides = {
   setControlAxisLayers: unavailable('Editing layers'),
   openControlAxisInEditor: unavailable('The glyph editor'),
   exportFont: unavailable('Exporting'),
-  importConfig: unavailable('Importing configurations'),
+  importConfig: async (bundle, dryRun) => {
+    if (!uploadDataset) {
+      throw new Error('Import needs an uploaded source — snapshots come pre-configured.');
+    }
+    const report = validateBundle(bundle, uploadDataset);
+    if (dryRun) return report;
+    if (!report.ok) {
+      const err = new Error(report.errors[0] || 'Invalid bundle');
+      err.report = report;
+      throw err;
+    }
+    return applyBundle(bundle, uploadDataset);
+  },
 };
 
 /**

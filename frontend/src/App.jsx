@@ -1876,6 +1876,7 @@ function App() {
         onGradeDefault={handleGradeDefault}
         staticMode={staticMode}
         hideRebuild={staticMode && !isUploadDataset()}
+        allowImportInStatic={isUploadDataset()}
       />
 
       <DeleteInstanceModal
