@@ -283,6 +283,58 @@ await sleep(600);
 const widthReset = await specimenWidth();
 ok(Math.abs(widthReset - widthDefault) < 0.01, `specimen width at SPAC 0 matches baseline (${widthReset.toFixed(2)}px ≈ ${widthDefault.toFixed(2)}px)`);
 
+// ---- 10. instance lifecycle on an uploaded source (authoring S1) ------------
+console.log('10. instance lifecycle (create → edit → delete)');
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_GLYPHS);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent?.startsWith('Crispy'),
+  { timeout: 90000 }
+);
+ok(true, 'fresh CrispyMini upload for authoring');
+// The fresh upload clears the previous dataset's rows, but the rows
+// refresh lags the family-name update — wait for it before counting.
+await page.waitForFunction(
+  () => document.querySelectorAll('.instance-row').length === 0,
+  { timeout: 30000 }
+);
+const rowCount = async () => (await page.$$('.instance-row')).length;
+const initialRows = await rowCount();
+await page.click('.btn-new-instance');
+await page.waitForSelector('.modal-input', { timeout: 10000 });
+await page.fill('.modal-input', 'Test Wide 96');
+await page.click('button:has-text("Create")');
+await page.waitForFunction(
+  (n) => document.querySelectorAll('.instance-row').length > n,
+  initialRows,
+  { timeout: 15000 }
+);
+ok(true, 'instance created via + New Instance');
+await page.click('.instance-row:has-text("Test Wide 96")');
+await page.waitForSelector('.sidebar input[type=range]', { timeout: 10000 });
+const rowEl = await page.$('.instance-row');
+const shotBefore = await rowEl.screenshot();
+await page.evaluate(() => {
+  const s = document.querySelector('.sidebar input[type=range]');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(s, 2000);
+  s.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.waitForTimeout(1200);
+const shotAfter = await rowEl.screenshot();
+ok(!shotBefore.equals(shotAfter), 'editing coordinates re-renders the specimen');
+await page.click('.instance-row:has-text("Test Wide 96")');
+await page.click('.delete-instance-btn');
+// Studio-origin rows delete directly (no confirmation modal — that's
+// reserved for source-defined rows).
+await page.waitForFunction(
+  (n) => document.querySelectorAll('.instance-row').length === n,
+  initialRows,
+  { timeout: 15000 }
+);
+ok(true, 'instance deleted');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

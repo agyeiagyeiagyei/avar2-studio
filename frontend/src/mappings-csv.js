@@ -1,0 +1,94 @@
+/**
+ * Mappings CSV model for the static demo's authoring flow — the CSV is
+ * the single source of truth for instances + avar2 mappings on uploaded
+ * fonts, exactly as in the studio's workspace.
+ *
+ * Format: first column is the instance name; remaining columns are axis
+ * tags — parametric (out) axes first by studio convention, then user
+ * (in) axes. Rows are instance rows; every mutation serializes back to
+ * text for the avar2 regen (wasm add_avar2).
+ *
+ * Numbers round-trip as raw strings from the CSV; writes use plain
+ * String(value) like the studio's writer.
+ */
+
+const stripBom = (t) => t.replace(/^﻿/, '');
+
+export function parseMappingsCsv(text) {
+  const lines = stripBom(text).split('\n').filter(l => l.trim());
+  if (!lines.length) return { nameCol: 'Instance Name', columns: [], rows: [] };
+  const header = lines[0].split(',').map(s => s.trim());
+  const nameCol = header[0] || 'Instance Name';
+  const columns = header.slice(1);
+  const rows = lines.slice(1).map(line => {
+    const cells = line.split(',');
+    const values = {};
+    columns.forEach((tag, i) => { values[tag] = (cells[i + 1] ?? '').trim(); });
+    return { name: (cells[0] ?? '').trim(), values };
+  }).filter(r => r.name);
+  return { nameCol, columns, rows };
+}
+
+export function serializeMappingsCsv(parsed) {
+  const lines = [[parsed.nameCol, ...parsed.columns].join(',')];
+  for (const row of parsed.rows) {
+    lines.push([row.name, ...parsed.columns.map(tag => row.values[tag] ?? '')].join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Columns that are NOT fvar axes of the compiled font = user axes. */
+export function userColumns(parsed, fvarTags) {
+  const set = new Set(fvarTags);
+  return parsed.columns.filter(t => !set.has(t));
+}
+
+const coordsForColumns = (columns, coords) => {
+  const values = {};
+  for (const tag of columns) {
+    const v = coords?.[tag];
+    values[tag] = v === undefined || v === null ? '' : String(v);
+  }
+  return values;
+};
+
+/** Insert or replace a row by name; insertAfter positions a new row. */
+export function upsertRow(parsed, name, coords, insertAfter = null) {
+  const existing = parsed.rows.find(r => r.name === name);
+  if (existing) {
+    Object.assign(existing.values, coordsForColumns(parsed.columns, coords));
+    return;
+  }
+  const row = { name, values: coordsForColumns(parsed.columns, coords) };
+  const at = insertAfter ? parsed.rows.findIndex(r => r.name === insertAfter) : -1;
+  if (at >= 0) parsed.rows.splice(at + 1, 0, row);
+  else parsed.rows.push(row);
+}
+
+export function renameRow(parsed, oldName, newName) {
+  const row = parsed.rows.find(r => r.name === oldName);
+  if (!row) throw new Error(`Instance "${oldName}" not found`);
+  if (parsed.rows.some(r => r.name === newName)) {
+    throw new Error(`An instance named "${newName}" already exists`);
+  }
+  row.name = newName;
+}
+
+export function deleteRow(parsed, name) {
+  const at = parsed.rows.findIndex(r => r.name === name);
+  if (at < 0) throw new Error(`Instance "${name}" not found`);
+  parsed.rows.splice(at, 1);
+}
+
+/** Synthesize a CSV structure from the compiled font (parametric-only). */
+export function synthesizeFromFont(metaAxes, metaInstances) {
+  const parametric = metaAxes.filter(a => a.has_master_coverage !== false).map(a => a.tag);
+  return {
+    nameCol: 'Instance Name',
+    columns: parametric,
+    rows: (metaInstances || []).map(i => ({
+      name: i.name,
+      values: coordsForColumns(parametric, i.coordinates),
+    })),
+  };
+}

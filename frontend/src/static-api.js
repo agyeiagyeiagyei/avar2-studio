@@ -28,6 +28,7 @@ import { api } from './api';
 import { compileFont, addAvar2 } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
+import * as mappingsCsv from './mappings-csv';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -77,26 +78,37 @@ let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
 const buildUploadDataset = async (glyphsFile, csvFile) => {
   const sourceText = await glyphsFile.text();
   let fontBytes = await compileFont(sourceText);
-  let mappingsCsv = null;
+  let mappingsText = null;
   let userAxisTags = new Set();
+  const compiledTags = new Set(parseFont(fontBytes).axes.map(a => a.tag));
   if (csvFile) {
     // avar2 generation in-browser: CSV mappings → avar v2 store in the
     // compiled font (fontc-web wasm). The user axes are the CSV columns
     // that aren't already fvar axes in the compiled font.
-    const compiledTags = new Set(parseFont(fontBytes).axes.map(a => a.tag));
-    mappingsCsv = await csvFile.text();
-    fontBytes = await addAvar2(fontBytes, mappingsCsv);
-    const header = mappingsCsv.split('\n', 1)[0].replace(/^﻿/, '');
+    mappingsText = await csvFile.text();
+    fontBytes = await addAvar2(fontBytes, mappingsText);
+    const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
     userAxisTags = new Set(
       header.split(',').slice(1).map(s => s.trim()).filter(t => t && !compiledTags.has(t))
     );
   }
   const meta = parseFont(fontBytes);
   const fontUrl = URL.createObjectURL(new Blob([fontBytes], { type: 'font/ttf' }));
-  return {
+  // The mappings CSV is the authoring source of truth (instances +
+  // mappings), exactly as in the studio's workspace: uploaded CSV if
+  // present, otherwise synthesized parametric-only from the font.
+  const csvParsed = mappingsText
+    ? mappingsCsv.parseMappingsCsv(mappingsText)
+    : mappingsCsv.synthesizeFromFont(
+        [...compiledTags].map(tag => ({ tag, has_master_coverage: true })),
+        meta.instances
+      );
+  const dataset = {
     sourceText,
     fontBytes,
-    mappingsCsv,
+    mappingsCsv: mappingsText,
+    instancesCsv: csvParsed,
+    parametricTags: new Set(compiledTags),
     fontUrl,
     axes: {
       axes: meta.axes.map(a => ({
@@ -105,11 +117,7 @@ const buildUploadDataset = async (glyphsFile, csvFile) => {
         has_master_coverage: !userAxisTags.has(a.tag), is_control_axis: false,
       })),
     },
-    instances: {
-      instances: meta.instances.map(i => ({
-        name: i.name, coordinates: i.coordinates, origin: 'source',
-      })),
-    },
+    instances: { instances: [] },
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
@@ -124,6 +132,43 @@ const buildUploadDataset = async (glyphsFile, csvFile) => {
       upm: meta.upm,
     },
   };
+  syncInstancesFromCsv(dataset, meta.instances.map(i => i.name));
+  return dataset;
+};
+
+// Instance list derives from the CSV rows (every column is a coordinate);
+// rows matching an fvar named instance are 'source', others 'studio'.
+const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
+  const fvarNames = new Set(
+    fvarInstanceNames ?? parseFont(dataset.fontBytes).instances.map(i => i.name)
+  );
+  dataset.instances = {
+    instances: dataset.instancesCsv.rows.map(row => ({
+      name: row.name,
+      coordinates: Object.fromEntries(
+        Object.entries(row.values)
+          .filter(([, v]) => v !== '')
+          .map(([tag, v]) => [tag, parseFloat(v)])
+      ),
+      origin: fvarNames.has(row.name) ? 'source' : 'studio',
+    })),
+  };
+};
+
+// Every authoring mutation funnels here: if the CSV grew user columns
+// the avar2 store regenerates; parametric-only edits only move browser
+// state (identity mapping — a no-op table fontc would omit anyway).
+const regenerateFont = async (dataset) => {
+  if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
+    return;
+  }
+  dataset.fontBytes = await addAvar2(
+    dataset.fontBytes,
+    mappingsCsv.serializeMappingsCsv(dataset.instancesCsv)
+  );
+  URL.revokeObjectURL(dataset.fontUrl);
+  dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+  dataset.health.last_build_time = Date.now();
 };
 
 // ---- transforms state (toggles → pre-baked variants) ------------------------
@@ -193,6 +238,12 @@ const staticHealth = async () => {
 
 const unavailable = (what) => async () => {
   throw new Error(`${what} needs the full app — this static demo is read-only.`);
+};
+
+const requireUpload = () => {
+  if (!uploadDataset) {
+    throw new Error('Editing instances needs an uploaded source — snapshots are read-only demos.');
+  }
 };
 
 // ---- config bundle import (uploaded sources only) ---------------------------
@@ -351,6 +402,9 @@ const applyBundle = async (bundle, dataset) => {
     );
     dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv);
     dataset.mappingsCsv = avar2Csv;
+    // The bundle's CSV becomes the authoring source of truth.
+    dataset.instancesCsv = mappingsCsv.parseMappingsCsv(avar2Csv);
+    syncInstancesFromCsv(dataset);
     report.applied.push('avar2 mappings');
   }
   if (controlAxes.length) {
@@ -559,13 +613,37 @@ const staticOverrides = {
   registerEditingInstance: async () => ({}),
   unregisterEditingInstance: async () => ({}),
 
-  // Everything that writes is unavailable. (Building and uploads are
-  // implemented above via fontc-wasm — don't shadow them here.)
+  // Everything that writes is unavailable on SNAPSHOT datasets (they are
+  // read-only demos). On uploaded sources the instance lifecycle is real:
+  // the CSV is the source of truth, mutations regenerate the avar2 store.
   buildAvar2Font: unavailable('Building'),
-  createInstance: unavailable('Creating instances'),
-  updateInstance: unavailable('Saving instances'),
-  renameInstance: unavailable('Renaming instances'),
-  deleteInstance: unavailable('Deleting instances'),
+  createInstance: async (instanceName, coordinates, insertAfter = null) => {
+    requireUpload();
+    mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates, insertAfter);
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return {};
+  },
+  updateInstance: async (instanceName, coordinates) => {
+    requireUpload();
+    mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates);
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return {};
+  },
+  renameInstance: async (instanceName, newName) => {
+    requireUpload();
+    mappingsCsv.renameRow(uploadDataset.instancesCsv, instanceName, newName);
+    syncInstancesFromCsv(uploadDataset);
+    return {};
+  },
+  deleteInstance: async (instanceName) => {
+    requireUpload();
+    mappingsCsv.deleteRow(uploadDataset.instancesCsv, instanceName);
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return {};
+  },
   addInstanceToSource: unavailable('Saving to source'),
   addAvar2Axis: unavailable('Adding mapping axes'),
   updateAvar2Axis: unavailable('Editing mapping axes'),

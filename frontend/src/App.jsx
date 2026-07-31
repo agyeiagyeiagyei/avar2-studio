@@ -1293,7 +1293,8 @@ function App() {
     );
 
     // Show confirmation dialog only for selected instance updates
-    if (!instanceName || instanceName === selectedInstance?.name) {
+    // (skip in static mode — there is no source file to modify).
+    if (!staticMode && (!instanceName || instanceName === selectedInstance?.name)) {
       const confirmed = window.confirm(
         `Update instance "${targetInstanceName}"?\n\n` +
         (parametricChanged ? `This will modify the source file.\n` : '')
@@ -1946,7 +1947,7 @@ function App() {
             axes={axes}
             coordinates={editingCoordinates}
             onAxisChange={handleAxisChange}
-            disabled={staticMode || !selectedInstance}
+            disabled={(staticMode && !isUploadDataset()) || !selectedInstance}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}
             selectedInstance={selectedInstance}
