@@ -5,7 +5,8 @@ edition = "2021"
 description = "WASM wrapper around fontc for the avar2-studio static demo (Phase 2)"
 
 [lib]
-crate-type = ["cdylib"]
+# rlib so the native oracle-comparison test (tests/) can link the crate.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # fontc from git main: the crates.io 0.6.0 norayon executor deadlocks
@@ -13,6 +14,13 @@ crate-type = ["cdylib"]
 # the in-memory/wasm fixes (PRs #1478/#1796) and the public Input API.
 fontc = { git = "https://github.com/googlefonts/fontc.git", default-features = false }
 wasm-bindgen = "0.2"
+
+# fontations stack, same versions as the Cargo.lock resolved for fontc:
+# avar2 generation (fvar/avar/HVAR/GDEF/MVAR surgery + sfnt repack).
+fontdrasil = { git = "https://github.com/googlefonts/fontc.git" }
+font-types = "0.12.2"
+read-fonts = "0.40.2"
+write-fonts = "0.49.2"
 
 [profile.release]
 # Keep the blob small: static demo payload discipline (fontspector model).

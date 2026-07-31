@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 
 const BASE = process.env.STATIC_URL || 'http://localhost:8123';
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest.glyphs');
+const FIXTURE_CSV = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest-avar.csv');
 
 let failures = 0;
 const ok = (cond, label) => {
@@ -106,6 +107,29 @@ await page.waitForFunction(
 await page.click('button:text-is("Instances")');
 await page.waitForSelector('.sidebar h2', { timeout: 15000 });
 ok((await page.textContent('.sidebar h2')) === 'WasmTest', 'still WasmTest after rebuild');
+
+// ---- 6. avar2 mappings upload (user axes + mapped reflection) --------------
+console.log('6. avar2 mappings upload');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', [FIXTURE, FIXTURE_CSV]);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent === 'WasmTest',
+  { timeout: 90000 }
+);
+ok(true, 'WasmTest family after mappings upload');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'WGHT')),
+  'USER AXES shows the CSV-derived WGHT axis');
+// The parametric (compiled) wght follows the mapping: with WGHT at its
+// default (100 → wght 400), the reflected parametric wght reads 400.
+await page.waitForFunction(() => {
+  const rows = [...document.querySelectorAll('.preview-tab *')];
+  return rows.some(el => el.children.length === 0 && el.textContent.trim() === '400');
+}, { timeout: 20000 });
+ok(true, 'parametric wght reflects mapping (400 at WGHT default)');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

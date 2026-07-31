@@ -1903,8 +1903,8 @@ function App() {
 
       {staticMode && (
         <div className="static-demo-banner">
-          Static demo — the live preview works in your browser; building,
-          saving, and authoring need the full app.
+          Static demo — previews, uploads, and baked transforms run in your
+          browser; saving and authoring need the full app.
         </div>
       )}
 

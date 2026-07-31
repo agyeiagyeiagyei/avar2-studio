@@ -79,3 +79,30 @@ Pyodide as a fallback, not the spine.
 - `.glyphs` writeback strategy for instance CRUD.
 - Whether SPAC/grade ports justify Rust, or a Pyodide+fontTools island
   is acceptable for those paths only.
+
+## Phase 3 decision record
+
+Resolved as the phases landed:
+
+- **avar2 generation — PORT.** avar v2 is VarStore-based
+  (DeltaSetIndexMap + ItemVariationStore, not the old segment-map
+  format). Build side: `add_avar2(font_bytes, csv)` in the fontc-web
+  wasm crate using fontc's own machinery (fontdrasil VariationModel +
+  write-fonts ivs_builder — the same code fontc uses for HVAR), verified
+  structurally against gftools-gen-avar2 as oracle. Eval side (the
+  Preview tab's mapped-location reflection): `frontend/src/avar2-eval.js`,
+  a pure-JS VarStore evaluator.
+- **harfbuzzjs — NOT NEEDED.** The width chips come from instance data;
+  no shaping happens client-side. The HB_TINY/avar2 question is moot.
+- **SPAC on uploaded fonts — DEFER.** It's per-glyph hmtx + advance
+  surgery; revisit if the static demo gains per-glyph editing. The
+  bundled demo is covered by the baked spac-on/off variants.
+- **Grade — DEFER.** It's outline computation (contour offsetting),
+  which means real geometry work (kurbo/skleja territory) — app-only
+  unless a Rust port is ever justified.
+- **export-font (hidden axes / default-location rebuild) — DEFER.**
+  Hidden-axes flags are cheap fvar surgery (easy later port);
+  default-location rebuild is a full recompile — may become a Rebuild
+  option for uploads later. App-only for now.
+- **STAT regeneration — DEFER** (gftools statmake is its own subsystem).
+

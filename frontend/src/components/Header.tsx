@@ -314,6 +314,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             style={{ position: 'fixed', left: '-9999px', width: 1, height: 1, opacity: 0 }}
             onChange={handleFileChange}
           />

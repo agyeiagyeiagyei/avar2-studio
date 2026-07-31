@@ -1,12 +1,28 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/**
+ * Add new user axes + an avar v2 table (and the supporting VarStore
+ * padding) to a compiled variable font, mirroring
+ * `gftools.scripts.gen_avar2.gen_avar2_mapping`.
+ *
+ * `mappings_csv` has a first "Instance Name" column (ignored); the
+ * remaining column headers are axis tags. Columns that already exist in
+ * fvar are output (parametric) axes; the rest become new fvar axes.
+ * Empty cells mean "axis default" and are dropped from the locations.
+ *
+ * Returns the font with updated fvar/name/avar/gvar/HVAR/GDEF/MVAR,
+ * repacked as a valid TTF.
+ */
+export function add_avar2(font_bytes: Uint8Array, mappings_csv: string): Uint8Array;
+
 export function compile_glyphs(source: string): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly add_avar2: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

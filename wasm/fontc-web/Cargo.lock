@@ -524,8 +524,12 @@ dependencies = [
 name = "fontc-web"
 version = "0.1.0"
 dependencies = [
+ "font-types",
  "fontc",
+ "fontdrasil",
+ "read-fonts",
  "wasm-bindgen",
+ "write-fonts",
 ]
 
 [[package]]
