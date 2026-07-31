@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
-import { isStaticMode } from './static-api';
+import { isStaticMode, isUploadDataset } from './static-api';
 import logoGif from './assets/logo.gif';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -1875,6 +1875,7 @@ function App() {
         onToggleGrade={handleToggleGrade}
         onGradeDefault={handleGradeDefault}
         staticMode={staticMode}
+        hideRebuild={staticMode && !isUploadDataset()}
       />
 
       <DeleteInstanceModal

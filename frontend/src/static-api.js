@@ -23,11 +23,16 @@
  */
 
 import { api } from './api';
+import { compileFont } from './fontc-compile';
+import { parseFont } from './fvar';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
 let staticMode = false;
 export const isStaticMode = () => staticMode;
+// True while the app is showing an uploaded (fontc-wasm compiled)
+// source rather than a baked snapshot — Rebuild exists for these.
+export const isUploadDataset = () => !!uploadDataset;
 
 // ---- dataset (example) state ------------------------------------------------
 
@@ -53,6 +58,53 @@ const datasetDir = async () => {
   }
   datasetPath = `${DATA}/${dataset}`;
   return dataset;
+};
+
+// ---- uploaded source state (fontc-wasm compiled in a Worker) -----------------
+//
+// An uploaded .glyphs compiles in-browser; everything the studio shows
+// comes from the compiled font itself (fvar axes + named instances +
+// name table — see fvar.js). Sidecar-backed features (avar2 mappings,
+// transforms, grade, control axes) don't exist for an upload, so those
+// surfaces stay empty/unavailable, exactly like a blind-launched source
+// on the real server.
+
+let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
+
+const buildUploadDataset = async (file) => {
+  const sourceText = await file.text();
+  const ttf = await compileFont(sourceText);
+  const meta = parseFont(ttf);
+  const fontUrl = URL.createObjectURL(new Blob([ttf], { type: 'font/ttf' }));
+  return {
+    sourceText,
+    fontUrl,
+    axes: {
+      axes: meta.axes.map(a => ({
+        tag: a.tag, name: a.name,
+        min: a.min, default: a.default, max: a.max,
+        has_master_coverage: true, is_control_axis: false,
+      })),
+    },
+    instances: {
+      instances: meta.instances.map(i => ({
+        name: i.name, coordinates: i.coordinates, origin: 'source',
+      })),
+    },
+    health: {
+      static: true, demo: false, building: false,
+      font_built: true, font_loaded: true,
+      glyphs_path: `upload:${file.name}:${Date.now()}`,
+      original_path: `upload:${file.name}`,
+      source_format: 'glyphs',
+      family_name: meta.familyName,
+      vf_family_id: `${meta.familyName}-VF`,
+      built_font_filename: `${meta.familyName}.ttf`,
+      last_build_status: 'ok', last_build_error: null,
+      avar2_error: null, build_stale: false,
+      upm: meta.upm,
+    },
+  };
 };
 
 // ---- transforms state (toggles → pre-baked variants) ------------------------
@@ -125,22 +177,56 @@ const unavailable = (what) => async () => {
 };
 
 const staticOverrides = {
-  health: staticHealth,
+  health: async () => (uploadDataset ? uploadDataset.health : staticHealth()),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
-  getInstances: async () => fetchJSON(await variantFile('instances.json')),
-  getMasters: endpoint('masters.json'),
-  getAxes: async () => fetchJSON(await variantFile('axes.json')),
-  getAvar2Instances: endpoint('avar2-instances.json'),
-  getAvar2Axes: endpoint('avar2-axes.json'),
-  getTransforms: async () => ({ transforms: await transformsList() }),
-  getGrade: endpoint('grade.json'),
-  listControlAxes: endpoint('control-axes.json'),
-  getGlyphCoverage: endpoint('glyph-coverage.json'),
+  getInstances: async () => (uploadDataset ? uploadDataset.instances : fetchJSON(await variantFile('instances.json'))),
+  getMasters: async () => (uploadDataset ? { masters: [] } : endpoint('masters.json')()),
+  getAxes: async () => (uploadDataset ? uploadDataset.axes : fetchJSON(await variantFile('axes.json'))),
+  getAvar2Instances: async () => (uploadDataset ? { instances: [] } : endpoint('avar2-instances.json')()),
+  getAvar2Axes: async () => (uploadDataset ? { axes: [] } : endpoint('avar2-axes.json')()),
+  getTransforms: async () => (uploadDataset ? { transforms: [] } : { transforms: await transformsList() }),
+  getGrade: async () => (uploadDataset
+    ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
+    : endpoint('grade.json')()),
+  listControlAxes: async () => (uploadDataset ? { axes: [] } : endpoint('control-axes.json')()),
+  getGlyphCoverage: async () => (uploadDataset ? {} : endpoint('glyph-coverage.json')()),
   listExamples: examplesIndex,
   checkSyncStatus: async () => ({ synced: true, message: 'Static demo snapshot' }),
-  getFontUrl: () => currentFontPath(),
-  getAvar2FontUrl: () => currentFontPath(),
+  getFontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
+  getAvar2FontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
   exportConfigUrl: () => `${datasetPath}/config-export.json`,
+
+  // Uploads: compile the source in a Web Worker (fontc-wasm) and switch
+  // the app to the resulting in-memory dataset. This is the Phase 2
+  // path — no server anywhere.
+  uploadSource: async (files) => {
+    const list = Array.from(files || []);
+    const glyphsFile = list.find(f => f.name.toLowerCase().endsWith('.glyphs'));
+    if (!glyphsFile) {
+      throw new Error('No .glyphs file in the upload (sources must be .glyphs for now)');
+    }
+    const ignored = list.filter(f => f !== glyphsFile).map(f => f.name);
+    uploadDataset = await buildUploadDataset(glyphsFile);
+    transformsState = [];
+    bakedEnabledIds = [];
+    return { ok: true, ignored_files: ignored };
+  },
+
+  // Rebuild only exists for uploaded sources: recompile the same source
+  // text in the Worker and swap the font bytes. Snapshot datasets have
+  // nothing to rebuild (pre-baked).
+  buildFont: async () => {
+    if (!uploadDataset) {
+      throw new Error('Building needs the full app — this static demo is read-only.');
+    }
+    const ttf = await compileFont(uploadDataset.sourceText);
+    URL.revokeObjectURL(uploadDataset.fontUrl);
+    uploadDataset = {
+      ...uploadDataset,
+      fontUrl: URL.createObjectURL(new Blob([ttf], { type: 'font/ttf' })),
+    };
+    return { ok: true };
+  },
 
   // Load Font: swap the dataset; App's loadData() re-reads the new
   // health (different glyphs_path) and treats it as a source swap.
@@ -150,6 +236,7 @@ const staticOverrides = {
       throw new Error(`Unknown example: ${id}`);
     }
     dataset = id;
+    uploadDataset = null;
     transformsState = null;
     bakedEnabledIds = null;
     return { ok: true };
@@ -157,13 +244,15 @@ const staticOverrides = {
 
   // Transforms toggles: allowed only between the two baked states (the
   // snapshot's enabled set ↔ all-off). Anything else isn't baked and
-  // throws — App reverts the toggle and shows the message.
+  // throws — App reverts the toggle and shows the message. Enabled/params
+  // merge OVER the stored list so name/description/schema metadata
+  // survives (the App renders the menu from our return value).
   updateTransforms: async (entries) => {
-    const next = (entries || []).map(e => ({
-      id: e.type || e.id,
-      enabled: !!e.enabled,
-      params: { ...(e.params || {}) },
-    }));
+    const base = await transformsList();
+    const next = base.map(t => {
+      const e = (entries || []).find(x => (x.type || x.id) === t.id);
+      return e ? { ...t, enabled: !!e.enabled, params: { ...(e.params || {}) } } : t;
+    });
     const cur = enabledIds(next);
     if (!sameSet(cur, bakedEnabledIds) && cur.length !== 0) {
       throw new Error("That transform combination isn't baked into the static demo — the full app rebuilds on demand.");
@@ -180,8 +269,8 @@ const staticOverrides = {
   registerEditingInstance: async () => ({}),
   unregisterEditingInstance: async () => ({}),
 
-  // Everything that writes or builds is unavailable.
-  buildFont: unavailable('Building'),
+  // Everything that writes is unavailable. (Building and uploads are
+  // implemented above via fontc-wasm — don't shadow them here.)
   buildAvar2Font: unavailable('Building'),
   createInstance: unavailable('Creating instances'),
   updateInstance: unavailable('Saving instances'),
@@ -200,7 +289,6 @@ const staticOverrides = {
   controlAxisLayerDelta: unavailable('Editing layers'),
   setControlAxisLayers: unavailable('Editing layers'),
   openControlAxisInEditor: unavailable('The glyph editor'),
-  uploadSource: unavailable('Uploading sources'),
   exportFont: unavailable('Exporting'),
   importConfig: unavailable('Importing configurations'),
 };

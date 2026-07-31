@@ -1,0 +1,84 @@
+{
+.appVersion = "3406";
+.formatVersion = 3;
+axes = (
+{
+name = "Weight";
+tag = wght;
+}
+);
+familyName = "WasmTest";
+customParameters = (
+{
+name = "Variable Font Origin";
+value = "REGULAR01";
+}
+);
+fontMaster = (
+{
+axesValues = (
+400
+);
+id = "REGULAR01";
+name = "Regular";
+},
+{
+axesValues = (
+700
+);
+id = "BOLD01";
+name = "Bold";
+}
+);
+glyphs = (
+{
+glyphname = A;
+layers = (
+{
+layerId = "REGULAR01";
+width = 600;
+shapes = (
+{
+closed = 1;
+nodes = (
+(100,0,l),
+(300,700,l),
+(500,0,l)
+);
+}
+);
+},
+{
+layerId = "BOLD01";
+width = 700;
+shapes = (
+{
+closed = 1;
+nodes = (
+(80,0,l),
+(300,780,l),
+(520,0,l)
+);
+}
+);
+}
+);
+},
+{
+glyphname = space;
+layers = (
+{
+layerId = "REGULAR01";
+width = 250;
+},
+{
+layerId = "BOLD01";
+width = 300;
+}
+);
+}
+);
+instances = (
+);
+unitsPerEm = 1000;
+}

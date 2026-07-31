@@ -61,6 +61,9 @@ interface HeaderProps {
   onGradeDefault?: (pct: number) => void;
   // Static demo (GitHub Pages): hide every action that needs the backend.
   staticMode?: boolean;
+  // Static demo showing a baked snapshot: nothing exists to rebuild
+  // (uploaded sources recompile in-browser, so they keep the button).
+  hideRebuild?: boolean;
 }
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
@@ -90,7 +93,8 @@ interface GradeState {
 // dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
-                 grade, onToggleGrade, onGradeDefault, staticMode = false }: HeaderProps) {
+                 grade, onToggleGrade, onGradeDefault, staticMode = false,
+                 hideRebuild = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -151,13 +155,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
 
   const handleUploadClick = () => {
     setOpen(false);
-    if (staticMode) {
-      // No dead button: explain instead. (Disabled buttons swallow
-      // mouse events, so a title tooltip would never even show.)
-      setLoadingMsg('Uploads need the full app — the static demo can\u2019t build fonts');
-      setTimeout(() => setLoadingMsg(null), 4000);
-      return;
-    }
+    // Static demo: uploads compile in-browser (fontc-wasm Worker).
     fileInputRef.current && fileInputRef.current.click();
   };
 
@@ -491,7 +489,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             />
           </div>
         )}
-        {fontLoaded !== undefined && familyName && !staticMode && (
+        {fontLoaded !== undefined && familyName && !hideRebuild && (
           <button
             onClick={onBuildFont}
             disabled={building}

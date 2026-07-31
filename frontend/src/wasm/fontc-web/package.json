@@ -1,0 +1,16 @@
+{
+  "name": "fontc-web",
+  "type": "module",
+  "description": "WASM wrapper around fontc for the avar2-studio static demo (Phase 2)",
+  "version": "0.1.0",
+  "files": [
+    "fontc_web_bg.wasm",
+    "fontc_web.js",
+    "fontc_web.d.ts"
+  ],
+  "main": "fontc_web.js",
+  "types": "fontc_web.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
