@@ -170,8 +170,12 @@ fn normalize_in_axis_name(name: &str) -> &str {
 /// `axis_metadata_json` (optional) is a JSON object
 /// `{TAG: {min, default, max}}` overriding the CSV-derived range for
 /// new user axes (the studio's avar2-axis-metadata.json semantics).
+/// `parametric_tags_json` (optional) overrides the in/out split when
+/// re-generating onto a font whose fvar already carries user axes
+/// (the default-location rebuild): columns matching these tags are
+/// outputs, everything else is an input.
 #[wasm_bindgen]
-pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Option<String>) -> Result<Vec<u8>, JsError> {
+pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Option<String>, parametric_tags_json: Option<String>) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
 
     // Existing fvar axes, in font order: tag + (min, default, max).
@@ -233,14 +237,23 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
     // Studio in/out classification (config_generator.validate_csv_structure):
     // a column is an avar2 INPUT when its normalized tag differs from the
     // column name (registered traditional axis) or it is not an fvar axis
-    // at all; otherwise it is a parametric OUTPUT column. col_axis[c] =
-    // (raw column tag, axis tag used in fvar/locations, is_input).
+    // at all; otherwise it is a parametric OUTPUT column. When regenerating
+    // onto a font that already carries user axes (default-location rebuild),
+    // parametric_tags_json supplies the OUTPUT set explicitly instead.
+    let output_tags: HashSet<Tag> = match parametric_tags_json.as_deref() {
+        Some(json) => serde_json::from_str::<Vec<String>>(json)
+            .map_err(|e| err(format!("invalid parametric tags JSON: {e}")))?
+            .iter()
+            .map(|t| Tag::from_str(t).map_err(|e| err(format!("bad tag '{t}': {e}"))))
+            .collect::<Result<_, JsError>>()?,
+        None => existing_tags.clone(),
+    };
     let col_axis: Vec<(Tag, Tag, bool)> = col_tags
         .iter()
         .map(|&raw| {
             let axis = Tag::from_str(normalize_in_axis_name(&raw.to_string()).as_ref())
                 .map_err(|e| err(format!("bad axis tag '{raw}': {e}")))?;
-            let is_input = axis != raw || !existing_tags.contains(&raw);
+            let is_input = axis != raw || !output_tags.contains(&raw);
             Ok((raw, axis, is_input))
         })
         .collect::<Result<_, JsError>>()?;
@@ -930,4 +943,82 @@ fn patch_gvar(
     out[14..16].copy_from_slice(&new_flags.to_be_bytes());
     out[16..20].copy_from_slice(&(new_off_glyph_data as u32).to_be_bytes());
     Ok(out)
+}
+
+// ---- Export options (default-location rebuild + hidden axes) ----------
+
+/// Patch fvar axis records in place (20 bytes each: tag(4) min(4)
+/// default(4) max(4) flags(2) nameID(2)) — no repack needed for the
+/// four-byte default / two-byte flag writes.
+fn fvar_patch(
+    font_bytes: &[u8],
+    mut patch: impl FnMut(&str, &mut [u8]),
+) -> Result<Vec<u8>, JsError> {
+    let mut out = font_bytes.to_vec();
+    let (table_off, axes_off, axis_size, axis_count) = {
+        let font = FontRef::new(font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
+        let rec = font
+            .table_directory()
+            .table_records()
+            .iter()
+            .find(|r| r.tag() == Tag::new(b"fvar"))
+            .ok_or_else(|| err("no fvar table"))?;
+        let fvar = font.fvar().map_err(|e| err(format!("invalid fvar: {e}")))?;
+        (
+            rec.offset() as usize,
+            fvar.axis_instance_arrays_offset().to_u32() as usize,
+            fvar.axis_size() as usize,
+            fvar.axis_count() as usize,
+        )
+    };
+    let base = table_off + axes_off;
+    for i in 0..axis_count {
+        let rec_off = base + i * axis_size;
+        if rec_off + 20 > out.len() {
+            return Err(err("fvar axis record out of bounds"));
+        }
+        let tag = std::str::from_utf8(&out[rec_off..rec_off + 4])
+            .map_err(|_| err("bad fvar axis tag bytes"))?
+            .to_string();
+        patch(&tag, &mut out[rec_off..rec_off + axis_size]);
+    }
+    Ok(out)
+}
+
+/// Rebuild the export so its resting state IS the current location:
+/// fvar defaults move to the given location (user values + mapped
+/// parametric values, resolved JS-side) and the avar2 table regenerates
+/// around that origin. Axis ranges stay intact.
+#[wasm_bindgen]
+pub fn set_default_location(
+    font_bytes: Vec<u8>,
+    default_location_json: &str,
+    mappings_csv: &str,
+    axis_metadata_json: Option<String>,
+    parametric_tags_json: Option<String>,
+) -> Result<Vec<u8>, JsError> {
+    let location: HashMap<String, f64> = serde_json::from_str(default_location_json)
+        .map_err(|e| err(format!("invalid default location JSON: {e}")))?;
+    let patched = fvar_patch(&font_bytes, |tag, rec| {
+        if let Some(&v) = location.get(tag) {
+            let fixed = (v * 65536.0).round() as i32;
+            rec[8..12].copy_from_slice(&fixed.to_be_bytes());
+        }
+    })?;
+    add_avar2(patched, mappings_csv, axis_metadata_json, parametric_tags_json)
+}
+
+/// Flag fvar axes as hidden in the exported font (fvar axis flags bit
+/// 0x0001): they keep working via font-variation-settings but don't
+/// appear in font pickers or design apps.
+#[wasm_bindgen]
+pub fn set_hidden_axes(font_bytes: Vec<u8>, hidden_tags_json: &str) -> Result<Vec<u8>, JsError> {
+    let hidden: HashSet<String> = serde_json::from_str(hidden_tags_json)
+        .map_err(|e| err(format!("invalid hidden tags JSON: {e}")))?;
+    fvar_patch(&font_bytes, |tag, rec| {
+        if hidden.contains(tag) {
+            let flags = u16::from_be_bytes([rec[16], rec[17]]) | 0x0001;
+            rec[16..18].copy_from_slice(&flags.to_be_bytes());
+        }
+    })
 }

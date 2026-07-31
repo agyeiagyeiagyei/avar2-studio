@@ -16,25 +16,32 @@
  * `axis_metadata_json` (optional) is a JSON object
  * `{TAG: {min, default, max}}` overriding the CSV-derived range for
  * new user axes (the studio's avar2-axis-metadata.json semantics).
+ * `parametric_tags_json` (optional) overrides the in/out split when
+ * re-generating onto a font whose fvar already carries user axes
+ * (the default-location rebuild): columns matching these tags are
+ * outputs, everything else is an input.
  * @param {Uint8Array} font_bytes
  * @param {string} mappings_csv
  * @param {string | null} [axis_metadata_json]
+ * @param {string | null} [parametric_tags_json]
  * @returns {Uint8Array}
  */
-export function add_avar2(font_bytes, mappings_csv, axis_metadata_json) {
+export function add_avar2(font_bytes, mappings_csv, axis_metadata_json, parametric_tags_json) {
     const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(mappings_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
     var ptr2 = isLikeNone(axis_metadata_json) ? 0 : passStringToWasm0(axis_metadata_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     var len2 = WASM_VECTOR_LEN;
-    const ret = wasm.add_avar2(ptr0, len0, ptr1, len1, ptr2, len2);
+    var ptr3 = isLikeNone(parametric_tags_json) ? 0 : passStringToWasm0(parametric_tags_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len3 = WASM_VECTOR_LEN;
+    const ret = wasm.add_avar2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v4;
+    return v5;
 }
 
 /**
@@ -134,6 +141,60 @@ export function compile_glyphs(source) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * Rebuild the export so its resting state IS the current location:
+ * fvar defaults move to the given location (user values + mapped
+ * parametric values, resolved JS-side) and the avar2 table regenerates
+ * around that origin. Axis ranges stay intact.
+ * @param {Uint8Array} font_bytes
+ * @param {string} default_location_json
+ * @param {string} mappings_csv
+ * @param {string | null} [axis_metadata_json]
+ * @param {string | null} [parametric_tags_json]
+ * @returns {Uint8Array}
+ */
+export function set_default_location(font_bytes, default_location_json, mappings_csv, axis_metadata_json, parametric_tags_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(default_location_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(mappings_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    var ptr3 = isLikeNone(axis_metadata_json) ? 0 : passStringToWasm0(axis_metadata_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len3 = WASM_VECTOR_LEN;
+    var ptr4 = isLikeNone(parametric_tags_json) ? 0 : passStringToWasm0(parametric_tags_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len4 = WASM_VECTOR_LEN;
+    const ret = wasm.set_default_location(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v6 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v6;
+}
+
+/**
+ * Flag fvar axes as hidden in the exported font (fvar axis flags bit
+ * 0x0001): they keep working via font-variation-settings but don't
+ * appear in font pickers or design apps.
+ * @param {Uint8Array} font_bytes
+ * @param {string} hidden_tags_json
+ * @returns {Uint8Array}
+ */
+export function set_hidden_axes(font_bytes, hidden_tags_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(hidden_tags_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.set_hidden_axes(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
 }
 function __wbg_get_imports() {
     const import0 = {

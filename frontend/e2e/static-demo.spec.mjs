@@ -408,6 +408,50 @@ const fontBytes = readFileSync(await fontDownload.path());
 ok(fontBytes.length > 10000
   && fontBytes[0] === 0 && fontBytes[1] === 1 && fontBytes[2] === 0 && fontBytes[3] === 0,
   `avar2-ready font downloads as valid TTF (${fontBytes.length} bytes)`);
+// The plain download path leaves the export modal open — close it.
+await page.click('.preview-export-modal button:has-text("Cancel")');
+await page.waitForTimeout(500);
+
+// ---- 13. export options (default location + hidden axes) -------------------
+console.log('13. export options (default location + hidden axes)');
+// Continues on section 11/12's dataset (crispy + CSV + authored ROND).
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+// Move wght off default so the default-location rebuild is observable.
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.preview-tab input[type=range]')];
+  const wght = rows.find(s => {
+    let p = s.parentElement;
+    for (let i = 0; i < 5 && p; i++) {
+      if (p.querySelectorAll('input[type=range]').length === 1 && p.textContent.includes('wght')) return true;
+      p = p.parentElement;
+    }
+    return false;
+  });
+  if (!wght) throw new Error('wght slider not found');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(wght, 500);
+  wght.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.waitForTimeout(1000);
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+await page.click('.preview-export-default input[type=checkbox]');
+await page.click('.preview-export-chips button:has-text("XTRA")');
+const [optDownload] = await Promise.all([
+  page.waitForEvent('download', { timeout: 90000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const { parseFont } = await import('../src/fvar.js');
+const optMeta = parseFont(new Uint8Array(readFileSync(await optDownload.path())));
+const wghtAxis = optMeta.axes.find(a => a.tag === 'wght');
+ok(wghtAxis && Math.abs(wghtAxis.default - 500) < 0.01,
+  `default-location rebuild: wght default is the slider position (${wghtAxis?.default})`);
+const xtraAxis = optMeta.axes.find(a => a.tag === 'XTRA');
+ok(xtraAxis && (xtraAxis.flags & 0x0001) === 0x0001,
+  'hidden-axes flag set on XTRA in the exported fvar');
+ok(optMeta.axes.every(a => (a.flags & 0x0001) === 0 || a.tag === 'XTRA'),
+  'only XTRA is hidden');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

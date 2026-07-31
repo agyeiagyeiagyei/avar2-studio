@@ -49,9 +49,29 @@ export function compileFont(source) {
 
 /** TTF bytes + mappings CSV → TTF bytes with user axes + avar v2 table.
  *  Optional axisMetadata: {TAG: {min, default, max}} range overrides
- *  for newly declared user axes (axis-metadata.json semantics). */
-export function addAvar2(fontBytes, mappingsCsv, axisMetadata = null) {
-  return send({ kind: 'avar2', fontBytes, csv: mappingsCsv, metadata: axisMetadata });
+ *  for newly declared user axes (axis-metadata.json semantics), and
+ *  parametricTags for the in/out split when regenerating onto a font
+ *  that already carries user axes (default-location rebuild). */
+export function addAvar2(fontBytes, mappingsCsv, axisMetadata = null, parametricTags = null) {
+  return send({ kind: 'avar2', fontBytes, csv: mappingsCsv, metadata: axisMetadata, parametricTags });
+}
+
+/** Export option: rebuild with fvar defaults moved to the location
+ *  (user values + mapped parametrics), avar2 regenerated around it. */
+export function exportFontSetDefault(fontBytes, defaultLocation, mappingsCsv, axisMetadata, parametricTags) {
+  return send({
+    kind: 'set-default',
+    fontBytes,
+    location: JSON.stringify(defaultLocation),
+    csv: mappingsCsv,
+    metadata: axisMetadata,
+    parametricTags: parametricTags ? JSON.stringify(parametricTags) : null,
+  });
+}
+
+/** Export option: flag fvar axes as hidden in the exported font. */
+export function exportFontHiddenAxes(fontBytes, hiddenTags) {
+  return send({ kind: 'hide-axes', fontBytes, tags: JSON.stringify(hiddenTags) });
 }
 
 /** TTF bytes + control-axes JSON array → TTF bytes with the new fvar

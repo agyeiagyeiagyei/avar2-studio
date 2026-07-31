@@ -89,8 +89,11 @@ const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
     mappingsText = await csvFile.text();
     fontBytes = await addAvar2(fontBytes, mappingsText);
     const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
+    // Registered columns normalize to lowercase fvar tags (wght etc.);
+    // user-tag matching must use the normalized form.
     userAxisTags = new Set(
       header.split(',').slice(1).map(s => s.trim()).filter(t => t && !compiledTags.has(t))
+        .map(t => mappingsCsv.normalizeInAxisName(t))
     );
   }
   const meta = parseFont(fontBytes);
@@ -183,7 +186,10 @@ const regenerateFont = async (dataset) => {
   // treated as non-master here too — bundle flags get refreshed on the
   // next import, and the authoring flow never mixes with snapshots.
   const meta = parseFont(dataset.fontBytes);
-  const userTags = new Set(mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]));
+  const userTags = new Set(
+    mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags])
+      .map(t => mappingsCsv.normalizeInAxisName(t))
+  );
   dataset.axes = {
     axes: meta.axes.map(a => ({
       tag: a.tag, name: a.name,
@@ -798,18 +804,43 @@ const staticOverrides = {
   setControlAxisLayers: unavailable('Editing layers'),
   openControlAxisInEditor: unavailable('The glyph editor'),
   exportFont: async (options) => {
-    // Plain avar2-ready download of the current font. The export
-    // options (hidden axes / default-location rebuild) are still
-    // app-side surgery — honest error until they port.
-    if (options?.hidden_axes?.length || options?.default_location) {
-      throw new Error('Export options (hidden axes / default location) need the full app for now');
+    const { hidden_axes = [], default_location } = options || {};
+    if (!uploadDataset) {
+      if (hidden_axes.length || default_location) {
+        throw new Error('Export options need an uploaded source');
+      }
+      const r = await fetch(await variantFile('demo.ttf'));
+      if (!r.ok) throw new Error('Font download failed');
+      return r.blob();
     }
-    if (uploadDataset) {
-      return new Blob([uploadDataset.fontBytes], { type: 'font/ttf' });
+    const { exportFontSetDefault, exportFontHiddenAxes } = await import('./fontc-compile');
+    let bytes = uploadDataset.fontBytes;
+    if (default_location) {
+      // Resting state IS the current location: defaults move to the user
+      // values, parametric defaults to the mapped location (avar2-eval).
+      const mapped = mappedLocation(bytes, uploadDataset.axes.axes, default_location);
+      const defaults = { ...default_location };
+      for (const tag of uploadDataset.parametricTags) {
+        if (mapped[tag] !== undefined) defaults[tag] = mapped[tag];
+      }
+      const metadata = Object.fromEntries(
+        Object.entries(uploadDataset.axisRanges || {}).map(([col, entry]) => {
+          const tag = mappingsCsv.normalizeInAxisName(col);
+          return [col, { ...entry, default: defaults[tag] ?? entry.default }];
+        })
+      );
+      bytes = await exportFontSetDefault(
+        bytes,
+        defaults,
+        mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv),
+        Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+        [...uploadDataset.parametricTags]
+      );
     }
-    const r = await fetch(await variantFile('demo.ttf'));
-    if (!r.ok) throw new Error('Font download failed');
-    return r.blob();
+    if (hidden_axes.length) {
+      bytes = await exportFontHiddenAxes(bytes, hidden_axes);
+    }
+    return new Blob([bytes], { type: 'font/ttf' });
   },
   importConfig: async (bundle, dryRun) => {
     if (!uploadDataset) {

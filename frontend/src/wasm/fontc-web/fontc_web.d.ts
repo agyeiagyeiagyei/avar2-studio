@@ -17,8 +17,12 @@
  * `axis_metadata_json` (optional) is a JSON object
  * `{TAG: {min, default, max}}` overriding the CSV-derived range for
  * new user axes (the studio's avar2-axis-metadata.json semantics).
+ * `parametric_tags_json` (optional) overrides the in/out split when
+ * re-generating onto a font whose fvar already carries user axes
+ * (the default-location rebuild): columns matching these tags are
+ * outputs, everything else is an input.
  */
-export function add_avar2(font_bytes: Uint8Array, mappings_csv: string, axis_metadata_json?: string | null): Uint8Array;
+export function add_avar2(font_bytes: Uint8Array, mappings_csv: string, axis_metadata_json?: string | null, parametric_tags_json?: string | null): Uint8Array;
 
 /**
  * Add control (secondary parametric) axes from a config bundle to a
@@ -54,15 +58,32 @@ export function apply_transforms(font_bytes: Uint8Array, transforms_json: string
 
 export function compile_glyphs(source: string): Uint8Array;
 
+/**
+ * Rebuild the export so its resting state IS the current location:
+ * fvar defaults move to the given location (user values + mapped
+ * parametric values, resolved JS-side) and the avar2 table regenerates
+ * around that origin. Axis ranges stay intact.
+ */
+export function set_default_location(font_bytes: Uint8Array, default_location_json: string, mappings_csv: string, axis_metadata_json?: string | null, parametric_tags_json?: string | null): Uint8Array;
+
+/**
+ * Flag fvar axes as hidden in the exported font (fvar axis flags bit
+ * 0x0001): they keep working via font-variation-settings but don't
+ * appear in font pickers or design apps.
+ */
+export function set_hidden_axes(font_bytes: Uint8Array, hidden_tags_json: string): Uint8Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly add_avar2: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly add_avar2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
+    readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+    readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
