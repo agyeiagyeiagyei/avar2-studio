@@ -35,6 +35,19 @@ export function apply_control_axes(font_bytes: Uint8Array, control_json: string)
  */
 export function apply_grade(font_bytes: Uint8Array, grade_json: string, instance_coords_json: string): Uint8Array;
 
+/**
+ * Apply the bundle's post-build transforms (the SPAC injectors,
+ * `transforms.transforms` with `enabled: true`) to a compiled variable
+ * font: SPAC fvar axis + gvar phantom tuples + rebuilt HVAR
+ * (see spac.rs; ported from gftools gen-spac and the studio's
+ * width-aware variant).
+ *
+ * `transforms_json` is the bundle's `transforms.transforms` array;
+ * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
+ * present, pins per-instance SPAC coordinates).
+ */
+export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, avar2_csv: string): Uint8Array;
+
 export function compile_glyphs(source: string): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -44,6 +57,7 @@ export interface InitOutput {
     readonly add_avar2: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

@@ -63,3 +63,10 @@ export function applyControlAxes(fontBytes, controlJson) {
 export function applyGrade(fontBytes, gradeJson, coordsJson) {
   return send({ kind: 'grade', fontBytes, json: gradeJson, coords: coordsJson });
 }
+
+/** TTF bytes + transforms JSON array + avar2 CSV → TTF bytes with the
+ * enabled SPAC transform applied (SPAC fvar axis + gvar phantom tuples
+ * + rebuilt HVAR — the axis stays a live slider). */
+export function applyTransforms(fontBytes, transformsJson, avar2Csv) {
+  return send({ kind: 'transforms', fontBytes, json: transformsJson, csv: avar2Csv });
+}

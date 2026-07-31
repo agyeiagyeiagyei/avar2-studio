@@ -32,6 +32,7 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod spac;
 
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
@@ -41,6 +42,24 @@ pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
         .map_err(|e| JsError::new(&e.to_string()))?;
     let options = fontc::Options::default();
     fontc::generate_font(source, options).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Apply the bundle's post-build transforms (the SPAC injectors,
+/// `transforms.transforms` with `enabled: true`) to a compiled variable
+/// font: SPAC fvar axis + gvar phantom tuples + rebuilt HVAR
+/// (see spac.rs; ported from gftools gen-spac and the studio's
+/// width-aware variant).
+///
+/// `transforms_json` is the bundle's `transforms.transforms` array;
+/// `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
+/// present, pins per-instance SPAC coordinates).
+#[wasm_bindgen]
+pub fn apply_transforms(
+    font_bytes: Vec<u8>,
+    transforms_json: &str,
+    avar2_csv: &str,
+) -> Result<Vec<u8>, JsError> {
+    spac::apply_transforms(font_bytes, transforms_json, avar2_csv)
 }
 
 /// Add control (secondary parametric) axes from a config bundle to a
@@ -77,6 +96,8 @@ const TAG_MVAR: Tag = Tag::new(b"MVAR");
 const TAG_NAME: Tag = Tag::new(b"name");
 
 fn err(msg: impl std::fmt::Display) -> JsError {
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!("fontc-web err: {}", msg);
     JsError::new(&msg.to_string())
 }
 

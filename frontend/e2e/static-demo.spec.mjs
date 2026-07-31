@@ -11,6 +11,8 @@
  *   7. config import onto an uploaded source (avar2 mappings apply)
  *   8. control axes + GRAD apply from a config bundle (computed braces;
  *      fixture built by e2e/fixtures/build-test-bundle.mjs)
+ *   9. width-aware SPAC applies from the same bundle (Transforms menu
+ *      state, parametric-group slider, specimen tracks SPAC)
  *
  * Usage:
  *   STATIC_URL=http://localhost:8123 node e2e/static-demo.spec.mjs
@@ -233,6 +235,53 @@ await sleep(600);
 const shotGrad = await specimenShot();
 ok(!shotDefault.equals(shotGrad), 'GRAD +10 darkens the specimen');
 await setSlider('GRAD', 0);
+
+// ---- 9. SPAC transform applies from the bundle (width-aware) ----------------
+// The test bundle imported in section 8 has spac_widthaware ENABLED —
+// it applied in-browser with the rest of the bundle, so this page state
+// already carries the injected SPAC axis (params min -20, max 40).
+console.log('9. SPAC transform applies from bundle (width-aware)');
+// The Transforms menu reflects the bundle's set: width-aware enabled.
+await page.click('button:has-text("Transforms")');
+const waRowChecked = await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.transform-row')];
+  const row = rows.find(r => r.querySelector('.transform-name')?.textContent.trim() === 'Spacing — width-aware');
+  return row ? !!row.querySelector('input[type=checkbox]')?.checked : null;
+});
+ok(waRowChecked === true, 'Transforms menu shows width-aware SPAC enabled');
+await page.keyboard.press('Escape');
+// SPAC is transform-injected: it sits in the parametric group with
+// XTRA/XOPQ/YOPQ, a live slider on the built font.
+const spacInParametric = await page.evaluate(() => {
+  const groups = [...document.querySelectorAll('.preview-axis-group')];
+  const g = groups.find(el =>
+    [...el.querySelectorAll('.preview-axis-group-title')].some(x => x.textContent.trim() === 'Parametric axes'));
+  return !!g && [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'SPAC');
+});
+ok(spacInParametric, 'SPAC slider exists in the parametric group');
+// Pixel-width check on the specimen text run: SPAC tracks the advances
+// (width-aware: 'n' is narrower than the glyph mean, so it tracks less
+// than an average glyph — but still monotonically).
+const specimenWidth = () => page.evaluate(() => {
+  const el = document.querySelector('.preview-tab-sample');
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().width;
+});
+await setSpecimen('eeee');
+await sleep(600);
+const widthDefault = await specimenWidth();
+await setSlider('SPAC', 40);
+await sleep(600);
+const widthWide = await specimenWidth();
+await setSlider('SPAC', -20);
+await sleep(600);
+const widthTight = await specimenWidth();
+ok(widthWide > widthTight, `specimen wider at SPAC +40 (${widthWide.toFixed(1)}px) than at -20 (${widthTight.toFixed(1)}px)`);
+await setSlider('SPAC', 0);
+await sleep(600);
+const widthReset = await specimenWidth();
+ok(Math.abs(widthReset - widthDefault) < 0.01, `specimen width at SPAC 0 matches baseline (${widthReset.toFixed(2)}px ≈ ${widthDefault.toFixed(2)}px)`);
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

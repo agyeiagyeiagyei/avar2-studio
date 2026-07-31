@@ -362,6 +362,20 @@ fn param_tag(t: &str) -> Tag {
     Tag::from_str(t).expect("PARAM_TAGS are valid tags")
 }
 
+/// Options for `build_grown_font` beyond the brace-layer basics.
+#[derive(Default)]
+pub(crate) struct GrowOptions<'a> {
+    /// Per-instance coordinates for the new axes, keyed by instance
+    /// (subfamily) name; values are parallel to `new_axes`. Instances
+    /// not listed get the axis default (the reference transforms'
+    /// fallback).
+    pub instance_overrides: Option<&'a HashMap<String, Vec<f64>>>,
+    /// Replaces the padded HVAR wholesale (SPAC rebuilds HVAR from the
+    /// patched gvar's phantom deltas; padding alone wouldn't carry the
+    /// new advance deltas).
+    pub hvar_bytes: Option<Vec<u8>>,
+}
+
 /// Append `new_axes` to fvar (+ name records, instance coordinate
 /// padding with the axis default), grow avar/HVAR/GDEF/MVAR to match,
 /// and rewrite gvar with the new axis count, injecting `extras`
@@ -370,6 +384,7 @@ pub(crate) fn build_grown_font(
     font_bytes: &[u8],
     new_axes: &[NewFvarAxis],
     extras: HashMap<u16, Vec<NewTuple>>,
+    options: &GrowOptions,
 ) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
 
@@ -412,9 +427,24 @@ pub(crate) fn build_grown_font(
             a.name.clone().into(),
         ));
     }
+    // Instance subfamily names for the override lookup, resolved like
+    // fontTools `name.getDebugName`: the (3,1,0x409) record for the id,
+    // falling back to any record with it.
+    let inst_names: HashMap<u16, String> = if options.instance_overrides.is_some() {
+        debug_names(&font)
+    } else {
+        HashMap::new()
+    };
     for inst in fvar.axis_instance_arrays.instances.iter_mut() {
-        for a in new_axes {
-            inst.coordinates.push(Fixed::from_f64(a.default));
+        let iname = inst_names.get(&inst.subfamily_name_id.to_u16());
+        for (i, a) in new_axes.iter().enumerate() {
+            let v = iname
+                .zip(options.instance_overrides)
+                .and_then(|(n, o)| o.get(n))
+                .and_then(|vals| vals.get(i))
+                .copied()
+                .unwrap_or(a.default);
+            inst.coordinates.push(Fixed::from_f64(v));
         }
     }
 
@@ -448,6 +478,9 @@ pub(crate) fn build_grown_font(
     };
 
     let mut replacements = crate::grown_varstore_replacements(&font, total_axes)?;
+    if let Some(b) = &options.hvar_bytes {
+        replacements.insert(crate::TAG_HVAR, b.clone()); // rebuilt, not just padded
+    }
     replacements.insert(TAG_FVAR, dump_replacement(&fvar, "fvar")?);
     replacements.insert(TAG_NAME, dump_replacement(&name, "name")?);
     if let Some(b) = avar_bytes {
@@ -459,6 +492,29 @@ pub(crate) fn build_grown_font(
     Ok(crate::repack(&font, replacements))
 }
 
+/// name-id → string map in fontTools `getDebugName` order: the
+/// (3,1,0x409) record wins, any other record with the id is the
+/// fallback.
+fn debug_names(font: &FontRef) -> HashMap<u16, String> {
+    let mut names = HashMap::new();
+    let mut fallback: HashMap<u16, String> = HashMap::new();
+    if let Ok(name) = font.name() {
+        let data = name.string_data();
+        for rec in name.name_record() {
+            let Ok(s) = rec.string(data) else { continue };
+            let id = rec.name_id().to_u16();
+            if rec.platform_id() == 3 && rec.encoding_id() == 1 && rec.language_id() == 0x409 {
+                names.insert(id, s.to_string());
+            }
+            fallback.entry(id).or_insert_with(|| s.to_string());
+        }
+    }
+    for (id, s) in fallback {
+        names.entry(id).or_insert(s);
+    }
+    names
+}
+
 // --------------------------------------------------------------------------
 // Brace tuple construction
 // --------------------------------------------------------------------------
@@ -468,7 +524,7 @@ pub(crate) fn build_grown_font(
 /// carry the inferred region (0 → ±1) so serialization writes no
 /// intermediate region (fontTools `compileIntermediateCoord` would
 /// return None — the inferred tent is exactly the one we want).
-fn brace_coords(total_axes: usize, control_idx: usize, control_norm: f64) -> NewTuple {
+pub(crate) fn brace_coords(total_axes: usize, control_idx: usize, control_norm: f64) -> NewTuple {
     let mut peak = vec![0.0; total_axes];
     let mut start = vec![0.0; total_axes];
     let mut end = vec![0.0; total_axes];
@@ -599,7 +655,7 @@ pub(crate) fn apply_control_axes(
         });
     }
 
-    build_grown_font(&font_bytes, &new_axes, extras)
+    build_grown_font(&font_bytes, &new_axes, extras, &GrowOptions::default())
 }
 
 // --------------------------------------------------------------------------
@@ -744,5 +800,5 @@ pub(crate) fn apply_grade(
         default: GRAD_DEFAULT,
         max: GRAD_MAX,
     }];
-    build_grown_font(&font_bytes, &new_axes, extras)
+    build_grown_font(&font_bytes, &new_axes, extras, &GrowOptions::default())
 }

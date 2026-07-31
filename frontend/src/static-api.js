@@ -15,8 +15,7 @@
  *     variants (params edits and Rebuild need a real build → hidden)
  *   - Config export: a static file download
  *   - Config import onto an uploaded source: avar2 mappings, control
- *     axes and grade apply in-browser (wasm); SPAC transforms are
- *     recorded as pending (separate port)
+ *     axes, grade and SPAC transforms apply in-browser (wasm)
  *
  * Known limitations (tracked in the migration doc):
  *   - snapshot datasets: getMappedLocation returns the input
@@ -201,10 +200,40 @@ const unavailable = (what) => async () => {
 // Validation gates on the target font supplying the bundle's core axis
 // data, mirroring config_port.validate_bundle: the parametric axes the
 // avar2 CSV maps onto, and the source axes brace-layer locations
-// reference. Apply is per-section: avar2 mappings, control axes and
-// grade are real (wasm add_avar2 / apply_control_axes / apply_grade);
-// transforms (SPAC) are recorded pending their port and reported as a
+// reference. Apply is per-section: avar2 mappings, control axes, grade
+// and the SPAC transforms are real (wasm add_avar2 /
+// apply_control_axes / apply_grade / apply_transforms). Enabled
+// transforms of a type the wasm port doesn't know are skipped with a
 // warning, never silently dropped.
+
+// Menu metadata for the built-in SPAC transforms, mirroring the studio's
+// transform registry (transforms/builtin_spac*.py — the bundle carries
+// only {type, enabled, params}; the Transforms menu also renders
+// name/description/params_schema).
+const KNOWN_TRANSFORMS = {
+  spac: {
+    id: 'spac',
+    name: 'Spacing — uniform (gftools)',
+    description: 'Inject a SPAC axis via gftools-gen-spac; every glyph tracks by the same amount, outlines unchanged.',
+    injected_axis_tag: 'SPAC',
+    params_schema: [
+      { key: 'min', label: 'Min', type: 'int', default: -20 },
+      { key: 'max', label: 'Max', type: 'int', default: 40 },
+    ],
+  },
+  spac_widthaware: {
+    id: 'spac_widthaware',
+    name: 'Spacing — width-aware',
+    description: 'Inject a SPAC axis that loosens every glyph by a consistent proportion of its width (wider glyphs get more), including composites.',
+    injected_axis_tag: 'SPAC',
+    params_schema: [
+      { key: 'min', label: 'Min', type: 'int', default: -20 },
+      { key: 'max', label: 'Max', type: 'int', default: 40 },
+      { key: 'bias', label: 'Wide bias', type: 'float', default: 1.0, min: 1.0, max: 2.5 },
+      { key: 'scale', label: 'Scale', type: 'float', default: 1.25, min: 0.1, max: 10.0 },
+    ],
+  },
+};
 
 const csvRowCount = (text) =>
   text.split('\n').filter(l => l.trim() && !l.startsWith('﻿')).length - 1;
@@ -274,9 +303,21 @@ const validateBundle = (bundle, dataset) => {
         }
       }
     }
+    // The registry's one-injector-per-axis rule: two enabled SPAC
+    // transforms would produce a font with two SPAC axes.
+    const spacInjectors = transforms
+      .filter(t => t.enabled && KNOWN_TRANSFORMS[t.type]?.injected_axis_tag === 'SPAC')
+      .map(t => t.type);
+    if (spacInjectors.length > 1) {
+      errors.push(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
+    }
   }
   if (controlAxes.length) warnings.push('Control axes: applied as computed brace tuples (drawn outlines are a full-app feature)');
-  if (transforms.length) warnings.push('Transforms: recorded, apply pending (SPAC port)');
+  for (const t of transforms) {
+    if (t.enabled && !KNOWN_TRANSFORMS[t.type]) {
+      warnings.push(`Transform '${t.type}': unknown type — skipped by the static demo`);
+    }
+  }
 
   return {
     ok: errors.length === 0,
@@ -293,10 +334,11 @@ const validateBundle = (bundle, dataset) => {
 };
 
 const applyBundle = async (bundle, dataset) => {
-  const { addAvar2, applyControlAxes, applyGrade } = await import('./fontc-compile');
+  const { addAvar2, applyControlAxes, applyGrade, applyTransforms } = await import('./fontc-compile');
   const report = { ok: true, applied: [], warnings: validateBundle(bundle, dataset).warnings };
   const avar2Csv = bundle.avar2_csv || '';
   const controlAxes = bundle.control_axes?.axes || [];
+  const transforms = bundle.transforms?.transforms || [];
   const grade = bundle.grade || {};
   const gradeInstances = grade.enabled ? (grade.instances || []) : [];
 
@@ -323,6 +365,20 @@ const applyBundle = async (bundle, dataset) => {
     );
     report.applied.push('grade');
   }
+  // SPAC transforms apply last (they rebuild HVAR from the gvar the
+  // earlier sections produced). Disabled and unknown-type entries never
+  // reach the font — the wasm side applies only enabled known ones.
+  if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
+    dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
+    report.applied.push('transforms (SPAC)');
+  }
+  // The Transforms menu reflects the bundle's set from now on: enabled
+  // entries show enabled, the rest available but off.
+  dataset.transforms = transforms.map(t => ({
+    ...(KNOWN_TRANSFORMS[t.type] || { id: t.type, name: t.type }),
+    enabled: !!t.enabled,
+    params: t.params || {},
+  }));
   if (!report.applied.length) return report;
 
   URL.revokeObjectURL(dataset.fontUrl);
@@ -334,10 +390,18 @@ const applyBundle = async (bundle, dataset) => {
   // Re-read axes from the patched font: user axes (CSV in-columns),
   // control axes and GRAD all appear in the fvar now. None of them has
   // master coverage — the compiled masters only span the parametrics.
+  // SPAC is transform-injected (a live-preview parametric slider, like
+  // the server's built-font overlay marks it).
   const userTags = avar2Csv.trim() && compiledTags
-    ? new Set(csvHeaderTags(avar2Csv).filter(t => !compiledTags.has(t)))
+    ? new Set(csvHeaderTags(avar2Csv).filter(t => !compiledTags.has(t) && t !== 'SPAC'))
     : new Set();
   const controlTags = new Set(controlAxes.map(a => a.tag));
+  const injectedTags = new Set(
+    transforms
+      .filter(t => t.enabled)
+      .map(t => KNOWN_TRANSFORMS[t.type]?.injected_axis_tag)
+      .filter(Boolean)
+  );
   const meta = parseFont(dataset.fontBytes);
   dataset.axes = {
     axes: meta.axes.map(a => ({
@@ -346,6 +410,7 @@ const applyBundle = async (bundle, dataset) => {
       has_master_coverage: !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD',
       is_control_axis: controlTags.has(a.tag),
       is_grade_axis: a.tag === 'GRAD',
+      transform_injected: injectedTags.has(a.tag),
     })),
   };
   return report;
@@ -359,7 +424,7 @@ const staticOverrides = {
   getAxes: async () => (uploadDataset ? uploadDataset.axes : fetchJSON(await variantFile('axes.json'))),
   getAvar2Instances: async () => (uploadDataset ? { instances: [] } : endpoint('avar2-instances.json')()),
   getAvar2Axes: async () => (uploadDataset ? { axes: [] } : endpoint('avar2-axes.json')()),
-  getTransforms: async () => (uploadDataset ? { transforms: [] } : { transforms: await transformsList() }),
+  getTransforms: async () => (uploadDataset ? { transforms: uploadDataset.transforms || [] } : { transforms: await transformsList() }),
   getGrade: async () => (uploadDataset
     ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
     : endpoint('grade.json')()),
@@ -452,6 +517,12 @@ const staticOverrides = {
   // merge OVER the stored list so name/description/schema metadata
   // survives (the App renders the menu from our return value).
   updateTransforms: async (entries) => {
+    if (uploadDataset) {
+      // An imported bundle's transforms were applied onto the compiled
+      // bytes one-shot; re-toggling would mean re-running the whole
+      // import pipeline.
+      throw new Error("Transform toggles on an uploaded source need the full app — the static demo applies an imported bundle's transforms as-is.");
+    }
     const base = await transformsList();
     const next = base.map(t => {
       const e = (entries || []).find(x => (x.type || x.id) === t.id);

@@ -83,6 +83,37 @@ export function apply_grade(font_bytes, grade_json, instance_coords_json) {
 }
 
 /**
+ * Apply the bundle's post-build transforms (the SPAC injectors,
+ * `transforms.transforms` with `enabled: true`) to a compiled variable
+ * font: SPAC fvar axis + gvar phantom tuples + rebuilt HVAR
+ * (see spac.rs; ported from gftools gen-spac and the studio's
+ * width-aware variant).
+ *
+ * `transforms_json` is the bundle's `transforms.transforms` array;
+ * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
+ * present, pins per-instance SPAC coordinates).
+ * @param {Uint8Array} font_bytes
+ * @param {string} transforms_json
+ * @param {string} avar2_csv
+ * @returns {Uint8Array}
+ */
+export function apply_transforms(font_bytes, transforms_json, avar2_csv) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(transforms_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(avar2_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.apply_transforms(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
  * @param {string} source
  * @returns {Uint8Array}
  */
