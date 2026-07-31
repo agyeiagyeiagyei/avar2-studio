@@ -407,6 +407,32 @@ const validateBundle = (bundle, dataset) => {
   };
 };
 
+// ---- config bundle export from browser state (S3) ---------------------------
+//
+// Assembles the same bundle shape the server's config_port.build_export
+// emits, from the in-memory dataset: the edited CSV is the mappings, the
+// rest are recorded section states. Downloads via a blob URL the Header
+// anchors to (same mechanism as the server's Content-Disposition trick).
+
+const buildConfigBundle = (dataset) => ({
+  format: 'avar2-studio-config',
+  format_version: 1,
+  exported_at: new Date().toISOString(),
+  studio_version: 'static-demo',
+  source: {
+    family_name: dataset.health.family_name,
+    axes: (dataset.axes?.axes || []).map(a => ({
+      tag: a.tag, min: a.min, default: a.default, max: a.max,
+      has_master_coverage: a.has_master_coverage,
+    })),
+    avar2_out_columns: [...dataset.parametricTags],
+  },
+  control_axes: { version: 1, axes: dataset.controlAxes || [] },
+  avar2_csv: mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
+  transforms: { version: 1, transforms: dataset.transforms || [] },
+  grade: dataset.grade || { version: 1, enabled: false, default_pct: 0.25, instances: [] },
+});
+
 const applyBundle = async (bundle, dataset) => {
   const { addAvar2, applyControlAxes, applyGrade, applyTransforms } = await import('./fontc-compile');
   const report = { ok: true, applied: [], warnings: validateBundle(bundle, dataset).warnings };
@@ -589,7 +615,13 @@ const staticOverrides = {
   checkSyncStatus: async () => ({ synced: true, message: 'Static demo snapshot' }),
   getFontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
   getAvar2FontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
-  exportConfigUrl: () => `${datasetPath}/config-export.json`,
+  exportConfigUrl: () => {
+    if (!uploadDataset) return `${datasetPath}/config-export.json`;
+    const bundle = buildConfigBundle(uploadDataset);
+    return URL.createObjectURL(
+      new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+    );
+  },
 
   // Uploads: compile the source in a Web Worker (fontc-wasm) and switch
   // the app to the resulting in-memory dataset. This is the Phase 2
@@ -765,7 +797,20 @@ const staticOverrides = {
   controlAxisLayerDelta: unavailable('Editing layers'),
   setControlAxisLayers: unavailable('Editing layers'),
   openControlAxisInEditor: unavailable('The glyph editor'),
-  exportFont: unavailable('Exporting'),
+  exportFont: async (options) => {
+    // Plain avar2-ready download of the current font. The export
+    // options (hidden axes / default-location rebuild) are still
+    // app-side surgery — honest error until they port.
+    if (options?.hidden_axes?.length || options?.default_location) {
+      throw new Error('Export options (hidden axes / default location) need the full app for now');
+    }
+    if (uploadDataset) {
+      return new Blob([uploadDataset.fontBytes], { type: 'font/ttf' });
+    }
+    const r = await fetch(await variantFile('demo.ttf'));
+    if (!r.ok) throw new Error('Font download failed');
+    return r.blob();
+  },
   importConfig: async (bundle, dryRun) => {
     if (!uploadDataset) {
       throw new Error('Import needs an uploaded source — snapshots come pre-configured.');

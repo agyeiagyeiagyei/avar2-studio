@@ -236,13 +236,18 @@ function PreviewTab({
     if (!fontUrl) return;
     const plainDownload = exportHidden.size === 0 && !exportUseDefault;
     if (plainDownload) {
-      const downloadUrl = `${fontUrl}${fontUrl.includes('?') ? '&' : '?'}download=1`;
+      // Blob URLs can't carry a query string — the ?download=1 flag is
+      // for the server's fetch path only.
+      const downloadUrl = fontUrl.startsWith('blob:')
+        ? fontUrl
+        : `${fontUrl}${fontUrl.includes('?') ? '&' : '?'}download=1`;
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      // Blob-URL downloads cancel if the anchor dies before the download starts.
+      setTimeout(() => document.body.removeChild(link), 0);
       return;
     }
     setExporting(true);
@@ -258,8 +263,12 @@ function PreviewTab({
       link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // Remove + revoke on the next tick — synchronously revoking the
+      // blob can cancel the download before it starts.
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 0);
       setShowExportModal(false);
     } catch (err) {
       setExportError(err.message || 'Export failed');

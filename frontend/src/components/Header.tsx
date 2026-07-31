@@ -199,10 +199,14 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     // filename wins.
     const link = document.createElement('a');
     link.href = api.exportConfigUrl();
-    link.download = '';
+    // Static demo has no server Content-Disposition to name the file —
+    // set it here (the server's "<family>-avar2studio.json" wins there).
+    link.download = staticMode ? `${familyName || 'avar2'}-avar2studio.json` : '';
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
+    // Blob-URL downloads cancel if the anchor dies before the download
+    // starts — remove on the next tick instead of synchronously.
+    setTimeout(() => document.body.removeChild(link), 0);
   };
 
   const handleImportClick = () => {

@@ -25,6 +25,7 @@
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const BASE = process.env.STATIC_URL || 'http://localhost:8123';
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest.glyphs');
@@ -380,6 +381,33 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(
     el => el.children.length === 0 && el.textContent.trim() === '-100'
   )), 'ROND range from axis metadata (-100 … 100), not CSV-derived');
+
+// ---- 12. downloads: config bundle + avar2-ready font -------------------------
+console.log('12. downloads (config bundle + font)');
+// Continues on section 11's dataset (crispy upload + CSV + authored ROND).
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Config")');
+const [cfgDownload] = await Promise.all([
+  page.waitForEvent('download', { timeout: 20000 }),
+  page.click('text=Export configuration…'),
+]);
+const bundle = JSON.parse(readFileSync(await cfgDownload.path(), 'utf8'));
+ok(bundle.format === 'avar2-studio-config'
+  && bundle.avar2_csv.includes('ROND')
+  && bundle.source.avar2_out_columns.includes('XTRA'),
+  'config bundle downloads with authored axis in the CSV');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-download', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [fontDownload] = await Promise.all([
+  page.waitForEvent('download', { timeout: 30000 }),
+  page.click('button:has-text("Download")'),
+]);
+const fontBytes = readFileSync(await fontDownload.path());
+ok(fontBytes.length > 10000
+  && fontBytes[0] === 0 && fontBytes[1] === 1 && fontBytes[2] === 0 && fontBytes[3] === 0,
+  `avar2-ready font downloads as valid TTF (${fontBytes.length} bytes)`);
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
