@@ -1,0 +1,84 @@
+{
+  "format": "avar2-studio-config",
+  "format_version": 1,
+  "exported_at": "2026-07-30T09:16:09.173152+00:00",
+  "studio_version": "0.1.0.dev8",
+  "source": {
+    "family_name": "CrispyMini",
+    "axes": [
+      {
+        "tag": "XTRA",
+        "min": 94,
+        "default": 94,
+        "max": 3330,
+        "has_master_coverage": true
+      },
+      {
+        "tag": "XOPQ",
+        "min": 2,
+        "default": 2,
+        "max": 1016,
+        "has_master_coverage": true
+      },
+      {
+        "tag": "YOPQ",
+        "min": 2,
+        "default": 2,
+        "max": 462,
+        "has_master_coverage": true
+      }
+    ],
+    "avar2_out_columns": [
+      "XTRA",
+      "XOPQ",
+      "YOPQ"
+    ]
+  },
+  "control_axes": {
+    "version": 1,
+    "axes": [
+      {
+        "tag": "crbr",
+        "name": "Crossbar",
+        "min": 0,
+        "default": 0,
+        "max": 100,
+        "layers": [
+          {
+            "glyph": "e",
+            "location": {
+              "XTRA": 1000
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "avar2_csv": "Instance Name,XTRA,XOPQ,YOPQ,OPSZ,WGHT,WDTH\nNarrow Thin 144,94.0,6.0,6.0,144.0,100.0,20.0\nUltra Wide Thin 144,2895.4,12.0,10.0,,,200.0\nUltra Wide Thin 12,2807.8,67.6,49.4,12.0,,200.0\nNarrow Thin 12,271.4,24.2,31.0,12.0,100.0,20.0\nNarrow Heavy 12,222.8,279.6,250.2,12.0,900.0,20.0\nNarrow Heavy 144,94.0,310.2,243.0,,900.0,20.0\nUltra Wide Heavy 12,2592.8,760.8,413.4,12.0,900.0,200.0\nUltra Wide Heavy 144,3330.0,961.0,462.0,,900.0,200.0\n",
+  "transforms": {
+    "version": 1,
+    "transforms": [
+      {
+        "type": "spac_widthaware",
+        "enabled": true,
+        "params": {
+          "min": -20,
+          "max": 40,
+          "bias": 1,
+          "scale": 1.25
+        }
+      }
+    ]
+  },
+  "grade": {
+    "version": 1,
+    "enabled": true,
+    "default_pct": 0.25,
+    "instances": [
+      {
+        "name": "Narrow Heavy 144",
+        "pct": 0.3
+      }
+    ]
+  }
+}

@@ -97,9 +97,20 @@ Resolved as the phases landed:
 - **SPAC on uploaded fonts — DEFER.** It's per-glyph hmtx + advance
   surgery; revisit if the static demo gains per-glyph editing. The
   bundled demo is covered by the baked spac-on/off variants.
-- **Grade — DEFER.** It's outline computation (contour offsetting),
-  which means real geometry work (kurbo/skleja territory) — app-only
-  unless a Rust port is ever justified.
+- **Grade — PORT.** The pure-weight model (grade.py: XOPQ+YOPQ drive,
+  XTRA follows at COMP_RATIO) needs no contour offsetting: each brace
+  is the glyph's own outline instanced at the light/dark grade coords,
+  advance-equalised by a symmetric shift (grade_shadow.py's algorithm).
+  `apply_grade(font_bytes, grade_json, instance_coords_json)` in the
+  fontc-web wasm crate injects them as gvar tuples at GRAD ∓10 plus the
+  GRAD fvar axis; verified against fontTools' instancer as oracle.
+- **Control axes (secondary parametric axes) — PORT (computed
+  braces).** `apply_control_axes(font_bytes, control_json)`: each
+  `{glyph, location}` layer becomes an fvar axis + a gvar tuple whose
+  delta is the glyph's instanced outline at the pinned location minus
+  the default instance's — the brace effect without a shadow source.
+  Designer-drawn brace outlines stay a full-app feature (the static
+  port computes them).
 - **export-font (hidden axes / default-location rebuild) — DEFER.**
   Hidden-axes flags are cheap fvar surgery (easy later port);
   default-location rebuild is a full recompile — may become a Rebuild

@@ -7,6 +7,10 @@
  *   3. Load Font dataset switch (Roboto Delta Mini)
  *   4. .glyphs upload compiled in-browser (fontc-wasm worker)
  *   5. Rebuild on an uploaded source
+ *   6. avar2 mappings upload (user axes + mapped reflection)
+ *   7. config import onto an uploaded source (avar2 mappings apply)
+ *   8. control axes + GRAD apply from a config bundle (computed braces;
+ *      fixture built by e2e/fixtures/build-test-bundle.mjs)
  *
  * Usage:
  *   STATIC_URL=http://localhost:8123 node e2e/static-demo.spec.mjs
@@ -157,6 +161,78 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'OPSZ')),
   'OPSZ user axis appears after mappings import');
+
+// ---- 8. control axes + GRAD apply from a config bundle ----------------------
+console.log('8. control axes + GRAD apply from bundle');
+const TEST_BUNDLE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'crispy-mini-test-bundle.json');
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_GLYPHS);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent?.startsWith('Crispy'),
+  { timeout: 90000 }
+);
+ok(true, 'CrispyMini.glyphs compiles on upload (section 8)');
+await page.click('button:has-text("Config")');
+await page.click('text=Import configuration…');
+await page.setInputFiles('.config-dropdown input[type=file]', TEST_BUNDLE);
+await page.waitForSelector('.import-config-confirm:not([disabled])', { timeout: 30000 });
+ok(true, 'control+grade bundle validates clean');
+await page.click('.import-config-confirm');
+await page.waitForFunction(() => !document.querySelector('.import-config-confirm'), { timeout: 90000 });
+ok(true, 'control+grade bundle applied');
+// The sidebar's SECONDARY PARAMETRIC AXES section lists the applied axis.
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.sidebar *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'SECONDARY PARAMETRIC AXES')),
+  'SECONDARY PARAMETRIC AXES section shows in sidebar');
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.control-axes *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'crbr')),
+  'crbr row in SECONDARY PARAMETRIC AXES');
+// The Preview tab gets sliders for both new axes, in their own groups.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+const sliderFor = (tag) => page.evaluateHandle((t) => {
+  const groups = [...document.querySelectorAll('.axis-control')];
+  const g = groups.find(el => [...el.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === t));
+  return g ? g.querySelector('input[type=range]') : null;
+}, tag);
+const setSlider = async (tag, value) => {
+  await page.evaluate(([t, v]) => {
+    const groups = [...document.querySelectorAll('.axis-control')];
+    const g = groups.find(el => [...el.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === t));
+    const input = g && g.querySelector('input[type=range]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, v);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [tag, String(value)]);
+};
+ok(await (await sliderFor('crbr')).evaluate(el => !!el), 'crbr slider in Preview (secondary parametric axes)');
+ok(await (await sliderFor('GRAD')).evaluate(el => !!el), 'GRAD slider in Preview (Grade group)');
+// Specimen shows 'e' only, so the pixel diff is the brace-layer effect.
+const setSpecimen = (text) => page.evaluate((t) => {
+  const el = document.querySelector('.preview-tab-sample');
+  el.textContent = t;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}, text);
+await setSpecimen('eeee');
+await sleep(600);
+const specimenShot = () => page.locator('.preview-tab-sample').screenshot();
+const shotDefault = await specimenShot();
+await setSlider('crbr', 100);
+await sleep(600);
+const shotCrbr = await specimenShot();
+ok(!shotDefault.equals(shotCrbr), 'moving crbr changes the rendered specimen for e');
+await setSlider('crbr', 0);
+await sleep(600);
+const shotReset = await specimenShot();
+ok(shotDefault.equals(shotReset), 'crbr back to default restores the specimen');
+await setSlider('GRAD', 10);
+await sleep(600);
+const shotGrad = await specimenShot();
+ok(!shotDefault.equals(shotGrad), 'GRAD +10 darkens the specimen');
+await setSlider('GRAD', 0);
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

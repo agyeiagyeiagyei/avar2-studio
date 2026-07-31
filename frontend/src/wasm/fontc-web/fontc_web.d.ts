@@ -16,6 +16,25 @@
  */
 export function add_avar2(font_bytes: Uint8Array, mappings_csv: string): Uint8Array;
 
+/**
+ * Add control (secondary parametric) axes from a config bundle to a
+ * compiled variable font: one fvar axis per entry, and a computed gvar
+ * brace tuple per layer (see braces.rs).
+ *
+ * `control_json` is the bundle's `control_axes.axes` array.
+ */
+export function apply_control_axes(font_bytes: Uint8Array, control_json: string): Uint8Array;
+
+/**
+ * Add the GRAD grade axis from a config bundle: fvar axis (−10/0/+10)
+ * plus equalised light/dark brace tuples per graded instance
+ * (see braces.rs; model ported from grade.py / grade_shadow.py).
+ *
+ * `grade_json` is the bundle's `grade` object; `instance_coords_json`
+ * maps instance name → its base parametric coords `{XTRA, XOPQ, YOPQ}`.
+ */
+export function apply_grade(font_bytes: Uint8Array, grade_json: string, instance_coords_json: string): Uint8Array;
+
 export function compile_glyphs(source: string): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -23,6 +42,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly add_avar2: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

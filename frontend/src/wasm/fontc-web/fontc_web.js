@@ -31,6 +31,58 @@ export function add_avar2(font_bytes, mappings_csv) {
 }
 
 /**
+ * Add control (secondary parametric) axes from a config bundle to a
+ * compiled variable font: one fvar axis per entry, and a computed gvar
+ * brace tuple per layer (see braces.rs).
+ *
+ * `control_json` is the bundle's `control_axes.axes` array.
+ * @param {Uint8Array} font_bytes
+ * @param {string} control_json
+ * @returns {Uint8Array}
+ */
+export function apply_control_axes(font_bytes, control_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(control_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.apply_control_axes(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Add the GRAD grade axis from a config bundle: fvar axis (−10/0/+10)
+ * plus equalised light/dark brace tuples per graded instance
+ * (see braces.rs; model ported from grade.py / grade_shadow.py).
+ *
+ * `grade_json` is the bundle's `grade` object; `instance_coords_json`
+ * maps instance name → its base parametric coords `{XTRA, XOPQ, YOPQ}`.
+ * @param {Uint8Array} font_bytes
+ * @param {string} grade_json
+ * @param {string} instance_coords_json
+ * @returns {Uint8Array}
+ */
+export function apply_grade(font_bytes, grade_json, instance_coords_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(grade_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(instance_coords_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.apply_grade(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
  * @param {string} source
  * @returns {Uint8Array}
  */

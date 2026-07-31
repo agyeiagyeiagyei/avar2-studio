@@ -528,6 +528,8 @@ dependencies = [
  "fontc",
  "fontdrasil",
  "read-fonts",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "write-fonts",
 ]

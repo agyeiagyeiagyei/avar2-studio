@@ -31,6 +31,8 @@ use write_fonts::tables::variations::{
 };
 use write_fonts::FontBuilder;
 
+mod braces;
+
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
     let input = fontc::Input::from_glyphs(source);
@@ -39,6 +41,31 @@ pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
         .map_err(|e| JsError::new(&e.to_string()))?;
     let options = fontc::Options::default();
     fontc::generate_font(source, options).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Add control (secondary parametric) axes from a config bundle to a
+/// compiled variable font: one fvar axis per entry, and a computed gvar
+/// brace tuple per layer (see braces.rs).
+///
+/// `control_json` is the bundle's `control_axes.axes` array.
+#[wasm_bindgen]
+pub fn apply_control_axes(font_bytes: Vec<u8>, control_json: &str) -> Result<Vec<u8>, JsError> {
+    braces::apply_control_axes(font_bytes, control_json)
+}
+
+/// Add the GRAD grade axis from a config bundle: fvar axis (−10/0/+10)
+/// plus equalised light/dark brace tuples per graded instance
+/// (see braces.rs; model ported from grade.py / grade_shadow.py).
+///
+/// `grade_json` is the bundle's `grade` object; `instance_coords_json`
+/// maps instance name → its base parametric coords `{XTRA, XOPQ, YOPQ}`.
+#[wasm_bindgen]
+pub fn apply_grade(
+    font_bytes: Vec<u8>,
+    grade_json: &str,
+    instance_coords_json: &str,
+) -> Result<Vec<u8>, JsError> {
+    braces::apply_grade(font_bytes, grade_json, instance_coords_json)
 }
 
 const TAG_AVAR: Tag = Tag::new(b"avar");
@@ -364,83 +391,89 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
     // equivalent byte-level rewrite (a 0.0 coordinate means the axis does
     // not participate in the tuple).
     let gvar_bytes = match font.data_for_tag(TAG_GVAR) {
-        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes)?),
+        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &HashMap::new())?),
         None => None,
     };
 
-    // HVAR/GDEF/MVAR VarStores: bump the region-list axis count and pad
-    // every region with a null tent {start: -1, peak: 0, end: 1} per new
-    // axis (gftools gen_fvar_axes).
-    let null_tent = RegionAxisCoordinates::new(
-        F2Dot14::from_f32(-1.0),
-        F2Dot14::from_f32(0.0),
-        F2Dot14::from_f32(1.0),
-    );
-    let pad_store = |store: &mut ItemVariationStore| {
-        store.variation_region_list.axis_count = total_axes;
-        for region in store.variation_region_list.variation_regions.iter_mut() {
-            while region.region_axes.len() < total_axes as usize {
-                region.region_axes.push(null_tent.clone());
-            }
-        }
-    };
-    let hvar_bytes = match font.hvar() {
-        Ok(hvar) => {
-            let mut hvar: w_hvar::Hvar = hvar.to_owned_table();
-            pad_store(&mut hvar.item_variation_store);
-            Some(write_fonts::dump_table(&hvar).map_err(|e| err(format!("HVAR: {e}")))?)
-        }
-        Err(_) => None,
-    };
-    let gdef_bytes = match font.gdef() {
-        Ok(gdef) => {
-            let mut gdef: w_gdef::Gdef = gdef.to_owned_table();
-            if let Some(store) = gdef.item_var_store.as_mut() {
-                pad_store(store);
-            }
-            Some(write_fonts::dump_table(&gdef).map_err(|e| err(format!("GDEF: {e}")))?)
-        }
-        Err(_) => None,
-    };
-    let mvar_bytes = match font.mvar() {
-        Ok(mvar) => {
-            let mut mvar: w_mvar::Mvar = mvar.to_owned_table();
-            if let Some(store) = mvar.item_variation_store.as_mut() {
-                pad_store(store);
-            }
-            Some(write_fonts::dump_table(&mvar).map_err(|e| err(format!("MVAR: {e}")))?)
-        }
-        Err(_) => None,
-    };
+    let mut replacements: HashMap<Tag, Vec<u8>> = grown_varstore_replacements(&font, total_axes)?;
 
     let fvar_bytes = write_fonts::dump_table(&fvar).map_err(|e| err(format!("fvar: {e}")))?;
     let name_bytes = write_fonts::dump_table(&name).map_err(|e| err(format!("name: {e}")))?;
     let avar_bytes = write_fonts::dump_table(&avar).map_err(|e| err(format!("avar: {e}")))?;
 
     // ---- Repack the sfnt -----------------------------------------------
-    // FontBuilder recomputes offsets, per-table checksums, the search
-    // parameters and head.checkSumAdjustment.
-    let mut replacements: HashMap<Tag, Vec<u8>> = HashMap::new();
     replacements.insert(TAG_FVAR, fvar_bytes);
     replacements.insert(TAG_NAME, name_bytes);
     replacements.insert(TAG_AVAR, avar_bytes);
     if let Some(b) = gvar_bytes {
         replacements.insert(TAG_GVAR, b);
     }
-    if let Some(b) = hvar_bytes {
-        replacements.insert(TAG_HVAR, b);
-    }
-    if let Some(b) = gdef_bytes {
-        replacements.insert(TAG_GDEF, b);
-    }
-    if let Some(b) = mvar_bytes {
-        replacements.insert(TAG_MVAR, b);
-    }
+    Ok(repack(&font, replacements))
+}
 
+/// HVAR/GDEF/MVAR VarStores grown to `total_axes`: bump the region-list
+/// axis count and pad every region with a null tent
+/// {start: -1, peak: 0, end: 1} per added axis (gftools gen_fvar_axes).
+fn grown_varstore_replacements(
+    font: &FontRef,
+    total_axes: u16,
+) -> Result<HashMap<Tag, Vec<u8>>, JsError> {
+    let mut replacements = HashMap::new();
+    if let Ok(hvar) = font.hvar() {
+        let mut hvar: w_hvar::Hvar = hvar.to_owned_table();
+        pad_var_store(&mut hvar.item_variation_store, total_axes);
+        replacements.insert(TAG_HVAR, dump_replacement(&hvar, "HVAR")?);
+    }
+    if let Ok(gdef) = font.gdef() {
+        let mut gdef: w_gdef::Gdef = gdef.to_owned_table();
+        if let Some(store) = gdef.item_var_store.as_mut() {
+            pad_var_store(store, total_axes);
+        }
+        replacements.insert(TAG_GDEF, dump_replacement(&gdef, "GDEF")?);
+    }
+    if let Ok(mvar) = font.mvar() {
+        let mut mvar: w_mvar::Mvar = mvar.to_owned_table();
+        if let Some(store) = mvar.item_variation_store.as_mut() {
+            pad_var_store(store, total_axes);
+        }
+        replacements.insert(TAG_MVAR, dump_replacement(&mvar, "MVAR")?);
+    }
+    Ok(replacements)
+}
+
+/// Grow a VarStore's region list to `total_axes`, padding every region
+/// with a null tent per added axis (a null tent never alters the
+/// scalar, so variation behavior along the new axes is unchanged).
+fn pad_var_store(store: &mut ItemVariationStore, total_axes: u16) {
+    let null_tent = RegionAxisCoordinates::new(
+        F2Dot14::from_f32(-1.0),
+        F2Dot14::from_f32(0.0),
+        F2Dot14::from_f32(1.0),
+    );
+    store.variation_region_list.axis_count = total_axes;
+    for region in store.variation_region_list.variation_regions.iter_mut() {
+        while region.region_axes.len() < total_axes as usize {
+            region.region_axes.push(null_tent.clone());
+        }
+    }
+}
+
+fn dump_replacement<T>(table: &T, context: &str) -> Result<Vec<u8>, JsError>
+where
+    T: write_fonts::FontWrite + write_fonts::validate::Validate,
+{
+    write_fonts::dump_table(table).map_err(|e| err(format!("{context}: {e}")))
+}
+
+/// Repack the sfnt with `replacements` swapped in. FontBuilder
+/// recomputes offsets, per-table checksums, the search parameters and
+/// head.checkSumAdjustment. Any replacement whose tag the font lacks is
+/// appended.
+fn repack(font: &FontRef, mut replacements: HashMap<Tag, Vec<u8>>) -> Vec<u8> {
     let mut builder = FontBuilder::new();
     for record in font.table_directory().table_records() {
         let tag = record.tag();
-        if tag == TAG_AVAR {
+        if tag == TAG_AVAR && !replacements.contains_key(&TAG_AVAR) {
             continue; // replaced by the freshly built avar below
         }
         if let Some(bytes) = replacements.remove(&tag) {
@@ -452,13 +485,118 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str) -> Result<Vec<u8>, JsE
     for (tag, bytes) in replacements {
         builder.add_raw(tag, bytes);
     }
-    Ok(builder.build())
+    builder.build()
 }
 
 // Tuple variation header flags (gvar / OT TupleVariation).
 const GVAR_TUPLE_COUNT_MASK: u16 = 0x0FFF;
 const GVAR_EMBEDDED_PEAK_TUPLE: u16 = 0x8000;
 const GVAR_INTERMEDIATE_REGION: u16 = 0x4000;
+const GVAR_PRIVATE_POINT_NUMBERS: u16 = 0x2000;
+// tupleVariationCount flag (glyph variation data level).
+const GVAR_TUPLES_SHARE_POINT_NUMBERS: u16 = 0x8000;
+// Packed-delta run header flags.
+const DELTAS_ARE_WORDS: u8 = 0x40;
+const DELTA_RUN_COUNT_MASK: u8 = 0x3F;
+// Packed point-number run flags.
+const POINTS_ARE_WORDS: u8 = 0x80;
+const POINT_RUN_COUNT_MASK: u8 = 0x7F;
+
+/// Byte length of a packed point-numbers blob (fontTools
+/// `decompilePoints_` without materializing the list — only the
+/// consumed length matters for slicing the tuple data section).
+fn packed_points_len(data: &[u8]) -> Result<usize, JsError> {
+    let mut pos = 0usize;
+    let first = *data
+        .get(pos)
+        .ok_or_else(|| gvar_err("packed points truncated"))?;
+    pos += 1;
+    let mut count = (first & POINT_RUN_COUNT_MASK) as usize;
+    if first & POINTS_ARE_WORDS != 0 {
+        count = (count << 8)
+            | *data
+                .get(pos)
+                .ok_or_else(|| gvar_err("packed points truncated"))? as usize;
+        pos += 1;
+    }
+    if count == 0 {
+        return Ok(pos); // all points
+    }
+    let mut seen = 0usize;
+    while seen < count {
+        let run = *data
+            .get(pos)
+            .ok_or_else(|| gvar_err("packed points run truncated"))?;
+        pos += 1;
+        let n = (run & POINT_RUN_COUNT_MASK) as usize + 1;
+        pos += n * if run & POINTS_ARE_WORDS != 0 { 2 } else { 1 };
+        seen += n;
+    }
+    if pos > data.len() {
+        return Err(gvar_err("packed points run out of range"));
+    }
+    Ok(pos)
+}
+
+/// A new gvar tuple to inject into a glyph's variation data
+/// (brace-layer effect; built by braces.rs). Coordinates are per-axis
+/// normalized values for the FULL (post-grow) axis list; zeros mark
+/// non-participating axes. `start`/`end` are written as an intermediate
+/// region when they differ from the peak's inferred region
+/// (fontTools `compileIntermediateCoord`).
+pub(crate) struct NewTuple {
+    pub peak: Vec<f64>,
+    pub start: Vec<f64>,
+    pub end: Vec<f64>,
+    /// (x, y) per point, including the 4 phantom points.
+    pub deltas: Vec<(i16, i16)>,
+}
+
+impl NewTuple {
+    /// Serialize as (tuple header, serialized delta data), mirroring
+    /// fontTools `TupleVariation.compile`: embedded peak, private point
+    /// numbers (a single 0 byte = all points), deltas as int16 runs.
+    fn serialize(&self) -> (Vec<u8>, Vec<u8>) {
+        let mut aux = vec![0u8]; // all points in the glyph
+        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.0));
+        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.1));
+
+        let intermediate = self.peak.iter().enumerate().any(|(i, &p)| {
+            let (s, e) = (self.start[i], self.end[i]);
+            (s, e) != (p.min(0.0), p.max(0.0))
+        });
+        let mut flags = GVAR_EMBEDDED_PEAK_TUPLE | GVAR_PRIVATE_POINT_NUMBERS;
+        let mut coords = Vec::with_capacity(self.peak.len() * 2);
+        for &p in &self.peak {
+            coords.extend_from_slice(&(fl2fi(p) as i16).to_be_bytes());
+        }
+        if intermediate {
+            flags |= GVAR_INTERMEDIATE_REGION;
+            for &s in &self.start {
+                coords.extend_from_slice(&(fl2fi(s) as i16).to_be_bytes());
+            }
+            for &e in &self.end {
+                coords.extend_from_slice(&(fl2fi(e) as i16).to_be_bytes());
+            }
+        }
+        let mut header = Vec::with_capacity(4 + coords.len());
+        header.extend_from_slice(&(aux.len() as u16).to_be_bytes());
+        header.extend_from_slice(&flags.to_be_bytes());
+        header.extend_from_slice(&coords);
+        (header, aux)
+    }
+}
+
+/// Packed delta values as int16 runs of ≤ 64 (DELTAS_ARE_WORDS).
+fn pack_deltas(out: &mut Vec<u8>, deltas: impl Iterator<Item = i16>) {
+    let deltas: Vec<i16> = deltas.collect();
+    for chunk in deltas.chunks((DELTA_RUN_COUNT_MASK + 1) as usize) {
+        out.push(DELTAS_ARE_WORDS | (chunk.len() as u8 - 1));
+        for d in chunk {
+            out.extend_from_slice(&d.to_be_bytes());
+        }
+    }
+}
 
 fn gvar_err(context: &str) -> JsError {
     err(format!("gvar table malformed: {context}"))
@@ -481,14 +619,19 @@ fn be_u32(bytes: &[u8], off: usize, context: &str) -> Result<u32, JsError> {
 /// Rewrite `gvar` for `total_axes` axes: bump `axisCount` and pad every
 /// tuple coordinate record (shared tuples, embedded peak tuples and
 /// intermediate start/end tuples in glyph variation data) with 0.0
-/// (F2DOT14) per added axis, shifting offsets accordingly.
+/// (F2DOT14) per added axis, shifting offsets accordingly. Then append
+/// `extras` (gid → new tuples) to the glyphs' variation data.
 ///
 /// This mirrors what gftools' `font["gvar"].axisCount = n` produces:
 /// fontTools recompiles gvar from decompiled form, writing every tuple's
 /// coordinates for the full (grown) axis list with missing axes at 0.0.
 /// A zero coordinate means the tuple does not participate in that axis,
 /// so glyph variation behavior along the new axes is unchanged.
-fn patch_gvar(bytes: &[u8], total_axes: u16) -> Result<Vec<u8>, JsError> {
+fn patch_gvar(
+    bytes: &[u8],
+    total_axes: u16,
+    extras: &HashMap<u16, Vec<NewTuple>>,
+) -> Result<Vec<u8>, JsError> {
     if bytes.len() < 20 {
         return Err(gvar_err("header truncated"));
     }
@@ -502,7 +645,7 @@ fn patch_gvar(bytes: &[u8], total_axes: u16) -> Result<Vec<u8>, JsError> {
     let new_axes = total_axes as usize;
     let old_axes = old_axes as usize;
     let n_new = new_axes.saturating_sub(old_axes);
-    if n_new == 0 {
+    if n_new == 0 && extras.is_empty() {
         // Nothing to pad; keep the table byte-identical (axisCount
         // already matches the new fvar).
         let mut out = bytes.to_vec();
@@ -523,76 +666,122 @@ fn patch_gvar(bytes: &[u8], total_axes: u16) -> Result<Vec<u8>, JsError> {
         glyph_offsets.push(off);
     }
 
-    // Rebuild each glyph's variation data, padding tuple headers.
+    // Rebuild each glyph's variation data, padding tuple headers and
+    // appending any injected tuples.
     let mut new_glyph_data: Vec<u8> = Vec::new();
     let mut new_offsets: Vec<u32> = Vec::with_capacity(glyph_count + 1);
     let zero_coord = [0u8; 2]; // F2DOT14 0.0
     for i in 0..glyph_count {
         new_offsets.push(new_glyph_data.len() as u32);
+        let gid = i as u16;
         let start = off_glyph_data
             .checked_add(glyph_offsets[i])
             .ok_or_else(|| gvar_err("glyph offset overflow"))?;
         let end = off_glyph_data
             .checked_add(glyph_offsets[i + 1])
             .ok_or_else(|| gvar_err("glyph offset overflow"))?;
-        if start == end {
+        let gid_extras = extras.get(&gid);
+        if start == end && gid_extras.is_none() {
             continue; // no variation data for this glyph
         }
-        let g = bytes
-            .get(start..end)
-            .ok_or_else(|| gvar_err("glyph variation data out of range"))?;
-        let count_flags = be_u16(g, 0, "tupleVariationCount")?;
-        let tuple_count = (count_flags & GVAR_TUPLE_COUNT_MASK) as usize;
-        let off_data = be_u16(g, 2, "offsetToData")? as usize;
+        let (count_flags, mut headers, data_section, trailing) = if start == end {
+            (0u16, Vec::new(), &[][..], &[][..])
+        } else {
+            let g = bytes
+                .get(start..end)
+                .ok_or_else(|| gvar_err("glyph variation data out of range"))?;
+            let count_flags = be_u16(g, 0, "tupleVariationCount")?;
+            let tuple_count = (count_flags & GVAR_TUPLE_COUNT_MASK) as usize;
+            let off_data = be_u16(g, 2, "offsetToData")? as usize;
 
-        let mut headers: Vec<u8> = Vec::new();
-        let mut pos = 4usize;
-        for _ in 0..tuple_count {
-            let tflags = be_u16(g, pos + 2, "tuple header")?;
-            headers.extend_from_slice(
-                g.get(pos..pos + 4)
-                    .ok_or_else(|| gvar_err("tuple header truncated"))?,
-            );
-            pos += 4;
-            if tflags & GVAR_EMBEDDED_PEAK_TUPLE != 0 {
-                let len = old_axes * 2;
+            let mut headers: Vec<u8> = Vec::new();
+            let mut pos = 4usize;
+            // Byte length of the old tuple data (shared point numbers +
+            // each tuple's serialized deltas). Anything after it in the
+            // glyph's data slice is trailing alignment padding, which
+            // must stay at the END — injected tuple data goes before it,
+            // since the spec reads tuple data sequentially.
+            let mut old_data_len = if count_flags & GVAR_TUPLES_SHARE_POINT_NUMBERS != 0 {
+                packed_points_len(
+                    g.get(off_data..)
+                        .ok_or_else(|| gvar_err("shared points out of range"))?,
+                )?
+            } else {
+                0
+            };
+            for _ in 0..tuple_count {
+                let data_size = be_u16(g, pos, "tuple header")? as usize;
+                old_data_len += data_size;
+                let tflags = be_u16(g, pos + 2, "tuple header")?;
                 headers.extend_from_slice(
-                    g.get(pos..pos + len)
-                        .ok_or_else(|| gvar_err("embedded peak truncated"))?,
+                    g.get(pos..pos + 4)
+                        .ok_or_else(|| gvar_err("tuple header truncated"))?,
                 );
-                for _ in 0..n_new {
-                    headers.extend_from_slice(&zero_coord);
+                pos += 4;
+                if tflags & GVAR_EMBEDDED_PEAK_TUPLE != 0 {
+                    let len = old_axes * 2;
+                    headers.extend_from_slice(
+                        g.get(pos..pos + len)
+                            .ok_or_else(|| gvar_err("embedded peak truncated"))?,
+                    );
+                    for _ in 0..n_new {
+                        headers.extend_from_slice(&zero_coord);
+                    }
+                    pos += len;
                 }
-                pos += len;
+                if tflags & GVAR_INTERMEDIATE_REGION != 0 {
+                    // start coords then end coords; pad each separately.
+                    let len = old_axes * 2;
+                    let start_coords = g
+                        .get(pos..pos + len)
+                        .ok_or_else(|| gvar_err("intermediate start truncated"))?;
+                    let end_coords = g
+                        .get(pos + len..pos + 2 * len)
+                        .ok_or_else(|| gvar_err("intermediate end truncated"))?;
+                    headers.extend_from_slice(start_coords);
+                    for _ in 0..n_new {
+                        headers.extend_from_slice(&zero_coord);
+                    }
+                    headers.extend_from_slice(end_coords);
+                    for _ in 0..n_new {
+                        headers.extend_from_slice(&zero_coord);
+                    }
+                    pos += 2 * len;
+                }
             }
-            if tflags & GVAR_INTERMEDIATE_REGION != 0 {
-                // start coords then end coords; pad each separately.
-                let len = old_axes * 2;
-                let start_coords = g
-                    .get(pos..pos + len)
-                    .ok_or_else(|| gvar_err("intermediate start truncated"))?;
-                let end_coords = g
-                    .get(pos + len..pos + 2 * len)
-                    .ok_or_else(|| gvar_err("intermediate end truncated"))?;
-                headers.extend_from_slice(start_coords);
-                for _ in 0..n_new {
-                    headers.extend_from_slice(&zero_coord);
-                }
-                headers.extend_from_slice(end_coords);
-                for _ in 0..n_new {
-                    headers.extend_from_slice(&zero_coord);
-                }
-                pos += 2 * len;
+            let data_end = off_data
+                .checked_add(old_data_len)
+                .ok_or_else(|| gvar_err("tuple data section overflow"))?;
+            let data_section = g
+                .get(off_data..data_end)
+                .ok_or_else(|| gvar_err("tuple data section out of range"))?;
+            let trailing = g.get(data_end..).unwrap_or(&[]);
+            (count_flags, headers, data_section, trailing)
+        };
+
+        // Injected tuples for this glyph.
+        let mut added: u16 = 0;
+        let mut added_data: Vec<u8> = Vec::new();
+        if let Some(tuples) = gid_extras {
+            for tuple in tuples {
+                let (header, aux) = tuple.serialize();
+                headers.extend_from_slice(&header);
+                added_data.extend_from_slice(&aux);
+                added += 1;
             }
         }
-        let data_section = g
-            .get(off_data..)
-            .ok_or_else(|| gvar_err("tuple data section out of range"))?;
+        let new_count_flags =
+            (count_flags & !GVAR_TUPLE_COUNT_MASK) | (added + (count_flags & GVAR_TUPLE_COUNT_MASK));
 
-        new_glyph_data.extend_from_slice(&count_flags.to_be_bytes());
+        new_glyph_data.extend_from_slice(&new_count_flags.to_be_bytes());
         new_glyph_data.extend_from_slice(&(4 + headers.len() as u16).to_be_bytes());
         new_glyph_data.extend_from_slice(&headers);
         new_glyph_data.extend_from_slice(data_section);
+        new_glyph_data.extend_from_slice(&added_data);
+        new_glyph_data.extend_from_slice(trailing);
+        if !new_glyph_data.len().is_multiple_of(2) {
+            new_glyph_data.push(0); // keep glyph starts even (short offsets)
+        }
     }
     new_offsets.push(new_glyph_data.len() as u32);
 

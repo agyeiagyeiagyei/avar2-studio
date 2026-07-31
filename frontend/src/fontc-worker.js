@@ -1,10 +1,12 @@
-// fontc worker entry — font compilation and avar2 generation off the
-// main thread. Protocol:
+// fontc worker entry — font compilation, avar2 generation and bundle
+// application (control axes, grade) off the main thread. Protocol:
 //   {kind: 'compile', source: string}     → {ok, ttf|error}
 //   {kind: 'avar2', fontBytes, csv}       → {ok, ttf|error}
+//   {kind: 'control', fontBytes, json}    → {ok, ttf|error}
+//   {kind: 'grade', fontBytes, json, coords} → {ok, ttf|error}
 // The ttf is transferred (zero-copy) back to the caller.
 
-import init, { compile_glyphs, add_avar2 } from './wasm/fontc-web/fontc_web.js';
+import init, { compile_glyphs, add_avar2, apply_control_axes, apply_grade } from './wasm/fontc-web/fontc_web.js';
 
 const ready = init();
 
@@ -13,6 +15,12 @@ self.onmessage = async (e) => {
     await ready;
     if (e.data && e.data.kind === 'avar2') {
       const ttf = add_avar2(e.data.fontBytes, e.data.csv);
+      self.postMessage({ ok: true, ttf }, [ttf.buffer]);
+    } else if (e.data && e.data.kind === 'control') {
+      const ttf = apply_control_axes(e.data.fontBytes, e.data.json);
+      self.postMessage({ ok: true, ttf }, [ttf.buffer]);
+    } else if (e.data && e.data.kind === 'grade') {
+      const ttf = apply_grade(e.data.fontBytes, e.data.json, e.data.coords);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else {
       const ttf = compile_glyphs(e.data.source ?? e.data);

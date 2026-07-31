@@ -9,17 +9,20 @@
  * responses — shapes match by construction).
  *
  * What works statically:
- *   - Load Font: switch between the snapshotted examples (uploads need
- *     a build → disabled)
+ *   - Load Font: snapshotted examples, or upload a .glyphs (compiles
+ *     in-browser via the fontc-wasm worker)
  *   - Transforms SPAC toggle: swaps the pre-baked spac-on/spac-off font
  *     variants (params edits and Rebuild need a real build → hidden)
- *   - Config export: a static file download (import needs a rebuild →
- *     hidden)
+ *   - Config export: a static file download
+ *   - Config import onto an uploaded source: avar2 mappings, control
+ *     axes and grade apply in-browser (wasm); SPAC transforms are
+ *     recorded as pending (separate port)
  *
  * Known limitations (tracked in the migration doc):
- *   - getMappedLocation returns the input coordinates (no avar2
- *     evaluation yet) — parametric sliders show inputs, not the mapping
- *   - anything that writes or builds throws "needs the full app"
+ *   - snapshot datasets: getMappedLocation returns the input
+ *     coordinates (their avar2 isn't parsed); uploads with a mappings
+ *     CSV get a real client-side evaluation (avar2-eval.js)
+ *   - anything else that writes or builds throws "needs the full app"
  */
 
 import { api } from './api';
@@ -198,12 +201,47 @@ const unavailable = (what) => async () => {
 // Validation gates on the target font supplying the bundle's core axis
 // data, mirroring config_port.validate_bundle: the parametric axes the
 // avar2 CSV maps onto, and the source axes brace-layer locations
-// reference. Apply is per-section: avar2 mappings are real (wasm
-// add_avar2); control axes / transforms / grade are recorded pending
-// their ports and reported as warnings, never silently dropped.
+// reference. Apply is per-section: avar2 mappings, control axes and
+// grade are real (wasm add_avar2 / apply_control_axes / apply_grade);
+// transforms (SPAC) are recorded pending their port and reported as a
+// warning, never silently dropped.
 
 const csvRowCount = (text) =>
   text.split('\n').filter(l => l.trim() && !l.startsWith('﻿')).length - 1;
+
+const csvHeaderTags = (csv) =>
+  csv.split('\n', 1)[0].replace(/^﻿/, '').split(',').slice(1).map(s => s.trim()).filter(Boolean);
+
+const PARAM_TAGS = ['XTRA', 'XOPQ', 'YOPQ'];
+
+// Instance name → base parametric coords {XTRA, XOPQ, YOPQ} for grade
+// application. Sources: the bundle's avar2 CSV rows (the studio
+// instances' mapped parametric locations), then the compiled font's
+// fvar named instances (font truth — overrides where they overlap).
+const resolveGradeCoords = (dataset, avar2Csv) => {
+  const coords = {};
+  if (avar2Csv && avar2Csv.trim()) {
+    const lines = avar2Csv.trim().split('\n').filter(l => l.trim());
+    const header = lines[0].replace(/^﻿/, '').split(',').map(s => s.trim());
+    for (const line of lines.slice(1)) {
+      const cells = line.split(',');
+      const row = {};
+      for (const t of PARAM_TAGS) {
+        const i = header.indexOf(t);
+        if (i > 0 && cells[i] && cells[i].trim()) row[t] = parseFloat(cells[i]);
+      }
+      if (Object.keys(row).length && cells[0]) coords[cells[0].trim()] = row;
+    }
+  }
+  for (const inst of parseFont(dataset.fontBytes).instances) {
+    const row = {};
+    for (const t of PARAM_TAGS) {
+      if (t in inst.coordinates) row[t] = inst.coordinates[t];
+    }
+    if (Object.keys(row).length) coords[inst.name] = row;
+  }
+  return coords;
+};
 
 const validateBundle = (bundle, dataset) => {
   const errors = [];
@@ -237,9 +275,8 @@ const validateBundle = (bundle, dataset) => {
       }
     }
   }
-  if (controlAxes.length) warnings.push('Control axes: recorded, apply pending (source injection port)');
+  if (controlAxes.length) warnings.push('Control axes: applied as computed brace tuples (drawn outlines are a full-app feature)');
   if (transforms.length) warnings.push('Transforms: recorded, apply pending (SPAC port)');
-  if (grade.enabled) warnings.push('Grade: recorded, apply pending (geometry port)');
 
   return {
     ok: errors.length === 0,
@@ -256,33 +293,61 @@ const validateBundle = (bundle, dataset) => {
 };
 
 const applyBundle = async (bundle, dataset) => {
-  const { addAvar2 } = await import('./fontc-compile');
+  const { addAvar2, applyControlAxes, applyGrade } = await import('./fontc-compile');
   const report = { ok: true, applied: [], warnings: validateBundle(bundle, dataset).warnings };
   const avar2Csv = bundle.avar2_csv || '';
+  const controlAxes = bundle.control_axes?.axes || [];
+  const grade = bundle.grade || {};
+  const gradeInstances = grade.enabled ? (grade.instances || []) : [];
+
+  // The compiled font's own (parametric) axes — captured BEFORE the
+  // mappings apply grows the fvar; used to tell user axes apart.
+  let compiledTags = null;
   if (avar2Csv.trim()) {
-    const compiledTags = new Set(
+    compiledTags = new Set(
       dataset.axes.axes.filter(a => a.has_master_coverage).map(a => a.tag)
     );
     dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv);
-    URL.revokeObjectURL(dataset.fontUrl);
-    dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
     dataset.mappingsCsv = avar2Csv;
-    // Re-read axes from the patched font: new user axes appear, and the
-    // CSV's in-columns are the non-parametric ones.
-    const header = avar2Csv.split('\n', 1)[0].replace(/^﻿/, '');
-    const userTags = new Set(
-      header.split(',').slice(1).map(s => s.trim()).filter(t => t && !compiledTags.has(t))
-    );
-    const meta = parseFont(dataset.fontBytes);
-    dataset.axes = {
-      axes: meta.axes.map(a => ({
-        tag: a.tag, name: a.name,
-        min: a.min, default: a.default, max: a.max,
-        has_master_coverage: !userTags.has(a.tag), is_control_axis: false,
-      })),
-    };
     report.applied.push('avar2 mappings');
   }
+  if (controlAxes.length) {
+    dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(controlAxes));
+    dataset.controlAxes = controlAxes;
+    report.applied.push('control axes');
+  }
+  if (gradeInstances.length) {
+    const coords = resolveGradeCoords(dataset, avar2Csv);
+    dataset.fontBytes = await applyGrade(
+      dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
+    );
+    report.applied.push('grade');
+  }
+  if (!report.applied.length) return report;
+
+  URL.revokeObjectURL(dataset.fontUrl);
+  dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+  // The App only re-reads fontUrl when last_build_time changes — the
+  // import IS a rebuild of the in-memory font, so stamp it (the real
+  // server bumps last_build_time on every build too).
+  dataset.health = { ...dataset.health, last_build_time: new Date().toISOString() };
+  // Re-read axes from the patched font: user axes (CSV in-columns),
+  // control axes and GRAD all appear in the fvar now. None of them has
+  // master coverage — the compiled masters only span the parametrics.
+  const userTags = avar2Csv.trim() && compiledTags
+    ? new Set(csvHeaderTags(avar2Csv).filter(t => !compiledTags.has(t)))
+    : new Set();
+  const controlTags = new Set(controlAxes.map(a => a.tag));
+  const meta = parseFont(dataset.fontBytes);
+  dataset.axes = {
+    axes: meta.axes.map(a => ({
+      tag: a.tag, name: a.name,
+      min: a.min, default: a.default, max: a.max,
+      has_master_coverage: !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD',
+      is_control_axis: controlTags.has(a.tag),
+      is_grade_axis: a.tag === 'GRAD',
+    })),
+  };
   return report;
 };
 
@@ -298,8 +363,36 @@ const staticOverrides = {
   getGrade: async () => (uploadDataset
     ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
     : endpoint('grade.json')()),
-  listControlAxes: async () => (uploadDataset ? { axes: [] } : endpoint('control-axes.json')()),
-  getGlyphCoverage: async () => (uploadDataset ? {} : endpoint('glyph-coverage.json')()),
+  listControlAxes: async () => (uploadDataset
+    ? { axes: uploadDataset.controlAxes || [] }
+    : endpoint('control-axes.json')()),
+  getGlyphCoverage: async () => {
+    if (!uploadDataset) return endpoint('glyph-coverage.json')();
+    // Synthesize coverage rows for bundle-applied control axes so the
+    // sidebar's SECONDARY PARAMETRIC AXES section shows them. Marked
+    // source: 'source' — that renders the layers read-only (studio rows
+    // would offer edit affordances that only exist on the real server).
+    const axes = (uploadDataset.controlAxes || []).map(a => {
+      const covers = [...new Set((a.layers || []).map(l => l.glyph))];
+      return {
+        tag: a.tag,
+        name: a.name || a.tag,
+        min: a.min,
+        default: a.default,
+        max: a.max,
+        kind: 'scoped',
+        source: 'source',
+        covers,
+        covers_count: covers.length,
+        layers: (a.layers || []).map(l => ({
+          glyph: l.glyph,
+          location: l.location || {},
+          location_user: l.location || {},
+        })),
+      };
+    });
+    return { axes, glyph_chars: {} };
+  },
   listExamples: examplesIndex,
   checkSyncStatus: async () => ({ synced: true, message: 'Static demo snapshot' }),
   getFontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),

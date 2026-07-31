@@ -1,7 +1,7 @@
 /**
- * compileFont / addAvar2 — font compilation and avar2 generation in a
- * Web Worker (fontc → WASM; see wasm/fontc-web and
- * docs/migration-github-pages.md).
+ * compileFont / addAvar2 / applyControlAxes / applyGrade — font
+ * compilation and bundle application in a Web Worker (fontc → WASM;
+ * see wasm/fontc-web and docs/migration-github-pages.md).
  *
  * One worker for the app's lifetime; calls serialize (each message
  * replaces the pending resolver — callers await before sending the
@@ -50,4 +50,16 @@ export function compileFont(source) {
 /** TTF bytes + mappings CSV → TTF bytes with user axes + avar v2 table. */
 export function addAvar2(fontBytes, mappingsCsv) {
   return send({ kind: 'avar2', fontBytes, csv: mappingsCsv });
+}
+
+/** TTF bytes + control-axes JSON array → TTF bytes with the new fvar
+ * axes and their computed gvar brace tuples. */
+export function applyControlAxes(fontBytes, controlJson) {
+  return send({ kind: 'control', fontBytes, json: controlJson });
+}
+
+/** TTF bytes + grade JSON + instance-coords JSON → TTF bytes with the
+ * GRAD fvar axis and equalised light/dark brace tuples. */
+export function applyGrade(fontBytes, gradeJson, coordsJson) {
+  return send({ kind: 'grade', fontBytes, json: gradeJson, coords: coordsJson });
 }
