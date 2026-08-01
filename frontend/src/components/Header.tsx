@@ -183,8 +183,9 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
         return;
       }
     } catch (err) {
+      // Failure text stays up — the 6s auto-clear hid upload errors
+      // before users could read them ("nothing happens").
       setLoadingMsg(`Failed: ${err.message || err}`);
-      setTimeout(() => setLoadingMsg(null), 6000);
       return;
     }
     setLoadingMsg(null);

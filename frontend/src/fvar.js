@@ -24,6 +24,7 @@ function tables(view) {
 }
 
 // name table: nameID → best string (UTF-16BE Windows first, then Mac).
+// No nameID range filter — axis/instance names live at IDs ≥ 256.
 function parseNames(view, rec) {
   const out = {};
   if (!rec) return out;
@@ -37,7 +38,6 @@ function parseNames(view, rec) {
     const length = view.getUint16(r + 8);
     const offset = view.getUint16(r + 10);
     const start = base + stringOff + offset;
-    if (nameID === 0 || nameID > 25) continue;
     let value = null;
     if (platform === 3 || platform === 0) {
       const bytes = new Uint8Array(view.buffer, view.byteOffset + start, length);

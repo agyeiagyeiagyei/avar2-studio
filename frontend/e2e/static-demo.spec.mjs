@@ -105,6 +105,14 @@ ok(await page.isVisible('header .btn-3d'), 'Rebuild appears for uploaded sources
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 15000 });
 ok(true, 'preview specimen renders for uploaded font');
+// avar2 mappings state is per-dataset: the crispy-mini example's CSV
+// columns (OPSZ/WGHT/WDTH) must not leak into a CSV-less upload.
+await page.click('button:text-is("Instances")');
+await page.waitForSelector('.sidebar', { timeout: 15000 });
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.sidebar .avar2-empty-hint')].some(el =>
+    el.textContent.includes('No mapping axes yet'))),
+  'no stale avar2 columns from the previous dataset');
 
 // ---- 5. rebuild on upload --------------------------------------------------
 console.log('5. Rebuild on uploaded source');

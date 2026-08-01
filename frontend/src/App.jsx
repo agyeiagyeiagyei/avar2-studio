@@ -346,6 +346,14 @@ function App() {
       setAvar2Error(health.avar2_error || null);
       setBuildStale(health.build_stale || false);
 
+      // avar2 mappings are per-dataset: clear + refetch on every
+      // loadData. The mount effect only fetches when empty, so without
+      // this the PREVIOUS source's columns/rows stayed on screen after
+      // a source swap (example columns leaking into an upload).
+      setAvar2Instances([]);
+      setAvar2Axes(null);
+      loadAvar2Data().catch(() => {});
+
       // If font was rebuilt (new build time), reload the font
       if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
         setFontUrl(api.getFontUrl()); // This is synchronous, returns string
