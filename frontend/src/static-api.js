@@ -138,6 +138,10 @@ const buildUploadDataset = async ({
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
+      // Stamp the build time: the App only re-reads fontUrl when it
+      // changes — without this the specimen keeps the PREVIOUS
+      // dataset's font after an upload.
+      last_build_time: Date.now(),
       glyphs_path: `upload:${sourceName}:${Date.now()}`,
       original_path: `upload:${sourceName}`,
       source_format: sourceFormat,
@@ -231,6 +235,7 @@ const restoreSession = async () => {
       health: {
         static: true, demo: false, building: false,
         font_built: true, font_loaded: true,
+        last_build_time: Date.now(), // see buildUploadDataset
         glyphs_path: `upload:${rec.sourceName}:${Date.now()}`,
         original_path: `upload:${rec.sourceName}`,
         source_format: rec.sourceFormat,

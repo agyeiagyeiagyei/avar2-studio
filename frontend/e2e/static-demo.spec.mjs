@@ -147,6 +147,11 @@ await page.waitForFunction(() => {
   return rows.some(el => el.children.length === 0 && el.textContent.trim() === '400');
 }, { timeout: 20000 });
 ok(true, 'parametric wght reflects mapping (400 at WGHT default)');
+// Capture the specimen pixels — the next section uploads a DIFFERENT
+// font, and the specimen must visibly change with it (staleness guard).
+const specimenBefore = await page.screenshot({
+  clip: await (await page.$('.preview-tab-sample')).boundingBox(),
+});
 
 // ---- 7. config import onto an uploaded source -------------------------------
 console.log('7. config import onto an uploaded source');
@@ -160,6 +165,15 @@ await page.waitForFunction(
   { timeout: 90000 }
 );
 ok(true, 'CrispyMini.glyphs compiles on upload');
+// The specimen must show the NEW font, not the previous upload's blob.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+await page.waitForTimeout(1000);
+const specimenAfter = await page.screenshot({
+  clip: await (await page.$('.preview-tab-sample')).boundingBox(),
+});
+ok(!specimenBefore.equals(specimenAfter), 'specimen renders the newly uploaded font (not the stale blob)');
+await page.click('button:text-is("Instances")');
 await page.click('button:has-text("Config")');
 await page.click('text=Import configuration…');
 await page.setInputFiles('.config-dropdown input[type=file]', CRISPY_BUNDLE);
