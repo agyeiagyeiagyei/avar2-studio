@@ -30,6 +30,7 @@ import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
 import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
+import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -122,6 +123,7 @@ const buildUploadDataset = async ({
     parametricTags: new Set(compiledTags),
     axisRanges: axisMetadata || {},
     fontUrl,
+    sourceName,
     stem: sourceName.replace(/\.[^.]+$/, ''),
     sourceDir,
     workspaceEntries,
@@ -151,6 +153,107 @@ const buildUploadDataset = async ({
   return dataset;
 };
 
+// ---- session persistence (IndexedDB; see session.js) -------------------------
+//
+// The stored record mirrors the dataset's serializable state; fontBytes is
+// the key asset — restoring it skips the recompile. Uploads persist
+// immediately (awaited); authoring mutations debounce.
+
+const serializeDataset = (dataset) => ({
+  version: SESSION_VERSION,
+  savedAt: new Date().toISOString(),
+  sourceName: dataset.sourceName,
+  sourceFormat: dataset.health.source_format,
+  stem: dataset.stem,
+  sourceDir: dataset.sourceDir,
+  sourceText: dataset.sourceText,
+  fontBytes: dataset.fontBytes,
+  workspaceEntries: dataset.workspaceEntries || null,
+  csvText: mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
+  parametricTags: [...dataset.parametricTags],
+  axes: dataset.axes,
+  axisRanges: dataset.axisRanges || {},
+  controlAxes: dataset.controlAxes || [],
+  transforms: dataset.transforms || [],
+  grade: dataset.grade || null,
+  familyName: dataset.health.family_name,
+  upm: dataset.health.upm,
+});
+
+let persistWarned = false;
+const persistSession = async () => {
+  if (!uploadDataset) return;
+  try {
+    await saveSession(serializeDataset(uploadDataset));
+  } catch (err) {
+    // Quota/IDB failure: persistence is best-effort, editing continues.
+    if (!persistWarned) console.warn('Session could not be persisted:', err);
+    persistWarned = true;
+  }
+};
+
+let persistTimer = null;
+const persistSoon = () => {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistSession, 500);
+};
+
+// Rehydrate a stored session as the live dataset WITHOUT recompiling.
+// Deliberately not buildUploadDataset: the stored fontBytes already carry
+// the avar2 table. Returns true when a session was restored.
+const restoreSession = async () => {
+  const rec = await loadSession().catch(() => null);
+  if (!rec) return false;
+  if (rec.version !== SESSION_VERSION) {
+    await clearSession().catch(() => {});
+    return false;
+  }
+  try {
+    const meta = parseFont(rec.fontBytes); // sanity: the bytes still parse
+    const familyName = rec.familyName || meta.familyName;
+    uploadDataset = {
+      sourceText: rec.sourceText,
+      fontBytes: rec.fontBytes,
+      mappingsCsv: rec.csvText,
+      instancesCsv: mappingsCsv.parseMappingsCsv(rec.csvText),
+      parametricTags: new Set(rec.parametricTags),
+      axisRanges: rec.axisRanges || {},
+      fontUrl: URL.createObjectURL(new Blob([rec.fontBytes], { type: 'font/ttf' })),
+      sourceName: rec.sourceName,
+      stem: rec.stem,
+      sourceDir: rec.sourceDir,
+      workspaceEntries: rec.workspaceEntries || null,
+      controlAxes: rec.controlAxes || [],
+      transforms: rec.transforms || [],
+      grade: rec.grade || null,
+      axes: rec.axes,
+      instances: { instances: [] },
+      health: {
+        static: true, demo: false, building: false,
+        font_built: true, font_loaded: true,
+        glyphs_path: `upload:${rec.sourceName}:${Date.now()}`,
+        original_path: `upload:${rec.sourceName}`,
+        source_format: rec.sourceFormat,
+        family_name: familyName,
+        vf_family_id: `${familyName}-VF`,
+        built_font_filename: `${familyName}.ttf`,
+        last_build_status: 'ok', last_build_error: null,
+        avar2_error: null, build_stale: false,
+        upm: rec.upm || meta.upm,
+      },
+    };
+    syncInstancesFromCsv(uploadDataset);
+    transformsState = [];
+    bakedEnabledIds = [];
+    return true;
+  } catch (err) {
+    console.warn('Stored session was unreadable — starting fresh:', err);
+    await clearSession().catch(() => {});
+    uploadDataset = null;
+    return false;
+  }
+};
+
 // Instance list derives from the CSV rows (every column is a coordinate);
 // rows matching an fvar named instance are 'source', others 'studio'.
 const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
@@ -176,6 +279,7 @@ const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
 // axisRanges (axis-metadata semantics) overrides the CSV-derived range
 // for newly declared user axes.
 const regenerateFont = async (dataset) => {
+  persistSoon(); // the CSV changed even when no avar2 regen is needed
   if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
     return;
   }
@@ -687,6 +791,7 @@ const staticOverrides = {
           grade: { version: 1, enabled: false, default_pct: 0.25, instances: [] },
         }, uploadDataset);
       }
+      await persistSession();
       return { ok: true, ignored_files: [] };
     }
     const glyphsFile = list.find(f => f.name.toLowerCase().endsWith('.glyphs'));
@@ -705,6 +810,7 @@ const staticOverrides = {
     });
     transformsState = [];
     bakedEnabledIds = [];
+    await persistSession();
     return { ok: true, ignored_files: ignored };
   },
 
@@ -730,6 +836,8 @@ const staticOverrides = {
 
   // Load Font: swap the dataset; App's loadData() re-reads the new
   // health (different glyphs_path) and treats it as a source swap.
+  // Switching to an example abandons the uploaded project — drop the
+  // stored session with it (snapshots are never persisted).
   loadExample: async (id) => {
     const idx = await examplesIndex();
     if (!(idx.examples || []).some(e => e.id === id)) {
@@ -739,6 +847,18 @@ const staticOverrides = {
     uploadDataset = null;
     transformsState = null;
     bakedEnabledIds = null;
+    clearSession().catch(() => {});
+    return { ok: true };
+  },
+
+  // "Forget this project": drop the stored session AND unload back to
+  // the default example — auto-restore brings nothing back after this.
+  forgetSession: async () => {
+    await clearSession().catch(() => {});
+    uploadDataset = null;
+    transformsState = null;
+    bakedEnabledIds = null;
+    dataset = (await examplesIndex()).examples?.[0]?.id || 'crispy-mini';
     return { ok: true };
   },
 
@@ -812,6 +932,7 @@ const staticOverrides = {
     requireUpload();
     mappingsCsv.renameRow(uploadDataset.instancesCsv, instanceName, newName);
     syncInstancesFromCsv(uploadDataset);
+    persistSoon();
     return {};
   },
   deleteInstance: async (instanceName) => {
@@ -920,7 +1041,9 @@ const staticOverrides = {
       err.report = report;
       throw err;
     }
-    return applyBundle(bundle, uploadDataset);
+    const applied = await applyBundle(bundle, uploadDataset);
+    persistSoon();
+    return applied;
   },
 };
 
@@ -938,5 +1061,8 @@ export async function selectApiMode() {
   }
   staticMode = true;
   Object.assign(api, staticOverrides);
+  // Auto-restore the stored session before the app renders — health()
+  // then answers for the uploaded dataset and the app boots into it.
+  await restoreSession();
   return true;
 }

@@ -553,6 +553,41 @@ await page.waitForFunction(() =>
 );
 ok(true, 'designspace zip without a preview TTF fails with guidance');
 
+// ---- 16. session persistence (auto-restore + forget) -----------------------
+console.log('16. session persistence (auto-restore + forget)');
+// Deterministic uploaded session to restore.
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', [FIXTURE, FIXTURE_CSV]);
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
+ok(true, 'fresh upload to persist');
+await page.reload({ waitUntil: 'load' });
+await page.waitForSelector('.static-demo-banner', { timeout: 20000 });
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
+ok(true, 'reload auto-restores the uploaded session (no re-upload)');
+// The source text survived too: Rebuild still works on the restored session.
+await page.click('header .btn-3d');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'));
+ok((await page.textContent('.sidebar h2')) === 'WasmTest', 'Rebuild works on the restored session');
+// Authoring state (the CSV-derived user axis) rehydrated, not just the font.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'wght')),
+  'restored session keeps the CSV-derived wght user axis');
+// Forget: unloads to the default example and stays forgotten after reload.
+await page.click('button:has-text("Load Font")');
+await page.click('button:has-text("Forget this project")');
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
+ok(true, 'forget returns to the default example');
+await page.reload({ waitUntil: 'load' });
+await page.waitForSelector('.static-demo-banner', { timeout: 20000 });
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
+ok(true, 'forget survives reload (stored session cleared)');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -157,3 +157,19 @@ current font bytes as the preview build. A zip we export loads cleanly
 in the full app, and a zip zipped from a real project folder loads in
 the hosted tool.
 
+## Session persistence
+
+Uploaded sessions auto-restore across reloads (`frontend/src/session.js`
++ the persist/restore path in `static-api.js`). The live dataset's
+serializable state — source text (glyphs) or zip entries (designspace),
+current font bytes, authoring CSV, sidecars, axis metadata — is written
+to one IndexedDB record: immediately on upload, debounced 500ms after
+each authoring mutation. Boot restores from it WITHOUT recompiling (the
+stored font bytes already carry the avar2 table), so resume is instant.
+Snapshots are never persisted; switching to an example clears the
+record, and Load Font → "Forget this project" clears it AND unloads
+back to the example. Persistence is best-effort (quota failures warn,
+editing continues; version mismatch or a corrupt record wipes and boots
+fresh). UI state (tab, preview text, slider positions) is deliberately
+not persisted, and a multi-project "recent" list stays future work.
+

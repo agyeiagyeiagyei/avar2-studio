@@ -214,6 +214,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     configFileInputRef.current && configFileInputRef.current.click();
   };
 
+  const handleForgetSession = async () => {
+    setOpen(false);
+    try {
+      // Static-only provider method (no stored session on the server).
+      await (api as any).forgetSession();
+      onSourceLoaded && onSourceLoaded();
+      setLoadingMsg('Project forgotten.');
+      setTimeout(() => setLoadingMsg(null), 4000);
+    } catch (err) {
+      setLoadingMsg(`Failed: ${err.message || err}`);
+      setTimeout(() => setLoadingMsg(null), 6000);
+    }
+  };
+
   const handleExportWorkspace = () => {
     setConfigOpen(false);
     const link = document.createElement('a');
@@ -321,6 +335,21 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                   studio data comes along (.designspace projects need the zip).
                 </div>
               </button>
+              {staticMode && allowImportInStatic && (
+                <>
+                  <div className="load-font-divider" />
+                  <button
+                    className="load-font-item"
+                    onClick={handleForgetSession}
+                    title="Clear the auto-restored session and unload this project back to the example"
+                  >
+                    <div className="load-font-item-name" style={{ color: '#c0392b' }}>Forget this project</div>
+                    <div className="load-font-item-subtitle">
+                      Clear the saved session (auto-restored on every visit) and unload back to the example
+                    </div>
+                  </button>
+                </>
+              )}
             </div>
           )}
           {/* No ``accept`` filter: Safari (and some macOS pickers) map
