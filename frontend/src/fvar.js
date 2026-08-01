@@ -51,8 +51,7 @@ function parseNames(view, rec) {
   return out;
 }
 
-export function parseFont(bytes) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+export function parseFont(bytes) {  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const dir = tables(view);
 
   const names = parseNames(view, dir.name);
@@ -93,4 +92,77 @@ export function parseFont(bytes) {
   }
 
   return { familyName, upm, axes, instances };
+}
+
+/**
+ * Minimal STAT reader for export verification: axis records (tag,
+ * nameID, ordering), format-aware axis value records, and
+ * elidedFallbackNameID. Value records are reached via the uint16
+ * offset array at AxisValueArray (offsets relative to that array's
+ * start); each record's own uint16 Format field selects the layout.
+ */
+export function parseStat(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const count = view.getUint16(4);
+  let rec = null;
+  for (let i = 0; i < count; i++) {
+    const r = 12 + i * 16;
+    if (String.fromCharCode(view.getUint8(r), view.getUint8(r + 1), view.getUint8(r + 2), view.getUint8(r + 3)) === 'STAT') {
+      rec = { offset: view.getUint32(r + 8), length: view.getUint32(r + 12) };
+      break;
+    }
+  }
+  if (!rec) return null;
+  const base = rec.offset;
+  const result = {
+    version: `${view.getUint16(base)}.${view.getUint16(base + 2)}`,
+    elidedFallbackNameID: view.getUint16(base + 18),
+    axes: [],
+    values: [],
+  };
+  const axisCount = view.getUint16(base + 6);
+  const designAxesOffset = view.getUint32(base + 8);
+  const axisValueCount = view.getUint16(base + 12);
+  const axisValueArrayOffset = view.getUint32(base + 14);
+  for (let i = 0; i < axisCount; i++) {
+    const a = base + designAxesOffset + i * 8;
+    result.axes.push({
+      tag: TAG(view, a),
+      nameID: view.getUint16(a + 4),
+      ordering: view.getUint16(a + 6),
+    });
+  }
+  const arrBase = base + axisValueArrayOffset;
+  for (let i = 0; i < axisValueCount; i++) {
+    const v = arrBase + view.getUint16(arrBase + i * 2);
+    const format = view.getUint16(v);
+    if (format === 4) {
+      const n = view.getUint16(v + 2);
+      const value = { format, flags: view.getUint16(v + 4), nameID: view.getUint16(v + 6), values: [] };
+      for (let j = 0; j < n; j++) {
+        const r = v + 8 + j * 6;
+        value.values.push({ axisIndex: view.getUint16(r), value: view.getInt32(r + 2) / 65536 });
+      }
+      result.values.push(value);
+      continue;
+    }
+    const value = {
+      format,
+      axisIndex: view.getUint16(v + 2),
+      flags: view.getUint16(v + 4),
+      nameID: view.getUint16(v + 6),
+    };
+    if (format === 1) {
+      value.value = view.getInt32(v + 8) / 65536;
+    } else if (format === 2) {
+      value.nominalValue = view.getInt32(v + 8) / 65536;
+      value.rangeMinValue = view.getInt32(v + 12) / 65536;
+      value.rangeMaxValue = view.getInt32(v + 16) / 65536;
+    } else if (format === 3) {
+      value.value = view.getInt32(v + 8) / 65536;
+      value.linkedValue = view.getInt32(v + 12) / 65536;
+    }
+    result.values.push(value);
+  }
+  return result;
 }

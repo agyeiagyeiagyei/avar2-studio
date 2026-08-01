@@ -144,6 +144,30 @@ export function compile_glyphs(source) {
 }
 
 /**
+ * Rebuild the font's STAT table from its fvar, mirroring
+ * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
+ * single font with no siblings): GF axis-registry fallbacks per fvar
+ * axis, registry elidable defaults, linked values (wght 400→700,
+ * ital 0→1), and style-token axes from the family/subfamily names.
+ * Avar2-added user axes (registered ones like opsz/wght/wdth and GF
+ * customs like XOPQ/GRAD) get Google-Fonts-ready STAT records; axes
+ * absent from the GF registry are skipped. See stat.rs.
+ * @param {Uint8Array} font_bytes
+ * @returns {Uint8Array}
+ */
+export function regen_stat(font_bytes) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.regen_stat(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
  * parametric values, resolved JS-side) and the avar2 table regenerates

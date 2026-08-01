@@ -813,7 +813,7 @@ const staticOverrides = {
       if (!r.ok) throw new Error('Font download failed');
       return r.blob();
     }
-    const { exportFontSetDefault, exportFontHiddenAxes } = await import('./fontc-compile');
+    const { exportFontSetDefault, exportFontHiddenAxes, regenStat } = await import('./fontc-compile');
     let bytes = uploadDataset.fontBytes;
     if (default_location) {
       // Resting state IS the current location: defaults move to the user
@@ -840,6 +840,8 @@ const staticOverrides = {
     if (hidden_axes.length) {
       bytes = await exportFontHiddenAxes(bytes, hidden_axes);
     }
+    // Every export is Google-Fonts-ready: STAT regenerated from the fvar.
+    bytes = await regenStat(bytes);
     return new Blob([bytes], { type: 'font/ttf' });
   },
   importConfig: async (bundle, dryRun) => {

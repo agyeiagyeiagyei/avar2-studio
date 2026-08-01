@@ -19,6 +19,7 @@ import init, {
   apply_transforms,
   set_default_location,
   set_hidden_axes,
+  regen_stat,
 } from './wasm/fontc-web/fontc_web.js';
 
 const ready = init();
@@ -43,6 +44,9 @@ self.onmessage = async (e) => {
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'hide-axes') {
       const ttf = set_hidden_axes(e.data.fontBytes, e.data.tags);
+      self.postMessage({ ok: true, ttf }, [ttf.buffer]);
+    } else if (e.data && e.data.kind === 'stat') {
+      const ttf = regen_stat(e.data.fontBytes);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else {
       const ttf = compile_glyphs(e.data.source ?? e.data);

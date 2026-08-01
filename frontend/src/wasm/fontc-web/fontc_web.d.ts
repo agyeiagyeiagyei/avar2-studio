@@ -59,6 +59,18 @@ export function apply_transforms(font_bytes: Uint8Array, transforms_json: string
 export function compile_glyphs(source: string): Uint8Array;
 
 /**
+ * Rebuild the font's STAT table from its fvar, mirroring
+ * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
+ * single font with no siblings): GF axis-registry fallbacks per fvar
+ * axis, registry elidable defaults, linked values (wght 400→700,
+ * ital 0→1), and style-token axes from the family/subfamily names.
+ * Avar2-added user axes (registered ones like opsz/wght/wdth and GF
+ * customs like XOPQ/GRAD) get Google-Fonts-ready STAT records; axes
+ * absent from the GF registry are skipped. See stat.rs.
+ */
+export function regen_stat(font_bytes: Uint8Array): Uint8Array;
+
+/**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
  * parametric values, resolved JS-side) and the avar2 table regenerates
@@ -82,6 +94,7 @@ export interface InitOutput {
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
+    readonly regen_stat: (a: number, b: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;

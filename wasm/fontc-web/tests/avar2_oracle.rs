@@ -30,7 +30,7 @@ fn avar2_matches_gftools_oracle() {
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
-    let out = fontc_web::add_avar2(font_bytes, &csv, None).expect("add_avar2");
+    let out = fontc_web::add_avar2(font_bytes, &csv, None, None).expect("add_avar2");
 
     let rust_out = "/tmp/av2-rust.ttf";
     std::fs::write(rust_out, &out).expect("write rust output");

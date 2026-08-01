@@ -145,8 +145,10 @@ def main():
     full = TTFont(full_path)
     axes = [(a.axisTag, a.minValue, a.defaultValue, a.maxValue) for a in full["fvar"].axes]
     tags = [a[0] for a in axes]
+    # Registered tags are normalized to lowercase by add_avar2 (studio
+    # semantics); custom tags stay verbatim. Positions are unchanged.
     ok(
-        tags == ["XTRA", "XOPQ", "YOPQ", "OPSZ", "WGHT", "WDTH", "crbr", "GRAD"],
+        tags == ["XTRA", "XOPQ", "YOPQ", "opsz", "wght", "wdth", "crbr", "GRAD"],
         f"fvar axis set/order ({tags})",
     )
     grad = axes[-1]
@@ -162,12 +164,12 @@ def main():
     try:
         # fontTools can't PARTIALLY instance an avar2 font, so pin all
         # 8 axes at a spread of locations.
-        all_axes = ["XTRA", "XOPQ", "YOPQ", "OPSZ", "WGHT", "WDTH", "crbr", "GRAD"]
+        all_axes = ["XTRA", "XOPQ", "YOPQ", "opsz", "wght", "wdth", "crbr", "GRAD"]
         for loc in (
-            {"WGHT": 900},
-            {"OPSZ": 12, "crbr": 100},
+            {"wght": 900},
+            {"opsz": 12, "crbr": 100},
             {"GRAD": -10},
-            {"WGHT": 900, "WDTH": 200, "crbr": 50, "GRAD": 10},
+            {"wght": 900, "wdth": 200, "crbr": 50, "GRAD": 10},
             {"XTRA": 1000},
         ):
             full_loc = {

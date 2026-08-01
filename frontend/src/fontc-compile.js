@@ -74,6 +74,11 @@ export function exportFontHiddenAxes(fontBytes, hiddenTags) {
   return send({ kind: 'hide-axes', fontBytes, tags: JSON.stringify(hiddenTags) });
 }
 
+/** Rebuild the STAT table from the font's fvar (Google-Fonts-ready). */
+export function regenStat(fontBytes) {
+  return send({ kind: 'stat', fontBytes });
+}
+
 /** TTF bytes + control-axes JSON array → TTF bytes with the new fvar
  * axes and their computed gvar brace tuples. */
 export function applyControlAxes(fontBytes, controlJson) {

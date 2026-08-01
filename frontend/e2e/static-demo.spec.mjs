@@ -453,6 +453,27 @@ ok(xtraAxis && (xtraAxis.flags & 0x0001) === 0x0001,
 ok(optMeta.axes.every(a => (a.flags & 0x0001) === 0 || a.tag === 'XTRA'),
   'only XTRA is hidden');
 
+// ---- 14. STAT regeneration -------------------------------------------------
+console.log('14. STAT regeneration in the exported font');
+// Continues on section 13's downloaded font (default-location + XTRA hidden).
+const { parseStat } = await import('../src/fvar.js');
+const stat = parseStat(new Uint8Array(readFileSync(await optDownload.path())));
+ok(stat !== null, 'STAT table present in the exported font');
+const statTags = stat ? stat.axes.map(a => a.tag) : [];
+ok(['wght', 'ROND'].every(t => statTags.includes(t)),
+  `STAT axis records include normalized wght and custom ROND (${statTags})`);
+ok(stat && stat.elidedFallbackNameID === 2,
+  `elidedFallbackNameID = 2 (Regular), got ${stat?.elidedFallbackNameID}`);
+ok(stat && stat.axes.every(a => optMeta.axes.some(f => f.tag === a.tag)),
+  'every STAT axis record matches an fvar axis');
+ok(stat && stat.values.every(v =>
+  [1, 2, 3, 4].includes(v.format) &&
+  (v.format === 4 ? v.values.every(r => r.axisIndex < stat.axes.length)
+                  : v.axisIndex < stat.axes.length)),
+  'all STAT value records are well-formed with valid axis indexes');
+ok(stat && stat.values.some(v => (v.flags & 0x0002) === 0x0002),
+  'at least one elidable (0x0002) STAT value record');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -33,6 +33,8 @@ use write_fonts::FontBuilder;
 
 mod braces;
 mod spac;
+mod stat;
+mod stat_registry;
 
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
@@ -518,6 +520,19 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
         replacements.insert(TAG_GVAR, b);
     }
     Ok(repack(&font, replacements))
+}
+
+/// Rebuild the font's STAT table from its fvar, mirroring
+/// `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
+/// single font with no siblings): GF axis-registry fallbacks per fvar
+/// axis, registry elidable defaults, linked values (wght 400→700,
+/// ital 0→1), and style-token axes from the family/subfamily names.
+/// Avar2-added user axes (registered ones like opsz/wght/wdth and GF
+/// customs like XOPQ/GRAD) get Google-Fonts-ready STAT records; axes
+/// absent from the GF registry are skipped. See stat.rs.
+#[wasm_bindgen]
+pub fn regen_stat(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
+    stat::regen_stat(font_bytes)
 }
 
 /// HVAR/GDEF/MVAR VarStores grown to `total_axes`: bump the region-list
