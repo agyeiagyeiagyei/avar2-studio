@@ -13,6 +13,7 @@
  *      fixture built by e2e/fixtures/build-test-bundle.mjs)
  *   9. width-aware SPAC applies from the same bundle (Transforms menu
  *      state, parametric-group slider, specimen tracks SPAC)
+ *  15. zip workspace (project zip upload incl. designspace, download)
  *
  * Usage:
  *   STATIC_URL=http://localhost:8123 node e2e/static-demo.spec.mjs
@@ -25,7 +26,7 @@
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const BASE = process.env.STATIC_URL || 'http://localhost:8123';
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest.glyphs');
@@ -40,6 +41,7 @@ const ok = (cond, label) => {
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 page.on('pageerror', e => console.error('[pageerror]', e.message));
+page.on('crash', () => console.error('[PAGE CRASHED]'));
 
 const sleep = (ms) => page.waitForTimeout(ms);
 
@@ -473,6 +475,83 @@ ok(stat && stat.values.every(v =>
   'all STAT value records are well-formed with valid axis indexes');
 ok(stat && stat.values.some(v => (v.flags & 0x0002) === 0x0002),
   'at least one elidable (0x0002) STAT value record');
+// (No modal close needed here — the options path closes the export
+// modal itself on success, unlike section 12's plain download.)
+
+// ---- 15. zip workspace (project zips in and out) ---------------------------
+console.log('15. zip workspace (project zips in and out)');
+const { zipSync, unzipSync, strToU8 } = await import('fflate');
+const FX = (n) => join(dirname(fileURLToPath(import.meta.url)), 'fixtures', n);
+
+// 15a: a .glyphs project zip uploads, and the workspace download round-trips.
+writeFileSync('/tmp/e2e-glyphs-project.zip', zipSync({
+  'WasmTest.glyphs': readFileSync(FIXTURE),
+  'WasmTest-avar.csv': readFileSync(FIXTURE_CSV),
+  'avar2-axis-metadata.json': strToU8(JSON.stringify({
+    WGHT: { display_name: 'Weight', registered_tag: 'wght', min: 100, default: 100, max: 900, is_parametric: false },
+  })),
+}));
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', '/tmp/e2e-glyphs-project.zip');
+// A source swap keeps the current tab; the family name only renders in
+// the Instances tab's sidebar h2 — go there before waiting on it.
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
+ok(true, 'glyphs project zip uploads and compiles');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.preview-tab *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'wght')),
+  'CSV-derived wght user axis from the zipped -avar.csv');
+await page.click('button:has-text("Config")');
+const [wsDownload] = await Promise.all([
+  page.waitForEvent('download', { timeout: 20000 }),
+  page.click('button:has-text("Download workspace")'),
+]);
+const wsZip = unzipSync(new Uint8Array(readFileSync(await wsDownload.path())));
+const wsNames = Object.keys(wsZip);
+ok(wsNames.includes('WasmTest-avar.csv'), 'workspace zip carries the mappings CSV');
+ok(wsNames.includes('.avar2-studio/axis-metadata.json'), 'workspace zip carries axis metadata');
+const buildEntry = wsNames.find(n => n.startsWith('.avar2-studio/build/') && n.endsWith('.ttf'));
+ok(!!buildEntry, 'workspace zip carries the current build as preview TTF');
+ok(parseFont(new Uint8Array(wsZip[buildEntry])).axes.some(a => a.tag === 'wght'),
+  'preview TTF parses with the wght axis');
+ok(new TextDecoder().decode(wsZip['WasmTest-avar.csv']).split('\n', 1)[0].includes('WGHT'),
+  'round-tripped CSV keeps the WGHT column');
+
+// 15b: a designspace project zip loads from its baked preview TTF; the
+// source itself can't recompile in the browser and says so honestly.
+writeFileSync('/tmp/e2e-designspace-project.zip', zipSync({
+  'WasmTest.designspace': readFileSync(FX('WasmTest.designspace')),
+  'WasmTest-Regular.ufo/metainfo.plist': readFileSync(FX('WasmTest-Regular.ufo/metainfo.plist')),
+  '.avar2-studio/build/WasmTest-VF.ttf': readFileSync(FX('WasmTest-VF.ttf')),
+  'WasmTest-avar.csv': readFileSync(FIXTURE_CSV),
+}));
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', '/tmp/e2e-designspace-project.zip');
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
+ok(true, 'designspace project zip loads from its baked preview TTF');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(true, 'preview specimen renders for the designspace project');
+await page.click('header .btn-3d');
+await page.waitForSelector('text=needs the full app', { timeout: 15000 });
+ok(true, 'Rebuild on a designspace project fails with guidance, not a crash');
+
+// 15c: a designspace zip WITHOUT a preview TTF is rejected with guidance.
+writeFileSync('/tmp/e2e-designspace-no-ttf.zip', zipSync({
+  'WasmTest.designspace': readFileSync(FX('WasmTest.designspace')),
+  'WasmTest-Regular.ufo/metainfo.plist': readFileSync(FX('WasmTest-Regular.ufo/metainfo.plist')),
+}));
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', '/tmp/e2e-designspace-no-ttf.zip');
+await page.waitForFunction(() =>
+  document.querySelector('.header-loading-msg')?.textContent.includes("can't be compiled in the browser"),
+  { timeout: 20000 }
+);
+ok(true, 'designspace zip without a preview TTF fails with guidance');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

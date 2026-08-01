@@ -29,6 +29,7 @@ import { compileFont, addAvar2 } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
+import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -75,19 +76,25 @@ const datasetDir = async () => {
 
 let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
 
-const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
-  const sourceText = await glyphsFile.text();
-  let fontBytes = await compileFont(sourceText);
-  let mappingsText = null;
+// sourceFormat is 'glyphs' (sourceText set — compiles/rebuilds in-browser)
+// or 'designspace' (fontBytes = baked preview TTF from the project zip —
+// fontc can't compile UFO sources off the filesystem). csvText/metadataText
+// are the harvested sidecars; workspaceEntries/sourceDir are the raw zip
+// contents for verbatim re-export (null for picker uploads).
+const buildUploadDataset = async ({
+  sourceName, sourceFormat, sourceText = null, fontBytes = null,
+  csvText = null, metadataText = null, workspaceEntries = null, sourceDir = '',
+}) => {
+  let bytes = fontBytes ?? await compileFont(sourceText);
+  let mappingsText = csvText;
   let userAxisTags = new Set();
-  const compiledTags = new Set(parseFont(fontBytes).axes.map(a => a.tag));
-  const axisMetadata = metadataFile ? JSON.parse(await metadataFile.text()) : {};
-  if (csvFile) {
+  const compiledTags = new Set(parseFont(bytes).axes.map(a => a.tag));
+  const axisMetadata = metadataText ? JSON.parse(metadataText) : {};
+  if (mappingsText) {
     // avar2 generation in-browser: CSV mappings → avar v2 store in the
     // compiled font (fontc-web wasm). The user axes are the CSV columns
     // that aren't already fvar axes in the compiled font.
-    mappingsText = await csvFile.text();
-    fontBytes = await addAvar2(fontBytes, mappingsText);
+    bytes = await addAvar2(bytes, mappingsText);
     const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
     // Registered columns normalize to lowercase fvar tags (wght etc.);
     // user-tag matching must use the normalized form.
@@ -96,8 +103,8 @@ const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
         .map(t => mappingsCsv.normalizeInAxisName(t))
     );
   }
-  const meta = parseFont(fontBytes);
-  const fontUrl = URL.createObjectURL(new Blob([fontBytes], { type: 'font/ttf' }));
+  const meta = parseFont(bytes);
+  const fontUrl = URL.createObjectURL(new Blob([bytes], { type: 'font/ttf' }));
   // The mappings CSV is the authoring source of truth (instances +
   // mappings), exactly as in the studio's workspace: uploaded CSV if
   // present, otherwise synthesized parametric-only from the font.
@@ -109,12 +116,15 @@ const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
       );
   const dataset = {
     sourceText,
-    fontBytes,
+    fontBytes: bytes,
     mappingsCsv: mappingsText,
     instancesCsv: csvParsed,
     parametricTags: new Set(compiledTags),
     axisRanges: axisMetadata || {},
     fontUrl,
+    stem: sourceName.replace(/\.[^.]+$/, ''),
+    sourceDir,
+    workspaceEntries,
     axes: {
       axes: meta.axes.map(a => ({
         tag: a.tag, name: a.name,
@@ -126,9 +136,9 @@ const buildUploadDataset = async (glyphsFile, csvFile, metadataFile = null) => {
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
-      glyphs_path: `upload:${glyphsFile.name}:${Date.now()}`,
-      original_path: `upload:${glyphsFile.name}`,
-      source_format: 'glyphs',
+      glyphs_path: `upload:${sourceName}:${Date.now()}`,
+      original_path: `upload:${sourceName}`,
+      source_format: sourceFormat,
       family_name: meta.familyName,
       vf_family_id: `${meta.familyName}-VF`,
       built_font_filename: `${meta.familyName}.ttf`,
@@ -628,31 +638,86 @@ const staticOverrides = {
       new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
     );
   },
+  // Whole project as one zip (sources + studio sidecars + preview build)
+  // — loads back here or in the full app. Uploads only; snapshots have
+  // no workspace to export.
+  exportWorkspaceUrl: () => {
+    if (!uploadDataset) {
+      throw new Error('Workspace export needs an uploaded source — snapshots are read-only demos.');
+    }
+    return URL.createObjectURL(
+      new Blob([buildWorkspaceZip(uploadDataset)], { type: 'application/zip' })
+    );
+  },
 
   // Uploads: compile the source in a Web Worker (fontc-wasm) and switch
   // the app to the resulting in-memory dataset. This is the Phase 2
-  // path — no server anywhere.
+  // path — no server anywhere. A project .zip travels as one archive
+  // (the only way a .designspace + its UFOs can arrive).
   uploadSource: async (files) => {
     const list = Array.from(files || []);
+    const zipFile = list.find(f => f.name.toLowerCase().endsWith('.zip'));
+    if (zipFile) {
+      if (list.length > 1) {
+        throw new Error('Upload the .zip on its own — it carries the whole project.');
+      }
+      const ws = readWorkspaceZip(new Uint8Array(await zipFile.arrayBuffer()));
+      uploadDataset = await buildUploadDataset({
+        sourceName: ws.sourceName,
+        sourceFormat: ws.sourceExt,
+        sourceText: ws.sourceText,
+        fontBytes: ws.previewTtf,
+        csvText: ws.csvText,
+        metadataText: ws.metadataText,
+        workspaceEntries: ws.entries,
+        sourceDir: ws.sourceDir,
+      });
+      transformsState = [];
+      bakedEnabledIds = [];
+      // Harvested control axes / transforms apply through the bundle
+      // machinery (same wasm steps, same warnings); the CSV was already
+      // applied by the dataset build above.
+      if (ws.controlText || ws.transformsText) {
+        await applyBundle({
+          format: 'avar2-studio-config', format_version: 1,
+          source: { avar2_out_columns: [...uploadDataset.parametricTags] },
+          control_axes: ws.controlText ? JSON.parse(ws.controlText) : { version: 1, axes: [] },
+          avar2_csv: '',
+          transforms: ws.transformsText ? JSON.parse(ws.transformsText) : { version: 1, transforms: [] },
+          grade: { version: 1, enabled: false, default_pct: 0.25, instances: [] },
+        }, uploadDataset);
+      }
+      return { ok: true, ignored_files: [] };
+    }
     const glyphsFile = list.find(f => f.name.toLowerCase().endsWith('.glyphs'));
     if (!glyphsFile) {
-      throw new Error('No .glyphs file in the upload (sources must be .glyphs for now)');
+      throw new Error('No .glyphs or project .zip in the upload (.designspace projects need the zip)');
     }
     const csvFile = list.find(f => f.name.toLowerCase().endsWith('-avar.csv')) || null;
     const metadataFile = list.find(f => f.name.toLowerCase().endsWith('axis-metadata.json')) || null;
     const ignored = list.filter(f => f !== glyphsFile && f !== csvFile && f !== metadataFile).map(f => f.name);
-    uploadDataset = await buildUploadDataset(glyphsFile, csvFile, metadataFile);
+    uploadDataset = await buildUploadDataset({
+      sourceName: glyphsFile.name,
+      sourceFormat: 'glyphs',
+      sourceText: await glyphsFile.text(),
+      csvText: csvFile ? await csvFile.text() : null,
+      metadataText: metadataFile ? await metadataFile.text() : null,
+    });
     transformsState = [];
     bakedEnabledIds = [];
     return { ok: true, ignored_files: ignored };
   },
 
-  // Rebuild only exists for uploaded sources: recompile the same source
-  // text in the Worker and swap the font bytes. Snapshot datasets have
-  // nothing to rebuild (pre-baked).
+  // Rebuild only exists for uploaded .glyphs sources: recompile the same
+  // source text in the Worker and swap the font bytes. Snapshot datasets
+  // have nothing to rebuild (pre-baked); designspace uploads can't
+  // recompile off the filesystem (their preview is the zip's baked TTF).
   buildFont: async () => {
     if (!uploadDataset) {
       throw new Error('Building needs the full app — this static demo is read-only.');
+    }
+    if (uploadDataset.sourceText == null) {
+      throw new Error("Rebuilding a .designspace needs the full app — the browser can't compile UFO sources yet.");
     }
     const ttf = await compileFont(uploadDataset.sourceText);
     URL.revokeObjectURL(uploadDataset.fontUrl);

@@ -111,9 +111,49 @@ Resolved as the phases landed:
   the default instance's — the brace effect without a shadow source.
   Designer-drawn brace outlines stay a full-app feature (the static
   port computes them).
-- **export-font (hidden axes / default-location rebuild) — DEFER.**
-  Hidden-axes flags are cheap fvar surgery (easy later port);
-  default-location rebuild is a full recompile — may become a Rebuild
-  option for uploads later. App-only for now.
-- **STAT regeneration — DEFER** (gftools statmake is its own subsystem).
+- **export-font (hidden axes / default-location rebuild) — PORT.**
+  `set_default_location` (fvar defaults move to the user's location,
+  parametric defaults to the avar2-eval'd mapped location, avar2
+  regenerated around the new origin) and `set_hidden_axes` (fvar flags
+  bit 0x0001) in the wasm crate; options in the Preview tab's export
+  modal.
+- **STAT regeneration — PORT.** `regen_stat(font_bytes)` in the wasm
+  crate: a hand-port of gftools `axisregistry.build_stat` (the
+  google-fonts-axisregistry crate deviates from the Python oracle, so
+  no crate reuse), registry data for 53 GF axes generated into
+  `stat_registry.rs`, zero structural diffs against real
+  `axisregistry.build_stat(font, [])`. Runs on every export.
+
+## Zip workspace format
+
+Project zips travel whole projects between the hosted tool and the full
+app — the static side mirrors the server's `_load_project_zip` contract
+(`frontend/src/zip-workspace.js`). One archive carries:
+
+```
+<stem>.glyphs                          # or:
+<stem>.designspace + *.ufo/ dirs       # designspace projects
+<stem>-avar.csv                        # avar2 mappings (edited state)
+<stem>-control.json                    # secondary parametric axes (if any)
+<stem>-transforms.json                 # transforms (if any)
+.avar2-studio/axis-metadata.json       # axis ranges/display names (if any)
+.avar2-studio/build/<stem>-VF.ttf      # current build (preview)
+```
+
+Import (Load Font → Upload): exactly one source per archive; the
+sidecars are harvested from beside it; harvested control axes /
+transforms apply through the same bundle machinery as JSON config
+imports. `.designspace` projects load from the baked preview TTF —
+fontc compiles UFO sources from the filesystem only, so the browser
+can't compile them (no in-memory input upstream); the preview build is
+required in the zip and the error says so when it's missing. Rebuild is
+glyphs-only for the same reason. Everything after the initial compile
+(avar2 regeneration, export options, STAT) already runs off font bytes,
+so nothing else is lost.
+
+Export (Config → Download workspace (.zip)): sources verbatim, sidecars
+re-emitted from live state (the CSV is the authoring source of truth),
+current font bytes as the preview build. A zip we export loads cleanly
+in the full app, and a zip zipped from a real project folder loads in
+the hosted tool.
 

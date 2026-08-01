@@ -214,6 +214,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     configFileInputRef.current && configFileInputRef.current.click();
   };
 
+  const handleExportWorkspace = () => {
+    setConfigOpen(false);
+    const link = document.createElement('a');
+    // Static-only provider method: the server provider (api.js) has no
+    // workspace export — this item only renders in static mode.
+    link.href = (api as any).exportWorkspaceUrl();
+    link.download = `${familyName || 'avar2'}-avar2studio.zip`;
+    document.body.appendChild(link);
+    link.click();
+    // Blob-URL downloads cancel if the anchor dies before the download
+    // starts — remove on the next tick instead of synchronously.
+    setTimeout(() => document.body.removeChild(link), 0);
+  };
+
   const handleConfigFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Grab the File BEFORE clearing the input (``input.files`` is live —
     // see handleFileChange); the File object itself stays valid after.
@@ -473,6 +487,17 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     Control axes, avar2 mappings, transforms as one JSON file
                   </div>
                 </button>
+                {staticMode && allowImportInStatic && (
+                <button
+                  className="load-font-item"
+                  onClick={handleExportWorkspace}
+                >
+                  <div className="load-font-item-name">Download workspace (.zip)…</div>
+                  <div className="load-font-item-subtitle">
+                    Source, avar2 mappings, sidecars and the current build as one project zip — loads back here or in the full app
+                  </div>
+                </button>
+                )}
                 {(!staticMode || allowImportInStatic) && (
                 <button
                   className="load-font-item"
