@@ -1903,14 +1903,6 @@ function App() {
         </div>
       )}
 
-      {staticMode && (
-        <div className="static-demo-banner">
-          Static demo — previews, uploads, editing, and downloads (including
-          export options) run in your browser; source-file write-back needs
-          the full app.
-        </div>
-      )}
-
       <div className="main-content">
         {!familyName ? (
           // Blind launch — nothing loaded server-side. Steer the user

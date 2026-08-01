@@ -48,8 +48,8 @@ const sleep = (ms) => page.waitForTimeout(ms);
 // ---- 1. static boot -------------------------------------------------------
 console.log('1. static boot');
 await page.goto(BASE, { waitUntil: 'load', timeout: 30000 });
-await page.waitForSelector('.static-demo-banner', { timeout: 20000 });
-ok(await page.isVisible('.static-demo-banner'), 'static banner shows');
+await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
+ok(!(await page.$('.static-demo-banner')), 'no demo banner');
 ok(await page.isVisible('button:has-text("Load Font")'), 'Load Font present');
 ok(await page.isVisible('button:has-text("Transforms")'), 'Transforms present');
 ok(await page.isVisible('button:has-text("Config")'), 'Config present');
@@ -562,7 +562,7 @@ await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
 ok(true, 'fresh upload to persist');
 await page.reload({ waitUntil: 'load' });
-await page.waitForSelector('.static-demo-banner', { timeout: 20000 });
+await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'WasmTest');
 ok(true, 'reload auto-restores the uploaded session (no re-upload)');
 // The source text survived too: Rebuild still works on the restored session.
@@ -584,7 +584,7 @@ await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
 ok(true, 'forget returns to the default example');
 await page.reload({ waitUntil: 'load' });
-await page.waitForSelector('.static-demo-banner', { timeout: 20000 });
+await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
 ok(true, 'forget survives reload (stored session cleared)');
 
