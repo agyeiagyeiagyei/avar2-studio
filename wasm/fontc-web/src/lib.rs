@@ -32,12 +32,20 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod iup;
 mod measure;
 mod spac;
 mod stat;
 mod stat_registry;
 
 pub use measure::measure_at;
+
+/// Hold a ghost corner up: instance the scaffold shape and inject it
+/// as model-computed gvar tuples at the corner (see braces.rs).
+#[wasm_bindgen]
+pub fn pin_corner(font_bytes: Vec<u8>, request_json: &str) -> Result<Vec<u8>, JsError> {
+    braces::pin_corner(font_bytes, request_json)
+}
 
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {

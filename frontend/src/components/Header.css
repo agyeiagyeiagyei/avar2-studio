@@ -359,3 +359,30 @@ select.transform-param-input {
 .transform-row-disabled .transform-toggle {
   cursor: not-allowed;
 }
+
+/* Coverage findings with a pin affordance */
+.coverage-finding-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+.coverage-finding-jump {
+  flex: 1;
+  text-align: left;
+}
+.coverage-pin-btn {
+  align-self: center;
+  flex: none;
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--zinc-700);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.coverage-pin-btn:hover {
+  background: var(--zinc-900);
+}

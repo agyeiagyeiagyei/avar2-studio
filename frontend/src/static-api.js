@@ -25,13 +25,13 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2, measureAt } from './fontc-compile';
+import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
 import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
-import { auditCoverage, probeSweeps } from './coverage.js';
+import { auditCoverage, probeSweeps, PROBE_GLYPHS } from './coverage.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -143,6 +143,7 @@ const buildUploadDataset = async ({
       ...auditCoverage(bytes).findings,
       ...await probeSweeps(bytes, meta.axes, (b, g, l) => measureAt(b, g, l)),
     ],
+    cornerPins: [],
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
@@ -188,6 +189,7 @@ const serializeDataset = (dataset) => ({
   controlAxes: dataset.controlAxes || [],
   transforms: dataset.transforms || [],
   grade: dataset.grade || null,
+  cornerPins: dataset.cornerPins || [],
   familyName: dataset.health.family_name,
   upm: dataset.health.upm,
 });
@@ -238,6 +240,7 @@ const restoreSession = async () => {
       controlAxes: rec.controlAxes || [],
       transforms: rec.transforms || [],
       grade: rec.grade || null,
+      cornerPins: rec.cornerPins || [],
       axes: rec.axes,
       instances: { instances: [] },
       coverage: [
@@ -299,8 +302,7 @@ const regenerateFont = async (dataset) => {
   persistSoon(); // the CSV changed even when no avar2 regen is needed
   if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
     return;
-  }
-  const ranges = Object.keys(dataset.axisRanges || {}).length
+  }  const ranges = Object.keys(dataset.axisRanges || {}).length
     ? JSON.stringify(dataset.axisRanges)
     : null;
   dataset.fontBytes = await addAvar2(
@@ -329,6 +331,48 @@ const regenerateFont = async (dataset) => {
       is_control_axis: false,
     })),
   };
+};
+
+// ---- corner pinning ---------------------------------------------------------
+//
+// A pin holds an uncovered corner up with the scaffold location's
+// shape (healthy edge — never the ghost itself). Pins are workspace
+// state: they ride sessions, the workspace zip, and rebuilds.
+//
+// Scaffold choice: sweep from the default location toward the corner
+// (every differing axis interpolated together) and take the measured
+// peak — the last healthy point before the collapse.
+
+const chooseScaffold = async (dataset, corner) => {
+  const defaults = Object.fromEntries(
+    dataset.axes.axes.filter(a => a.has_master_coverage).map(a => [a.tag, a.default])
+  );
+  const steps = [];
+  for (let i = 0; i <= 6; i++) {
+    const t = i / 6;
+    steps.push(Object.fromEntries(
+      Object.keys(defaults).map(tag => [tag, defaults[tag] + ((corner[tag] ?? defaults[tag]) - defaults[tag]) * t])
+    ));
+  }
+  const areas = await measureAt(dataset.fontBytes, PROBE_GLYPHS, steps);
+  const peakI = areas.indexOf(Math.max(...areas));
+  return steps[peakI];
+};
+
+const applyPins = async (dataset) => {
+  for (const pin of dataset.cornerPins || []) {
+    dataset.fontBytes = await pinCorner(dataset.fontBytes, pin.corner, pin.scaffold);
+  }
+};
+
+const refreshAfterPin = async (dataset) => {
+  URL.revokeObjectURL(dataset.fontUrl);
+  dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+  dataset.health.last_build_time = Date.now();
+  const structural = auditCoverage(dataset.fontBytes).findings;
+  const behavioral = await probeSweeps(dataset.fontBytes, parseFont(dataset.fontBytes).axes, (b, g, l) => measureAt(b, g, l));
+  dataset.coverage = [...structural, ...behavioral];
+  persistSoon();
 };
 
 // ---- transforms state (toggles → pre-baked variants) ------------------------
@@ -568,6 +612,7 @@ const buildConfigBundle = (dataset) => ({
   avar2_csv: mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
   transforms: { version: 1, transforms: dataset.transforms || [] },
   grade: dataset.grade || { version: 1, enabled: false, default_pct: 0.25, instances: [] },
+  corner_pins: { version: 1, pins: dataset.cornerPins || [] },
 });
 
 const applyBundle = async (bundle, dataset) => {
@@ -611,6 +656,14 @@ const applyBundle = async (bundle, dataset) => {
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
     report.applied.push('transforms (SPAC)');
+  }
+  // Corner pins: replace the set and re-apply onto the font the
+  // earlier sections produced.
+  const cornerPins = bundle.corner_pins?.pins || [];
+  if (cornerPins.length) {
+    dataset.cornerPins = cornerPins;
+    await applyPins(dataset);
+    report.applied.push('corner pins');
   }
   // The Transforms menu reflects the bundle's set from now on: enabled
   // entries show enabled, the rest available but off.
@@ -798,7 +851,7 @@ const staticOverrides = {
       bakedEnabledIds = [];
       // Harvested control axes / transforms apply through the bundle
       // machinery (same wasm steps, same warnings); the CSV was already
-      // applied by the dataset build above.
+      // applied by the dataset build above. Corner pins apply after.
       if (ws.controlText || ws.transformsText) {
         await applyBundle({
           format: 'avar2-studio-config', format_version: 1,
@@ -808,6 +861,10 @@ const staticOverrides = {
           transforms: ws.transformsText ? JSON.parse(ws.transformsText) : { version: 1, transforms: [] },
           grade: { version: 1, enabled: false, default_pct: 0.25, instances: [] },
         }, uploadDataset);
+      }
+      if (ws.cornerPinsText) {
+        uploadDataset.cornerPins = JSON.parse(ws.cornerPinsText).pins || [];
+        await applyPins(uploadDataset);
       }
       await persistSession();
       return { ok: true, ignored_files: [] };
@@ -832,10 +889,9 @@ const staticOverrides = {
     return { ok: true, ignored_files: ignored };
   },
 
-  // Rebuild only exists for uploaded .glyphs sources: recompile the same
-  // source text in the Worker and swap the font bytes. Snapshot datasets
-  // have nothing to rebuild (pre-baked); designspace uploads can't
-  // recompile off the filesystem (their preview is the zip's baked TTF).
+  // Rebuild only exists for uploaded .glyphs sources: recompile the
+  // source, re-apply the mappings CSV (as the upload did), and re-apply
+  // corner pins — the rebuilt fontBytes stay the dataset's truth.
   buildFont: async () => {
     if (!uploadDataset) {
       throw new Error('Building needs the full app — this static demo is read-only.');
@@ -843,12 +899,19 @@ const staticOverrides = {
     if (uploadDataset.sourceText == null) {
       throw new Error("Rebuilding a .designspace needs the full app — the browser can't compile UFO sources yet.");
     }
-    const ttf = await compileFont(uploadDataset.sourceText);
+    let ttf = await compileFont(uploadDataset.sourceText);
+    if (uploadDataset.mappingsCsv) {
+      ttf = await addAvar2(ttf, uploadDataset.mappingsCsv);
+    }
+    uploadDataset.fontBytes = ttf;
+    await applyPins(uploadDataset);
     URL.revokeObjectURL(uploadDataset.fontUrl);
     uploadDataset = {
       ...uploadDataset,
-      fontUrl: URL.createObjectURL(new Blob([ttf], { type: 'font/ttf' })),
+      fontUrl: URL.createObjectURL(new Blob([uploadDataset.fontBytes], { type: 'font/ttf' })),
     };
+    uploadDataset.health.last_build_time = Date.now();
+    persistSoon();
     return { ok: true };
   },
 
@@ -1062,6 +1125,25 @@ const staticOverrides = {
     const applied = await applyBundle(bundle, uploadDataset);
     persistSoon();
     return applied;
+  },
+
+  // Pin a ghost corner: scaffold from the measured healthy edge, hold
+  // the corner up (model-computed tuple), then regenerate the stack
+  // (avar2 from the CSV if present, STAT always) and re-audit.
+  pinCorner: async (corner) => {
+    requireUpload();
+    const scaffold = await chooseScaffold(uploadDataset, corner);
+    uploadDataset.fontBytes = await pinCornerWasm(uploadDataset.fontBytes, corner, scaffold);
+    (uploadDataset.cornerPins ||= []).push({ corner, scaffold });
+    if (uploadDataset.mappingsCsv) {
+      uploadDataset.fontBytes = await addAvar2(
+        uploadDataset.fontBytes,
+        mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv)
+      );
+    }
+    uploadDataset.fontBytes = await regenStat(uploadDataset.fontBytes);
+    await refreshAfterPin(uploadDataset);
+    return { ok: true, scaffold };
   },
 };
 

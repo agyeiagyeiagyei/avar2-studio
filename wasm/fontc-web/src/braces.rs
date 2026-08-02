@@ -39,6 +39,8 @@ use std::str::FromStr;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
+use fontdrasil::coords::NormalizedLocation;
+use fontdrasil::variations::VariationModel;
 use font_types::{Fixed, NameId, Tag};
 use read_fonts::tables::glyf::{Anchor, CompositeGlyphFlags, Glyph};
 use read_fonts::tables::variations::Tuple;
@@ -156,20 +158,27 @@ impl<'a> GlyphInstancer<'a> {
         self.name_to_gid.get(glyph_name).copied()
     }
 
-    /// The glyph's default-instance points: contour points for simple
-    /// glyphs, component offsets for composites, plus the 4 phantom
-    /// points (fontTools `_getPhantomPoints`).
-    fn base_points(&self, gid: u16) -> Result<Vec<[f64; 2]>, JsError> {
+    /// The glyph's default-instance points and contour end indices:
+    /// contour points for simple glyphs (with endPtsOfContours for
+    /// IUP), component offsets for composites (no IUP — anchor deltas
+    /// apply explicitly), plus the 4 phantom points (fontTools
+    /// `_getPhantomPoints`).
+    fn base_points(&self, gid: u16) -> Result<(Vec<[f64; 2]>, Vec<usize>), JsError> {
         let glyph = self
             .loca
             .get_glyf(GlyphId::new(gid as u32), &self.glyf)
             .map_err(|e| err(format!("glyph {gid}: {e}")))?;
-        let (mut pts, x_min, y_max) = match &glyph {
-            None => (Vec::new(), 0, 0), // empty glyph: phantoms only
+        let (mut pts, end_pts, x_min, y_max) = match &glyph {
+            None => (Vec::new(), Vec::new(), 0, 0), // empty glyph: phantoms only
             Some(Glyph::Simple(simple)) => (
                 simple
                     .points()
                     .map(|p| [p.x as f64, p.y as f64])
+                    .collect(),
+                simple
+                    .end_pts_of_contours()
+                    .iter()
+                    .map(|e| e.get() as usize)
                     .collect(),
                 simple.x_min(),
                 simple.y_max(),
@@ -194,7 +203,7 @@ impl<'a> GlyphInstancer<'a> {
                         }
                     }
                 }
-                (pts, composite.x_min(), composite.y_max())
+                (pts, Vec::new(), composite.x_min(), composite.y_max())
             }
         };
         let advance = self
@@ -220,7 +229,7 @@ impl<'a> GlyphInstancer<'a> {
         pts.push([right_side_x, 0.0]);
         pts.push([0.0, top_side_y]);
         pts.push([0.0, bottom_side_y]);
-        Ok(pts)
+        Ok((pts, end_pts))
     }
 
     /// Points at `coords` (normalized, fvar axis order): base points
@@ -228,7 +237,8 @@ impl<'a> GlyphInstancer<'a> {
     /// (a f64 port of read-fonts' `compute_scalar_f32`, which matches
     /// fontTools' `supportScalar(ot=True)`).
     fn instance_points(&self, gid: u16, coords: &[f64]) -> Result<Vec<[f64; 2]>, JsError> {
-        let mut pts = self.base_points(gid)?;
+        let (base_pts, end_pts) = self.base_points(gid)?;
+        let mut pts = base_pts.clone();
         let Some(gvar) = &self.gvar else { return Ok(pts) };
         let Some(data) = gvar
             .glyph_variation_data(GlyphId::new(gid as u32))
@@ -250,12 +260,26 @@ impl<'a> GlyphInstancer<'a> {
             if scalar == 0.0 {
                 continue;
             }
+            // Pack explicit deltas, then IUP-fill the untouched points
+            // (the renderer's semantics — never zero them out).
+            let mut packed: Vec<Option<(f64, f64)>> = vec![None; pts.len()];
             for delta in tuple.deltas() {
-                let Some(p) = pts.get_mut(delta.position as usize) else {
+                let Some(slot) = packed.get_mut(delta.position as usize) else {
                     continue;
                 };
-                p[0] += scalar * delta.x_delta as f64;
-                p[1] += scalar * delta.y_delta as f64;
+                *slot = Some((delta.x_delta as f64, delta.y_delta as f64));
+            }
+            let filled = if end_pts.is_empty() {
+                packed
+                    .into_iter()
+                    .map(|d| d.unwrap_or((0.0, 0.0)))
+                    .collect::<Vec<_>>()
+            } else {
+                crate::iup::iup_delta(&packed, &base_pts, &end_pts)
+            };
+            for (p, (dx, dy)) in pts.iter_mut().zip(filled.into_iter()) {
+                p[0] += scalar * dx;
+                p[1] += scalar * dy;
             }
         }
         Ok(pts)
@@ -801,4 +825,134 @@ pub(crate) fn apply_grade(
         max: GRAD_MAX,
     }];
     build_grown_font(&font_bytes, &new_axes, extras, &GrowOptions::default())
+}
+
+// --------------------------------------------------------------------------
+// pin_corner: hold a ghost corner up with a model-computed tuple
+// --------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(crate) struct PinRequest {
+    corner: HashMap<String, f64>,
+    scaffold: HashMap<String, f64>,
+}
+
+/// Hold an uncovered corner up with the scaffold's shape, the way
+/// adding a master there would. Per glyph: rebuild the variation model
+/// over (origin + the glyph's tuple peaks + the corner), decompose the
+/// corner's indicator into proper model regions, and inject tuples
+/// carrying (scaffold − default) × the region's weight. The regions
+/// are what make this a master add and not a bleed: at OTHER sources'
+/// corners the pin's scalar is 0 (their shapes are untouched), at the
+/// pinned corner it is 1 (exactly the scaffold shape).
+pub(crate) fn pin_corner(
+    font_bytes: Vec<u8>,
+    request_json: &str,
+) -> Result<Vec<u8>, JsError> {
+    let request: PinRequest =
+        serde_json::from_str(request_json).map_err(|e| err(format!("bad pin JSON: {e}")))?;
+    let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
+    let triples = fvar_triples(&font)?;
+    let norm_loc = |loc: &HashMap<String, f64>| -> Vec<f64> {
+        triples
+            .iter()
+            .map(|(tag, min, default, max)| {
+                let v = loc.get(&tag.to_string()).copied().unwrap_or(*default);
+                normalize(v, *min, *default, *max).clamp(-1.0, 1.0)
+            })
+            .collect()
+    };
+    let corner_norm = norm_loc(&request.corner);
+    let scaffold_norm = norm_loc(&request.scaffold);
+    let axis_order: Vec<Tag> = triples.iter().map(|t| t.0).collect();
+    let instancer = GlyphInstancer::new(&font)?;
+    let zeroes = vec![0.0; triples.len()];
+    let corner_pos: Vec<(String, f64)> = axis_order
+        .iter()
+        .map(|t| t.to_string())
+        .zip(corner_norm.iter().copied())
+        .collect();
+    let corner_pos_refs: Vec<(&str, f64)> =
+        corner_pos.iter().map(|(s, v)| (s.as_str(), *v)).collect();
+    let corner_loc = NormalizedLocation::for_pos(&corner_pos_refs);
+
+    let mut extras: HashMap<u16, Vec<NewTuple>> = HashMap::new();
+    for gid in 0..instancer.num_glyphs {
+        // This glyph's source locations: origin + its tuple peaks.
+        let mut locations: HashSet<NormalizedLocation> = HashSet::new();
+        locations.insert(NormalizedLocation::default());
+        if let Some(gvar) = &instancer.gvar {
+            if let Ok(Some(data)) = gvar.glyph_variation_data(GlyphId::new(gid as u32)) {
+                for tuple in data.tuples() {
+                    let peak = coords_f64(&tuple.peak(), triples.len());
+                    let pos: Vec<(String, f64)> = axis_order
+                        .iter()
+                        .map(|t| t.to_string())
+                        .zip(peak.iter().copied())
+                        .collect();
+                    let pos_refs: Vec<(&str, f64)> =
+                        pos.iter().map(|(s, v)| (s.as_str(), *v)).collect();
+                    locations.insert(NormalizedLocation::for_pos(&pos_refs));
+                }
+            }
+        }
+        if locations.contains(&corner_loc) {
+            continue; // a source already reaches this corner
+        }
+        locations.insert(corner_loc.clone());
+        let model = VariationModel::new(locations.clone(), axis_order.clone());
+
+        // The corner's indicator decomposes into the regions a true
+        // master there would get (weight per region).
+        let indicator: HashMap<NormalizedLocation, Vec<f64>> = locations
+            .iter()
+            .map(|loc| {
+                let v = if *loc == corner_loc { 1.0 } else { 0.0 };
+                (loc.clone(), vec![v])
+            })
+            .collect();
+        let decomposition = model
+            .deltas::<f64, f64>(&indicator)
+            .map_err(|e| err(format!("variation model failed: {e:?}")))?;
+
+        let at_scaffold = instancer.instance_points(gid, &scaffold_norm)?;
+        let at_default = instancer.instance_points(gid, &zeroes)?;
+        let base_deltas = point_deltas(&at_scaffold, &at_default, 0.0, false);
+        for (region, weights) in decomposition {
+            if region.is_default() || weights[0] == 0.0 {
+                continue;
+            }
+            let w = weights[0];
+            let mut peak = vec![0.0; triples.len()];
+            let mut start = vec![0.0; triples.len()];
+            let mut end = vec![0.0; triples.len()];
+            for (i, tag) in axis_order.iter().enumerate() {
+                if let Some(tent) = region.get(tag) {
+                    start[i] = tent.min.into_inner().into_inner();
+                    peak[i] = tent.peak.into_inner().into_inner();
+                    end[i] = tent.max.into_inner().into_inner();
+                }
+            }
+            let deltas = base_deltas
+                .iter()
+                .map(|&(dx, dy)| (ot_round(dx as f64 * w) as i16, ot_round(dy as f64 * w) as i16))
+                .collect();
+            extras
+                .entry(gid)
+                .or_default()
+                .push(NewTuple { peak, start, end, deltas });
+        }
+    }
+    if extras.is_empty() {
+        return Ok(font_bytes);
+    }
+    // Renderers take advances from HVAR, not gvar phantoms — rebuild it
+    // from the phantom deltas (incl. the pin's) or the corner renders
+    // with default advances (letters collide into a blob).
+    let hvar_bytes = crate::spac::rebuild_hvar(&font, &extras, triples.len() as u16)?;
+    let options = GrowOptions {
+        hvar_bytes: Some(hvar_bytes),
+        ..Default::default()
+    };
+    build_grown_font(&font_bytes, &[], extras, &options)
 }

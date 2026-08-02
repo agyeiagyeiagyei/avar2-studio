@@ -86,6 +86,13 @@ export function measureAt(fontBytes, glyphs, locations) {
   return send({ kind: 'measure', fontBytes, request: JSON.stringify({ glyphs, locations }) });
 }
 
+/** Pin a ghost corner: hold it up with the scaffold location's shape
+ *  (a model-computed gvar tuple — master semantics, no bleed onto
+ *  other corners). Locations in user coords. */
+export function pinCorner(fontBytes, corner, scaffold) {
+  return send({ kind: 'pin', fontBytes, request: JSON.stringify({ corner, scaffold }) });
+}
+
 /** TTF bytes + control-axes JSON array → TTF bytes with the new fvar
  * axes and their computed gvar brace tuples. */
 export function applyControlAxes(fontBytes, controlJson) {

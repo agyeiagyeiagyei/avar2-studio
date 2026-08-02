@@ -123,6 +123,7 @@ export function readWorkspaceZip(u8) {
     metadataText: text(beside('-axis-metadata.json')) || text(studioMetaPath),
     controlText: text(beside('-control.json')),
     transformsText: text(beside('-transforms.json')),
+    cornerPinsText: text(beside('-cornerpins.json')),
     previewTtf,
   };
 }
@@ -144,6 +145,7 @@ export function buildWorkspaceZip(dataset) {
       || base.endsWith('-avar.csv')
       || base.endsWith('-control.json')
       || base.endsWith('-transforms.json')
+      || base.endsWith('-cornerpins.json')
       || base.endsWith('-axis-metadata.json');
   };
 
@@ -175,6 +177,10 @@ export function buildWorkspaceZip(dataset) {
   if (Object.keys(dataset.axisRanges || {}).length) {
     out[`${dir}.avar2-studio/axis-metadata.json`] = strToU8(
       JSON.stringify(dataset.axisRanges, null, 2));
+  }
+  if (dataset.cornerPins?.length) {
+    out[`${dir}${stem}-cornerpins.json`] = strToU8(
+      JSON.stringify({ version: 1, pins: dataset.cornerPins }, null, 2));
   }
   out[`${dir}.avar2-studio/build/${stem}-VF.ttf`] = dataset.fontBytes;
   return zipSync(out);

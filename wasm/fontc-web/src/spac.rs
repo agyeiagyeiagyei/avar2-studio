@@ -333,7 +333,7 @@ fn widthaware_extras(
 /// indirect ItemVariationStore + AdvWidthMap. (fontTools' direct-store
 /// path never triggers here: its singleModel check compares per-glyph
 /// list identities, which are always distinct.)
-fn rebuild_hvar(
+pub(crate) fn rebuild_hvar(
     font: &FontRef,
     extras: &HashMap<u16, Vec<NewTuple>>,
     total_axes: u16,

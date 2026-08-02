@@ -146,6 +146,30 @@ jumps to the location):
   darkness in `tests/measure_oracle.rs` (behavior agreement, not
   value equality).
 
+## Corner pinning (phase 3)
+
+Fail-tier corner findings get a **Pin** action in the Coverage panel:
+the studio sweeps from the default location toward the corner, takes
+the measured healthy peak as the scaffold, and holds the corner up
+with it (`pin_corner` in the wasm crate). The pin decomposes the
+corner through a rebuilt variation model per glyph, so it behaves
+like a master add — the pinned corner renders exactly the scaffold
+shape and every other corner is untouched (no bleed). The avar2 CSV
+and STAT are regenerated around the pin, the audit re-runs (the
+finding clears), and renderers get the advance too (HVAR is rebuilt
+from the gvar phantom deltas).
+
+Pins are workspace state: they ride session persistence, the
+workspace zip (`<stem>-cornerpins.json`), the config bundle
+(`corner_pins` section), and rebuilds (Recompile re-applies them).
+
+The instancer behind this (and the whole braces/pin family) ports
+IUP — OpenType's "Interpolate Untouched Points" — so packed-point
+tuples infer uncovered deltas exactly like fontTools/harfbuzz
+(`src/iup.rs`; without it, instanced outlines silently miss deltas
+that every real renderer applies).
+
+
 ## Zip workspace format
 
 Project zips travel whole projects between the hosted tool and the full

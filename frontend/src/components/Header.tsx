@@ -70,6 +70,7 @@ interface HeaderProps {
   // Coverage audit findings (uploads only — see coverage.js).
   coverageFindings?: CoverageFinding[];
   onJumpToLocation?: (location: Record<string, number>) => void;
+  onPinCorner?: (location: Record<string, number>) => void | Promise<unknown>;
 }
 
 interface CoverageFinding {
@@ -115,7 +116,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onJumpToLocation }: HeaderProps) {
+                 coverageFindings = [], onJumpToLocation, onPinCorner }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -540,19 +541,39 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               <div className="load-font-menu">
                 <div className="load-font-section-label">Design-space coverage</div>
                 {coverageFindings.map((f, i) => (
-                  <button
-                    key={i}
-                    className="load-font-item"
-                    onClick={() => {
-                      setCoverageOpen(false);
-                      if (f.location && onJumpToLocation) onJumpToLocation(f.location);
-                    }}
-                  >
-                    <div className="load-font-item-name">
-                      {f.severity === 'fail' ? '✗' : 'i'} {FINDING_LABELS[f.type] || f.type}
-                    </div>
-                    <div className="load-font-item-subtitle">{f.detail}</div>
-                  </button>
+                  <div key={i} className="load-font-item coverage-finding-row">
+                    <button
+                      className="coverage-finding-jump"
+                      onClick={() => {
+                        setCoverageOpen(false);
+                        if (f.location && onJumpToLocation) onJumpToLocation(f.location);
+                      }}
+                    >
+                      <div className="load-font-item-name">
+                        {f.severity === 'fail' ? '✗' : 'i'} {FINDING_LABELS[f.type] || f.type}
+                      </div>
+                      <div className="load-font-item-subtitle">{f.detail}</div>
+                    </button>
+                    {f.type === 'uncovered-corner' && f.location && onPinCorner && (
+                      <button
+                        className="coverage-pin-btn"
+                        title="Hold this corner up with the nearest healthy shape (master semantics)"
+                        onClick={async () => {
+                          setCoverageOpen(false);
+                          setLoadingMsg('Pinning corner…');
+                          try {
+                            await onPinCorner(f.location!);
+                            setLoadingMsg('Corner pinned.');
+                            setTimeout(() => setLoadingMsg(null), 4000);
+                          } catch (err: any) {
+                            setLoadingMsg(`Pin failed: ${err?.message || err}`);
+                          }
+                        }}
+                      >
+                        Pin
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

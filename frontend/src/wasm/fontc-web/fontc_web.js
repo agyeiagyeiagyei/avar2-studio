@@ -166,6 +166,27 @@ export function measure_at(font_bytes, request_json) {
 }
 
 /**
+ * Hold a ghost corner up: instance the scaffold shape and inject it
+ * as model-computed gvar tuples at the corner (see braces.rs).
+ * @param {Uint8Array} font_bytes
+ * @param {string} request_json
+ * @returns {Uint8Array}
+ */
+export function pin_corner(font_bytes, request_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.pin_corner(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
  * Rebuild the font's STAT table from its fvar, mirroring
  * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
  * single font with no siblings): GF axis-registry fallbacks per fvar

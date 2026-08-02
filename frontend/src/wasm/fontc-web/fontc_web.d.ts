@@ -66,6 +66,12 @@ export function compile_glyphs(source: string): Uint8Array;
 export function measure_at(font_bytes: Uint8Array, request_json: string): Float64Array;
 
 /**
+ * Hold a ghost corner up: instance the scaffold shape and inject it
+ * as model-computed gvar tuples at the corner (see braces.rs).
+ */
+export function pin_corner(font_bytes: Uint8Array, request_json: string): Uint8Array;
+
+/**
  * Rebuild the font's STAT table from its fvar, mirroring
  * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
  * single font with no siblings): GF axis-registry fallbacks per fvar
@@ -101,6 +107,7 @@ export interface InitOutput {
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
+    readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];

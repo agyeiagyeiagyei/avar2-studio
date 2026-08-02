@@ -1892,6 +1892,10 @@ function App() {
         allowImportInStatic={isUploadDataset()}
         coverageFindings={coverage}
         onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
+        onPinCorner={async (loc) => {
+          await api.pinCorner(loc);
+          await loadData();
+        }}
       />
 
       <DeleteInstanceModal

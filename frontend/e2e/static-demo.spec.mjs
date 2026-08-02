@@ -24,6 +24,7 @@
  */
 
 import { chromium } from 'playwright-core';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -635,6 +636,87 @@ await page.waitForTimeout(800);
 ok(await page.evaluate(() =>
   getComputedStyle(document.querySelector('.preview-tab-sample')).fontVariationSettings.includes('"XOPQ" 700')),
   'clicking a finding jumps the preview sliders to the corner');
+
+// ---- 18. corner pinning ------------------------------------------------------
+console.log('18. corner pinning');
+// Continues on section 17's crispy-test upload. The real ghost is the
+// (XOPQ▲, YOPQ▲) corner (47,700,300) — the one with a collapse finding.
+const cornerFindings = async () => {
+  const n = await page.$$eval('.load-font-menu .load-font-item-name',
+    els => els.filter(e => e.textContent.includes('Missing corner')).length);
+  await page.click('button:has-text("Coverage")'); // toggle closed
+  return n;
+};
+const pinGhost = async () => {
+  await page.click('button:has-text("Coverage")');
+  await page.waitForSelector('.coverage-pin-btn', { timeout: 15000 });
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.coverage-finding-row')];
+    const row = rows.find(r => r.textContent.includes('XOPQ▲') && r.textContent.includes('YOPQ▲'));
+    if (!row) throw new Error('ghost corner finding not found');
+    row.querySelector('.coverage-pin-btn').click();
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('.header-loading-msg')?.textContent === 'Corner pinned.',
+    { timeout: 90000 }
+  );
+  await page.waitForTimeout(1500);
+};
+await pinGhost();
+ok(true, 'ghost corner pinned (scaffold from the healthy edge)');
+await page.click('button:has-text("Coverage")');
+ok(await cornerFindings() < 3, 'pin cleared the corners it covers');
+// Shape-level verification: the exported font renders real stem
+// darkness at the pinned corner (it was 0 before — the ghost).
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [pinFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const pinFontPath = await pinFontDl.path();
+const pinDarkness = Number(execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from PIL import Image, ImageDraw, ImageFont
+f = ImageFont.truetype(sys.argv[1], 72)
+f.set_variation_by_axes([47, 700, 300])
+bbox = f.getbbox('a')
+img = Image.new('L', (bbox[2]-bbox[0]+20, bbox[3]-bbox[1]+20), 255)
+ImageDraw.Draw(img).text((10-bbox[0], 10-bbox[1]), 'a', font=f, fill=0)
+print(sum(1 for p in img.get_flattened_data() if p < 128))
+`, pinFontPath]
+).toString().trim());
+ok(pinDarkness > 1000, `pinned ghost corner renders with weight (darkness ${pinDarkness} at (47,700,300))`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+// Pin the rest (the intent-hairline corners — covered explicitly).
+const pinRemaining = async () => {
+  await page.click('button:has-text("Coverage")');
+  await page.waitForSelector('.coverage-pin-btn', { timeout: 15000 });
+  await page.click('.coverage-pin-btn');
+  await page.waitForFunction(() =>
+    document.querySelector('.header-loading-msg')?.textContent === 'Corner pinned.',
+    { timeout: 90000 }
+  );
+  await page.waitForTimeout(1500);
+};
+await pinRemaining();
+await pinRemaining();
+await page.click('button:has-text("Coverage")');
+ok(await cornerFindings() === 0, 'all corner findings pinned');
+
+// ---- 19. rebuild keeps pins ---------------------------------------------------
+console.log('19. rebuild keeps pins');
+await page.click('header .btn-3d');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 90000 }
+);
+await page.click('button:has-text("Coverage")');
+ok(await cornerFindings() === 0, 'pins re-applied on rebuild (still no corner findings)');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
