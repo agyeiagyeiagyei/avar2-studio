@@ -139,6 +139,8 @@ function App() {
   const [instanceToDelete, setInstanceToDelete] = useState(null);
   const [avar2FontUrl, setAvar2FontUrl] = useState(null);
   const [avar2FontLoaded, setAvar2FontLoaded] = useState(false);
+  const [coverage, setCoverage] = useState([]);
+  const [jumpLocation, setJumpLocation] = useState(null);
   // Load initial data
   useEffect(() => {
     loadData();
@@ -318,18 +320,20 @@ function App() {
         }
       }
       
-      const [instancesData, axesData, mastersData, transformsData, gradeData] = await Promise.all([
+      const [instancesData, axesData, mastersData, transformsData, gradeData, coverageData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
         api.getMasters().catch(() => ({ masters: [] })),
         api.getTransforms().catch(() => ({ transforms: [] })),
         api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, instances: [], max_pct: {} })),
+        api.getCoverage ? api.getCoverage().catch(() => ({ findings: [] })) : Promise.resolve({ findings: [] }),
       ]);
 
       setInstances(instancesData.instances);
       setMasters(mastersData.masters || []);
       setAxes(axesData.axes || []);
       setTransforms(transformsData.transforms || []);
+      setCoverage(coverageData.findings || []);
       setGrade({
         enabled: !!gradeData.enabled,
         default_pct: gradeData.default_pct ?? 0.25,
@@ -1886,6 +1890,8 @@ function App() {
         staticMode={staticMode}
         hideRebuild={staticMode && !isUploadDataset()}
         allowImportInStatic={isUploadDataset()}
+        coverageFindings={coverage}
+        onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
       />
 
       <DeleteInstanceModal
@@ -2025,6 +2031,7 @@ function App() {
             onSampleTextChange={setSampleText}
             fontSize={fontSize}
             onFontSizeChange={setFontSize}
+            jumpLocation={jumpLocation}
           />
         )}
         {building && (

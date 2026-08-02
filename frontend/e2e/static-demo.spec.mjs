@@ -610,6 +610,27 @@ await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
 ok(true, 'forget survives reload (stored session cleared)');
 
+// ---- 17. coverage audit (missing corners on upload) -------------------------
+console.log('17. coverage audit (missing corners on upload)');
+const CRISPY_TEST = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'Crispy-test.glyphs');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy', null, { timeout: 120000 });
+const coverageBtn = await page.waitForSelector('button:has-text("Coverage")', { timeout: 20000 });
+ok((await coverageBtn.textContent()).includes('3'), 'Coverage badge shows 3 findings (crispy-test missing corners)');
+await coverageBtn.click();
+const missingCorners = await page.$$eval('.load-font-menu .load-font-item-name',
+  els => els.filter(e => e.textContent.includes('Missing corner')).length);
+ok(missingCorners === 3, `findings list shows 3 Missing corner entries (${missingCorners})`);
+// First finding: (XTRA 47, XOPQ 700, YOPQ 1) — clicking jumps the preview.
+await page.click('.load-font-menu .load-font-item');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+await page.waitForTimeout(800);
+ok(await page.evaluate(() =>
+  getComputedStyle(document.querySelector('.preview-tab-sample')).fontVariationSettings.includes('"XOPQ" 700')),
+  'clicking a finding jumps the preview sliders to the corner');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

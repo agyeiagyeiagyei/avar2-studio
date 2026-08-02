@@ -53,6 +53,7 @@ function PreviewTab({
   onSampleTextChange,
   fontSize,
   onFontSizeChange,
+  jumpLocation,
 }) {
   const { userAxes, controlAxes, gradeAxes, parametricAxes } = useMemo(() => {
     const user = [];
@@ -79,6 +80,16 @@ function PreviewTab({
 
   const [coords, setCoords] = useState({});
   const [showParametric, setShowParametric] = useState(true);
+
+  // Coverage findings jump (Header panel, later the Space tab): merge
+  // the finding's location into the preview coordinates. Deduped so a
+  // re-render with the same object doesn't re-pin the sliders.
+  const jumpRef = useRef(null);
+  useEffect(() => {
+    if (!jumpLocation || jumpLocation === jumpRef.current) return;
+    jumpRef.current = jumpLocation;
+    setCoords(prev => ({ ...prev, ...jumpLocation }));
+  }, [jumpLocation]);
 
   // Auto optical size — mimics browsers'/Google Fonts'
   // font-optical-sizing:auto: opsz tracks the font size (in pt),

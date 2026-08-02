@@ -67,6 +67,16 @@ interface HeaderProps {
   // Static demo with an uploaded source: config import becomes
   // available (bundles apply in-browser via the static provider).
   allowImportInStatic?: boolean;
+  // Coverage audit findings (uploads only — see coverage.js).
+  coverageFindings?: CoverageFinding[];
+  onJumpToLocation?: (location: Record<string, number>) => void;
+}
+
+interface CoverageFinding {
+  severity: 'fail' | 'info';
+  type: 'uncovered-corner' | 'out-of-range-source';
+  location?: Record<string, number> | null;
+  detail: string;
 }
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
@@ -97,10 +107,12 @@ interface GradeState {
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
-                 hideRebuild = false, allowImportInStatic = false }: HeaderProps) {
+                 hideRebuild = false, allowImportInStatic = false,
+                 coverageFindings = [], onJumpToLocation }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [coverageOpen, setCoverageOpen] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState<string | null>(null);
   // Non-null while the import confirmation modal is open:
   // {bundle, report} from the dry-run POST.
@@ -139,6 +151,19 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [configOpen]);
+
+  // Click-outside closes the coverage menu.
+  const coverageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!coverageOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (coverageRef.current && !coverageRef.current.contains(e.target as Node)) {
+        setCoverageOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [coverageOpen]);
 
   const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0);
 
@@ -494,6 +519,37 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               })}
             </DropdownMenuContent>
           </DropdownMenu>
+        )}
+        {coverageFindings.length > 0 && (
+          <div className="config-dropdown" ref={coverageRef}>
+            <button
+              className="btn btn-load-font"
+              onClick={() => setCoverageOpen(o => !o)}
+              title="Design-space coverage: corners no source reaches and out-of-range sources. Click a finding to preview that location."
+            >
+              Coverage <span className="count-flag">{coverageFindings.length}</span> ▾
+            </button>
+            {coverageOpen && (
+              <div className="load-font-menu">
+                <div className="load-font-section-label">Design-space coverage</div>
+                {coverageFindings.map((f, i) => (
+                  <button
+                    key={i}
+                    className="load-font-item"
+                    onClick={() => {
+                      setCoverageOpen(false);
+                      if (f.location && onJumpToLocation) onJumpToLocation(f.location);
+                    }}
+                  >
+                    <div className="load-font-item-name">
+                      {f.severity === 'fail' ? '✗' : 'i'} {f.type === 'uncovered-corner' ? 'Missing corner' : 'Out-of-range source'}
+                    </div>
+                    <div className="load-font-item-subtitle">{f.detail}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {familyName && (
           <div className="config-dropdown" ref={configRef}>

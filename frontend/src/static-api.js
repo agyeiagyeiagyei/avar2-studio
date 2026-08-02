@@ -31,6 +31,7 @@ import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
 import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
+import { auditCoverage } from './coverage.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -135,6 +136,10 @@ const buildUploadDataset = async ({
       })),
     },
     instances: { instances: [] },
+    // Structural coverage audit (gvar regions): missing corners and
+    // out-of-range sources, found at load time. The behavioral probe
+    // (sweeps) merges more findings here when it exists.
+    coverage: auditCoverage(bytes).findings,
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
@@ -232,6 +237,7 @@ const restoreSession = async () => {
       grade: rec.grade || null,
       axes: rec.axes,
       instances: { instances: [] },
+      coverage: auditCoverage(rec.fontBytes).findings,
       health: {
         static: true, demo: false, building: false,
         font_built: true, font_loaded: true,
@@ -703,6 +709,7 @@ const staticOverrides = {
     };
   },
   getTransforms: async () => (uploadDataset ? { transforms: uploadDataset.transforms || [] } : { transforms: await transformsList() }),
+  getCoverage: async () => ({ findings: uploadDataset ? uploadDataset.coverage || [] : [] }),
   getGrade: async () => (uploadDataset
     ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
     : endpoint('grade.json')()),
