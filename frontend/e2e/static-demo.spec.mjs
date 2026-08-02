@@ -618,11 +618,16 @@ await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
 await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy', null, { timeout: 120000 });
 const coverageBtn = await page.waitForSelector('button:has-text("Coverage")', { timeout: 20000 });
-ok((await coverageBtn.textContent()).includes('3'), 'Coverage badge shows 3 findings (crispy-test missing corners)');
+const badgeText = await coverageBtn.textContent();
+ok(/\d+/.test(badgeText) && parseInt(badgeText.match(/\d+/)[0], 10) >= 3,
+  `Coverage badge shows findings (${badgeText.trim()})`);
 await coverageBtn.click();
 const missingCorners = await page.$$eval('.load-font-menu .load-font-item-name',
   els => els.filter(e => e.textContent.includes('Missing corner')).length);
 ok(missingCorners === 3, `findings list shows 3 Missing corner entries (${missingCorners})`);
+const collapseItems = await page.$$eval('.load-font-menu .load-font-item',
+  els => els.filter(e => e.textContent.includes('collapses')).length);
+ok(collapseItems > 0, `findings include sweep collapse(s) from the probe (${collapseItems})`);
 // First finding: (XTRA 47, XOPQ 700, YOPQ 1) — clicking jumps the preview.
 await page.click('.load-font-menu .load-font-item');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });

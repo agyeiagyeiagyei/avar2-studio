@@ -74,10 +74,17 @@ interface HeaderProps {
 
 interface CoverageFinding {
   severity: 'fail' | 'info';
-  type: 'uncovered-corner' | 'out-of-range-source';
+  type: 'uncovered-corner' | 'out-of-range-source' | 'collapse' | 'inert-sweep';
   location?: Record<string, number> | null;
   detail: string;
 }
+
+const FINDING_LABELS: Record<CoverageFinding['type'], string> = {
+  'uncovered-corner': 'Missing corner',
+  'out-of-range-source': 'Out-of-range source',
+  'collapse': 'Collapse',
+  'inert-sweep': 'Inert axis',
+};
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
 // here, per-instance grade% in each style's row menu.
@@ -542,7 +549,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     }}
                   >
                     <div className="load-font-item-name">
-                      {f.severity === 'fail' ? '✗' : 'i'} {f.type === 'uncovered-corner' ? 'Missing corner' : 'Out-of-range source'}
+                      {f.severity === 'fail' ? '✗' : 'i'} {FINDING_LABELS[f.type] || f.type}
                     </div>
                     <div className="load-font-item-subtitle">{f.detail}</div>
                   </button>

@@ -20,7 +20,7 @@ function getWorker() {
       const p = pending;
       pending = null;
       if (!p) return;
-      if (e.data.ok) p.resolve(e.data.ttf);
+      if (e.data.ok) p.resolve(e.data.ttf ?? e.data.areas);
       else p.reject(new Error(e.data.error || 'fontc worker failed'));
     };
     worker.onerror = (e) => {
@@ -77,6 +77,13 @@ export function exportFontHiddenAxes(fontBytes, hiddenTags) {
 /** Rebuild the STAT table from the font's fvar (Google-Fonts-ready). */
 export function regenStat(fontBytes) {
   return send({ kind: 'stat', fontBytes });
+}
+
+/** Coverage probe: outline area (stem-darkness proxy) across `glyphs`
+ *  for each location in `locations` (user coords, fvar tags) — one
+ *  entry per location. Batched in one worker round-trip. */
+export function measureAt(fontBytes, glyphs, locations) {
+  return send({ kind: 'measure', fontBytes, request: JSON.stringify({ glyphs, locations }) });
 }
 
 /** TTF bytes + control-axes JSON array → TTF bytes with the new fvar

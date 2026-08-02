@@ -144,6 +144,28 @@ export function compile_glyphs(source) {
 }
 
 /**
+ * Sum of filled outline area (font units² at the font's upm) across
+ * `glyphs`, per location (user coords, fvar tags). One entry per
+ * location, in order.
+ * @param {Uint8Array} font_bytes
+ * @param {string} request_json
+ * @returns {Float64Array}
+ */
+export function measure_at(font_bytes, request_json) {
+    const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.measure_at(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v3;
+}
+
+/**
  * Rebuild the font's STAT table from its fvar, mirroring
  * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
  * single font with no siblings): GF axis-registry fallbacks per fvar
@@ -254,9 +276,22 @@ function __wbg_get_imports() {
     };
 }
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -359,6 +394,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedFloat64ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

@@ -25,13 +25,13 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2 } from './fontc-compile';
+import { compileFont, addAvar2, measureAt } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
 import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
-import { auditCoverage } from './coverage.js';
+import { auditCoverage, probeSweeps } from './coverage.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -136,10 +136,13 @@ const buildUploadDataset = async ({
       })),
     },
     instances: { instances: [] },
-    // Structural coverage audit (gvar regions): missing corners and
-    // out-of-range sources, found at load time. The behavioral probe
-    // (sweeps) merges more findings here when it exists.
-    coverage: auditCoverage(bytes).findings,
+    // Coverage audit (structural gvar regions + behavioral sweeps via
+    // the measure_at probe): missing corners, out-of-range sources,
+    // collapses and inert regions, found at load time.
+    coverage: [
+      ...auditCoverage(bytes).findings,
+      ...await probeSweeps(bytes, meta.axes, (b, g, l) => measureAt(b, g, l)),
+    ],
     health: {
       static: true, demo: false, building: false,
       font_built: true, font_loaded: true,
@@ -237,7 +240,10 @@ const restoreSession = async () => {
       grade: rec.grade || null,
       axes: rec.axes,
       instances: { instances: [] },
-      coverage: auditCoverage(rec.fontBytes).findings,
+      coverage: [
+        ...auditCoverage(rec.fontBytes).findings,
+        ...await probeSweeps(rec.fontBytes, parseFont(rec.fontBytes).axes, (b, g, l) => measureAt(b, g, l)),
+      ],
       health: {
         static: true, demo: false, building: false,
         font_built: true, font_loaded: true,

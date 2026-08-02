@@ -26,6 +26,9 @@ font-types = "0.12.2"
 read-fonts = "0.40.2"
 write-fonts = "0.49.2"
 
+# Outline evaluation at a location for the coverage probe (measure_at).
+skrifa = "0.40"
+
 [profile.release]
 # Keep the blob small: static demo payload discipline (fontspector model).
 opt-level = "z"

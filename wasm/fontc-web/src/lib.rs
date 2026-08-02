@@ -32,9 +32,12 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod measure;
 mod spac;
 mod stat;
 mod stat_registry;
+
+pub use measure::measure_at;
 
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {

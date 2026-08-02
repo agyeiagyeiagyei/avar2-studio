@@ -59,6 +59,13 @@ export function apply_transforms(font_bytes: Uint8Array, transforms_json: string
 export function compile_glyphs(source: string): Uint8Array;
 
 /**
+ * Sum of filled outline area (font units² at the font's upm) across
+ * `glyphs`, per location (user coords, fvar tags). One entry per
+ * location, in order.
+ */
+export function measure_at(font_bytes: Uint8Array, request_json: string): Float64Array;
+
+/**
  * Rebuild the font's STAT table from its fvar, mirroring
  * `axisregistry.build_stat(ttFont, [])` (gftools gen_stat_tables for a
  * single font with no siblings): GF axis-registry fallbacks per fvar
@@ -97,6 +104,7 @@ export interface InitOutput {
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly measure_at: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

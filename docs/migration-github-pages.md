@@ -124,6 +124,28 @@ Resolved as the phases landed:
   `stat_registry.rs`, zero structural diffs against real
   `axisregistry.build_stat(font, [])`. Runs on every export.
 
+## Coverage audit (phases 1–2)
+
+Structural + behavioral design-space coverage, found at upload time
+and listed in the Header's Coverage panel (click a finding → preview
+jumps to the location):
+
+- **Layer A (structural, `frontend/src/gvar.js` + `coverage.js`)**:
+  reads every glyph's gvar tuple regions and reports axis-extreme
+  corners no source's tent reaches (with per-axis edge coverage) and
+  sources outside the axis box (out-of-range braces/masters). These
+  never error at build time — they only fail in axis usage.
+- **Layer B (behavioral, `measure_at` in the wasm crate)**:
+  skrifa-draws probe glyphs at sweep locations and integrates filled
+  outline area as a stem-darkness proxy (canvas 2D
+  `fontVariationSettings` proved unreliable in Chrome). Sweeps per
+  axis (at default, and with each other axis pinned at min/max)
+  flag **collapses** (weight rises then dies below half its peak —
+  the extrapolation-collapse signature) and **inert** default sweeps
+  (weight needs more than one axis). Verified against Pillow stem
+  darkness in `tests/measure_oracle.rs` (behavior agreement, not
+  value equality).
+
 ## Zip workspace format
 
 Project zips travel whole projects between the hosted tool and the full

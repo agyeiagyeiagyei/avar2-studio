@@ -116,3 +116,65 @@ export function auditCoverage(bytes) {
 
   return { findings, axes: meta.axes };
 }
+
+// ---- layer B (behavioral probe) ---------------------------------------------
+//
+// Sweep each axis (at default, then with each other axis pinned at min
+// and max) and measure outline area (the stem-darkness proxy from
+// fontc-web's measure_at). Flags:
+//   - collapse: real weight appears, then dies below half its peak —
+//     the extrapolation-collapse signature.
+//   - inert (default sweeps only): the sweep moves nothing — weight in
+//     this design needs more than one axis.
+// Thresholds are scale-free (ratios), since outline area is
+// font-dependent.
+
+export const PROBE_GLYPHS = ['a', 'e', 'o', 'g', 'A', 'H', 'n', 'x'];
+const SWEEP_STEPS = 7;
+const COLLAPSE_RATIO = 0.5;   // tail drops below this share of the peak
+const MOVE_RATIO = 1.5;       // peak must clear baseline×this to count as movement
+const INERT_RATIO = 0.05;     // sweep moves less than this share of its peak
+
+export async function probeSweeps(bytes, axes, measureFn) {
+  const defaultLoc = Object.fromEntries(axes.map(a => [a.tag, a.default]));
+  const findings = [];
+  for (const axis of axes) {
+    const pins = [[null, null]];
+    for (const other of axes) {
+      if (other.tag !== axis.tag) pins.push([other.tag, other.min], [other.tag, other.max]);
+    }
+    for (const [other, pos] of pins) {
+      const steps = [];
+      for (let i = 0; i < SWEEP_STEPS; i++) {
+        const loc = { ...defaultLoc, [axis.tag]: axis.min + (axis.max - axis.min) * i / (SWEEP_STEPS - 1) };
+        if (other) loc[other] = pos;
+        steps.push(loc);
+      }
+      const vals = await measureFn(bytes, PROBE_GLYPHS, steps);
+      const peak = Math.max(...vals);
+      const floor = Math.min(...vals);
+      if (peak === 0) continue; // no probe glyphs in this font — nothing to measure
+      const peakI = vals.indexOf(peak);
+      const tail = vals.slice(peakI + 1);
+      const label = `${axis.tag} sweep` + (other === null ? ' (others at default)' : ` with ${other} at ${pos}`);
+      if (peak > MOVE_RATIO * floor && tail.length && Math.min(...tail) < COLLAPSE_RATIO * peak) {
+        const end = steps[steps.length - 1];
+        const at = axes.map(a => `${a.tag} ${end[a.tag]}`).join(', ');
+        findings.push({
+          severity: 'fail',
+          type: 'collapse',
+          location: end,
+          detail: `${label}: collapses — stems vanish toward (${at})`,
+        });
+      } else if (other === null && peak > 0 && (peak - floor) < INERT_RATIO * peak) {
+        findings.push({
+          severity: 'info',
+          type: 'inert-sweep',
+          location: null,
+          detail: `${label}: inert — weight here needs more than one axis`,
+        });
+      }
+    }
+  }
+  return findings;
+}

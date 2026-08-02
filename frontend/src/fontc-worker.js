@@ -9,6 +9,7 @@
 //   {kind: 'transforms', fontBytes, json, csv} → {ok, ttf|error}
 //   {kind: 'set-default', fontBytes, location, csv, metadata?, parametricTags?} → {ok, ttf|error}
 //   {kind: 'hide-axes', fontBytes, tags}  → {ok, ttf|error}
+//   {kind: 'measure', fontBytes, request} → {ok, areas|error}
 // The ttf is transferred (zero-copy) back to the caller.
 
 import init, {
@@ -20,6 +21,7 @@ import init, {
   set_default_location,
   set_hidden_axes,
   regen_stat,
+  measure_at,
 } from './wasm/fontc-web/fontc_web.js';
 
 const ready = init();
@@ -27,7 +29,10 @@ const ready = init();
 self.onmessage = async (e) => {
   try {
     await ready;
-    if (e.data && e.data.kind === 'avar2') {
+    if (e.data && e.data.kind === 'measure') {
+      const areas = measure_at(e.data.fontBytes, e.data.request);
+      self.postMessage({ ok: true, areas: Array.from(areas) });
+    } else if (e.data && e.data.kind === 'avar2') {
       const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined, e.data.parametricTags ?? undefined);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'control') {
