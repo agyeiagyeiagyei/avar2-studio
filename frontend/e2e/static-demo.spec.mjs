@@ -718,6 +718,49 @@ await page.waitForFunction(() =>
 await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() === 0, 'pins re-applied on rebuild (still no corner findings)');
 
+// ---- 20. Space tab (Noordzij cube) ------------------------------------------
+console.log('20. Space tab (Noordzij cube)');
+// Fresh upload so ghost corners are present again.
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy', null, { timeout: 120000 });
+await page.click('button:text-is("Space")');
+await page.waitForSelector('.space-chip', { timeout: 30000 });
+ok((await page.$$('.space-chip')).length === 8, '8 corner chips render');
+ok((await page.$$('.space-chip.ghost')).length === 3, '3 ghost chips (the missing corners)');
+// Orbit by drag: chips move with the cube (before any chip click, since
+// jumping to Preview unmounts the Space tab).
+const chipLeftBefore = await page.evaluate(() => document.querySelector('.space-chip').style.left);
+await page.evaluate(() => {
+  const cv = document.querySelector('.space-cube');
+  const r = cv.getBoundingClientRect();
+  cv.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + 200, clientY: r.y + 200, buttons: 1, bubbles: true }));
+  cv.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + 260, clientY: r.y + 220, buttons: 1, bubbles: true }));
+});
+const chipLeftAfter = await page.evaluate(() => document.querySelector('.space-chip').style.left);
+ok(chipLeftBefore !== chipLeftAfter, 'drag orbits the cube (chips move)');
+// Chip click jumps the preview to that location.
+await page.evaluate(() => {
+  const chips = [...document.querySelectorAll('.space-chip:not(.ghost)')];
+  chips[0].click();
+});
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+ok(await page.evaluate(() =>
+  getComputedStyle(document.querySelector('.preview-tab-sample')).fontVariationSettings.includes('"')),
+  'chip click jumps the preview to its location');
+// Pin a ghost from its chip.
+await page.click('button:text-is("Space")');
+await page.evaluate(() => {
+  const chips = [...document.querySelectorAll('.space-chip.ghost')];
+  chips[0].querySelector('.space-chip-pin').click();
+});
+await page.waitForFunction(() =>
+  document.querySelectorAll('.space-chip.ghost').length < 3,
+  { timeout: 90000 }
+);
+ok(true, 'pin from a ghost chip completes');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

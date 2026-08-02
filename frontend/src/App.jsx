@@ -7,6 +7,7 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
 import PreviewTab from './components/PreviewTab';
+import SpaceTab from './components/SpaceTab';
 import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
 import DemoLanding from './components/DemoLanding';
@@ -1950,9 +1951,28 @@ function App() {
           >
             Preview
           </button>
+          <button
+            type="button"
+            className={`main-tab${mainTab === 'space' ? ' active' : ''}`}
+            onClick={() => setMainTab('space')}
+          >
+            Space
+          </button>
         </div>
         <div className={`build-scope${building ? ' is-building' : ''}`}>
-        {mainTab === 'instances' ? (
+        {mainTab === 'space' ? (
+          <SpaceTab
+            axes={axes}
+            coverageFindings={coverage}
+            fontUrl={fontUrl}
+            vfFamilyId={vfFamilyId}
+            onPinCorner={async (loc) => {
+              await api.pinCorner(loc);
+              await loadData();
+            }}
+            onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
+          />
+        ) : mainTab === 'instances' ? (
         <div className="content-area">
           <Sidebar
             axes={axes}

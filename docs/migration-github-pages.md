@@ -169,6 +169,18 @@ tuples infer uncovered deltas exactly like fontTools/harfbuzz
 (`src/iup.rs`; without it, instanced outlines silently miss deltas
 that every real renderer applies).
 
+## Space tab (phase 4)
+
+The Noordzij cube (`frontend/src/components/SpaceTab.jsx`): the
+font's design space as an orbitable wireframe box (hand-rolled
+projection, no WebGL). Masters and brace layers are read from the
+gvar tuple peaks; the corners carry live glyph specimens at their
+exact `font-variation-settings` — red when the audit flags the corner
+as uncovered (a ghost), with a Pin affordance on the chip itself.
+Clicking any chip jumps the preview sliders to its location and
+renders the probe text beside the cube; corner health (outline area)
+comes from the phase-2 probe in one worker round-trip.
+
 
 ## Zip workspace format
 
