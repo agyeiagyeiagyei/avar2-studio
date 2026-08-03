@@ -876,6 +876,44 @@ const spacOffFontPath = await spacOffFontDl.path();
 ok(!fontAxes(spacOffFontPath).includes('SPAC'), `SPAC fvar axis removed after toggling off (${fontAxes(spacOffFontPath)})`);
 await page.click('.preview-export-modal button:has-text("Cancel")');
 
+// ---- 23. rebuild re-applies bundle state (control axes + grade + SPAC) ------
+console.log('23. rebuild re-applies bundle state (control axes + grade + SPAC)');
+// A bundle import bakes control axes / grade / transforms into the font
+// BYTES; the studio state lives beside the source. Rebuild must re-apply
+// that state — before this fix the recompiled font lost crbr/GRAD/SPAC.
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_GLYPHS);
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 240000 });
+await page.click('button:has-text("Config")');
+await page.click('text=Import configuration…');
+await page.setInputFiles('.config-dropdown input[type=file]', TEST_BUNDLE);
+await page.waitForSelector('.import-config-confirm:not([disabled])', { timeout: 30000 });
+await page.click('.import-config-confirm');
+await page.waitForFunction(() => !document.querySelector('.import-config-confirm'), { timeout: 120000 });
+ok(true, 'bundle imported onto a fresh CrispyMini upload');
+await page.click('header .btn-3d');
+await page.waitForFunction(() =>
+  document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 15000 }).catch(() => null);
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 300000 });
+ok(true, 'rebuild with full studio state completed');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [rebuiltFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const rebuiltAxes = fontAxes(await rebuiltFontDl.path());
+ok(rebuiltAxes.includes('crbr'), `control axis crbr survives REBUILD (${rebuiltAxes})`);
+ok(rebuiltAxes.includes('GRAD'), `GRAD axis survives REBUILD (${rebuiltAxes})`);
+ok(rebuiltAxes.includes('SPAC'), `SPAC axis survives REBUILD (${rebuiltAxes})`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

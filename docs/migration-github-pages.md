@@ -101,8 +101,10 @@ Resolved as the phases landed:
   upload lists the known built-ins (uniform + width-aware) with the
   dataset's state overlaid; toggles/params rebuild the font from source
   with the new set applied (applied transforms can't be un-baked) —
-  the same rebuild pipeline as Rebuild (compile → avar2 → corner pins
-  → out-of-range drop → transforms), so the enabled set also rides
+  the same rebuild pipeline as Rebuild (compile → avar2 → control axes
+  → grade → transforms → corner pins → out-of-range drop — bundle
+  state is re-applied, so imported secondary axes and grade survive
+  rebuilds too), so the enabled set also rides
   rebuilds, sessions and bundle exports. Snapshot datasets keep the
   baked spac-on/off variants.
 - **Grade — PORT.** The pure-weight model (grade.py: XOPQ+YOPQ drive,

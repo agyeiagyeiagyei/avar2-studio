@@ -25,7 +25,7 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms } from './fontc-compile';
+import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -650,6 +650,7 @@ const applyBundle = async (bundle, dataset) => {
     dataset.fontBytes = await applyGrade(
       dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
     );
+    dataset.grade = grade; // kept so rebuilds re-apply it
     report.applied.push('grade');
   }
   // SPAC transforms apply last (they rebuild HVAR from the gvar the
@@ -740,20 +741,28 @@ const transformsMenu = (dataset) => {
 };
 
 // The full rebuild pipeline for an uploaded .glyphs source: compile,
-// avar2 mappings, corner pins, the out-of-range drop, SPAC transforms.
-// Each stage's HVAR rebuild reads the current gvar, so the final font
-// carries every stage's advances. Shared by buildFont (the transform
-// set rides along on rebuilds) and updateTransforms (the only way to
-// change the set — applied transforms can't be un-baked).
+// then re-apply the studio state in bundle-import order — avar2
+// mappings, control axes, grade, SPAC transforms, corner pins — and
+// finally the out-of-range drop. Each stage's HVAR rebuild reads the
+// current gvar, so the final font carries every stage's advances.
+// Shared by buildFont and updateTransforms (the only way to change the
+// transform set — applied transforms can't be un-baked).
 const rebuildUploadFont = async (dataset) => {
   let ttf = await compileFont(dataset.sourceText);
   if (dataset.mappingsCsv) {
     ttf = await addAvar2(ttf, dataset.mappingsCsv);
   }
   dataset.fontBytes = ttf;
-  await applyPins(dataset);
-  if (dataset.clampOutOfRange) {
-    dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
+  if ((dataset.controlAxes || []).length) {
+    dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(dataset.controlAxes));
+  }
+  const grade = dataset.grade || {};
+  const gradeInstances = grade.enabled ? (grade.instances || []) : [];
+  if (gradeInstances.length) {
+    const coords = resolveGradeCoords(dataset, dataset.mappingsCsv || '');
+    dataset.fontBytes = await applyGrade(
+      dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
+    );
   }
   const transforms = (dataset.transforms || [])
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
@@ -761,6 +770,10 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyTransforms(
       dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
     );
+  }
+  await applyPins(dataset);
+  if (dataset.clampOutOfRange) {
+    dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
   }
   refreshAxesFromFont(dataset);
 };
@@ -952,7 +965,8 @@ const staticOverrides = {
   },
 
   // Rebuild only exists for uploaded .glyphs sources: the full pipeline
-  // re-runs (compile → avar2 → pins → out-of-range drop → transforms) —
+  // re-runs (compile → avar2 → control axes → grade → transforms →
+  // pins → out-of-range drop) —
   // the rebuilt fontBytes stay the dataset's truth.
   buildFont: async () => {
     if (!uploadDataset) {
