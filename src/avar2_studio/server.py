@@ -2297,12 +2297,136 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
     return None
 
 
+# Extent written for an axis whose real range isn't known yet. Parametric
+# axes are re-synced from the source's masters on every load, so a placeholder
+# there is self-healing; traditional axes have no such anchor, so this value
+# is also the marker that lets _repair_placeholder_ranges() spot an entry that
+# was never really initialised and derive it properly.
+_PLACEHOLDER_MIN, _PLACEHOLDER_MAX = -1000, 1000
+
+
+def _is_placeholder_range(entry: Dict) -> bool:
+    """True while an entry still carries the untouched placeholder extent.
+
+    Used to distinguish "never initialised" from "the designer set this",
+    so repairs never clobber a hand-edited range.
+    """
+    try:
+        return (
+            float(entry.get("min")) == float(_PLACEHOLDER_MIN)
+            and float(entry.get("max")) == float(_PLACEHOLDER_MAX)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_degenerate_range(entry: Dict) -> bool:
+    """True if an entry's extent has collapsed to a point.
+
+    Axes carried by VIRTUAL masters (GRAD) or injected post-build (SPAC) have
+    no real master spanning them, so the source reports them as [0, 0] — a
+    slider with nowhere to go. Treated as repairable, but only when something
+    actually defines the axis, so a genuinely unused axis stays as-is.
+    """
+    try:
+        return float(entry.get("min")) >= float(entry.get("max"))
+    except (TypeError, ValueError):
+        return False
+
+
+def _derive_traditional_range(tag: str, rows: Optional[List[Dict]] = None,
+                              col: Optional[str] = None):
+    """Real ``(min, max)`` for a traditional (non-parametric) axis.
+
+    Parametric axes take their extent from the source's masters. Traditional
+    axes have no such anchor, so recover it from whichever artifact actually
+    defines the axis:
+
+    1. an enabled transform that injects it (e.g. SPAC) — the transform's own
+       min/max params, which are what it writes into fvar;
+    2. the grade axis — the fixed registered GRAD extent;
+    3. otherwise the CSV column's own values, which ARE the mapping corners
+       (the same source the generated STAT table already uses).
+
+    Returns ``None`` when nothing defines the axis, leaving the placeholder in
+    place rather than inventing a range.
+    """
+    tag_upper = (tag or "").strip().upper()
+
+    # 1. Transform-injected axes (SPAC): the transform owns the fvar extent.
+    if ORIGINAL_PATH is not None:
+        try:
+            _transforms.discover()
+            for transform, params in _transforms.active(ORIGINAL_PATH):
+                if (transform.spec.injected_axis_tag or "").upper() != tag_upper:
+                    continue
+                lo, hi = params.get("min"), params.get("max")
+                if lo is not None and hi is not None and float(lo) < float(hi):
+                    return float(lo), float(hi)
+        except Exception as exc:
+            print(f"Warning: transform range lookup for {tag_upper} failed: {exc}",
+                  file=sys.stderr)
+
+    # 2. The grade axis has a fixed registered extent.
+    if tag_upper == _grade.GRAD_TAG.upper():
+        return float(_grade.GRAD_MIN), float(_grade.GRAD_MAX)
+
+    # 3. Fall back to the CSV column's own spread. Blank cells mean "inherit",
+    #    not zero, so they're skipped rather than counted as a corner.
+    if col is None:
+        return None
+    values: List[float] = []
+    for row in rows or []:
+        raw = row.get(col)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            values.append(float(str(raw).strip()))
+        except ValueError:
+            continue
+    if len(values) >= 2 and min(values) < max(values):
+        return min(values), max(values)
+    return None
+
+
+def _repair_placeholder_ranges(metadata: Dict, rows: List[Dict], in_cols: List[str]) -> bool:
+    """Re-derive any traditional axis still sitting at the placeholder extent.
+
+    Without this, an axis seeded before its CSV column had values (or before
+    its transform was enabled) would keep -1000/1000 forever — and that range
+    reaches real fvar, not just the UI. Hand-edited ranges are left alone.
+    Returns True if anything changed.
+    """
+    changed = False
+    for key, entry in metadata.items():
+        if not isinstance(entry, dict):
+            continue
+        if not (_is_placeholder_range(entry) or _is_degenerate_range(entry)):
+            continue
+        # Only axes that are actually a CSV column can be derived from its
+        # values; the rest (GRAD, SPAC) fall through to their own definitions.
+        col = key if key in in_cols else None
+        derived = _derive_traditional_range(
+            entry.get("registered_tag") or key, rows, col
+        )
+        if derived is None:
+            continue
+        entry["min"], entry["max"] = derived
+        # A default carried over from the placeholder era can sit outside the
+        # real range (e.g. opsz 72 against a 12..144 axis is fine, but a
+        # stale one may not be) — clamp it so fvar stays well-formed.
+        if isinstance(entry.get("default"), (int, float)):
+            entry["default"] = max(derived[0], min(derived[1], float(entry["default"])))
+        changed = True
+    return changed
+
+
 def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     """Load axis metadata from JSON file. Auto-populates with Glyphs file axes if missing."""
     metadata_path = _get_avar2_metadata_path()
     if not metadata_path:
         return {}
-    
+
     # Create file with empty dict if it doesn't exist
     if not metadata_path.exists():
         try:
@@ -2337,11 +2461,23 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
                 is_parametric = axis.get("has_master_coverage", True)
 
                 if axis_tag_upper not in metadata:
+                    # The source's masters already give the real extent — seed
+                    # with it rather than a placeholder, so the entry is never
+                    # briefly wrong (and stays right even if the re-sync in
+                    # /api/avar2/axes doesn't run, e.g. no CSV yet). Axes on
+                    # virtual masters report [0,0] here, so fall back to
+                    # whatever defines them before the placeholder.
+                    axis_min = float(axis.get("min", 0.0))
+                    axis_max = float(axis.get("max", 0.0))
+                    if axis_min >= axis_max:
+                        axis_min, axis_max = _derive_traditional_range(axis_tag) or (
+                            _PLACEHOLDER_MIN, _PLACEHOLDER_MAX
+                        )
                     metadata[axis_tag_upper] = {
                         "display_name": axis_name,
                         "registered_tag": axis_tag.lower(),
-                        "min": -1000,
-                        "max": 1000,
+                        "min": axis_min,
+                        "max": axis_max,
                         "is_parametric": is_parametric,
                     }
                     metadata_updated = True
@@ -4205,8 +4341,8 @@ def get_avar2_axes():
             }), 404
         
         
-        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
+        rows, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+
         # Normalize traditional axis names
         traditional_axes = [_csv_io.normalize_in_axis_name(col) for col in in_cols]
         
@@ -4307,11 +4443,15 @@ def get_avar2_axes():
                 normalized_tag = _csv_io.normalize_in_axis_name(col)
                 # Use proper display name if available, otherwise use column name
                 default_display_name = default_display_names.get(normalized_tag.lower(), col)
+                # Seed with the axis's real extent where we can recover it —
+                # the placeholder only stands in when nothing defines the axis.
+                derived = _derive_traditional_range(normalized_tag, rows, col)
+                axis_min, axis_max = derived or (_PLACEHOLDER_MIN, _PLACEHOLDER_MAX)
                 metadata[col] = {
                     "display_name": default_display_name,
                     "registered_tag": normalized_tag,
-                    "min": -1000,
-                    "max": 1000,
+                    "min": axis_min,
+                    "max": axis_max,
                     "is_parametric": False  # Mark as traditional (not in Glyphs file)
                 }
                 metadata_updated = True
@@ -4331,7 +4471,15 @@ def get_avar2_axes():
                     metadata_updated = True
             
             axes_with_metadata[col] = metadata[col]
-        
+
+        # Repair traditional axes still stuck on the placeholder extent —
+        # entries seeded before their CSV column had values, or before the
+        # transform that injects them was enabled. Parametric axes already
+        # re-sync from the source above; this gives traditional axes the
+        # same self-healing instead of leaking -1000/1000 into real fvar.
+        if _repair_placeholder_ranges(metadata, rows, in_cols):
+            metadata_updated = True
+
         # Save updated metadata if we added any new axes
         if metadata_updated:
             _save_axis_metadata(metadata)
