@@ -141,6 +141,7 @@ function App() {
   const [avar2FontUrl, setAvar2FontUrl] = useState(null);
   const [avar2FontLoaded, setAvar2FontLoaded] = useState(false);
   const [coverage, setCoverage] = useState([]);
+  const [coveragePins, setCoveragePins] = useState([]);
   const [jumpLocation, setJumpLocation] = useState(null);
   // Load initial data
   useEffect(() => {
@@ -335,6 +336,7 @@ function App() {
       setAxes(axesData.axes || []);
       setTransforms(transformsData.transforms || []);
       setCoverage(coverageData.findings || []);
+      setCoveragePins(coverageData.pins || []);
       setGrade({
         enabled: !!gradeData.enabled,
         default_pct: gradeData.default_pct ?? 0.25,
@@ -1964,6 +1966,7 @@ function App() {
           <SpaceTab
             axes={axes}
             coverageFindings={coverage}
+            coveragePins={coveragePins}
             fontUrl={fontUrl}
             vfFamilyId={vfFamilyId}
             onPinCorner={async (loc) => {

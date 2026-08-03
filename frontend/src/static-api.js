@@ -768,7 +768,13 @@ const staticOverrides = {
     };
   },
   getTransforms: async () => (uploadDataset ? { transforms: uploadDataset.transforms || [] } : { transforms: await transformsList() }),
-  getCoverage: async () => ({ findings: uploadDataset ? uploadDataset.coverage || [] : [] }),
+  getCoverage: async () => ({
+    findings: uploadDataset ? uploadDataset.coverage || [] : [],
+    // Fresh array every call: dataset.cornerPins is mutated in place
+    // by pinCorner, and the same reference through getCoverage left
+    // React's Object.is state check blind to the update.
+    pins: [...(uploadDataset ? uploadDataset.cornerPins || [] : [])],
+  }),
   getGrade: async () => (uploadDataset
     ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
     : endpoint('grade.json')()),
@@ -1161,6 +1167,9 @@ export async function selectApiMode() {
   }
   staticMode = true;
   Object.assign(api, staticOverrides);
+  // Debug/introspection hook for the static provider (used by e2e and
+  // manual diagnosis).
+  if (typeof window !== 'undefined') window.__avar2api = api;
   // Auto-restore the stored session before the app renders — health()
   // then answers for the uploaded dataset and the app boots into it.
   await restoreSession();

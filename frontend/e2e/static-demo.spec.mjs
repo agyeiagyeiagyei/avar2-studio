@@ -729,8 +729,9 @@ await page.click('button:text-is("Space")');
 await page.waitForSelector('.space-chip', { timeout: 30000 });
 ok((await page.$$('.space-chip')).length === 8, '8 corner chips render');
 ok((await page.$$('.space-chip.ghost')).length === 3, '3 ghost chips (the missing corners)');
-// Orbit by drag: chips move with the cube (before any chip click, since
-// jumping to Preview unmounts the Space tab).
+ok((await page.$$('.space-instance')).length === 2, 'named instances render as diamonds');
+ok((await page.$$('.space-brace-dot')).length === 0, 'no brace dots on a brace-less font (correct classification)');
+// Orbit by drag: chips move with the cube (before any chip click).
 const chipLeftBefore = await page.evaluate(() => document.querySelector('.space-chip').style.left);
 await page.evaluate(() => {
   const cv = document.querySelector('.space-cube');
@@ -740,26 +741,22 @@ await page.evaluate(() => {
 });
 const chipLeftAfter = await page.evaluate(() => document.querySelector('.space-chip').style.left);
 ok(chipLeftBefore !== chipLeftAfter, 'drag orbits the cube (chips move)');
-// Chip click jumps the preview to that location.
+// Chip click applies the location to the in-tab probe (no navigation).
 await page.evaluate(() => {
   const chips = [...document.querySelectorAll('.space-chip:not(.ghost)')];
-  chips[0].click();
+  chips[chips.length - 1].click();
 });
-await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
-ok(await page.evaluate(() =>
-  getComputedStyle(document.querySelector('.preview-tab-sample')).fontVariationSettings.includes('"')),
-  'chip click jumps the preview to its location');
-// Pin a ghost from its chip.
-await page.click('button:text-is("Space")');
+await page.waitForTimeout(600);
+ok(await page.$('.space-cube') !== null, 'chip click stays in the Space tab');
+ok((await page.textContent('.space-side-label')).includes('XTRA'), 'probe shows the clicked location');
+// Pin a ghost from its chip → the chip turns into a red "pinned" chip.
 await page.evaluate(() => {
   const chips = [...document.querySelectorAll('.space-chip.ghost')];
   chips[0].querySelector('.space-chip-pin').click();
 });
-await page.waitForFunction(() =>
-  document.querySelectorAll('.space-chip.ghost').length < 3,
-  { timeout: 90000 }
-);
+await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned').length > 0, { timeout: 90000 });
 ok(true, 'pin from a ghost chip completes');
+ok((await page.textContent('.space-chip.pinned')).includes('pinned'), 'pinned chip shows the red pinned label');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

@@ -97,3 +97,44 @@
   text-align: center;
   color: var(--zinc-500, #71717a);
 }
+
+/* named instances (teal diamonds) */
+.space-instance {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: #0d9488;
+  transform: translate(-50%, -50%) rotate(45deg);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+/* brace layer dots */
+.space-brace-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #94a3b8;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: default;
+}
+.space-brace-dot:hover {
+  background: #64748b;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.25);
+}
+
+/* pinned corner chips */
+.space-chip.pinned {
+  background: #fee2e2;
+  border: 2px solid #dc2626;
+}
+.space-chip-pinned-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #dc2626;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-left: 2px;
+}
+.space-legend .dot.instance { background: #0d9488; border-radius: 2px; transform: rotate(45deg); }

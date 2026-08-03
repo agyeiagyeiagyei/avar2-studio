@@ -94,6 +94,35 @@ export function parseFont(bytes) {  const view = new DataView(bytes.buffer, byte
   return { familyName, upm, axes, instances };
 }
 
+// post table (format 2.0): glyph order as names — glyphNameIndex plus
+// Pascal strings for custom names (index ≥ 258). Used by the Space tab
+// to name brace layers' glyphs.
+import { MAC_GLYPH_NAMES } from './mac-glyph-names.js';
+
+export function parseGlyphNames(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dir = tables(view);
+  const rec = dir.post;
+  if (!rec) return [];
+  const base = rec.offset;
+  if (view.getUint32(base) !== 0x00020000) return [];
+  // fontc writes 0 in post's own numGlyphs field; fontTools (and we)
+  // read the real count from maxp. post 2.0's full header is 34
+  // bytes; glyphNameIndex follows it, then Pascal strings.
+  const numGlyphs = dir.maxp ? view.getUint16(dir.maxp.offset + 4) : view.getUint16(base + 4);
+  const idx = [];
+  for (let i = 0; i < numGlyphs; i++) idx.push(view.getUint16(base + 34 + i * 2));
+  const pascal = [];
+  let p = base + 34 + numGlyphs * 2;
+  const end = base + rec.length;
+  while (p < end) {
+    const len = view.getUint8(p);
+    pascal.push(new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset + p + 1, len)));
+    p += 1 + len;
+  }
+  return idx.map(gi => (gi < 258 ? MAC_GLYPH_NAMES[gi] : pascal[gi - 258]) || `glyph${gi}`);
+}
+
 /**
  * Minimal STAT reader for export verification: axis records (tag,
  * nameID, ordering), format-aware axis value records, and
