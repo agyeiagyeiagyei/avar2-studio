@@ -25,7 +25,7 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm } from './fontc-compile';
+import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -687,14 +687,26 @@ const applyBundle = async (bundle, dataset) => {
   // master coverage — the compiled masters only span the parametrics.
   // SPAC is transform-injected (a live-preview parametric slider, like
   // the server's built-font overlay marks it).
-  const userTags = avar2Csv.trim() && compiledTags
-    ? new Set(csvHeaderTags(avar2Csv).filter(t => !compiledTags.has(t) && t !== 'SPAC'))
+  refreshAxesFromFont(dataset);
+  return report;
+};
+
+// Re-derive dataset.axes from the font's fvar after a mutation that
+// changed the axis set (bundle import, transforms toggle, rebuild).
+// User axes (CSV in-columns), control axes, GRAD and transform-injected
+// axes don't come from compiled masters — SPAC rides the fvar as a
+// live-preview parametric slider.
+const refreshAxesFromFont = (dataset) => {
+  const csv = dataset.mappingsCsv || '';
+  const compiledTags = new Set(dataset.parametricTags);
+  const userTags = csv.trim()
+    ? new Set(csvHeaderTags(csv).filter(t => !compiledTags.has(t) && t !== 'SPAC'))
     : new Set();
-  const controlTags = new Set(controlAxes.map(a => a.tag));
+  const controlTags = new Set((dataset.controlAxes || []).map(a => a.tag));
   const injectedTags = new Set(
-    transforms
+    (dataset.transforms || [])
       .filter(t => t.enabled)
-      .map(t => KNOWN_TRANSFORMS[t.type]?.injected_axis_tag)
+      .map(t => KNOWN_TRANSFORMS[t.type || t.id]?.injected_axis_tag)
       .filter(Boolean)
   );
   const meta = parseFont(dataset.fontBytes);
@@ -708,7 +720,49 @@ const applyBundle = async (bundle, dataset) => {
       transform_injected: injectedTags.has(a.tag),
     })),
   };
-  return report;
+};
+
+// The Transforms menu on an uploaded source: the known built-ins with
+// the dataset's enabled/params state overlaid (bundle imports and
+// toggles set it), plus any unknown imported entries (the wasm skips
+// those — they render so the menu reflects the bundle).
+const transformsMenu = (dataset) => {
+  const state = new Map((dataset.transforms || []).map(t => [t.type || t.id, t]));
+  const known = Object.values(KNOWN_TRANSFORMS).map(k => {
+    const s = state.get(k.id) || {};
+    return { ...k, enabled: !!s.enabled, params: { ...(s.params || {}) } };
+  });
+  const knownIds = new Set(Object.keys(KNOWN_TRANSFORMS));
+  const unknown = (dataset.transforms || [])
+    .filter(t => !knownIds.has(t.type || t.id))
+    .map(t => ({ id: t.type || t.id, name: t.name || t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
+  return [...known, ...unknown];
+};
+
+// The full rebuild pipeline for an uploaded .glyphs source: compile,
+// avar2 mappings, corner pins, the out-of-range drop, SPAC transforms.
+// Each stage's HVAR rebuild reads the current gvar, so the final font
+// carries every stage's advances. Shared by buildFont (the transform
+// set rides along on rebuilds) and updateTransforms (the only way to
+// change the set — applied transforms can't be un-baked).
+const rebuildUploadFont = async (dataset) => {
+  let ttf = await compileFont(dataset.sourceText);
+  if (dataset.mappingsCsv) {
+    ttf = await addAvar2(ttf, dataset.mappingsCsv);
+  }
+  dataset.fontBytes = ttf;
+  await applyPins(dataset);
+  if (dataset.clampOutOfRange) {
+    dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
+  }
+  const transforms = (dataset.transforms || [])
+    .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
+  if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
+    dataset.fontBytes = await applyTransforms(
+      dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
+    );
+  }
+  refreshAxesFromFont(dataset);
 };
 
 const staticOverrides = {
@@ -769,7 +823,7 @@ const staticOverrides = {
       parametric_axes: [...uploadDataset.parametricTags],
     };
   },
-  getTransforms: async () => (uploadDataset ? { transforms: uploadDataset.transforms || [] } : { transforms: await transformsList() }),
+  getTransforms: async () => (uploadDataset ? { transforms: transformsMenu(uploadDataset) } : { transforms: await transformsList() }),
   getCoverage: async () => ({
     findings: uploadDataset ? uploadDataset.coverage || [] : [],
     // Fresh array every call: dataset.cornerPins is mutated in place
@@ -897,10 +951,9 @@ const staticOverrides = {
     return { ok: true, ignored_files: ignored };
   },
 
-  // Rebuild only exists for uploaded .glyphs sources: recompile the
-  // source, re-apply the mappings CSV (as the upload did), re-apply
-  // corner pins, and re-drop out-of-range sources when the user chose
-  // that — the rebuilt fontBytes stay the dataset's truth.
+  // Rebuild only exists for uploaded .glyphs sources: the full pipeline
+  // re-runs (compile → avar2 → pins → out-of-range drop → transforms) —
+  // the rebuilt fontBytes stay the dataset's truth.
   buildFont: async () => {
     if (!uploadDataset) {
       throw new Error('Building needs the full app — this static demo is read-only.');
@@ -908,15 +961,7 @@ const staticOverrides = {
     if (uploadDataset.sourceText == null) {
       throw new Error("Rebuilding a .designspace needs the full app — the browser can't compile UFO sources yet.");
     }
-    let ttf = await compileFont(uploadDataset.sourceText);
-    if (uploadDataset.mappingsCsv) {
-      ttf = await addAvar2(ttf, uploadDataset.mappingsCsv);
-    }
-    uploadDataset.fontBytes = ttf;
-    await applyPins(uploadDataset);
-    if (uploadDataset.clampOutOfRange) {
-      uploadDataset.fontBytes = await clampOutOfRangeWasm(uploadDataset.fontBytes);
-    }
+    await rebuildUploadFont(uploadDataset);
     URL.revokeObjectURL(uploadDataset.fontUrl);
     uploadDataset = {
       ...uploadDataset,
@@ -955,17 +1000,38 @@ const staticOverrides = {
     return { ok: true };
   },
 
-  // Transforms toggles: allowed only between the two baked states (the
-  // snapshot's enabled set ↔ all-off). Anything else isn't baked and
-  // throws — App reverts the toggle and shows the message. Enabled/params
-  // merge OVER the stored list so name/description/schema metadata
-  // survives (the App renders the menu from our return value).
+  // Transforms toggles: on SNAPSHOT datasets, allowed only between the
+  // two baked states (the snapshot's enabled set ↔ all-off). Anything
+  // else isn't baked and throws — App reverts the toggle and shows the
+  // message. On UPLOADED .glyphs sources the set is real: applied
+  // transforms can't be un-baked, so the font rebuilds from source with
+  // the new set applied. Enabled/params merge OVER the stored list so
+  // name/description/schema metadata survives (the App renders the menu
+  // from our return value).
   updateTransforms: async (entries) => {
     if (uploadDataset) {
-      // An imported bundle's transforms were applied onto the compiled
-      // bytes one-shot; re-toggling would mean re-running the whole
-      // import pipeline.
-      throw new Error("Transform toggles on an uploaded source need the full app — the static demo applies an imported bundle's transforms as-is.");
+      if (uploadDataset.sourceText == null) {
+        throw new Error("Transform toggles on a .designspace project need the full app — the browser can't rebuild UFO sources yet.");
+      }
+      const list = (entries || []).map(e => ({
+        type: e.type || e.id, enabled: !!e.enabled, params: e.params || {},
+      }));
+      // The registry's one-injector-per-axis rule (same as the bundle
+      // validation): two enabled SPAC transforms would produce a font
+      // with two SPAC axes.
+      const spacInjectors = list
+        .filter(t => t.enabled && KNOWN_TRANSFORMS[t.type]?.injected_axis_tag === 'SPAC')
+        .map(t => t.type);
+      if (spacInjectors.length > 1) {
+        throw new Error(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
+      }
+      uploadDataset.transforms = list;
+      await rebuildUploadFont(uploadDataset);
+      URL.revokeObjectURL(uploadDataset.fontUrl);
+      uploadDataset.fontUrl = URL.createObjectURL(new Blob([uploadDataset.fontBytes], { type: 'font/ttf' }));
+      uploadDataset.health.last_build_time = Date.now();
+      persistSoon();
+      return { transforms: transformsMenu(uploadDataset) };
     }
     const base = await transformsList();
     const next = base.map(t => {

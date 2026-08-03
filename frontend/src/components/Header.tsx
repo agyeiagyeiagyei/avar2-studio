@@ -500,7 +500,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                             <input
                               type="checkbox"
                               checked={!!(t.params?.[p.key] ?? p.default)}
-                              disabled={busy || staticMode}
+                              disabled={busy || (staticMode && !allowImportInStatic)}
                               onChange={(e) => onTransformParam && onTransformParam(t.id, p.key, e.target.checked)}
                             />
                           ) : (
@@ -511,7 +511,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                               min={p.min ?? undefined}
                               max={p.max ?? undefined}
                               step={p.type === 'float' ? 0.1 : 1}
-                              disabled={busy || staticMode}
+                              disabled={busy || (staticMode && !allowImportInStatic)}
                               // Pass the RAW string so clearing the field or
                               // typing a leading '-' isn't coerced to 0 — the
                               // server coerces/clamps against the ParamSpec on

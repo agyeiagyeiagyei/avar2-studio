@@ -814,6 +814,68 @@ ok(clampMetrics === '(166, 34) (34, 0, 129, 1200)',
   `default instance intact after the drop (${clampMetrics})`);
 await page.click('.preview-export-modal button:has-text("Cancel")');
 
+// ---- 22. SPAC transform toggles on an upload --------------------------------
+console.log('22. SPAC transform toggles on an upload');
+// Continues on section 21's CrispyBraced upload (its clamp flag is set,
+// so the toggle also exercises the rebuild pipeline order: compile →
+// pins → clamp → transforms). Uploads previously showed only Grade in
+// this menu.
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+const tNames = await page.$$eval('.transform-row .transform-name', els => els.map(e => e.textContent.trim()));
+ok(tNames.includes('Spacing — uniform (gftools)') && tNames.includes('Spacing — width-aware'),
+  `Transforms menu lists the SPAC transforms on an upload (${tNames.join(' | ')})`);
+// Toggle width-aware on → the font rebuilds with SPAC injected.
+await page.click('.transform-row:has-text("Spacing — width-aware") input[type=checkbox]');
+await page.keyboard.press('Escape'); // close the Radix dropdown — outside clicks are swallowed by it
+await page.click('button:text-is("Preview")');
+await page.waitForFunction(() => {
+  const groups = [...document.querySelectorAll('.preview-axis-group')];
+  return groups.some(g => [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'SPAC'));
+}, { timeout: 240000 });
+ok(true, 'SPAC slider appears after toggling width-aware on');
+// The exported font carries the SPAC fvar axis.
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [spacFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const spacFontPath = await spacFontDl.path();
+const fontAxes = (p) => execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+print(','.join(a.axisTag for a in TTFont(sys.argv[1])['fvar'].axes))
+`, p]
+).toString().trim();
+ok(fontAxes(spacFontPath).includes('SPAC'), `exported font carries the SPAC fvar axis (${fontAxes(spacFontPath)})`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+// Toggle off → rebuild without SPAC → the fvar axis is gone again.
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+await page.click('.transform-row:has-text("Spacing — width-aware") input[type=checkbox]');
+await page.keyboard.press('Escape'); // close the Radix dropdown
+await page.waitForFunction(() =>
+  document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 15000 }).catch(() => null);
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 240000 });
+await page.waitForTimeout(1000);
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [spacOffFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const spacOffFontPath = await spacOffFontDl.path();
+ok(!fontAxes(spacOffFontPath).includes('SPAC'), `SPAC fvar axis removed after toggling off (${fontAxes(spacOffFontPath)})`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

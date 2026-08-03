@@ -94,9 +94,17 @@ Resolved as the phases landed:
   a pure-JS VarStore evaluator.
 - **harfbuzzjs — NOT NEEDED.** The width chips come from instance data;
   no shaping happens client-side. The HB_TINY/avar2 question is moot.
-- **SPAC on uploaded fonts — DEFER.** It's per-glyph hmtx + advance
-  surgery; revisit if the static demo gains per-glyph editing. The
-  bundled demo is covered by the baked spac-on/off variants.
+- **SPAC on uploaded fonts — PORT.** `apply_transforms(font_bytes,
+  transforms_json, avar2_csv)` in the fontc-web wasm crate (SPAC fvar
+  axis + gvar phantom tuples + rebuilt HVAR — a live slider, first
+  exercised via config-bundle imports). The Transforms menu on an
+  upload lists the known built-ins (uniform + width-aware) with the
+  dataset's state overlaid; toggles/params rebuild the font from source
+  with the new set applied (applied transforms can't be un-baked) —
+  the same rebuild pipeline as Rebuild (compile → avar2 → corner pins
+  → out-of-range drop → transforms), so the enabled set also rides
+  rebuilds, sessions and bundle exports. Snapshot datasets keep the
+  baked spac-on/off variants.
 - **Grade — PORT.** The pure-weight model (grade.py: XOPQ+YOPQ drive,
   XTRA follows at COMP_RATIO) needs no contour offsetting: each brace
   is the glyph's own outline instanced at the light/dark grade coords,
