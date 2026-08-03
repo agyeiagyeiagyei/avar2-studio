@@ -138,3 +138,19 @@
   margin-left: 2px;
 }
 .space-legend .dot.instance { background: #0d9488; border-radius: 2px; transform: rotate(45deg); }
+
+/* out-of-range sources: hollow amber marker */
+.space-brace-dot.out-of-range {
+  background: #fff;
+  border: 2px solid #f59e0b;
+  width: 8px;
+  height: 8px;
+}
+.space-brace-dot.out-of-range:hover {
+  background: #fef3c7;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+.space-legend .dot.out-of-range {
+  background: #fff;
+  border: 2px solid #f59e0b;
+}

@@ -19,7 +19,7 @@ function projectors(norm, az, el, W, H) {
   };
 }
 
-const fmtLoc = (tags, loc) => tags.map((t, i) => `${t} ${loc[i]}`).join(' · ');
+const fmtLoc = (tags, loc) => tags.map((t, i) => `${t} ${Math.round(loc[i] * 10) / 10}`).join(' · ');
 // Single-letter glyph names render as themselves; longer names are
 // shown as text (no reliable name→unicode path without the full AGL).
 const probeFor = (glyphName) =>
@@ -113,7 +113,8 @@ function SpaceTab({ axes, coverageFindings, coveragePins, fontUrl, vfFamilyId, o
         const a = paramAxes[i];
         return v >= 0 ? a.default + v * (a.max - a.default) : a.default + v * (a.default - a.min);
       });
-      (glyphs.size >= glyphCount * 0.5 ? masters : braces).push({ loc, glyphs: [...glyphs] });
+      const outOfRange = loc.some((v, i) => v < ranges[i][0] || v > ranges[i][1]);
+      (glyphs.size >= glyphCount * 0.5 ? masters : braces).push({ loc, glyphs: [...glyphs], outOfRange });
     }
     return { masters, braces };
   }, [bytes, axes, glyphNames]);
@@ -236,15 +237,16 @@ function SpaceTab({ axes, coverageFindings, coveragePins, fontUrl, vfFamilyId, o
             />
           );
         })}
-        {/* brace layers (grey dots; hover previews the glyph) */}
+        {/* brace layers (grey dots; hover previews the glyph). Sources
+            outside the axis box get a hollow amber marker instead. */}
         {braces.map((b, i) => {
           const [x, y] = proj(b.loc);
           return (
             <div
               key={`brace-${i}`}
-              className="space-brace-dot"
+              className={`space-brace-dot${b.outOfRange ? ' out-of-range' : ''}`}
               style={{ left: x, top: y }}
-              title={`brace layer — ${b.glyphs.join(', ')} — ${fmtLoc(tags, b.loc)}`}
+              title={`brace layer${b.outOfRange ? ' (out of range)' : ''} — ${b.glyphs.join(', ')} — ${fmtLoc(tags, b.loc)}`}
               onMouseEnter={() => setProbe({ loc: b.loc, glyphName: probeFor(b.glyphs[0]), label: b.glyphs.join(', ') })}
             />
           );
@@ -306,6 +308,7 @@ function SpaceTab({ axes, coverageFindings, coveragePins, fontUrl, vfFamilyId, o
         <div className="space-legend">
           <span><i className="dot master" /> master</span>
           <span><i className="dot brace" /> brace layer</span>
+          <span><i className="dot out-of-range" /> out of range</span>
           <span><i className="dot instance" /> instance</span>
           <span><i className="dot default" /> default</span>
           <span><i className="dot ghost" /> ghost corner</span>
