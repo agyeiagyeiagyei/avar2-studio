@@ -71,6 +71,7 @@ interface HeaderProps {
   coverageFindings?: CoverageFinding[];
   onJumpToLocation?: (location: Record<string, number>) => void;
   onPinCorner?: (location: Record<string, number>) => void | Promise<unknown>;
+  onClampOutOfRange?: () => void | Promise<unknown>;
 }
 
 interface CoverageFinding {
@@ -116,7 +117,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onJumpToLocation, onPinCorner }: HeaderProps) {
+                 coverageFindings = [], onJumpToLocation, onPinCorner, onClampOutOfRange }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -540,6 +541,27 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             {coverageOpen && (
               <div className="load-font-menu">
                 <div className="load-font-section-label">Design-space coverage</div>
+                {onClampOutOfRange && coverageFindings.some(f => f.type === 'out-of-range-source') && (
+                  <div className="load-font-item coverage-finding-row">
+                    <button
+                      className="coverage-pin-btn"
+                      title="Drop every source outside the axis box (zero its deltas, rebuild HVAR) — the Glyphs.app/fontmake semantics"
+                      onClick={async () => {
+                        setCoverageOpen(false);
+                        setLoadingMsg('Dropping out-of-range sources…');
+                        try {
+                          await onClampOutOfRange();
+                          setLoadingMsg('Out-of-range sources dropped.');
+                          setTimeout(() => setLoadingMsg(null), 4000);
+                        } catch (err: any) {
+                          setLoadingMsg(`Drop failed: ${err?.message || err}`);
+                        }
+                      }}
+                    >
+                      Drop out-of-range sources
+                    </button>
+                  </div>
+                )}
                 {coverageFindings.map((f, i) => (
                   <div key={i} className="load-font-item coverage-finding-row">
                     <button

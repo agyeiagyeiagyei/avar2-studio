@@ -25,7 +25,7 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat } from './fontc-compile';
+import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -190,6 +190,7 @@ const serializeDataset = (dataset) => ({
   transforms: dataset.transforms || [],
   grade: dataset.grade || null,
   cornerPins: dataset.cornerPins || [],
+  clampOutOfRange: dataset.clampOutOfRange || false,
   familyName: dataset.health.family_name,
   upm: dataset.health.upm,
 });
@@ -241,6 +242,7 @@ const restoreSession = async () => {
       transforms: rec.transforms || [],
       grade: rec.grade || null,
       cornerPins: rec.cornerPins || [],
+      clampOutOfRange: rec.clampOutOfRange || false,
       axes: rec.axes,
       instances: { instances: [] },
       coverage: [
@@ -896,8 +898,9 @@ const staticOverrides = {
   },
 
   // Rebuild only exists for uploaded .glyphs sources: recompile the
-  // source, re-apply the mappings CSV (as the upload did), and re-apply
-  // corner pins — the rebuilt fontBytes stay the dataset's truth.
+  // source, re-apply the mappings CSV (as the upload did), re-apply
+  // corner pins, and re-drop out-of-range sources when the user chose
+  // that — the rebuilt fontBytes stay the dataset's truth.
   buildFont: async () => {
     if (!uploadDataset) {
       throw new Error('Building needs the full app — this static demo is read-only.');
@@ -911,6 +914,9 @@ const staticOverrides = {
     }
     uploadDataset.fontBytes = ttf;
     await applyPins(uploadDataset);
+    if (uploadDataset.clampOutOfRange) {
+      uploadDataset.fontBytes = await clampOutOfRangeWasm(uploadDataset.fontBytes);
+    }
     URL.revokeObjectURL(uploadDataset.fontUrl);
     uploadDataset = {
       ...uploadDataset,
@@ -1150,6 +1156,17 @@ const staticOverrides = {
     uploadDataset.fontBytes = await regenStat(uploadDataset.fontBytes);
     await refreshAfterPin(uploadDataset);
     return { ok: true, scaffold };
+  },
+
+  // Drop out-of-range (stranded) sources — the Glyphs.app/fontmake
+  // semantics: their gvar deltas are zeroed and HVAR rebuilt. Sticks
+  // to the dataset: rebuilds re-apply it, sessions carry it.
+  clampOutOfRange: async () => {
+    requireUpload();
+    uploadDataset.fontBytes = await clampOutOfRangeWasm(uploadDataset.fontBytes);
+    uploadDataset.clampOutOfRange = true;
+    await refreshAfterPin(uploadDataset);
+    return { ok: true };
   },
 };
 

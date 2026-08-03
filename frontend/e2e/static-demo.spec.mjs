@@ -758,6 +758,62 @@ await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned')
 ok(true, 'pin from a ghost chip completes');
 ok((await page.textContent('.space-chip.pinned')).includes('pinned'), 'pinned chip shows the red pinned label');
 
+// ---- 21. drop out-of-range sources ----------------------------------------
+console.log('21. drop out-of-range sources');
+// The full braced Crispy has brace sources OUTSIDE the axis box
+// (XTRA +2.00 etc.) — fontc extrapolates them, Glyphs.app/fontmake drop
+// them. The Coverage action applies the drop semantics in-browser.
+const CRISPY_BRACED = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'Crispy-braced.glyphs');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_BRACED);
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyBraced', null, { timeout: 240000 });
+await page.click('button:has-text("Coverage")');
+await page.waitForSelector('.load-font-menu', { timeout: 20000 });
+const oorBefore = await page.$$eval('.load-font-menu .load-font-item-name',
+  els => els.filter(e => e.textContent.includes('Out-of-range source')).length);
+ok(oorBefore > 0, `out-of-range findings present after upload (${oorBefore})`);
+await page.click('button:has-text("Drop out-of-range sources")');
+await page.waitForFunction(() =>
+  document.querySelector('.header-loading-msg')?.textContent === 'Out-of-range sources dropped.',
+  { timeout: 120000 }
+);
+await page.waitForTimeout(1500);
+await page.click('button:has-text("Coverage")');
+await page.waitForSelector('.load-font-menu', { timeout: 20000 });
+const oorAfter = await page.$$eval('.load-font-menu .load-font-item-name',
+  els => els.filter(e => e.textContent.includes('Out-of-range source')).length);
+ok(oorAfter === 0, `drop cleared the out-of-range findings (${oorAfter} left)`);
+await page.click('button:has-text("Coverage")'); // close
+// The default instance must be intact: download the font and check the
+// default 'a' metrics/outline — the peak-zeroing failure mode gave a
+// default advance of 2154 (vs 166). (A Pillow render can't be used
+// here: Crispy's default is a 1-unit hairline — zero dark pixels at
+// any size.)
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [clampFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const clampFontPath = await clampFontDl.path();
+const clampMetrics = execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+f = TTFont(sys.argv[1])
+g = f['glyf']['a']
+g.recalcBounds(f['glyf'])
+print(f['hmtx'].metrics['a'], (g.xMin, g.yMin, g.xMax, g.yMax))
+`, clampFontPath]
+).toString().trim();
+ok(clampMetrics === '(166, 34) (34, 0, 129, 1200)',
+  `default instance intact after the drop (${clampMetrics})`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

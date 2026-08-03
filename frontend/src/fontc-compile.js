@@ -111,3 +111,9 @@ export function applyGrade(fontBytes, gradeJson, coordsJson) {
 export function applyTransforms(fontBytes, transformsJson, avar2Csv) {
   return send({ kind: 'transforms', fontBytes, json: transformsJson, csv: avar2Csv });
 }
+
+/** Drop out-of-range (stranded) sources: their gvar deltas are zeroed
+ * and HVAR rebuilt — the Glyphs.app/fontmake semantics. */
+export function clampOutOfRange(fontBytes) {
+  return send({ kind: 'clamp', fontBytes });
+}

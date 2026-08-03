@@ -38,6 +38,12 @@ mod spac;
 mod stat;
 mod stat_registry;
 
+/// Bring stranded (out-of-range) gvar sources back to the axis edge
+/// (Glyphs/varLib semantics — see braces.rs).
+#[wasm_bindgen]
+pub fn clamp_out_of_range(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
+    braces::clamp_out_of_range(font_bytes)
+}
 pub use measure::measure_at;
 
 /// Hold a ghost corner up: instance the scaffold shape and inject it

@@ -956,3 +956,237 @@ pub(crate) fn pin_corner(
     };
     build_grown_font(&font_bytes, &[], extras, &options)
 }
+
+// --------------------------------------------------------------------------
+// clamp_out_of_range: bring stranded sources back into the axis box
+// --------------------------------------------------------------------------
+
+/// Neutralize out-of-range ("stranded") tuples by zeroing their packed
+/// delta bytes AND their coordinates (peak + intermediate bounds) in
+/// place. Zero deltas alone would already inert the tuple (0 × any
+/// scalar = 0); zeroing the coordinates too makes peak-reading audits
+/// (the studio's coverage check) see the source as resolved. This is
+/// NOT the mangling the divergence oracle proved: that was zeroing a
+/// LIVE tuple's peak (default advance 166→2154) — a zero-peak
+/// zero-delta tuple is a global no-op. Intermediate bounds of in-range
+/// tuples are clamped to ±1 (varLib clamps those). Stranded shared-peak
+/// entries are zeroed as well (every referencing tuple is stranded —
+/// same peak).
+fn zero_out_of_range_tuples(bytes: &mut [u8], axis_count: usize) -> Result<usize, JsError> {
+    fn be_u16(b: &[u8], off: usize) -> Result<u16, JsError> {
+        b.get(off..off + 2)
+            .map(|s| u16::from_be_bytes([s[0], s[1]]))
+            .ok_or_else(|| err("gvar: truncated"))
+    }
+    fn be_u32(b: &[u8], off: usize) -> Result<u32, JsError> {
+        b.get(off..off + 4)
+            .map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
+            .ok_or_else(|| err("gvar: truncated"))
+    }
+    fn coord_at(bytes: &[u8], off: usize) -> i16 {
+        i16::from_be_bytes([bytes[off], bytes[off + 1]])
+    }
+    fn clamp_block(bytes: &mut [u8], off: usize, n: usize) -> usize {
+        let mut changed = 0;
+        for i in 0..n {
+            let v = coord_at(bytes, off + i * 2);
+            let c = v.clamp(-16384, 16384);
+            if c != v {
+                bytes[off + i * 2..off + i * 2 + 2].copy_from_slice(&c.to_be_bytes());
+                changed += 1;
+            }
+        }
+        changed
+    }
+    fn zero_block(bytes: &mut [u8], off: usize, n: usize) {
+        for b in &mut bytes[off..off + n * 2] {
+            *b = 0;
+        }
+    }
+
+    if bytes.len() < 20 {
+        return Err(err("gvar: header truncated"));
+    }
+    let shared_count = be_u16(bytes, 6)? as usize;
+    let off_shared = be_u32(bytes, 8)? as usize;
+    let glyph_count = be_u16(bytes, 12)? as usize;
+    let flags = be_u16(bytes, 14)?;
+    let off_data = be_u32(bytes, 16)? as usize;
+    let long_offsets = flags & 1 != 0;
+
+    // Shared-peak entries with out-of-range coords: zero them (every
+    // tuple referencing one is stranded by definition — same peak — so
+    // its deltas die in the glyph walk below; a zero-peak zero-delta
+    // tuple is a global no-op).
+    let mut stranded_shared: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    for i in 0..shared_count {
+        let off = off_shared + i * axis_count * 2;
+        if (0..axis_count).any(|a| coord_at(bytes, off + a * 2).abs() > 16384) {
+            zero_block(bytes, off, axis_count);
+            stranded_shared.insert(i as u16);
+        }
+    }
+
+    // Packed points: (count byte(s) then runs). Returns bytes consumed.
+    fn skip_packed_points(bytes: &[u8], mut p: usize) -> Result<usize, JsError> {
+        let b0 = *bytes.get(p).ok_or_else(|| err("packed points: truncated"))?;
+        p += 1;
+        let count = if b0 & 0x80 != 0 {
+            let b1 = *bytes.get(p).ok_or_else(|| err("packed points: truncated"))?;
+            p += 1;
+            (((b0 & 0x7f) as usize) << 8) | b1 as usize
+        } else {
+            (b0 & 0x7f) as usize
+        };
+        let mut left = count;
+        while left > 0 {
+            let r = *bytes.get(p).ok_or_else(|| err("packed run: truncated"))?;
+            p += 1;
+            let n = (r & 0x7f) as usize + 1;
+            let sz = if r & 0x80 != 0 { 2 } else { 1 };
+            p += n * sz;
+            left = left.saturating_sub(n);
+        }
+        Ok(p)
+    }
+
+    // Zero the packed-delta data bytes within `size` bytes at `p`.
+    fn zero_packed_deltas(bytes: &mut [u8], mut p: usize, end: usize) -> Result<(), JsError> {
+        while p < end {
+            let r = bytes[p];
+            p += 1;
+            let n = (r & 0x3f) as usize + 1;
+            // OT delta-run control (DELTAS_SIZE_MASK): 0x00 = 1 byte,
+            // 0x40 = words (2B), 0x80 = DELTAS_ARE_ZERO (no data),
+            // 0xC0 = longs (4B).
+            let sz = match r & 0xc0 {
+                0x00 => 1,
+                0x40 => 2,
+                0x80 => 0,
+                _ => 4,
+            };
+            for i in 0..n * sz {
+                if p + i < bytes.len() {
+                    bytes[p + i] = 0;
+                }
+            }
+            p += n * sz;
+        }
+        Ok(())
+    }
+
+    let mut changed = 0;
+    for g in 0..glyph_count {
+        let (start, end) = if long_offsets {
+            (
+                be_u32(bytes, 20 + g * 4)? as usize,
+                be_u32(bytes, 20 + (g + 1) * 4)? as usize,
+            )
+        } else {
+            (
+                be_u16(bytes, 20 + g * 2)? as usize * 2,
+                be_u16(bytes, 20 + (g + 1) * 2)? as usize * 2,
+            )
+        };
+        if end <= start {
+            continue;
+        }
+        let gd = off_data + start;
+        let count = (be_u16(bytes, gd)? & 0x0fff) as usize;
+        let data_off = gd + be_u16(bytes, gd + 2)? as usize;
+
+        // Pass 1: tuple headers — clamp in-range intermediate bounds,
+        // and note which tuples are stranded (out-of-range embedded
+        // peak, or referencing an out-of-range shared peak).
+        let mut stranded: Vec<bool> = Vec::with_capacity(count);
+        let mut sizes: Vec<usize> = Vec::with_capacity(count);
+        let mut privates: Vec<bool> = Vec::with_capacity(count);
+        let mut h = gd + 4;
+        for _ in 0..count {
+            let data_size = be_u16(bytes, h)? as usize;
+            let tuple_index = be_u16(bytes, h + 2)?;
+            sizes.push(data_size);
+            privates.push(tuple_index & 0x2000 != 0);
+            h += 4;
+            let mut peak_stranded = false;
+            if tuple_index & 0x8000 != 0 {
+                peak_stranded = (0..axis_count).any(|a| coord_at(bytes, h + a * 2).abs() > 16384);
+                if peak_stranded {
+                    // Zero the peak (and the bounds below): with its
+                    // deltas also zeroed the tuple is a global no-op,
+                    // and peak-reading audits see the source resolved.
+                    zero_block(bytes, h, axis_count);
+                }
+                h += axis_count * 2;
+            } else if stranded_shared.contains(&(tuple_index & 0x0fff)) {
+                peak_stranded = true;
+            }
+            if tuple_index & 0x4000 != 0 {
+                if peak_stranded {
+                    zero_block(bytes, h, axis_count * 2);
+                } else {
+                    changed += clamp_block(bytes, h, axis_count * 2);
+                }
+                h += axis_count * 4;
+            }
+            stranded.push(peak_stranded);
+        }
+        if !stranded.iter().any(|&x| x) {
+            continue;
+        }
+
+        // Pass 2: serialized data. The glyph's shared packed-points
+        // list exists only when the glyph's tupleVariationCount has
+        // the TUPLES_SHARE_POINT_NUMBERS flag (0x8000).
+        let mut p = data_off;
+        if be_u16(bytes, gd)? & 0x8000 != 0 {
+            p = skip_packed_points(bytes, p)?;
+        }
+        for (i, &is_stranded) in stranded.iter().enumerate() {
+            // dataSize covers the private point list AND the deltas —
+            // anchor the tuple's end BEFORE skipping the privates.
+            let tuple_start = p;
+            if privates[i] {
+                p = skip_packed_points(bytes, p)?;
+            }
+            let end_of_tuple = tuple_start + sizes[i];
+            if is_stranded {
+                zero_packed_deltas(bytes, p, end_of_tuple)?;
+                changed += 1;
+            }
+            p = end_of_tuple;
+        }
+    }
+    Ok(changed)
+}
+/// Drop stranded (out-of-range) sources: neutralize their tuples by
+/// zeroing their packed deltas AND their peaks/bounds (zero deltas make
+/// the tuple a no-op; zeroed coordinates make peak-reading audits see
+/// the drop), clamp in-range intermediate bounds to ±1, then rebuild
+/// HVAR from the remaining tuples. This is what Glyphs.app and the
+/// fontmake/varLib pipeline do with sources outside the axis box — the
+/// studio's divergence oracle established that Glyphs.app == fontmake
+/// == drop, while fontc extrapolated. Dropping makes the studio's font
+/// match both.
+pub(crate) fn clamp_out_of_range(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
+    let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
+    let Some(gvar_data) = font.data_for_tag(TAG_GVAR) else {
+        return Err(err("font has no gvar table (not a variable font?)"));
+    };
+    let triples = fvar_triples(&font)?;
+    let mut gvar_bytes = gvar_data.as_bytes().to_vec();
+    let dropped = zero_out_of_range_tuples(&mut gvar_bytes, triples.len())?;
+    if dropped == 0 {
+        return Ok(font_bytes);
+    }
+    let mut replacements = HashMap::new();
+    replacements.insert(TAG_GVAR, gvar_bytes);
+    let dropped_bytes = crate::repack(&font, replacements);
+    let font = FontRef::new(&dropped_bytes).map_err(|e| err(format!("repack: {e}")))?;
+    // Phantom deltas from the stranded sources are gone too — rebuild
+    // HVAR from what remains, with no injected extras.
+    let hvar_bytes = crate::spac::rebuild_hvar(&font, &HashMap::new(), triples.len() as u16)?;
+    let mut replacements = HashMap::new();
+    replacements.insert(crate::TAG_HVAR, hvar_bytes);
+    Ok(crate::repack(&font, replacements))
+}

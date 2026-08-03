@@ -11,6 +11,7 @@
 //   {kind: 'hide-axes', fontBytes, tags}  → {ok, ttf|error}
 //   {kind: 'measure', fontBytes, request} → {ok, areas|error}
 //   {kind: 'pin', fontBytes, request}     → {ok, ttf|error}
+//   {kind: 'clamp', fontBytes}            → {ok, ttf|error}
 // The ttf is transferred (zero-copy) back to the caller.
 
 import init, {
@@ -24,6 +25,7 @@ import init, {
   regen_stat,
   measure_at,
   pin_corner,
+  clamp_out_of_range,
 } from './wasm/fontc-web/fontc_web.js';
 
 const ready = init();
@@ -31,7 +33,10 @@ const ready = init();
 self.onmessage = async (e) => {
   try {
     await ready;
-    if (e.data && e.data.kind === 'pin') {
+    if (e.data && e.data.kind === 'clamp') {
+      const ttf = clamp_out_of_range(e.data.fontBytes);
+      self.postMessage({ ok: true, ttf }, [ttf.buffer]);
+    } else if (e.data && e.data.kind === 'pin') {
       const ttf = pin_corner(e.data.fontBytes, e.data.request);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'measure') {

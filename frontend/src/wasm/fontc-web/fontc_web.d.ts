@@ -56,6 +56,12 @@ export function apply_grade(font_bytes: Uint8Array, grade_json: string, instance
  */
 export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, avar2_csv: string): Uint8Array;
 
+/**
+ * Bring stranded (out-of-range) gvar sources back to the axis edge
+ * (Glyphs/varLib semantics — see braces.rs).
+ */
+export function clamp_out_of_range(font_bytes: Uint8Array): Uint8Array;
+
 export function compile_glyphs(source: string): Uint8Array;
 
 /**
@@ -106,6 +112,7 @@ export interface InitOutput {
     readonly apply_control_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_grade: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly clamp_out_of_range: (a: number, b: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
     readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];

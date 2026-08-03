@@ -1899,6 +1899,10 @@ function App() {
           await api.pinCorner(loc);
           await loadData();
         }}
+        onClampOutOfRange={api.clampOutOfRange ? async () => {
+          await api.clampOutOfRange();
+          await loadData();
+        } : undefined}
       />
 
       <DeleteInstanceModal

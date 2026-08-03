@@ -169,6 +169,26 @@ tuples infer uncovered deltas exactly like fontTools/harfbuzz
 (`src/iup.rs`; without it, instanced outlines silently miss deltas
 that every real renderer applies).
 
+## Dropping out-of-range sources (phase 3b)
+
+Out-of-range findings get a **Drop out-of-range sources** action at
+the top of the Coverage panel (`clamp_out_of_range` in the wasm
+crate). Glyphs.app and the fontmake/varLib pipeline DROP sources
+outside the axis box — the divergence oracle established
+Glyphs.app == fontmake == drop, while fontc extrapolated them — so
+the drop makes the studio's font match both. Mechanically: the
+stranded tuples' packed deltas AND their peaks/bounds are zeroed
+(zero deltas make the tuple a global no-op; zeroed coordinates make
+the peak-reading audit see the drop), in-range intermediate bounds
+are clamped to ±1, and HVAR is rebuilt from the remaining tuples.
+The default instance is untouched (glyf/hmtx byte-identical — the
+oracle in `tests/clamp_oracle.rs` asserts it, plus an anti-mangling
+outline bound against the fontmake build; exact equality is not
+provable, fontdrasil and fontTools tent shapes differ).
+
+The drop sticks to the dataset: rebuilds re-apply it and sessions
+carry it (a `clampOutOfRange` flag beside the corner pins).
+
 ## Space tab (phase 4)
 
 The Noordzij cube (`frontend/src/components/SpaceTab.jsx`): the
