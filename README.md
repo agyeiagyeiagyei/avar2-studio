@@ -17,8 +17,7 @@ editor), and chain optional **post-build transforms** onto every build.
 ![avar2-studio — the Instances tab, each instance rendering live in the built font](docs/images/app-overview.png)
 
 Try it without installing: the [static demo](https://agyeiagyeiagyei.github.io/avar2-studio/)
-(example fonts, plus in-browser compile of uploaded `.glyphs`) or the
-[hosted full app](https://avar2-studio.fly.dev/).
+(example fonts, plus in-browser compile of uploaded `.glyphs`).
 
 ## Getting started
 
