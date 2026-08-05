@@ -226,3 +226,18 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Axis labels — DOM (above chips), non-interactive */
+.space-axis-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #52525b;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 1px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 3;
+  white-space: nowrap;
+}

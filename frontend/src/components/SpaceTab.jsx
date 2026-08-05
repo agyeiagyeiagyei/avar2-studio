@@ -178,13 +178,6 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         }
       }
     }
-    ctx.fillStyle = '#52525b';
-    ctx.font = '12px ui-monospace, monospace';
-    const ends = [[ranges[0][1], ranges[1][0], ranges[2][0]], [ranges[0][0], ranges[1][1], ranges[2][0]], [ranges[0][0], ranges[1][0], ranges[2][1]]];
-    ends.forEach((loc, i) => {
-      const p = proj(loc);
-      ctx.fillText(`${tags[i]} →`, p[0] + 8, p[1] + 12);
-    });
     const items = [];
     masters.forEach(m => items.push({ p: proj(m.loc), kind: 'master' }));
     const dflt = paramAxes.map(a => a.default);
@@ -260,6 +253,15 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
               title={`brace layer${b.outOfRange ? ' (out of range)' : ''} — ${b.glyphs.join(', ')} — ${fmtLoc(tags, b.loc)}`}
               onMouseEnter={() => setProbe({ loc: b.loc, glyphName: probeFor(b.glyphs[0]), label: b.glyphs.join(', ') })}
             />
+          );
+        })}
+        {/* axis labels — DOM so they sit above the chips at any orbit */}
+        {tags.map((t, i) => {
+          const ext = [0, 1, 2].map(j =>
+            i === j ? ranges[j][1] + 0.14 * (ranges[j][1] - ranges[j][0]) : ranges[j][0]);
+          const [x, y] = proj(ext);
+          return (
+            <span key={t} className="space-axis-label" style={{ left: x, top: y }}>{t} →</span>
           );
         })}
         {/* corner chips (live specimens; ghost = red, pinned = labelled) */}
