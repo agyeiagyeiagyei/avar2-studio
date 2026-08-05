@@ -154,3 +154,75 @@
   background: #fff;
   border: 2px solid #f59e0b;
 }
+
+/* Coverage findings rail (migrated from the header dropdown) */
+.space-findings {
+  margin-top: 16px;
+  border-top: 1px solid #e4e4e7;
+  padding-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.space-findings-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #71717a;
+  margin-bottom: 6px;
+}
+.space-findings .coverage-finding-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.space-findings .coverage-finding-jump {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.space-findings .coverage-finding-jump:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.space-findings .coverage-finding-jump:not(:disabled):hover {
+  border-color: #a1a1aa;
+  background: #fafafa;
+}
+.space-findings .load-font-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #27272a;
+}
+.space-findings .load-font-item-subtitle {
+  font-size: 11px;
+  color: #71717a;
+  margin-top: 2px;
+}
+.space-findings .coverage-pin-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  background: #fff;
+  color: #dc2626;
+  cursor: pointer;
+}
+.space-findings .coverage-pin-btn:hover:not(:disabled) {
+  background: #dc2626;
+  color: #fff;
+}
+.space-findings .coverage-pin-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -67,11 +67,11 @@ interface HeaderProps {
   // Static demo with an uploaded source: config import becomes
   // available (bundles apply in-browser via the static provider).
   allowImportInStatic?: boolean;
-  // Coverage audit findings (uploads only — see coverage.js).
+  // Coverage audit findings (uploads only — see coverage.js). The
+  // header shows only the count badge; the findings list and its
+  // actions live in the Space tab.
   coverageFindings?: CoverageFinding[];
-  onJumpToLocation?: (location: Record<string, number>) => void;
-  onPinCorner?: (location: Record<string, number>) => void | Promise<unknown>;
-  onClampOutOfRange?: () => void | Promise<unknown>;
+  onShowCoverage?: () => void;
 }
 
 interface CoverageFinding {
@@ -80,13 +80,6 @@ interface CoverageFinding {
   location?: Record<string, number> | null;
   detail: string;
 }
-
-const FINDING_LABELS: Record<CoverageFinding['type'], string> = {
-  'uncovered-corner': 'Missing corner',
-  'out-of-range-source': 'Out-of-range source',
-  'collapse': 'Collapse',
-  'inert-sweep': 'Inert axis',
-};
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
 // here, per-instance grade% in each style's row menu.
@@ -117,11 +110,10 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onJumpToLocation, onPinCorner, onClampOutOfRange }: HeaderProps) {
+                 coverageFindings = [], onShowCoverage }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [coverageOpen, setCoverageOpen] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState<string | null>(null);
   // Non-null while the import confirmation modal is open:
   // {bundle, report} from the dry-run POST.
@@ -160,19 +152,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [configOpen]);
-
-  // Click-outside closes the coverage menu.
-  const coverageRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!coverageOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (coverageRef.current && !coverageRef.current.contains(e.target as Node)) {
-        setCoverageOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [coverageOpen]);
 
   const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0);
 
@@ -529,77 +508,14 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {coverageFindings.length > 0 && (
-          <div className="config-dropdown" ref={coverageRef}>
-            <button
-              className="btn btn-load-font"
-              onClick={() => setCoverageOpen(o => !o)}
-              title="Design-space coverage: corners no source reaches and out-of-range sources. Click a finding to preview that location."
-            >
-              Coverage <span className="count-flag">{coverageFindings.length}</span> ▾
-            </button>
-            {coverageOpen && (
-              <div className="load-font-menu">
-                <div className="load-font-section-label">Design-space coverage</div>
-                {onClampOutOfRange && coverageFindings.some(f => f.type === 'out-of-range-source') && (
-                  <div className="load-font-item coverage-finding-row">
-                    <button
-                      className="coverage-pin-btn"
-                      title="Drop every source outside the axis box (zero its deltas, rebuild HVAR) — the Glyphs.app/fontmake semantics"
-                      onClick={async () => {
-                        setCoverageOpen(false);
-                        setLoadingMsg('Dropping out-of-range sources…');
-                        try {
-                          await onClampOutOfRange();
-                          setLoadingMsg('Out-of-range sources dropped.');
-                          setTimeout(() => setLoadingMsg(null), 4000);
-                        } catch (err: any) {
-                          setLoadingMsg(`Drop failed: ${err?.message || err}`);
-                        }
-                      }}
-                    >
-                      Drop out-of-range sources
-                    </button>
-                  </div>
-                )}
-                {coverageFindings.map((f, i) => (
-                  <div key={i} className="load-font-item coverage-finding-row">
-                    <button
-                      className="coverage-finding-jump"
-                      onClick={() => {
-                        setCoverageOpen(false);
-                        if (f.location && onJumpToLocation) onJumpToLocation(f.location);
-                      }}
-                    >
-                      <div className="load-font-item-name">
-                        {f.severity === 'fail' ? '✗' : 'i'} {FINDING_LABELS[f.type] || f.type}
-                      </div>
-                      <div className="load-font-item-subtitle">{f.detail}</div>
-                    </button>
-                    {f.type === 'uncovered-corner' && f.location && onPinCorner && (
-                      <button
-                        className="coverage-pin-btn"
-                        title="Hold this corner up with the nearest healthy shape (master semantics)"
-                        onClick={async () => {
-                          setCoverageOpen(false);
-                          setLoadingMsg('Pinning corner…');
-                          try {
-                            await onPinCorner(f.location!);
-                            setLoadingMsg('Corner pinned.');
-                            setTimeout(() => setLoadingMsg(null), 4000);
-                          } catch (err: any) {
-                            setLoadingMsg(`Pin failed: ${err?.message || err}`);
-                          }
-                        }}
-                      >
-                        Pin
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {coverageFindings.length > 0 && onShowCoverage && (
+          <button
+            className="btn btn-load-font"
+            onClick={onShowCoverage}
+            title="Design-space coverage: missing corners, out-of-range sources, collapses. Opens the Space tab."
+          >
+            Coverage <span className="count-flag">{coverageFindings.length}</span>
+          </button>
         )}
         {familyName && (
           <div className="config-dropdown" ref={configRef}>

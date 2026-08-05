@@ -25,6 +25,13 @@ const fmtLoc = (tags, loc) => tags.map((t, i) => `${t} ${Math.round(loc[i] * 10)
 const probeFor = (glyphName) =>
   glyphName && /^[A-Za-z]$/.test(glyphName) ? glyphName : PROBE_TEXT;
 
+const FINDING_LABELS = {
+  'uncovered-corner': 'Missing corner',
+  'out-of-range-source': 'Out-of-range source',
+  'collapse': 'Collapse',
+  'inert-sweep': 'Inert axis',
+};
+
 /**
  * The Noordzij cube: the font's design space as a box. Masters are
  * blue dots, brace layers grey dots (hover = glyph preview), named
@@ -33,14 +40,18 @@ const probeFor = (glyphName) =>
  * audit flags the corner as uncovered (a ghost), labelled "pinned"
  * once held by a corner pin. Clicking any marker applies that
  * location to the probe text on the right — no navigation.
+ * The side panel also carries the coverage findings rail: every audit
+ * finding with a click-to-probe shortcut, plus the Pin and Drop
+ * actions (the header keeps only a count badge that lands here).
  */
-function SpaceTab({ axes, coverageFindings, coveragePins, fontUrl, vfFamilyId, onPinCorner }) {
+function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamilyId, onPinCorner, onClampOutOfRange }) {
   const [bytes, setBytes] = useState(null);
   const [health, setHealth] = useState({});
   const [probe, setProbe] = useState(null); // {loc, glyphName?, label?}
   const [az, setAz] = useState(-0.62);
   const [el, setEl] = useState(0.42);
   const [pinning, setPinning] = useState(null);
+  const [dropping, setDropping] = useState(false);
   const dragRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -314,6 +325,62 @@ function SpaceTab({ axes, coverageFindings, coveragePins, fontUrl, vfFamilyId, o
           <span><i className="dot ghost" /> ghost corner</span>
           <span className="dim">drag to orbit · hover braces for their glyph</span>
         </div>
+        {coverageFindings.length > 0 && (
+          <div className="space-findings">
+            <div className="space-findings-title">
+              <span>Coverage findings</span>
+              {onClampOutOfRange && coverageFindings.some(f => f.type === 'out-of-range-source') && (
+                <button
+                  className="coverage-pin-btn"
+                  disabled={dropping}
+                  title="Drop every source outside the axis box (zero its deltas, rebuild HVAR) — the Glyphs.app/fontmake semantics"
+                  onClick={async () => {
+                    setDropping(true);
+                    try {
+                      await onClampOutOfRange();
+                    } finally {
+                      setDropping(false);
+                    }
+                  }}
+                >
+                  {dropping ? 'Dropping…' : 'Drop out-of-range sources'}
+                </button>
+              )}
+            </div>
+            {coverageFindings.map((f, i) => (
+              <div key={i} className="coverage-finding-row">
+                <button
+                  className="coverage-finding-jump"
+                  disabled={!f.location}
+                  onClick={() => f.location && setProbe({
+                    loc: tags.map(t => f.location[t] ?? 0),
+                    glyphName: CHIP_GLYPH,
+                    label: FINDING_LABELS[f.type] || f.type,
+                  })}
+                >
+                  <div className="load-font-item-name">
+                    {f.severity === 'fail' ? '✗' : 'i'} {FINDING_LABELS[f.type] || f.type}
+                  </div>
+                  <div className="load-font-item-subtitle">{f.detail}</div>
+                </button>
+                {f.type === 'uncovered-corner' && f.location && onPinCorner && (
+                  <button
+                    className="coverage-pin-btn"
+                    title="Hold this corner up with the nearest healthy shape (master semantics)"
+                    disabled={pinning === locKey(tags.map(t => f.location[t] ?? 0))}
+                    onClick={() => {
+                      const key = locKey(tags.map(t => f.location[t] ?? 0));
+                      setPinning(key);
+                      Promise.resolve(onPinCorner(f.location)).finally(() => setPinning(null));
+                    }}
+                  >
+                    {pinning === locKey(tags.map(t => f.location[t] ?? 0)) ? '…' : 'Pin'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1899,15 +1899,7 @@ function App() {
         hideRebuild={staticMode && !isUploadDataset()}
         allowImportInStatic={isUploadDataset()}
         coverageFindings={coverage}
-        onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
-        onPinCorner={async (loc) => {
-          await api.pinCorner(loc);
-          await loadData();
-        }}
-        onClampOutOfRange={api.clampOutOfRange ? async () => {
-          await api.clampOutOfRange();
-          await loadData();
-        } : undefined}
+        onShowCoverage={() => setMainTab('space')}
       />
 
       <DeleteInstanceModal
@@ -1982,6 +1974,10 @@ function App() {
               await api.pinCorner(loc);
               await loadData();
             }}
+            onClampOutOfRange={api.clampOutOfRange ? async () => {
+              await api.clampOutOfRange();
+              await loadData();
+            } : undefined}
             onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
           />
         ) : mainTab === 'instances' ? (

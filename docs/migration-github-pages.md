@@ -140,9 +140,11 @@ Resolved as the phases landed:
 
 ## Coverage audit (phases 1–2)
 
-Structural + behavioral design-space coverage, found at upload time
-and listed in the Header's Coverage panel (click a finding → preview
-jumps to the location):
+Structural + behavioral design-space coverage, found at upload time.
+The header keeps only a count badge (lands on the Space tab); the
+findings live in the Space tab's findings rail — click a finding to
+probe its location in-tab, Pin a ghost corner, or Drop out-of-range
+sources:
 
 - **Layer A (structural, `frontend/src/gvar.js` + `coverage.js`)**:
   reads every glyph's gvar tuple regions and reports axis-extreme
@@ -162,7 +164,7 @@ jumps to the location):
 
 ## Corner pinning (phase 3)
 
-Fail-tier corner findings get a **Pin** action in the Coverage panel:
+Fail-tier corner findings get a **Pin** action in the Space tab's findings rail:
 the studio sweeps from the default location toward the corner, takes
 the measured healthy peak as the scaffold, and holds the corner up
 with it (`pin_corner` in the wasm crate). The pin decomposes the
@@ -186,7 +188,7 @@ that every real renderer applies).
 ## Dropping out-of-range sources (phase 3b)
 
 Out-of-range findings get a **Drop out-of-range sources** action at
-the top of the Coverage panel (`clamp_out_of_range` in the wasm
+the top of the findings rail (`clamp_out_of_range` in the wasm
 crate). Glyphs.app and the fontmake/varLib pipeline DROP sources
 outside the axis box — the divergence oracle established
 Glyphs.app == fontmake == drop, while fontc extrapolated them — so

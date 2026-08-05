@@ -622,49 +622,51 @@ const coverageBtn = await page.waitForSelector('button:has-text("Coverage")', { 
 const badgeText = await coverageBtn.textContent();
 ok(/\d+/.test(badgeText) && parseInt(badgeText.match(/\d+/)[0], 10) >= 3,
   `Coverage badge shows findings (${badgeText.trim()})`);
+// The badge is now just a count that lands on the Space tab — the
+// findings list and its actions live there.
 await coverageBtn.click();
-const missingCorners = await page.$$eval('.load-font-menu .load-font-item-name',
+await page.waitForSelector('.space-findings', { timeout: 20000 });
+const missingCorners = await page.$$eval('.space-findings .load-font-item-name',
   els => els.filter(e => e.textContent.includes('Missing corner')).length);
 ok(missingCorners === 3, `findings list shows 3 Missing corner entries (${missingCorners})`);
-const collapseItems = await page.$$eval('.load-font-menu .load-font-item',
+const collapseItems = await page.$$eval('.space-findings .coverage-finding-row',
   els => els.filter(e => e.textContent.includes('collapses')).length);
 ok(collapseItems > 0, `findings include sweep collapse(s) from the probe (${collapseItems})`);
-// First finding: (XTRA 47, XOPQ 700, YOPQ 1) — clicking jumps the preview.
-await page.click('.load-font-menu .load-font-item');
-await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
-await page.waitForTimeout(800);
-ok(await page.evaluate(() =>
-  getComputedStyle(document.querySelector('.preview-tab-sample')).fontVariationSettings.includes('"XOPQ" 700')),
-  'clicking a finding jumps the preview sliders to the corner');
+// First finding: (XTRA 47, XOPQ 700, YOPQ 1) — clicking sets the in-tab probe.
+await page.click('.space-findings .coverage-finding-row .coverage-finding-jump');
+await page.waitForTimeout(600);
+ok((await page.textContent('.space-side-label')).includes('XOPQ 700'),
+  'clicking a finding sets the in-tab probe to the corner');
 
 // ---- 18. corner pinning ------------------------------------------------------
 console.log('18. corner pinning');
-// Continues on section 17's crispy-test upload. The real ghost is the
-// (XOPQ▲, YOPQ▲) corner (47,700,300) — the one with a collapse finding.
+// Continues on section 17's crispy-test upload (the Space tab's findings
+// rail holds the Pin buttons now). The real ghost is the (XOPQ▲, YOPQ▲)
+// corner (47,700,300) — the one with a collapse finding.
 const cornerFindings = async () => {
-  const n = await page.$$eval('.load-font-menu .load-font-item-name',
-    els => els.filter(e => e.textContent.includes('Missing corner')).length);
-  await page.click('button:has-text("Coverage")'); // toggle closed
-  return n;
+  await page.click('button:has-text("Coverage")'); // badge → Space tab
+  await page.waitForSelector('.space-tab', { timeout: 15000 });
+  return page.$$eval('.space-findings .load-font-item-name',
+    els => els.filter(e => e.textContent.includes('Missing corner')).length)
+    .catch(() => 0);
 };
 const pinGhost = async () => {
   await page.click('button:has-text("Coverage")');
-  await page.waitForSelector('.coverage-pin-btn', { timeout: 15000 });
+  await page.waitForSelector('.space-findings .coverage-pin-btn', { timeout: 15000 });
   await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.coverage-finding-row')];
+    const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
     const row = rows.find(r => r.textContent.includes('XOPQ▲') && r.textContent.includes('YOPQ▲'));
     if (!row) throw new Error('ghost corner finding not found');
     row.querySelector('.coverage-pin-btn').click();
   });
   await page.waitForFunction(() =>
-    document.querySelector('.header-loading-msg')?.textContent === 'Corner pinned.',
+    document.querySelectorAll('.space-chip.pinned').length > 0,
     { timeout: 90000 }
   );
   await page.waitForTimeout(1500);
 };
 await pinGhost();
 ok(true, 'ghost corner pinned (scaffold from the healthy edge)');
-await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() < 3, 'pin cleared the corners it covers');
 // Shape-level verification: the exported font renders real stem
 // darkness at the pinned corner (it was 0 before — the ghost).
@@ -695,17 +697,17 @@ await page.click('.preview-export-modal button:has-text("Cancel")');
 // Pin the rest (the intent-hairline corners — covered explicitly).
 const pinRemaining = async () => {
   await page.click('button:has-text("Coverage")');
-  await page.waitForSelector('.coverage-pin-btn', { timeout: 15000 });
-  await page.click('.coverage-pin-btn');
-  await page.waitForFunction(() =>
-    document.querySelector('.header-loading-msg')?.textContent === 'Corner pinned.',
-    { timeout: 90000 }
+  await page.waitForSelector('.space-findings .coverage-pin-btn', { timeout: 15000 });
+  const before = (await page.$$('.space-findings .coverage-pin-btn')).length;
+  await page.click('.space-findings .coverage-pin-btn');
+  await page.waitForFunction((b) =>
+    document.querySelectorAll('.space-findings .coverage-pin-btn').length < b,
+    before, { timeout: 90000 }
   );
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1200);
 };
 await pinRemaining();
 await pinRemaining();
-await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() === 0, 'all corner findings pinned');
 
 // ---- 19. rebuild keeps pins ---------------------------------------------------
@@ -729,7 +731,9 @@ await page.click('button:text-is("Space")');
 await page.waitForSelector('.space-chip', { timeout: 30000 });
 ok((await page.$$('.space-chip')).length === 8, '8 corner chips render');
 ok((await page.$$('.space-chip.ghost')).length === 3, '3 ghost chips (the missing corners)');
-ok((await page.$$('.space-instance')).length === 2, 'named instances render as diamonds');
+// instance diamonds need the font bytes parsed (they read fvar) — wait for them
+await page.waitForFunction(() => document.querySelectorAll('.space-instance').length === 2, { timeout: 20000 });
+ok(true, 'named instances render as diamonds');
 ok((await page.$$('.space-brace-dot')).length === 0, 'no brace dots on a brace-less font (correct classification)');
 // Orbit by drag: chips move with the cube (before any chip click).
 const chipLeftBefore = await page.evaluate(() => document.querySelector('.space-chip').style.left);
@@ -768,23 +772,19 @@ await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_BRACED);
 await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyBraced', null, { timeout: 240000 });
-await page.click('button:has-text("Coverage")');
-await page.waitForSelector('.load-font-menu', { timeout: 20000 });
-const oorBefore = await page.$$eval('.load-font-menu .load-font-item-name',
+await page.click('button:has-text("Coverage")'); // badge → Space tab
+await page.waitForSelector('.space-findings', { timeout: 20000 });
+const oorBefore = await page.$$eval('.space-findings .load-font-item-name',
   els => els.filter(e => e.textContent.includes('Out-of-range source')).length);
 ok(oorBefore > 0, `out-of-range findings present after upload (${oorBefore})`);
 await page.click('button:has-text("Drop out-of-range sources")');
 await page.waitForFunction(() =>
-  document.querySelector('.header-loading-msg')?.textContent === 'Out-of-range sources dropped.',
+  [...document.querySelectorAll('.space-findings .load-font-item-name')]
+    .filter(e => e.textContent.includes('Out-of-range source')).length === 0,
   { timeout: 120000 }
 );
 await page.waitForTimeout(1500);
-await page.click('button:has-text("Coverage")');
-await page.waitForSelector('.load-font-menu', { timeout: 20000 });
-const oorAfter = await page.$$eval('.load-font-menu .load-font-item-name',
-  els => els.filter(e => e.textContent.includes('Out-of-range source')).length);
-ok(oorAfter === 0, `drop cleared the out-of-range findings (${oorAfter} left)`);
-await page.click('button:has-text("Coverage")'); // close
+ok(true, 'drop cleared the out-of-range findings');
 // The default instance must be intact: download the font and check the
 // default 'a' metrics/outline — the peak-zeroing failure mode gave a
 // default advance of 2154 (vs 166). (A Pillow render can't be used
