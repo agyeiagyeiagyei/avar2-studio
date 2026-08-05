@@ -914,6 +914,145 @@ ok(rebuiltAxes.includes('GRAD'), `GRAD axis survives REBUILD (${rebuiltAxes})`);
 ok(rebuiltAxes.includes('SPAC'), `SPAC axis survives REBUILD (${rebuiltAxes})`);
 await page.click('.preview-export-modal button:has-text("Cancel")');
 
+// ---- 24. control axes on an upload (secondary parametric axes) --------------
+console.log('24. control axes on an upload');
+// Continues on section 23's Crispy Mini upload (bundle already applied:
+// crbr/GRAD/SPAC present). Declares a NEW axis through the sidebar and
+// adds a computed brace layer — the full static control-axes flow.
+await page.click('button:text-is("Instances")');
+await page.waitForSelector('.sidebar .control-axes', { timeout: 20000 });
+await page.evaluate(() => {
+  const btns = [...document.querySelectorAll('.control-axes button')];
+  btns.find(b => b.textContent.trim() === '+ Add')?.click();
+});
+await page.waitForSelector('#ctl-tag', { timeout: 10000 });
+await page.fill('#ctl-tag', 'crnr');
+await page.fill('#ctl-name', 'Corner test');
+await page.fill('#ctl-min', '0');
+await page.fill('#ctl-default', '0');
+await page.fill('#ctl-max', '100');
+await page.click('.add-control-axis-modal .btn-confirm');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 300000 });
+await page.waitForTimeout(1000);
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.control-axes *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'crnr')),
+  'declared control axis shows in the sidebar');
+// Add a computed brace layer: expand the row, add 'e' at XOPQ 700.
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.control-axis-row')];
+  rows.find(r => r.textContent.includes('crnr'))?.querySelector('.control-axis-header')?.click();
+});
+await page.waitForTimeout(600);
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.control-axis-row')];
+  const row = rows.find(r => r.textContent.includes('crnr'));
+  row?.querySelector('.layer-add-toplevel')?.click();
+});
+await page.waitForSelector('#brace-glyphs', { timeout: 10000 });
+await page.fill('#brace-glyphs', 'e');
+// add mode requires a non-default control-axis value
+await page.evaluate(() => {
+  const input = document.querySelector('.control-value-row .pin-value');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, '100');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+// uploads have no master-corner shortcuts — set a custom location
+await page.click('.corner-custom input[type=checkbox]');
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.location-pin-row.pinned')]
+    .find(r => r.querySelector('.pin-tag')?.textContent.trim() === 'XOPQ');
+  const input = row?.querySelector('.pin-value') || row?.querySelector('.pin-slider');
+  if (input) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '700');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+});
+await page.click('.add-brace-location-modal .btn-confirm');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 300000 });
+await page.waitForTimeout(1000);
+ok(await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.control-axis-row')];
+  const row = rows.find(r => r.textContent.includes('crnr'));
+  return row && [...row.querySelectorAll('.layers-glyph-name')].some(el => el.textContent.trim() === 'e');
+}), 'brace layer for e listed under the control axis');
+// The exported font carries the new axis.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+await page.click('.preview-tab-download button');
+await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+const [crnrFontDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.click('.preview-export-modal button:has-text("Download")'),
+]);
+const crnrAxes = fontAxes(await crnrFontDl.path());
+ok(crnrAxes.includes('crnr'), `exported font carries the new control axis (${crnrAxes})`);
+await page.click('.preview-export-modal button:has-text("Cancel")');
+
+// ---- 25. mapping-axis rename / delete --------------------------------------
+console.log('25. mapping-axis rename / delete');
+// Continues on section 24's dataset (Crispy Mini: OPSZ/WGHT/WDTH
+// columns). Declare a junk axis, rename it (display name + registered
+// tag persist through updateAvar2Axis), then delete it.
+await page.click('button:text-is("Instances")');
+await page.waitForSelector('.sidebar', { timeout: 20000 });
+await page.evaluate(() => {
+  const btns = [...document.querySelectorAll('.sidebar button')];
+  const add = btns.filter(b => b.textContent.trim() === '+ Add');
+  add[add.length - 1]?.click(); // the AVAR2 MAPPINGS one
+});
+await page.waitForSelector('.add-axis-modal input[type=text]', { timeout: 10000 });
+const junkInputs = await page.$$('.add-axis-modal input[type=text]');
+await junkInputs[0].fill('Junk axis');
+await junkInputs[1].fill('junk');
+await page.click('.add-axis-modal .btn-confirm');
+await page.waitForTimeout(2500);
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.traditional-axis-tag')].some(t => t.textContent.trim() === 'JUNK')),
+  'junk mapping axis declared');
+// Select an instance — the per-instance list labels axes by registered
+// tag and makes the tags clickable.
+await page.click('.instance-row >> nth=0');
+await page.waitForTimeout(800);
+// Rename: registered tag junk → jnkd (the sidebar labels axes by tag).
+await page.evaluate(() => {
+  const tags = [...document.querySelectorAll('.traditional-axis-tag.clickable')];
+  tags.find(t => t.textContent.trim() === 'junk')?.click();
+});
+await page.waitForSelector('.edit-axis-modal input', { timeout: 10000 });
+const editInputs = await page.$$('.edit-axis-modal .form-group input');
+await editInputs[0].fill('Junked axis');
+await editInputs[1].fill('jnkd');
+await page.click('.edit-axis-modal .btn-confirm');
+await page.waitForTimeout(1500);
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.traditional-axis-tag')].some(t => t.textContent.trim() === 'jnkd')),
+  'renamed mapping axis shows its new tag');
+// Re-open: the display name edit must have persisted too.
+await page.evaluate(() => {
+  const tags = [...document.querySelectorAll('.traditional-axis-tag.clickable')];
+  tags.find(t => t.textContent.trim() === 'jnkd')?.click();
+});
+await page.waitForSelector('.edit-axis-modal input', { timeout: 10000 });
+ok((await page.$eval('.edit-axis-modal .form-group input', el => el.value)) === 'Junked axis',
+  'display name edit persisted');
+// Delete it through the same modal.
+page.on('dialog', d => d.accept());
+await page.click('.edit-axis-modal button:has-text("Delete axis")');
+await page.waitForTimeout(2000);
+ok(!(await page.evaluate(() =>
+  [...document.querySelectorAll('.traditional-axis-tag')].some(t => t.textContent.trim() === 'jnkd'))),
+  'deleted mapping axis is gone from the sidebar');
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

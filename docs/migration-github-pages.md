@@ -120,7 +120,11 @@ Resolved as the phases landed:
   delta is the glyph's instanced outline at the pinned location minus
   the default instance's — the brace effect without a shadow source.
   Designer-drawn brace outlines stay a full-app feature (the static
-  port computes them).
+  port computes them). On uploads the full authoring loop works
+  in-browser: declare/rename/delete axes and add/remove layers from
+  the sidebar — every mutation rebuilds from source through the shared
+  pipeline (the declaration lives in `dataset.controlAxes`, so it
+  rides rebuilds, sessions and bundle exports).
 - **export-font (hidden axes / default-location rebuild) — PORT.**
   `set_default_location` (fvar defaults move to the user's location,
   parametric defaults to the avar2-eval'd mapped location, avar2

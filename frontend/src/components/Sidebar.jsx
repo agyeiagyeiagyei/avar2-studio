@@ -21,7 +21,7 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
+function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.
@@ -353,14 +353,24 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
 
             // No instance selected: render the same axis grid with empty
             // value cells so the user sees what mapping inputs exist
-            // without committing to a row.
+            // without committing to a row. Tags stay clickable — axis
+            // edit/delete (EditAxisModal) doesn't depend on a selection.
             if (!selectedInstance) {
               const columns = avar2Axes?.traditional_axes?.columns || [];
               return (
                 <div className="traditional-axes-list">
                   {columns.filter(col => col.toUpperCase() !== 'SPAC').map(col => (
                     <div key={col} className="traditional-axis-item">
-                      <div className="traditional-axis-tag">{col}</div>
+                      <div
+                        className="traditional-axis-tag clickable"
+                        onClick={() => {
+                          setEditingAxisName(col);
+                          setShowEditAxisModal(true);
+                        }}
+                        title="Click to edit axis metadata"
+                      >
+                        {col}
+                      </div>
                       <div className="traditional-axis-value traditional-axis-value-placeholder">
                         —
                       </div>
@@ -681,6 +691,15 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           registeredTag: avar2Axes?.metadata?.[col]?.registered_tag || ''
         }))}
         isParametricAxis={editingAxisName && (avar2Axes?.parametric_axes?.includes(editingAxisName) || false)}
+        onDelete={onDeleteAvar2Axis ? async (name) => {
+          try {
+            await onDeleteAvar2Axis(name);
+            setShowEditAxisModal(false);
+            setEditingAxisName(null);
+          } catch (err) {
+            alert(err.message || 'Failed to delete axis');
+          }
+        } : undefined}
       />
     </aside>
   );

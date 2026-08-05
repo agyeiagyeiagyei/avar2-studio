@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './EditAxisModal.css';
 
-function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, existingAxes = [], isParametricAxis = false }) {
+function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, existingAxes = [], isParametricAxis = false, onDelete = null }) {
   const [displayName, setDisplayName] = useState('');
   const [registeredTag, setRegisteredTag] = useState('');
   const [minValue, setMinValue] = useState('');
@@ -197,6 +197,19 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
           </div>
           
           <div className="modal-buttons">
+            {onDelete && (
+              <button
+                type="button"
+                className="btn btn-cancel"
+                onClick={() => {
+                  if (window.confirm(`Delete mapping axis "${axisName}"? Its column and every instance's value for it are removed from the mappings.`)) {
+                    onDelete(axisName);
+                  }
+                }}
+              >
+                Delete axis
+              </button>
+            )}
             <button type="button" onClick={handleCancel} className="btn btn-cancel">
               Cancel
             </button>

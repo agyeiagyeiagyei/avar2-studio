@@ -748,6 +748,9 @@ const transformsMenu = (dataset) => {
 // Shared by buildFont and updateTransforms (the only way to change the
 // transform set — applied transforms can't be un-baked).
 const rebuildUploadFont = async (dataset) => {
+  if (dataset.sourceText == null) {
+    throw new Error("This needs the full app — the browser can't compile UFO sources yet.");
+  }
   let ttf = await compileFont(dataset.sourceText);
   if (dataset.mappingsCsv) {
     ttf = await addAvar2(ttf, dataset.mappingsCsv);
@@ -776,6 +779,16 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
   }
   refreshAxesFromFont(dataset);
+};
+
+// After any rebuild-from-source: swap the object URL, stamp the build
+// (the App re-reads fontUrl only when last_build_time changes) and
+// persist the session.
+const commitRebuiltFont = (dataset) => {
+  URL.revokeObjectURL(dataset.fontUrl);
+  dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+  dataset.health.last_build_time = Date.now();
+  persistSoon();
 };
 
 const staticOverrides = {
@@ -852,10 +865,10 @@ const staticOverrides = {
     : endpoint('control-axes.json')()),
   getGlyphCoverage: async () => {
     if (!uploadDataset) return endpoint('glyph-coverage.json')();
-    // Synthesize coverage rows for bundle-applied control axes so the
+    // Synthesize coverage rows for the upload's control axes so the
     // sidebar's SECONDARY PARAMETRIC AXES section shows them. Marked
-    // source: 'source' — that renders the layers read-only (studio rows
-    // would offer edit affordances that only exist on the real server).
+    // source: 'studio' — the rows get the edit affordances (add/remove
+    // layers); the braces are computed by the wasm on rebuild.
     const axes = (uploadDataset.controlAxes || []).map(a => {
       const covers = [...new Set((a.layers || []).map(l => l.glyph))];
       return {
@@ -865,7 +878,7 @@ const staticOverrides = {
         default: a.default,
         max: a.max,
         kind: 'scoped',
-        source: 'source',
+        source: 'studio',
         covers,
         covers_count: covers.length,
         layers: (a.layers || []).map(l => ({
@@ -1041,10 +1054,7 @@ const staticOverrides = {
       }
       uploadDataset.transforms = list;
       await rebuildUploadFont(uploadDataset);
-      URL.revokeObjectURL(uploadDataset.fontUrl);
-      uploadDataset.fontUrl = URL.createObjectURL(new Blob([uploadDataset.fontBytes], { type: 'font/ttf' }));
-      uploadDataset.health.last_build_time = Date.now();
-      persistSoon();
+      commitRebuiltFont(uploadDataset);
       return { transforms: transformsMenu(uploadDataset) };
     }
     const base = await transformsList();
@@ -1136,13 +1146,26 @@ const staticOverrides = {
   },
   updateAvar2Axis: async (axisName, axisData) => {
     requireUpload();
-    // Range edit (EditAxisModal): merge into the axis-metadata entry.
+    // EditAxisModal payload: {display_name, registered_tag, min,
+    // default, max} — merge all of it into the axis-metadata entry
+    // (name/tag edits included; earlier this dropped them silently).
     uploadDataset.axisRanges[axisName] = {
       ...(uploadDataset.axisRanges[axisName] || {}),
+      ...(axisData.display_name !== undefined ? { display_name: axisData.display_name } : {}),
+      ...(axisData.registered_tag !== undefined ? { registered_tag: axisData.registered_tag } : {}),
       ...(axisData.min !== undefined ? { min: axisData.min } : {}),
+      ...(axisData.default !== undefined ? { default: axisData.default } : {}),
       ...(axisData.default_value !== undefined ? { default: axisData.default_value } : {}),
       ...(axisData.max !== undefined ? { max: axisData.max } : {}),
     };
+    await regenerateFont(uploadDataset);
+    return {};
+  },
+  deleteAvar2Axis: async (axisName) => {
+    requireUpload();
+    mappingsCsv.removeColumn(uploadDataset.instancesCsv, axisName);
+    delete uploadDataset.axisRanges[axisName];
+    syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
   },
@@ -1156,11 +1179,86 @@ const staticOverrides = {
   setGrade: unavailable('Editing grade'),
   setInstanceGrade: unavailable('Editing grade'),
   removeInstanceGrade: unavailable('Editing grade'),
-  createControlAxis: unavailable('Creating control axes'),
-  updateControlAxis: unavailable('Editing control axes'),
-  deleteControlAxis: unavailable('Deleting control axes'),
-  controlAxisLayerDelta: unavailable('Editing layers'),
-  setControlAxisLayers: unavailable('Editing layers'),
+  // Control axes (secondary parametric axes) on uploads: declarations
+  // live in dataset.controlAxes using the sidecar shape ({tag, name,
+  // min, default, max, layers: [{glyph, location}]}); every mutation
+  // rebuilds from source through the shared pipeline — the wasm
+  // computes the brace tuples (drawn outlines stay a full-app feature).
+  createControlAxis: async (axis) => {    requireUpload();
+    // Modal payload: {tag, display_name, default, min, max}.
+    (uploadDataset.controlAxes ||= []).push({
+      tag: axis.tag,
+      name: axis.display_name || axis.tag,
+      min: axis.min, default: axis.default, max: axis.max,
+      layers: [],
+    });
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return { ok: true };
+  },
+  updateControlAxis: async (tag, updates) => {
+    requireUpload();
+    const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
+    if (!ax) throw new Error(`No control axis '${tag}'`);
+    if (updates.display_name !== undefined) ax.name = updates.display_name;
+    for (const k of ['min', 'default', 'max']) {
+      if (updates[k] !== undefined) ax[k] = updates[k];
+    }
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return { ok: true };
+  },
+  deleteControlAxis: async (tag) => {
+    requireUpload();
+    uploadDataset.controlAxes = (uploadDataset.controlAxes || []).filter(a => a.tag !== tag);
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return { ok: true };
+  },
+  // Layer locations from the UI pin every axis (including control,
+  // grade and transform-injected ones at their defaults); the wasm
+  // only knows the compiled parametric axes plus CSV user columns and
+  // rejects anything else — strip the rest before storing.
+  controlAxisLayerDelta: async (tag, delta) => {
+    requireUpload();
+    const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
+    if (!ax) throw new Error(`No control axis '${tag}'`);
+    ax.layers ||= [];
+    const allowed = new Set([...uploadDataset.parametricTags]);
+    for (const t of csvHeaderTags(uploadDataset.mappingsCsv || '')) allowed.add(t);
+    const clean = (l) => ({
+      glyph: l.glyph,
+      location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
+    });
+    const sameLayer = (a, b) =>
+      a.glyph === b.glyph &&
+      JSON.stringify(Object.entries(a.location || {}).sort()) ===
+        JSON.stringify(Object.entries(b.location || {}).sort());
+    for (const rm of delta.remove || []) {
+      ax.layers = ax.layers.filter(l => !sameLayer(l, clean(rm)));
+    }
+    for (const add of delta.add || []) {
+      const c = clean(add);
+      if (!ax.layers.some(l => sameLayer(l, c))) ax.layers.push(c);
+    }
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return { ok: true };
+  },
+  setControlAxisLayers: async (tag, layers) => {
+    requireUpload();
+    const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
+    if (!ax) throw new Error(`No control axis '${tag}'`);
+    const allowed = new Set([...uploadDataset.parametricTags]);
+    for (const t of csvHeaderTags(uploadDataset.mappingsCsv || '')) allowed.add(t);
+    ax.layers = (layers || []).map(l => ({
+      glyph: l.glyph,
+      location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
+    }));
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return { ok: true };
+  },
   openControlAxisInEditor: unavailable('The glyph editor'),
   exportFont: async (options) => {
     const { hidden_axes = [], default_location } = options || {};

@@ -649,6 +649,11 @@ function App() {
     }
   };
 
+  const handleDeleteAvar2Axis = async (axisName) => {
+    await api.deleteAvar2Axis(axisName);
+    await loadAvar2Data();
+  };
+
   const handleUpdateAvar2Mapping = async (instanceName, axisName, value) => {
     try {
       await api.updateAvar2Mapping(instanceName, axisName, value);
@@ -2013,6 +2018,7 @@ function App() {
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
+            onDeleteAvar2Axis={api.deleteAvar2Axis ? handleDeleteAvar2Axis : undefined}
             onUpdateAvar2Mapping={handleUpdateAvar2Mapping}
             onReloadAvar2Data={loadAvar2Data}
             glyphsFileHasUnsavedChanges={glyphsFileHasUnsavedChanges}

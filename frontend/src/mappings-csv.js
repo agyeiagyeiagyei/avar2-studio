@@ -102,6 +102,15 @@ export function addColumn(parsed, tag, defaultValue) {
   for (const row of parsed.rows) row.values[tag] = defaultValue === undefined ? '' : String(defaultValue);
 }
 
+/** Remove a user-axis column and every row's value for it. */
+export function removeColumn(parsed, tag) {
+  if (!parsed.columns.includes(tag)) {
+    throw new Error(`Axis column "${tag}" does not exist`);
+  }
+  parsed.columns = parsed.columns.filter(c => c !== tag);
+  for (const row of parsed.rows) delete row.values[tag];
+}
+
 // Column-name → registered tag (mirrors csv_io.normalize_in_axis_name).
 const AXIS_NAME_MAP = { WGHT: 'wght', WDTH: 'wdth', OPSZ: 'opsz', CONTRAST: 'cntr', CNTR: 'cntr' };
 export const normalizeInAxisName = (col) => AXIS_NAME_MAP[col.toUpperCase()] || col;
