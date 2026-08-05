@@ -30,7 +30,9 @@ avar2-studio /path/to/MyFont.glyphs       # or .designspace
 
 All dependencies (fontc, gftools, …) come with the wheel. The server
 prints a URL (default `http://localhost:5001`); the first build runs
-on launch. Launching with no argument opens a **Load Font** picker —
+on launch. The released wheel (dev6) predates most current features —
+install from source ([Development](#development)) for the newest.
+Launching with no argument opens a **Load Font** picker —
 upload your own source or start from a bundled example (Crispy Mini,
 Roboto Delta Mini). `avar2-studio doctor` checks the environment.
 Useful flags: `--port` (default 5001, avoids macOS AirPlay on 5000),

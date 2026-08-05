@@ -1,4 +1,4 @@
-# Handover — project state & undocumented knowledge (July 2026)
+# Handover — project state & undocumented knowledge (July 2026, updated August 2026)
 
 This doc captures everything a new developer needs that is **not**
 already written down. Read the existing docs first — this deliberately
@@ -12,6 +12,10 @@ doesn't repeat them:
   parametric ("control") axes: the user reference (authoring, coverage, editing)
 - [docs/design-notes.md](./design-notes.md) — the same feature's design record:
   what isn't built, alternatives weighed, the Fontra integration paths
+- [docs/grade.md](./grade.md) — the grade feature's weight model
+- [docs/migration-github-pages.md](./migration-github-pages.md) — the
+  static (GitHub Pages) port: wasm crate internals, coverage audit,
+  corner pinning, dropping out-of-range sources, zip workspaces
 
 Everything below is tribal knowledge as of this handover.
 
@@ -19,59 +23,65 @@ Everything below is tribal knowledge as of this handover.
 
 ## 1. Repo state at handover
 
-- **Branching:** work lands on a feature branch first, then
-  fast-forwards to `main` — no PRs, ff-only throughout. Check
-  `git log --oneline --all` and `git status` for the current branch and
-  any unpushed commits; that snapshot rots too fast to record here.
+- **Branching & deploys:** the working branch is `github-pages` (ff'd
+  to `main` periodically — `main` is never ahead). Pushes to either
+  branch trigger `.github/workflows/pages.yml`, which builds the static
+  demo (`frontend/dist-pages`) and deploys it to GitHub Pages:
+  <https://agyeiagyeiagyei.github.io/avar2-studio/>. Commit + push IS
+  the deploy. The **fly.io demo is gone** (fly.toml and its Dockerfile
+  deleted, the fly app destroyed) — don't look for it.
 - Notable parked branch: `grade-comparison` (WIP — grade-master
   comparison sidebar using uharfbuzz advances).
 - **Releases:** pushing a `v0.1.0.devN` tag triggers
   `.github/workflows/release.yml`, which builds the React bundle,
   assembles the wheel (bundle force-included at
   `src/avar2_studio/static/`), and attaches it to a GitHub Release. The
-  released wheel lags the repo, and it's not on PyPI yet — check the
-  Releases page and `pyproject.toml` for current versions.
+  latest release is **v0.1.0.dev6 (June) but `pyproject.toml` is at
+  dev8** — the released wheel predates nearly everything below; tagging
+  a fresh release is the single highest-leverage chore. Not on PyPI yet.
 - **The Crispy repo** (`~/Documents/Crispy`) is the parent project this
-  tool was extracted from. Its `preview-app/` is the **legacy
-  predecessor — do not develop there**; avar2-studio is canonical. The
-  Crispy repo currently has a dirty working tree (legacy preview-app
-  edits, plus an untracked `sources/.avar2-studio/` workdir and
-  `sources/Crispy-avar.csv` from driving the real Crispy through this
-  tool). Someone should triage/commit that separately.
+  tool was extracted from. The legacy `preview-app/` and all avar2
+  tooling there are now in `archive/avar2-tooling/` (gitignored,
+  pending deletion review) — **do not develop there**; avar2-studio is
+  canonical.
 
 ## 2. Development environment — the traps
 
 - **The repo `.venv` is the only correct environment.** It has
-  avar2-studio installed **editable**, plus three packages that are NOT
-  in `pyproject.toml`:
-  - `flask-sock` — a **hard dependency** (`server.py` imports it at
-    module level for the Fontra websocket proxy). **A fresh
-    `pip install` of this repo crashes on launch** until it's added to
-    `pyproject.toml`. Known gap; one-line fix, top of the list.
+  avar2-studio installed **editable**, plus packages NOT in
+  `pyproject.toml`:
   - `fontra` and `fontra-glyphs` — soft deps, installed **from git**
     (neither is on PyPI under those names; see the docstring at
     `_ensure_fontra_running` in `server.py`). Only needed for the
     embedded outline editor; everything else works without them.
+  - (`flask-sock` used to be missing from pyproject — it's a declared
+    dep now, and `pytest` is installed for `tests/`.)
 - **Trap:** the system Framework Python (`/Library/Frameworks/.../3.11`)
-  has the released `dev6` wheel installed. If you launch with the wrong
+  has an old released wheel installed. If you launch with the wrong
   interpreter you silently run month-old code — endpoints 404 and the
   sidebar breaks. `ps` shows venv processes as the *Framework binary
   path* (venv shims exec the base interpreter), so you cannot tell from
   `ps` which env a server is using. When in doubt:
   `python -c "import avar2_studio; print(avar2_studio.__file__)"` —
   it must point into this repo's `src/`. Don't use the *version* to
-  identify the env: the venv's editable-install metadata still reports
-  `0.1.0.dev5` even though `pyproject.toml` says `dev7` — stale
-  dist-info, harmless but misleading.
+  identify the env: the venv's editable-install metadata reports a stale
+  devN — harmless but misleading.
 - **Frontend deploy loop:** the served bundle is
   `src/avar2_studio/static/` (gitignored, CI-assembled for wheels).
   Locally after any frontend change:
   `cd frontend && npm run build && rsync -a --delete build/ ../src/avar2_studio/static/`
   — then just reload the browser (no server restart needed for
   frontend-only changes; backend changes need a server restart).
+  **This rsync is easy to forget** — a stale static dir cost a
+  debugging session once (the Space tab was "missing" because the
+  served bundle was a month old). Check the mtimes first when the app
+  seems to lack a feature you just wrote.
 - Launch used throughout development:
   `.venv/bin/python -m avar2_studio <source> --port 5070` (default port
   is 5001). Blind launch (no source) opens the Load Font dropdown.
+- **Don't screenshot/capture against a source inside the repo** — the
+  server writes sidecars + `.avar2-studio/` next to it. Stage a copy in
+  /tmp (plus its `-avar.csv`) and point the server there.
 
 ## 3. Architecture — what the docs don't cover
 
@@ -114,6 +124,14 @@ Everything below is tribal knowledge as of this handover.
   `SIDECAR_LOCK`. The whole-list `PUT /layers` still exists but the
   frontend no longer uses it for edits — whole-list replace from a
   stale client cache silently dropped layers (a real data-loss bug).
+- **Axis-metadata ranges self-heal** (Aug 2026): traditional
+  (non-parametric) axes seeded with the `-1000/1000` placeholder extent
+  (or a degenerate `[0,0]`, as transform-injected axes like SPAC report)
+  are re-derived on read — from the enabled transform's params, the
+  GRAD registry extent, or the CSV column's own spread
+  (`_repair_placeholder_ranges` / `_derive_traditional_range` in
+  `server.py`). Hand-edited ranges are never clobbered; without this the
+  placeholder leaked into real fvar.
 
 ### /api/glyph-coverage response contract
 Classification: `kind` = `universal` (100% coverage) vs `scoped`;
@@ -167,6 +185,10 @@ treat any change here as high-risk.
 - Fontra is restarted when the watched source file's mtime changes
   (shadow rewritten by a layer edit) so its backend doesn't serve a
   stale cache.
+- `/api/coverage` (the structural design-space audit) depends on the
+  Fontra subprocess — it 500s with "Fontra subprocess is not running"
+  when Fontra isn't up, and the frontend silently shows no Coverage
+  button. If the panel is "missing" in the full app, check Fontra first.
 
 ### Transforms internals (user-facing story is in README)
 - Registry: built-ins + any `.py` subclassing `Transform` in
@@ -193,6 +215,49 @@ treat any change here as high-risk.
   with `has_master_coverage: True` — that's why SPAC shows as a
   parametric slider at all.
 
+### The static (GitHub Pages) app
+The Pages demo is the same React frontend with a static provider
+(`frontend/src/static-api.js`) swapped in when `/api/health` doesn't
+answer (`selectApiMode`). All font work happens in a **Rust/wasm
+crate** (`wasm/fontc-web`, built with wasm-pack into
+`frontend/src/wasm/fontc-web/` — commit the pkg; a rebuild is
+`wasm-pack build --target web --out-dir ../../frontend/src/wasm/fontc-web`
+plus `rm` the pkg's `.gitignore`). The crate compiles `.glyphs`
+in-browser (fontc) and does table surgery: `add_avar2`, `pin_corner`,
+`clamp_out_of_range`, `apply_transforms` (SPAC), `apply_control_axes`,
+`apply_grade`, `set_default_location`, `set_hidden_axes`, `regen_stat`,
+`measure_at`. Details + the rationale for each port:
+docs/migration-github-pages.md.
+- **Rebuild pipeline** (`rebuildUploadFont`, shared by Rebuild and the
+  transforms toggles): compile → avar2 → control axes → grade →
+  SPAC transforms → corner pins → out-of-range drop. Applied state
+  can't be un-baked, so changing the transform set means rebuilding
+  from source with the new set — the same path keeps bundle-imported
+  state (control axes, grade) alive across rebuilds.
+- **Drop out-of-range sources** (`clamp_out_of_range`): stranded
+  sources (braces/masters outside the axis box) are DROPPED — the
+  Glyphs.app/fontmake semantics, which the divergence oracle proved
+  (fontc alone extrapolated). Their tuples' packed deltas AND peaks are
+  zeroed (zero deltas make the tuple inert; zeroed peaks make the
+  peak-reading audit see the drop — zeroing a LIVE peak is the mangling
+  case, default advance 166→2154) and HVAR is rebuilt. glyf/hmtx stay
+  byte-identical (`tests/clamp_oracle.rs` asserts it).
+- **Sessions** persist uploads in IndexedDB (`frontend/src/session.js`)
+  — fontBytes plus all authoring state; restores skip the recompile.
+  When testing, remember a prior session auto-restores (a "first visit"
+  may not be one).
+- **e2e** (`frontend/e2e/static-demo.spec.mjs`, 23 sections):
+  `python3 -m http.server 8123 -d frontend/dist-pages` after
+  `npx vite build --base=./ --outDir dist-pages`, then
+  `node e2e/static-demo.spec.mjs`. Uses system Chrome via
+  playwright-core. Downloads get verified with the venv's Python
+  (fontTools/Pillow). Oracle tests for the crate are cargo
+  (`cargo test` in `wasm/fontc-web`) with fontmake/gftools/Pillow as
+  the references.
+- **Snapshot datasets** (the bundled examples on Pages) are read-only:
+  transforms toggle between two baked states; uploads get the real
+  pipeline.
+
 ### Frontend patterns worth knowing
 - **AVAR2 MAPPINGS sliders** (`Sidebar.js`): optimistic drafts keyed
   `"<instance>:<axisColumn>"`; commits debounce 450ms, **flush on
@@ -205,38 +270,67 @@ treat any change here as high-risk.
   log is dominated by it, that's normal.
 - Classic bug fixed twice, remember it: `input.files` is a **live**
   FileList — copy it (`Array.from`) *before* clearing `input.value`.
+- Driving the UI from scripts: synthetic `input`-event dispatches leave
+  the mapped-location reflection one step behind (the request fires
+  with pre-change state); real `page.mouse` drags don't. Not a product
+  bug — a harness trap that cost a false bug report.
 
 ## 4. Known issues / sharp edges (ranked)
 
-1. **No test suite.** `tests/` holds only an (empty) fixtures dir;
-   pytest isn't installed in the venv. All verification to date has
-   been endpoint-level smoke tests + adversarial code review. The
-   highest-value first tests: `glyph_coverage.compute_coverage` on both
-   fixtures (ranges, layers, `location_user` incl. the non-invertible
-   case), the open-editor routing matrix, and the transforms conflict
-   guard.
-2. **`flask-sock` missing from pyproject deps** — fresh installs crash
-   (see §2).
-3. **Shadow wipe loses drawn outlines** (model β, §3) — biggest
+1. **Chrome doesn't apply avar2 in its text pipeline** (verified on
+   Chrome 151, Aug 2026): the in-browser preview specimen follows the
+   fvar axes only — user-axis moves show in the *sliders* (computed
+   reflection) but not the glyphs. The exported font's avar2 is valid
+   (HarfBuzz applies it: ink darkness 338→1238, advance 178→3521 at a
+   mapped corner; WebKit/CoreText also implement avar2). Nothing to
+   fix in-repo — watch Chrome's support before claiming "what you see
+   is what ships" again.
+2. **The server's avar2 reflection evaluator understates the table.**
+   `/api/mapped-location` at a mapped corner returns too little (XTRA
+   unchanged, XOPQ/YOPQ ~90% of the CSV row's values) while HarfBuzz on
+   the same font produces the full effect — the Python evaluator is the
+   outlier, not the table. Users see the understatement as sliders not
+   going all the way.
+3. **`avar2-eval.js` (static) parses only wasm-written avar2 tables** —
+   it crashes (DataView offset) on the server-written layout. No live
+   breakage (snapshot datasets use identity mapping, uploads build
+   tables via the wasm crate), but any future "load a server-built
+   font into the static app" path hits it.
+4. **Shadow wipe loses drawn outlines** (model β, §3) — biggest
    data-integrity foot-gun for users.
-4. **Fontra port 8001 collision** across simultaneous instances (§3).
-5. `/api/glyph-coverage` re-parses the source (and re-reads every glif
+5. **Fontra port 8001 collision** across simultaneous instances (§3);
+   `/api/coverage` 500s silently when Fontra is down (§3).
+6. `/api/glyph-coverage` re-parses the source (and re-reads every glif
    for `.designspace`) on **every request** — fine at fixture scale,
    linear cost on production fonts. Memoize on `(path, mtime)` when it
    starts to hurt.
-6. `.glyphspackage` (Glyphs 3 folder format) can't be uploaded via the
+7. `.glyphspackage` (Glyphs 3 folder format) can't be uploaded via the
    file picker — browsers can't post directories; needs zip upload or a
    server-side path field.
-7. `.designspace` **authoring** is read-only: coverage + layers panel +
+8. `.designspace` **authoring** is read-only: coverage + layers panel +
    Fontra-on-original work, but declaring studio axes / brace-layer
-   authoring is `.glyphs`-only (roadmapped).
-8. Naming seam: UI says "secondary parametric axes"; code, API routes,
+   authoring is `.glyphs`-only (roadmapped). The static app can't
+   compile UFO sources at all (designspace zips load the baked preview
+   TTF).
+9. Naming seam: UI says "secondary parametric axes"; code, API routes,
    CSS, sidecar, and docs keep "control axes" (anchor comment at the
    top of `ControlAxes.js`).
+10. CrispyMini CSV trivia: the two `Ultra Wide Thin` rows have **blank
+    wght cells** (resolve to the wght default 400, not 100 like the
+    Narrow Thin rows) — looks unintended, left as-is pending the
+    designer's call. (Their blank *opsz* cells were filled in Aug 2026:
+    they used to collide rows onto shared avar2 corners, dropping
+    `Ultra Wide Heavy 144` from the table.)
 
-## 5. Smoke-test playbook (no test suite, so this is the bar)
+## 5. Verification playbook
 
 ```bash
+.venv/bin/python -m pytest tests/ -q            # 41 server tests
+cd wasm/fontc-web && cargo test                 # crate oracles (avar2/braces/clamp/pin/spac/stat/measure)
+cd frontend && npx vite build --base=./ --outDir dist-pages
+python3 -m http.server 8123 -d frontend/dist-pages &
+cd frontend && node e2e/static-demo.spec.mjs    # 23 sections against :8123
+
 .venv/bin/python -m avar2_studio examples/crispy-mini/sources/CrispyMini.glyphs --port 5070
 curl -s localhost:5070/api/health            # status ok, font_built true, building false
 curl -s localhost:5070/api/glyph-coverage    # axes with layers/min/default/max/glyph_chars
@@ -253,12 +347,11 @@ fontc ~0.09s, startup ~1-2s.
 
 ## 6. Suggested first week
 
-1. Push the pending commits on `glyph-scoped-axes`; fast-forward main.
-2. Add `flask-sock` to pyproject deps; decide how to document the
-   fontra/fontra-glyphs git installs (extras? doctor check exists).
-3. Stand up pytest + the three test families from §4.1.
-4. Tag `v0.1.0.dev8` so a released wheel finally contains control
-   axes, the Preview tab, and transforms (README currently warns the
-   released `dev6` predates them).
-5. Then the roadmap in README (PyPI, `.designspace` authoring,
+1. Tag a release (`pyproject` is at dev8; the latest release is dev6
+   and predates control axes, the Preview tab, transforms, grade, the
+   whole static app).
+2. Fix the server's avar2 reflection evaluator (§4.2) — or route the
+   full app through the wasm/JS evaluator that already agrees with
+   HarfBuzz.
+3. Then the roadmap in README (PyPI, `.designspace` authoring,
    push-to-source sync) in whatever order the designer needs.
