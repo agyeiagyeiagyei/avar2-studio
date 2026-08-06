@@ -717,6 +717,9 @@ await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 90000 }
 );
+// A failed rebuild throws into the error banner and leaves the old font
+// in place — the findings check below would pass vacuously on it.
+ok(!(await page.$('.error-banner')), 'rebuild completed without an error');
 await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() === 0, 'pins re-applied on rebuild (still no corner findings)');
 
@@ -1052,6 +1055,70 @@ await page.waitForTimeout(2000);
 ok(!(await page.evaluate(() =>
   [...document.querySelectorAll('.traditional-axis-tag')].some(t => t.textContent.trim() === 'jnkd'))),
   'deleted mapping axis is gone from the sidebar');
+
+// ---- 26. table-fixer transforms on an upload ---------------------------------
+console.log('26. table-fixer transforms on an upload');
+// Continues on section 25's Crispy Mini upload (has a wght user axis).
+// The three gftools fixers run in-browser via the wasm crate.
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+const fixerNames = await page.$$eval('.transform-row .transform-name', els => els.map(e => e.textContent.trim()));
+ok(fixerNames.includes('Clean fvar instances') && fixerNames.includes('Rebuild STAT table') && fixerNames.includes('Smooth unhinted rendering'),
+  `Transforms menu lists the fixer transforms on an upload (${fixerNames.join(' | ')})`);
+await page.keyboard.press('Escape');
+const toggleTransform = async (name) => {
+  await page.click('button:has-text("Transforms")');
+  await page.waitForSelector('.transform-row', { timeout: 15000 });
+  await page.evaluate((n) => {
+    const row = [...document.querySelectorAll('.transform-row')]
+      .find(r => r.querySelector('.transform-name')?.textContent.trim() === n);
+    row?.querySelector('input[type=checkbox]')?.click();
+  }, name);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() =>
+    document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+    { timeout: 15000 }).catch(() => null);
+  await page.waitForFunction(() =>
+    !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+    { timeout: 300000 });
+  await page.waitForTimeout(800);
+};
+const downloadFont = async () => {
+  await page.click('button:text-is("Preview")');
+  await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
+  await page.click('.preview-tab-download button');
+  await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60000 }),
+    page.click('.preview-export-modal button:has-text("Download")'),
+  ]);
+  const p = await dl.path();
+  await page.click('.preview-export-modal button:has-text("Cancel")');
+  return p;
+};
+const fontReport = (p) => execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+f = TTFont(sys.argv[1])
+insts = [f['name'].getDebugName(i.subfamilyNameID) for i in f['fvar'].instances]
+print('|'.join(['gasp' if 'gasp' in f else '-', 'prep' if 'prep' in f else '-', 'STAT' if 'STAT' in f else '-', ','.join(insts)]))
+`, p]
+).toString().trim();
+await toggleTransform('Smooth unhinted rendering');
+const unhintedReport = fontReport(await downloadFont());
+ok(unhintedReport.startsWith('gasp|prep|'), `fix_unhinted added gasp+prep (${unhintedReport})`);
+await toggleTransform('Clean fvar instances');
+const instReport = fontReport(await downloadFont());
+ok(instReport.includes('Thin') && instReport.includes('Black') && !instReport.includes('Narrow Thin'),
+  `fix_instances regenerated GF-spec instances (${instReport.split('|').pop()})`);
+await toggleTransform('Clean fvar instances'); // back off
+const revertReport = fontReport(await downloadFont());
+// Reverting returns to the pre-fix instance list (the compiled upload
+// carries no fvar instances — the CSV holds them in the studio).
+ok(revertReport.split('|').pop() === unhintedReport.split('|').pop(),
+  `toggling off restores the pre-fix instances ('${revertReport.split('|').pop()}')`);
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

@@ -363,7 +363,7 @@ const chooseScaffold = async (dataset, corner) => {
 
 const applyPins = async (dataset) => {
   for (const pin of dataset.cornerPins || []) {
-    dataset.fontBytes = await pinCorner(dataset.fontBytes, pin.corner, pin.scaffold);
+    dataset.fontBytes = await pinCornerWasm(dataset.fontBytes, pin.corner, pin.scaffold);
   }
 };
 
@@ -489,6 +489,21 @@ const KNOWN_TRANSFORMS = {
       { key: 'bias', label: 'Wide bias', type: 'float', default: 1.0, min: 1.0, max: 2.5 },
       { key: 'scale', label: 'Scale', type: 'float', default: 1.25, min: 0.1, max: 10.0 },
     ],
+  },
+  fix_instances: {
+    id: 'fix_instances',
+    name: 'Clean fvar instances',
+    description: "Regenerate the font's named instances (fix-instances) so they match the current axes.",
+  },
+  gen_stat: {
+    id: 'gen_stat',
+    name: 'Rebuild STAT table',
+    description: 'Generate the STAT table from the Google Fonts axis registry. Registered axes (wght/wdth/opsz) only — custom axes need a STAT config.',
+  },
+  fix_unhinted: {
+    id: 'fix_unhinted',
+    name: 'Smooth unhinted rendering',
+    description: 'Add gasp + prep tables so an unhinted variable font rasterizes with grayscale anti-aliasing at all sizes.',
   },
 };
 

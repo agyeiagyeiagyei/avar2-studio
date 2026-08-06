@@ -32,6 +32,7 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod fix;
 mod iup;
 mod measure;
 mod spac;

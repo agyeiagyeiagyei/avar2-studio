@@ -485,20 +485,42 @@ pub(crate) fn apply_transforms(
 ) -> Result<Vec<u8>, JsError> {
     let entries: Vec<TransformEntry> = serde_json::from_str(transforms_json)
         .map_err(|e| err(format!("bad transforms JSON: {e}")))?;
+    let mut font_bytes = font_bytes;
+
+    // SPAC injectors: at most one (the registry's one-injector-per-axis
+    // rule — two SPAC injectors would produce two SPAC axes).
     let mut spac_entries = entries
         .iter()
         .filter(|e| e.enabled && matches!(e.kind.as_str(), "spac" | "spac_widthaware"));
-    let Some(entry) = spac_entries.next() else {
-        return Ok(font_bytes); // nothing enabled that this port implements
-    };
-    if spac_entries.next().is_some() {
-        // The registry's one-injector-per-axis rule: two SPAC injectors
-        // would produce a font with two SPAC axes.
-        return Err(err(
-            "only one SPAC transform can be enabled at a time ('spac' and 'spac_widthaware' both add the SPAC axis)",
-        ));
+    if let Some(entry) = spac_entries.next() {
+        if spac_entries.next().is_some() {
+            return Err(err(
+                "only one SPAC transform can be enabled at a time ('spac' and 'spac_widthaware' both add the SPAC axis)",
+            ));
+        }
+        font_bytes = apply_spac(font_bytes, entry, avar2_csv)?;
     }
 
+    // Table fixers, in semantic order (fvar instances before STAT).
+    for e in &entries {
+        if !e.enabled {
+            continue;
+        }
+        font_bytes = match e.kind.as_str() {
+            "fix_instances" => crate::fix::fix_fvar_instances(font_bytes)?,
+            "gen_stat" => crate::stat::regen_stat(font_bytes)?,
+            "fix_unhinted" => crate::fix::fix_unhinted(font_bytes)?,
+            _ => font_bytes,
+        };
+    }
+    Ok(font_bytes)
+}
+
+fn apply_spac(
+    font_bytes: Vec<u8>,
+    entry: &TransformEntry,
+    avar2_csv: &str,
+) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
     let fvar = font
         .fvar()

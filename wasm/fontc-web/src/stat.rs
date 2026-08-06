@@ -263,7 +263,7 @@ fn debug_name(records: &[w_name::NameRecord], name_id: u16) -> Option<String> {
 }
 
 /// fontTools `getFirstDebugName` (getBestFamilyName/getBestSubFamilyName).
-fn first_debug_name(records: &[w_name::NameRecord], ids: &[u16]) -> Option<String> {
+pub(crate) fn first_debug_name(records: &[w_name::NameRecord], ids: &[u16]) -> Option<String> {
     ids.iter().find_map(|id| debug_name(records, *id))
 }
 
@@ -271,7 +271,7 @@ fn first_debug_name(records: &[w_name::NameRecord], ids: &[u16]) -> Option<Strin
 /// mac=False)`: reuse the smallest nameID >= min_id with a matching
 /// (3,1,0x409) record; else assign `_findUnusedNameID` (1 + max of all
 /// nameIDs and 255) and append a (3,1,0x409) record.
-fn find_or_add_name(records: &mut Vec<w_name::NameRecord>, string: &str, min_id: u16) -> NameId {
+pub(crate) fn find_or_add_name(records: &mut Vec<w_name::NameRecord>, string: &str, min_id: u16) -> NameId {
     let reuse = records
         .iter()
         .filter(|r| {
