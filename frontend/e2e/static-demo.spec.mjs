@@ -837,6 +837,14 @@ await page.waitForFunction(() => {
   return groups.some(g => [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'SPAC'));
 }, { timeout: 240000 });
 ok(true, 'SPAC slider appears after toggling width-aware on');
+// With SPAC the font has 4 master-covered axes — the cube becomes a tesseract.
+await page.click('button:text-is("Space")');
+await page.waitForSelector('.space-chip', { timeout: 30000 });
+await page.waitForFunction(() => document.querySelectorAll('.space-chip').length === 16, { timeout: 20000 });
+ok(true, '16 corner chips with a 4th axis (tesseract)');
+ok((await page.$$('.space-axis-label')).length === 4, '4 axis labels (one per axis)');
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 // The exported font carries the SPAC fvar axis.
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
 await page.click('.preview-tab-download button');

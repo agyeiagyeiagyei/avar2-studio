@@ -7,11 +7,26 @@ import { measureAt } from '../fontc-compile';
 const PROBE_TEXT = 'adhesion';
 const CHIP_GLYPH = 'a';
 
-// 3D → 2D orbit projection (hand-rolled, no deps). Drag orbits.
-function projectors(norm, az, el, W, H) {
+// N-D → 2D orbit projection (hand-rolled, no deps). The first three
+// axes get the familiar 3D orbit (drag). Every dimension beyond that
+// is rotated in its (z, x_d) plane — ⇧drag spins the 4th — and
+// perspective-collapsed into z before the 3D orbit, so a 4-axis font
+// shows a real tesseract, not a truncated cube.
+function projectors(ranges, az, el, wAngle, W, H) {
+  const norm = (i, v) => (v - ranges[i][0]) / (ranges[i][1] - ranges[i][0]) - 0.5;
   const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+  const cw = Math.cos(wAngle), sw = Math.sin(wAngle);
   return (loc) => {
-    const x = norm(0, loc[0]) - 0.5, y = norm(1, loc[1]) - 0.5, z = norm(2, loc[2]) - 0.5;
+    let x = norm(0, loc[0]), y = norm(1, loc[1]), z = norm(2, loc[2]);
+    for (let d = 3; d < loc.length; d++) {
+      const w = norm(d, loc[d]);
+      const z2 = z * cw - w * sw, w2 = z * sw + w * cw;
+      const s4 = 1.35 / (w2 + 2.1);
+      x *= s4; y *= s4; z = z2 * s4;
+    }
+    // The collapse shrinks the figure toward the center — grow it back.
+    const grow = loc.length > 3 ? 1.35 : 1;
+    x *= grow; y *= grow; z *= grow;
     const X = x * ca - y * sa, Y1 = x * sa + y * ca;
     const Y = Y1 * ce - z * se, Z = Y1 * se + z * ce;
     const s = 1.9 / (Z + 2.6);
@@ -33,7 +48,10 @@ const FINDING_LABELS = {
 };
 
 /**
- * The Noordzij cube: the font's design space as a box. Masters are
+ * The Noordzij cube: the font's design space as an orbitable wireframe
+ * — a cube for 3 parametric axes, a tesseract for 4 (extra dimensions
+ * rotate in their z–w plane and collapse into the 3D projection;
+ * ⇧drag spins them). Masters are
  * blue dots, brace layers grey dots (hover = glyph preview), named
  * instances teal diamonds, the default a ring. Corners carry live
  * glyph specimens at their exact variation settings — red when the
@@ -50,18 +68,18 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   const [probe, setProbe] = useState(null); // {loc, glyphName?, label?}
   const [az, setAz] = useState(-0.62);
   const [el, setEl] = useState(0.42);
+  const [wAngle, setWAngle] = useState(0.6);
   const [pinning, setPinning] = useState(null);
   const [dropping, setDropping] = useState(false);
   const dragRef = useRef(null);
   const canvasRef = useRef(null);
 
   const W = 760, H = 520;
-  const paramAxes = (axes || []).filter(a => a.has_master_coverage !== false).slice(0, 3);
+  const paramAxes = (axes || []).filter(a => a.has_master_coverage !== false);
   const tags = paramAxes.map(a => a.tag);
   const ranges = paramAxes.map(a => [a.min, a.max]);
-  const norm = (i, v) => (v - ranges[i][0]) / (ranges[i][1] - ranges[i][0]);
   const locKey = (loc) => loc.map(v => Math.round(v * 100) / 100).join(',');
-  const proj = projectors(norm, az, el, W, H);
+  const proj = projectors(ranges, az, el, wAngle, W, H);
 
   const corners = useMemo(() => {
     const out = [];
@@ -71,15 +89,19 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     return out;
   }, [axes]);
 
-  const ghosts = useMemo(() => new Set(
+  const ghostLocs = useMemo(() =>
     (coverageFindings || [])
       .filter(f => f.type === 'uncovered-corner' && f.location)
-      .map(f => locKey(tags.map(t => f.location[t] ?? 0)))
-  ), [coverageFindings, axes]);
-
-  const pinned = useMemo(() => new Set(
-    (coveragePins || []).map(p => locKey(tags.map(t => p.corner[t] ?? 0)))
-  ), [coveragePins, axes]);
+      .map(f => f.location),
+  [coverageFindings]);
+  const pinLocs = useMemo(() => (coveragePins || []).map(p => p.corner), [coveragePins]);
+  // A corner is ghost/pinned when a finding/pin matches it on every
+  // axis the finding pins — extra dimensions (e.g. SPAC) don't
+  // disqualify: the corner is uncovered at every value of those axes.
+  const locationMatches = (loc) => (L) =>
+    Object.entries(L).every(([t, v]) => Math.abs((loc[tags.indexOf(t)] ?? NaN) - v) < 0.01);
+  const isGhost = (loc) => ghostLocs.some(locationMatches(loc));
+  const isPinned = (loc) => pinLocs.some(locationMatches(loc));
 
   // Fetch the font bytes once (same URL the preview renders from).
   useEffect(() => {
@@ -99,7 +121,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   // glyphs are masters; the rest are brace/intermediate sources,
   // tracked with their glyph names for the hover preview).
   const { masters, braces } = useMemo(() => {
-    if (!bytes || tags.length !== 3) return { masters: [], braces: [] };
+    if (!bytes || tags.length < 3) return { masters: [], braces: [] };
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const dir = {};
     const count = view.getUint16(4);
@@ -109,7 +131,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         { offset: view.getUint32(r + 8) };
     }
     if (!dir.gvar) return { masters: [], braces: [] };
-    const tuples = gvarRegions(view, dir.gvar, 3);
+    const tuples = gvarRegions(view, dir.gvar, tags.length);
     const usage = new Map(); // peakKey -> Set of glyph names
     for (const t of tuples) {
       const key = [...t.peaks].map(v => v.toFixed(3)).join(',');
@@ -152,17 +174,18 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     if (!cv || !tags.length) return;
     const ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, W, H);
-    const cornerOf = (x, y, z) => tags.map((t, i) => ((i === 0 ? x : i === 1 ? y : z) ? ranges[i][1] : ranges[i][0]));
     ctx.strokeStyle = '#d4d4d8';
     ctx.lineWidth = 1.5;
-    const EDGES = [
-      [[0,0,0],[1,0,0]], [[0,0,0],[0,1,0]], [[0,0,0],[0,0,1]],
-      [[1,1,0],[1,0,0]], [[1,1,0],[0,1,0]], [[1,0,1],[1,0,0]],
-      [[1,0,1],[0,0,1]], [[0,1,1],[0,1,0]], [[0,1,1],[0,0,1]],
-      [[1,1,1],[1,1,0]], [[1,1,1],[1,0,1]], [[1,1,1],[0,1,1]],
-    ];
+    // Hypercube edges: corner bitmasks differing in exactly one bit.
+    const EDGES = [];
+    for (let i = 0; i < (1 << tags.length); i++) {
+      for (let j = 0; j < tags.length; j++) {
+        const k = i ^ (1 << j);
+        if (i < k) EDGES.push([i, k]);
+      }
+    }
     for (const [u, v] of EDGES) {
-      const p = proj(cornerOf(...u)), q = proj(cornerOf(...v));
+      const p = proj(corners[u]), q = proj(corners[v]);
       ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
     }
     if (masters.length) {
@@ -207,8 +230,13 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     if (e.buttons !== 1) return;
     const last = dragRef.current;
     if (last) {
-      setAz(az + (e.clientX - last[0]) * 0.008);
-      setEl(Math.max(-1.2, Math.min(1.2, el + (e.clientY - last[1]) * 0.008)));
+      if (e.shiftKey && tags.length > 3) {
+        // ⇧drag spins the extra dimensions (the z–w plane rotation).
+        setWAngle(wAngle + (e.clientX - last[0]) * 0.008);
+      } else {
+        setAz(az + (e.clientX - last[0]) * 0.008);
+        setEl(Math.max(-1.2, Math.min(1.2, el + (e.clientY - last[1]) * 0.008)));
+      }
     }
     dragRef.current = [e.clientX, e.clientY];
   };
@@ -257,7 +285,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         })}
         {/* axis labels — DOM so they sit above the chips at any orbit */}
         {tags.map((t, i) => {
-          const ext = [0, 1, 2].map(j =>
+          const ext = tags.map((_, j) =>
             i === j ? ranges[j][1] + 0.14 * (ranges[j][1] - ranges[j][0]) : ranges[j][0]);
           const [x, y] = proj(ext);
           return (
@@ -268,13 +296,13 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         {corners.map((loc) => {
           const [x, y] = proj(loc);
           const key = locKey(loc);
-          const ghost = ghosts.has(key);
-          const isPinned = pinned.has(key);
+          const ghost = isGhost(loc);
+          const pinnedChip = isPinned(loc);
           const h = healthOf(loc);
           return (
             <div
               key={key}
-              className={`space-chip${ghost ? ' ghost' : ''}${isPinned ? ' pinned' : ''}`}
+              className={`space-chip${ghost ? ' ghost' : ''}${pinnedChip ? ' pinned' : ''}`}
               style={{ left: x, top: y }}
               title={fmtLoc(tags, loc) + (h !== undefined ? ` · area ${Math.round(h)}` : '')}
               onClick={() => setProbe({ loc, glyphName: CHIP_GLYPH })}
@@ -283,8 +311,8 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
                 fontFamily: vfFamilyId ? `"${vfFamilyId}", sans-serif` : 'sans-serif',
                 fontVariationSettings: fvs(loc),
               }}>{CHIP_GLYPH}</span>
-              {isPinned && <span className="space-chip-pinned-label">pinned</span>}
-              {ghost && !isPinned && onPinCorner && (
+              {pinnedChip && <span className="space-chip-pinned-label">pinned</span>}
+              {ghost && !pinnedChip && onPinCorner && (
                 <button
                   className="space-chip-pin"
                   disabled={pinning === key}
@@ -325,7 +353,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
           <span><i className="dot instance" /> instance</span>
           <span><i className="dot default" /> default</span>
           <span><i className="dot ghost" /> ghost corner</span>
-          <span className="dim">drag to orbit · hover braces for their glyph</span>
+          <span className="dim">drag to orbit{tags.length > 3 ? ' · ⇧drag spins the 4th axis' : ''} · hover braces for their glyph</span>
         </div>
         {coverageFindings.length > 0 && (
           <div className="space-findings">
