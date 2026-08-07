@@ -181,7 +181,12 @@ free extrapolation** (`extrapolate.rs`): per-axis trend functions are
 peeled off the basis masters (pure masters give direct samples; joint
 masters attribute by residual, so a heavy master at (XOPQ 0.5, YOPQ
 0.85) lends its whole delta to XOPQ when the glyph is YOPQ-invariant)
-and continued linearly past the last master. This is the "make an
+and continued linearly past the last master — **capped at the
+outermost trend sample** (continuing the slope overshoots: 2× a heavy
+trend fills counters and drives phantom advances negative; the cap
+holds the corner with the outermost healthy master's shape). Per-axis,
+the closest-plane source wins so wide-plane joints never pollute a
+narrow corner's trend. This is the "make an
 instance at the extreme" semantics the tent model can't express (it
 zeroes joint masters at default planes). If even that yields the
 default shape, the pin is **refused** with an explanation instead of

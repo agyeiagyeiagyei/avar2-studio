@@ -76,13 +76,12 @@ impl AxisTrend {
             prev_v = *vi;
             prev_d = di.clone();
         }
-        if s.len() == 1 {
-            return scale(&s[0].1, v / s[0].0);
-        }
-        let (vn, dn) = &s[s.len() - 1];
-        let (vp, dp) = &s[s.len() - 2];
-        let t = (v - vp) / (vn - vp);
-        lerp(dp, dn, t)
+        // beyond the outermost sample: CAP at it — holding the corner
+        // with the outermost healthy master's shape. (Continuing the
+        // slope overshoots hard: 2× a heavy trend fills counters and
+        // drives phantom advances negative.)
+        let (_vn, dn) = &s[s.len() - 1];
+        dn.clone()
     }
 }
 
@@ -100,7 +99,23 @@ pub(crate) fn synthesize(
     // C leaves at default unrestricted within the box — a joint master
     // that lives off the default plane still informs the trend (its
     // cross-axis part is peeled off by the residual pass below).
-    let basis: Vec<&SourceDelta> = sources
+    // Off-plane distance: how far a source sits from the corner's own
+    // planes. Per axis, the closest-plane content wins — a wide-plane
+    // joint master must not override narrow-plane trend content.
+    let dist = |s: &SourceDelta| -> f64 {
+        s.loc
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                if coords[i] == 0.0 {
+                    v.abs()
+                } else {
+                    (v.abs() - coords[i].abs()).max(0.0)
+                }
+            })
+            .sum()
+    };
+    let mut basis: Vec<&SourceDelta> = sources
         .iter()
         .filter(|s| {
             s.loc.iter().enumerate().all(|(i, &v)| {
@@ -112,6 +127,10 @@ pub(crate) fn synthesize(
             })
         })
         .collect();
+    basis.sort_by(|a, b| dist(a).partial_cmp(&dist(b)).unwrap());
+    // Closest source distance feeding each axis so far; strictly
+    // farther sources don't contribute to that axis's trend.
+    let mut trend_dist: Vec<f64> = vec![f64::MAX; axis_count];
 
     let mut trends: Vec<AxisTrend> = (0..axis_count)
         .map(|_| AxisTrend { samples: Vec::new() })
@@ -121,11 +140,16 @@ pub(crate) fn synthesize(
         (0..axis_count).filter(|&i| s.loc[i] != 0.0).collect()
     };
 
-    // Pure masters first.
+    // Pure masters first (closest plane wins per axis).
     for s in &basis {
         let m = moved(s);
         if m.len() == 1 {
             let a = m[0];
+            let d = dist(s);
+            if d > trend_dist[a] + 0.05 {
+                continue;
+            }
+            trend_dist[a] = trend_dist[a].min(d);
             trends[a].samples.push((s.loc[a], s.deltas.clone()));
             trends[a].samples.sort_by(|x, y| x.0.abs().partial_cmp(&y.0.abs()).unwrap());
             known.insert(a);
@@ -149,6 +173,11 @@ pub(crate) fn synthesize(
             }
             if unknown.len() == 1 {
                 let a = unknown[0];
+                let d = dist(s);
+                if d > trend_dist[a] + 0.05 {
+                    continue; // a closer-plane source already feeds this axis
+                }
+                trend_dist[a] = trend_dist[a].min(d);
                 trends[a].samples.push((s.loc[a], residual));
                 trends[a].samples.sort_by(|x, y| x.0.abs().partial_cmp(&y.0.abs()).unwrap());
                 known.insert(a);
@@ -157,7 +186,12 @@ pub(crate) fn synthesize(
                 // Split the residual among unknown axes by peak magnitude.
                 let total: f64 = unknown.iter().map(|&a| s.loc[a].abs()).sum();
                 if total > 1e-9 {
+                    let d = dist(s);
                     for &a in &unknown {
+                        if d > trend_dist[a] + 0.05 {
+                            continue;
+                        }
+                        trend_dist[a] = trend_dist[a].min(d);
                         let share = s.loc[a].abs() / total;
                         trends[a].samples.push((s.loc[a], scale(&residual, share)));
                         trends[a].samples.sort_by(|x, y| x.0.abs().partial_cmp(&y.0.abs()).unwrap());

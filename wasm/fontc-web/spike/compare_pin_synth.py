@@ -72,6 +72,14 @@ def synthesize(font, name, loc, tags):
         )
     ]
 
+    def dist(s):
+        return sum(
+            abs(v) if norm[i] == 0.0 else max(0.0, abs(v) - abs(norm[i]))
+            for i, v in enumerate(s[0])
+        )
+    basis.sort(key=dist)
+    trend_dist = [float('inf')] * len(tags)  # closest source distance per axis
+
     trends = {a: [] for a in range(len(tags))}  # a -> [(v, deltas)]
     known = set()
 
@@ -79,6 +87,10 @@ def synthesize(font, name, loc, tags):
         m = moved(s)
         if len(m) == 1:
             a = m[0]
+            d = dist(s)
+            if d > trend_dist[a] + 0.05:
+                continue
+            trend_dist[a] = min(trend_dist[a], d)
             trends[a].append((s[0][a], s[1]))
             known.add(a)
 
@@ -101,13 +113,21 @@ def synthesize(font, name, loc, tags):
                 continue
             if len(unknown) == 1:
                 a = unknown[0]
+                d = dist(s)
+                if d > trend_dist[a] + 0.05:
+                    continue
+                trend_dist[a] = min(trend_dist[a], d)
                 trends[a].append((s[0][a], residual))
                 known.add(a)
                 progress = True
             else:
                 total = sum(abs(s[0][a]) for a in unknown)
                 if total > 1e-9:
+                    d = dist(s)
                     for a in unknown:
+                        if d > trend_dist[a] + 0.05:
+                            continue
+                        trend_dist[a] = min(trend_dist[a], d)
                         share = abs(s[0][a]) / total
                         trends[a].append((s[0][a], [(dx * share, dy * share) for dx, dy in residual]))
                         known.add(a)
@@ -148,12 +168,8 @@ def eval_trend(samples, v, n_pts):
             t = (v - prev_v) / (vi - prev_v)
             return lerp(prev_d, di, t)
         prev_v, prev_d = vi, di
-    if len(s) == 1:
-        v1, d1 = s[0]
-        return [(dx * v / v1, dy * v / v1) for dx, dy in d1]
-    (vp, dp), (vn, dn) = s[-2], s[-1]
-    t = (v - vp) / (vn - vp)
-    return lerp(dp, dn, t)
+    # Cap at the outermost sample (never continue the slope past it).
+    return list(s[-1][1])
 
 
 def main():
