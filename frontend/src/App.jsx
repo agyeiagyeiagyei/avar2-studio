@@ -1973,8 +1973,9 @@ function App() {
             onPinCorner={async (loc) => {
               // Errors (e.g. untrendable-corner refusals) surface inline
               // in the Space tab's pinAt — don't catch here.
-              await api.pinCorner(loc);
+              const res = await api.pinCorner(loc);
               await loadData();
+              return res; // pinAt reads .synthesized for the notice
             }}
             onClampOutOfRange={api.clampOutOfRange ? async () => {
               await api.clampOutOfRange();

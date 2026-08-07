@@ -124,6 +124,11 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     setPinNotice(null);
     setPinning(key);
     Promise.resolve(onPinCorner(loc))
+      .then((res) => {
+        if (res?.synthesized) {
+          setPinNotice('Corner synthesized by extrapolation — review the shape before shipping.');
+        }
+      })
       .catch((err) => setPinNotice(err?.message || String(err)))
       .finally(() => setPinning(null));
   };

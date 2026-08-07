@@ -177,15 +177,18 @@ from the gvar phantom deltas).
 
 When the sweep collapses straight back to the default, no reusable
 shape exists on the path. The pin then **synthesizes the corner by
-extrapolation**: each master tuple's per-axis factor continues past
-its peak (v/peak on its own side of the default; edge-reaching
-regions only — interior brace regions stay clamped). If even that
-yields the default shape (every master trend sits on a different
-plane), the pin is **refused** with an explanation instead of
+free extrapolation** (`extrapolate.rs`): per-axis trend functions are
+peeled off the basis masters (pure masters give direct samples; joint
+masters attribute by residual, so a heavy master at (XOPQ 0.5, YOPQ
+0.85) lends its whole delta to XOPQ when the glyph is YOPQ-invariant)
+and continued linearly past the last master. This is the "make an
+instance at the extreme" semantics the tent model can't express (it
+zeroes joint masters at default planes). If even that yields the
+default shape, the pin is **refused** with an explanation instead of
 recording a zero-delta no-op — the corner genuinely needs a drawn
-extreme in the source. Synthesis verified against a Python
-extrapolation oracle (`tests/pin_synth_oracle.rs`,
-`spike/compare_pin_synth.py`).
+extreme in the source. Synthesized pins show a review notice in the
+Space tab. Verified against a Python peel-off oracle
+(`tests/pin_synth_oracle.rs`, `spike/compare_pin_synth.py`).
 
 Pins are workspace state: they ride session persistence, the
 workspace zip (`<stem>-cornerpins.json`), the config bundle

@@ -20,18 +20,14 @@ fn pin_synthesis_and_refusal() {
     let before = fontc_web::compile_glyphs(source).expect("fontc compile");
     std::fs::write("/tmp/pinsynth-before.ttf", &before).expect("write before");
 
-    // 1. The untrendable corner ((47,700,1): every XOPQ-heavy master
-    // also lifts XTRA or YOPQ, so no trend reaches it) REFUSES. The
-    // refusal constructs a JsError, which panics off-wasm — so it is
-    // asserted in the e2e (error banner), not here.
-
-    // 2. The trended corner synthesizes: at (47,700,300) the
-    // (47,350,255) master's joint XOPQ+YOPQ trend continues
-    // (×2.0 × 1.18 of its delta).
+    // 1. (47,700,1): unreachable by the tent model (every XOPQ-heavy
+    // master also lifts XTRA or YOPQ), but 'a' is YOPQ-invariant, so
+    // the peel-off extrapolator attributes the heavy master's whole
+    // delta to XOPQ and synthesizes real content.
     let pinned = fontc_web::pin_corner(
         before.clone(),
         &serde_json::json!({
-            "corner": { "XTRA": 47, "XOPQ": 700, "YOPQ": 300 },
+            "corner": { "XTRA": 47, "XOPQ": 700, "YOPQ": 1 },
             "scaffold": null,
         })
         .to_string(),
@@ -41,13 +37,36 @@ fn pin_synthesis_and_refusal() {
 
     let comparator = manifest.join("spike/compare_pin_synth.py");
     let status = Command::new(&python)
-        .arg(comparator)
+        .arg(&comparator)
         .arg("/tmp/pinsynth-before.ttf")
         .arg("/tmp/pinsynth-after.ttf")
+        .arg("47")
+        .arg("700")
+        .arg("1")
+        .status()
+        .expect("run comparator");
+    assert!(status.success(), "synthesis oracle failed for (47,700,1)");
+
+    // 2. (47,700,300): the (47,350,255) master's joint XOPQ+YOPQ trend
+    // continues (×2.0 × 1.18 of its delta).
+    let pinned2 = fontc_web::pin_corner(
+        before.clone(),
+        &serde_json::json!({
+            "corner": { "XTRA": 47, "XOPQ": 700, "YOPQ": 300 },
+            "scaffold": null,
+        })
+        .to_string(),
+    )
+    .expect("synthesis pin should succeed");
+    std::fs::write("/tmp/pinsynth-after2.ttf", &pinned2).expect("write after2");
+    let status = Command::new(&python)
+        .arg(&comparator)
+        .arg("/tmp/pinsynth-before.ttf")
+        .arg("/tmp/pinsynth-after2.ttf")
         .arg("47")
         .arg("700")
         .arg("300")
         .status()
         .expect("run comparator");
-    assert!(status.success(), "synthesis oracle comparison failed");
+    assert!(status.success(), "synthesis oracle failed for (47,700,300)");
 }

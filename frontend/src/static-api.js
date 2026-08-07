@@ -1353,7 +1353,7 @@ const staticOverrides = {
     }
     uploadDataset.fontBytes = await regenStat(uploadDataset.fontBytes);
     await refreshAfterPin(uploadDataset);
-    return { ok: true, scaffold };
+    return { ok: true, scaffold, synthesized: scaffold == null };
   },
 
   // Drop out-of-range (stranded) sources — the Glyphs.app/fontmake

@@ -694,27 +694,14 @@ print(sum(1 for p in img.get_flattened_data() if p < 128))
 ).toString().trim());
 ok(pinDarkness > 1000, `pinned ghost corner renders with weight (darkness ${pinDarkness} at (47,700,300))`);
 await page.click('.preview-export-modal button:has-text("Cancel")');
-// Pin the rest, targeted by corner. (47,700,1) is untrendable — every
-// XOPQ-heavy master also lifts XTRA or YOPQ — so its pin refuses with
-// an explanation instead of recording a no-op; (47,1,300) pins via its
-// sweep scaffold.
-await page.click('button:has-text("Coverage")');
-await page.waitForSelector('.space-findings', { timeout: 15000 });
-await page.evaluate(() => {
-  const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
-  const row = rows.find(r => r.textContent.includes('XOPQ▲ YOPQ▼'));
-  row?.querySelector('.coverage-pin-btn')?.click();
-});
-await page.waitForSelector('.space-pin-notice', { timeout: 120000 });
-ok(await page.evaluate(() =>
-  document.querySelector('.space-pin-notice')?.textContent.includes('no design trend reaches this corner')),
-  'untrendable corner refused with an explanation (inline notice)');
-ok(await page.evaluate(() =>
-  [...document.querySelectorAll('.space-findings .load-font-item-name')]
-    .some(e => e.textContent.includes('Missing corner'))),
-  'refused corner finding remains listed');
-// The trended corner pins (sweep scaffold).
+// Pin the rest, targeted by corner. (47,700,1) is unreachable by the
+// tent model (every XOPQ-heavy master also lifts XTRA or YOPQ), so it
+// synthesizes by free extrapolation — 'a' is YOPQ-invariant, so the
+// peel-off attributes the heavy master's whole delta to XOPQ. The
+// synthesis notice must show. (47,1,300) pins via its sweep scaffold.
 const pinCornerByText = async (needle) => {
+  await page.click('button:has-text("Coverage")');
+  await page.waitForSelector('.space-findings', { timeout: 15000 });
   const chipsBefore = (await page.$$('.space-chip.pinned')).length;
   const clicked = await page.evaluate((n) => {
     const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
@@ -728,8 +715,9 @@ const pinCornerByText = async (needle) => {
   await page.waitForTimeout(1200);
   return 'pinned';
 };
-ok((await pinCornerByText('XOPQ▼ YOPQ▲')) === 'pinned', 'trended corner pinned');
-ok((await cornerFindings()) === 1, 'one untrendable corner finding remains');
+ok((await pinCornerByText('XOPQ▲ YOPQ▼')) === 'pinned', 'second corner pinned');
+ok((await pinCornerByText('XOPQ▼ YOPQ▲')) === 'pinned', 'trended corner pinned (sweep scaffold)');
+ok((await cornerFindings()) === 0, 'all corner findings cleared');
 
 // ---- 19. rebuild keeps pins ---------------------------------------------------
 console.log('19. rebuild keeps pins');
@@ -743,7 +731,7 @@ await page.waitForFunction(() =>
 const banner19 = await page.$eval('.error-banner', el => el.textContent).catch(() => null);
 ok(!banner19, `rebuild produced no global error banner (${banner19 || 'none'})`);
 await page.click('button:has-text("Coverage")');
-ok(await cornerFindings() === 1, 'pins re-applied on rebuild (the untrendable corner finding remains)');
+ok(await cornerFindings() === 0, 'pins re-applied on rebuild (no corner findings remain)');
 
 // ---- 20. Space tab (Noordzij cube) ------------------------------------------
 console.log('20. Space tab (Noordzij cube)');
@@ -781,15 +769,18 @@ await page.waitForTimeout(600);
 ok(await page.$('.space-cube') !== null, 'chip click stays in the Space tab');
 ok((await page.textContent('.space-side-label')).includes('XTRA'), 'probe shows the clicked location');
 // Pin a ghost from its chip → the chip turns into a red "pinned" chip.
-// (The last ghost in DOM order is (47,700,300) — trended/synthesizable;
-// the first is the untrendable (47,700,1), refused by design.)
+// The first ghost in DOM order is (47,700,1): its sweep collapses on a
+// fresh font, so this pin takes the extrapolated-synthesis path.
 await page.evaluate(() => {
   const chips = [...document.querySelectorAll('.space-chip.ghost')];
-  chips[chips.length - 1].querySelector('.space-chip-pin').click();
+  chips[0].querySelector('.space-chip-pin').click();
 });
 await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned').length > 0, { timeout: 90000 });
 ok(true, 'pin from a ghost chip completes');
 ok((await page.textContent('.space-chip.pinned')).includes('pinned'), 'pinned chip shows the red pinned label');
+ok(await page.evaluate(() =>
+  document.querySelector('.space-pin-notice')?.textContent.includes('synthesized')),
+  'synthesis notice shows for the extrapolated corner');
 
 // ---- 21. drop out-of-range sources ----------------------------------------
 console.log('21. drop out-of-range sources');

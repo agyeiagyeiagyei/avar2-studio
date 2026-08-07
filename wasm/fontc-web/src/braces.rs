@@ -237,22 +237,6 @@ impl<'a> GlyphInstancer<'a> {
     /// (a f64 port of read-fonts' `compute_scalar_f32`, which matches
     /// fontTools' `supportScalar(ot=True)`).
     fn instance_points(&self, gid: u16, coords: &[f64]) -> Result<Vec<[f64; 2]>, JsError> {
-        self.instance_points_mode(gid, coords, false)
-    }
-
-    /// Points at `coords` with master tuples EXTRAPOLATED: each simple
-    /// tuple's per-axis factor is the rising-edge line continued past
-    /// the peak (v/peak, unclamped) on its side of the default, 0 on
-    /// the opposite side; peak-at-default (global) axes stay at 1.
-    /// Intermediate (brace) tuples keep the clamped OT scalar — they
-    /// are local edits, not trends. This is the "synthesize an instance
-    /// at the extreme" operation (Glyphs' instance-at-arbitrary-point
-    /// behaviour) used to pin corners no master reaches.
-    fn instance_points_extrapolated(&self, gid: u16, coords: &[f64]) -> Result<Vec<[f64; 2]>, JsError> {
-        self.instance_points_mode(gid, coords, true)
-    }
-
-    fn instance_points_mode(&self, gid: u16, coords: &[f64], extrapolate: bool) -> Result<Vec<[f64; 2]>, JsError> {
         let (base_pts, end_pts) = self.base_points(gid)?;
         let mut pts = base_pts.clone();
         let Some(gvar) = &self.gvar else { return Ok(pts) };
@@ -270,48 +254,7 @@ impl<'a> GlyphInstancer<'a> {
             let end = tuple
                 .intermediate_end()
                 .map(|t| coords_f64(&t, coords.len()));
-            let scalar = if extrapolate {
-                // Per axis: v/peak continued past the peak (the master
-                // trend), on the master's side of the default only.
-                // Regions that reach the axis edge are master tents and
-                // extrapolate; strictly interior regions are brace
-                // edits and keep their clamped tent.
-                let mut s = 1.0;
-                for (i, &v) in coords.iter().enumerate() {
-                    let p = peak.get(i).copied().unwrap_or(0.0);
-                    if p == 0.0 {
-                        continue; // global axis: participates at 1
-                    }
-                    if v == 0.0 || v.signum() != p.signum() {
-                        s = 0.0;
-                        break;
-                    }
-                    let reaches_edge = match (&start, &end) {
-                        (Some(st), Some(en)) => {
-                            en.get(i).copied().unwrap_or(0.0).abs() >= 0.999
-                                || st.get(i).copied().unwrap_or(0.0).abs() >= 0.999
-                        }
-                        _ => true,
-                    };
-                    if reaches_edge {
-                        s *= v / p;
-                    } else {
-                        let st = start.as_ref().and_then(|t| t.get(i).copied()).unwrap_or(0.0);
-                        let en = end.as_ref().and_then(|t| t.get(i).copied()).unwrap_or(p);
-                        let axis_val = if v < st || v > en {
-                            0.0
-                        } else if v <= p {
-                            (v - st) / (p - st)
-                        } else {
-                            (v - en) / (p - en)
-                        };
-                        s *= axis_val;
-                    }
-                }
-                s
-            } else {
-                tuple_scalar(&peak, start, end, coords)
-            };
+            let scalar = tuple_scalar(&peak, start, end, coords);
             if scalar == 0.0 {
                 continue;
             }
@@ -346,6 +289,60 @@ impl<'a> GlyphInstancer<'a> {
         let pts = self.instance_points(gid, coords)?;
         let n = pts.len();
         Ok(pts[n - 3][0] - pts[n - 4][0])
+    }
+
+    /// Per-source shape differences for the extrapolator: each
+    /// master-level tuple's peak (normalized) and its IUP-filled
+    /// per-point deltas vs the default instance. Brace/interior-region
+    /// tuples (bounds strictly inside the axis box on some axis) are
+    /// local edits, not trends — excluded from the basis.
+    fn source_deltas(
+        &self,
+        gid: u16,
+        axis_count: usize,
+    ) -> Result<Vec<crate::extrapolate::SourceDelta>, JsError> {
+        let (base_pts, end_pts) = self.base_points(gid)?;
+        let Some(gvar) = &self.gvar else { return Ok(Vec::new()) };
+        let Some(data) = gvar
+            .glyph_variation_data(GlyphId::new(gid as u32))
+            .map_err(|e| err(format!("glyph {gid} gvar: {e}")))?
+        else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for tuple in data.tuples() {
+            let peak = coords_f64(&tuple.peak(), axis_count);
+            // A brace has an intermediate region bounded INSIDE the box
+            // on an axis it moves; master regions reach the axis edge.
+            let is_brace = match (tuple.intermediate_start(), tuple.intermediate_end()) {
+                (Some(_st), Some(en)) => (0..axis_count).any(|i| {
+                    peak[i] != 0.0 && en.get(i).map(|v| v.to_f64().abs()).unwrap_or(0.0) < 0.999
+                }),
+                _ => false,
+            };
+            if is_brace {
+                continue;
+            }
+            let mut packed: Vec<Option<(f64, f64)>> = vec![None; base_pts.len()];
+            for delta in tuple.deltas() {
+                if let Some(slot) = packed.get_mut(delta.position as usize) {
+                    *slot = Some((delta.x_delta as f64, delta.y_delta as f64));
+                }
+            }
+            let filled = if end_pts.is_empty() {
+                packed
+                    .into_iter()
+                    .map(|d| d.unwrap_or((0.0, 0.0)))
+                    .collect::<Vec<_>>()
+            } else {
+                crate::iup::iup_delta(&packed, &base_pts, &end_pts)
+            };
+            out.push(crate::extrapolate::SourceDelta {
+                loc: peak,
+                deltas: filled,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -975,7 +972,14 @@ pub(crate) fn pin_corner(
 
         let at_scaffold = match &scaffold_norm {
             Some(s) => instancer.instance_points(gid, s)?,
-            None => instancer.instance_points_extrapolated(gid, &corner_norm)?,
+            // Synthesis: free extrapolation of the model's trends to
+            // the corner (MutatorMath-flavored per-axis peel-off — see
+            // extrapolate.rs), NOT the tent model (which zeroes here).
+            None => {
+                let (base_pts, _) = instancer.base_points(gid)?;
+                let sources = instancer.source_deltas(gid, triples.len())?;
+                crate::extrapolate::synthesize(&base_pts, triples.len(), &sources, &corner_norm)
+            }
         };
         let at_default = instancer.instance_points(gid, &zeroes)?;
         let base_deltas = point_deltas(&at_scaffold, &at_default, 0.0, false);
