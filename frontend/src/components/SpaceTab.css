@@ -264,3 +264,17 @@
   border-color: #a1a1aa;
   color: #27272a;
 }
+
+/* Pin refusal / notice, shown inline under the probe */
+.space-pin-notice {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #8a4b00;
+  background: #fff4e0;
+  border: 1px solid #f1c277;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  max-width: 460px;
+}

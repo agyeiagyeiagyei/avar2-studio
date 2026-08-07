@@ -1971,14 +1971,10 @@ function App() {
             fontUrl={fontUrl}
             vfFamilyId={vfFamilyId}
             onPinCorner={async (loc) => {
-              try {
-                await api.pinCorner(loc);
-                await loadData();
-              } catch (err) {
-                // e.g. a corner no design trend reaches — the pin is
-                // refused rather than silently no-op'ing.
-                setError(err?.message || String(err));
-              }
+              // Errors (e.g. untrendable-corner refusals) surface inline
+              // in the Space tab's pinAt — don't catch here.
+              await api.pinCorner(loc);
+              await loadData();
             }}
             onClampOutOfRange={api.clampOutOfRange ? async () => {
               await api.clampOutOfRange();

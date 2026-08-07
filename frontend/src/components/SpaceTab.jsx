@@ -71,6 +71,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   const [wAngle, setWAngle] = useState(0.6);
   const [pinning, setPinning] = useState(null);
   const [dropping, setDropping] = useState(false);
+  const [pinNotice, setPinNotice] = useState(null); // refusal/explanation shown inline
   const dragRef = useRef(null);
   const canvasRef = useRef(null);
   // Orbit animation/inertia state (see orbitTo / the drag handlers).
@@ -115,6 +116,16 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
       inertiaRef.current = requestAnimationFrame(decay);
     };
     inertiaRef.current = requestAnimationFrame(decay);
+  };
+  // Pin a corner; a refusal (no trend reaches it) shows inline, right
+  // next to the probe — the global error banner alone was too easy to
+  // miss.
+  const pinAt = (key, loc) => {
+    setPinNotice(null);
+    setPinning(key);
+    Promise.resolve(onPinCorner(loc))
+      .catch((err) => setPinNotice(err?.message || String(err)))
+      .finally(() => setPinning(null));
   };
 
   const W = 760, H = 520;
@@ -423,9 +434,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
                   title="Pin this corner (healthy-edge scaffold)"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPinning(key);
-                    Promise.resolve(onPinCorner(Object.fromEntries(tags.map((t, i) => [t, loc[i]]))))
-                      .finally(() => setPinning(null));
+                    pinAt(key, Object.fromEntries(tags.map((t, i) => [t, loc[i]])));
                   }}
                 >
                   {pinning === key ? '…' : 'Pin'}
@@ -450,6 +459,11 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         >
           {probe ? probeFor(probe.glyphName) : PROBE_TEXT}
         </div>
+        {pinNotice && (
+          <div className="space-pin-notice" onClick={() => setPinNotice(null)} title="Click to dismiss">
+            {pinNotice}
+          </div>
+        )}
         <div className="space-legend">
           <span><i className="dot master" /> master</span>
           <span><i className="dot brace" /> brace layer</span>
@@ -502,11 +516,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
                     className="coverage-pin-btn"
                     title="Hold this corner up with the nearest healthy shape (master semantics)"
                     disabled={pinning === locKey(tags.map(t => f.location[t] ?? 0))}
-                    onClick={() => {
-                      const key = locKey(tags.map(t => f.location[t] ?? 0));
-                      setPinning(key);
-                      Promise.resolve(onPinCorner(f.location)).finally(() => setPinning(null));
-                    }}
+                    onClick={() => pinAt(locKey(tags.map(t => f.location[t] ?? 0)), f.location)}
                   >
                     {pinning === locKey(tags.map(t => f.location[t] ?? 0)) ? '…' : 'Pin'}
                   </button>

@@ -705,10 +705,10 @@ await page.evaluate(() => {
   const row = rows.find(r => r.textContent.includes('XOPQ▲ YOPQ▼'));
   row?.querySelector('.coverage-pin-btn')?.click();
 });
-await page.waitForSelector('.error-banner', { timeout: 120000 });
+await page.waitForSelector('.space-pin-notice', { timeout: 120000 });
 ok(await page.evaluate(() =>
-  document.querySelector('.error-banner')?.textContent.includes('no design trend reaches this corner')),
-  'untrendable corner refused with an explanation');
+  document.querySelector('.space-pin-notice')?.textContent.includes('no design trend reaches this corner')),
+  'untrendable corner refused with an explanation (inline notice)');
 ok(await page.evaluate(() =>
   [...document.querySelectorAll('.space-findings .load-font-item-name')]
     .some(e => e.textContent.includes('Missing corner'))),
@@ -738,11 +738,10 @@ await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 90000 }
 );
-// The only banner allowed is section 18's known refusal; a rebuild
-// error would replace its text.
+// The only notice allowed is section 18's known refusal (inline in the
+// Space tab); a rebuild error would show as the global error banner.
 const banner19 = await page.$eval('.error-banner', el => el.textContent).catch(() => null);
-ok(!banner19 || banner19.includes('no design trend'),
-  `rebuild produced no new error (${banner19 || 'none'})`);
+ok(!banner19, `rebuild produced no global error banner (${banner19 || 'none'})`);
 await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() === 1, 'pins re-applied on rebuild (the untrendable corner finding remains)');
 
