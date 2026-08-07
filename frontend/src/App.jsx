@@ -1971,8 +1971,14 @@ function App() {
             fontUrl={fontUrl}
             vfFamilyId={vfFamilyId}
             onPinCorner={async (loc) => {
-              await api.pinCorner(loc);
-              await loadData();
+              try {
+                await api.pinCorner(loc);
+                await loadData();
+              } catch (err) {
+                // e.g. a corner no design trend reaches — the pin is
+                // refused rather than silently no-op'ing.
+                setError(err?.message || String(err));
+              }
             }}
             onClampOutOfRange={api.clampOutOfRange ? async () => {
               await api.clampOutOfRange();

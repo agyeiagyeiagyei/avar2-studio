@@ -694,21 +694,42 @@ print(sum(1 for p in img.get_flattened_data() if p < 128))
 ).toString().trim());
 ok(pinDarkness > 1000, `pinned ghost corner renders with weight (darkness ${pinDarkness} at (47,700,300))`);
 await page.click('.preview-export-modal button:has-text("Cancel")');
-// Pin the rest (the intent-hairline corners — covered explicitly).
-const pinRemaining = async () => {
-  await page.click('button:has-text("Coverage")');
-  await page.waitForSelector('.space-findings .coverage-pin-btn', { timeout: 15000 });
-  const before = (await page.$$('.space-findings .coverage-pin-btn')).length;
-  await page.click('.space-findings .coverage-pin-btn');
-  await page.waitForFunction((b) =>
-    document.querySelectorAll('.space-findings .coverage-pin-btn').length < b,
-    before, { timeout: 90000 }
-  );
+// Pin the rest, targeted by corner. (47,700,1) is untrendable — every
+// XOPQ-heavy master also lifts XTRA or YOPQ — so its pin refuses with
+// an explanation instead of recording a no-op; (47,1,300) pins via its
+// sweep scaffold.
+await page.click('button:has-text("Coverage")');
+await page.waitForSelector('.space-findings', { timeout: 15000 });
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
+  const row = rows.find(r => r.textContent.includes('XOPQ▲ YOPQ▼'));
+  row?.querySelector('.coverage-pin-btn')?.click();
+});
+await page.waitForSelector('.error-banner', { timeout: 120000 });
+ok(await page.evaluate(() =>
+  document.querySelector('.error-banner')?.textContent.includes('no design trend reaches this corner')),
+  'untrendable corner refused with an explanation');
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.space-findings .load-font-item-name')]
+    .some(e => e.textContent.includes('Missing corner'))),
+  'refused corner finding remains listed');
+// The trended corner pins (sweep scaffold).
+const pinCornerByText = async (needle) => {
+  const chipsBefore = (await page.$$('.space-chip.pinned')).length;
+  const clicked = await page.evaluate((n) => {
+    const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
+    const row = rows.find(r => r.textContent.includes(n));
+    const btn = row?.querySelector('.coverage-pin-btn');
+    if (btn) btn.click();
+    return !!btn;
+  }, needle);
+  if (!clicked) return 'no-finding';
+  await page.waitForFunction((b) => document.querySelectorAll('.space-chip.pinned').length > b, chipsBefore, { timeout: 120000 });
   await page.waitForTimeout(1200);
+  return 'pinned';
 };
-await pinRemaining();
-await pinRemaining();
-ok(await cornerFindings() === 0, 'all corner findings pinned');
+ok((await pinCornerByText('XOPQ▼ YOPQ▲')) === 'pinned', 'trended corner pinned');
+ok((await cornerFindings()) === 1, 'one untrendable corner finding remains');
 
 // ---- 19. rebuild keeps pins ---------------------------------------------------
 console.log('19. rebuild keeps pins');
@@ -717,11 +738,13 @@ await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 90000 }
 );
-// A failed rebuild throws into the error banner and leaves the old font
-// in place — the findings check below would pass vacuously on it.
-ok(!(await page.$('.error-banner')), 'rebuild completed without an error');
+// The only banner allowed is section 18's known refusal; a rebuild
+// error would replace its text.
+const banner19 = await page.$eval('.error-banner', el => el.textContent).catch(() => null);
+ok(!banner19 || banner19.includes('no design trend'),
+  `rebuild produced no new error (${banner19 || 'none'})`);
 await page.click('button:has-text("Coverage")');
-ok(await cornerFindings() === 0, 'pins re-applied on rebuild (still no corner findings)');
+ok(await cornerFindings() === 1, 'pins re-applied on rebuild (the untrendable corner finding remains)');
 
 // ---- 20. Space tab (Noordzij cube) ------------------------------------------
 console.log('20. Space tab (Noordzij cube)');
@@ -733,7 +756,9 @@ await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textCont
 await page.click('button:text-is("Space")');
 await page.waitForSelector('.space-chip', { timeout: 30000 });
 ok((await page.$$('.space-chip')).length === 8, '8 corner chips render');
-ok((await page.$$('.space-chip.ghost')).length === 3, '3 ghost chips (the missing corners)');
+// ghost styling needs the coverage findings — they land a beat after the chips
+await page.waitForFunction(() => document.querySelectorAll('.space-chip.ghost').length === 3, { timeout: 20000 });
+ok(true, '3 ghost chips (the missing corners)');
 // instance diamonds need the font bytes parsed (they read fvar) — wait for them
 await page.waitForFunction(() => document.querySelectorAll('.space-instance').length === 2, { timeout: 20000 });
 ok(true, 'named instances render as diamonds');
@@ -757,9 +782,11 @@ await page.waitForTimeout(600);
 ok(await page.$('.space-cube') !== null, 'chip click stays in the Space tab');
 ok((await page.textContent('.space-side-label')).includes('XTRA'), 'probe shows the clicked location');
 // Pin a ghost from its chip → the chip turns into a red "pinned" chip.
+// (The last ghost in DOM order is (47,700,300) — trended/synthesizable;
+// the first is the untrendable (47,700,1), refused by design.)
 await page.evaluate(() => {
   const chips = [...document.querySelectorAll('.space-chip.ghost')];
-  chips[0].querySelector('.space-chip-pin').click();
+  chips[chips.length - 1].querySelector('.space-chip-pin').click();
 });
 await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned').length > 0, { timeout: 90000 });
 ok(true, 'pin from a ghost chip completes');

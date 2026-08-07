@@ -175,6 +175,18 @@ and STAT are regenerated around the pin, the audit re-runs (the
 finding clears), and renderers get the advance too (HVAR is rebuilt
 from the gvar phantom deltas).
 
+When the sweep collapses straight back to the default, no reusable
+shape exists on the path. The pin then **synthesizes the corner by
+extrapolation**: each master tuple's per-axis factor continues past
+its peak (v/peak on its own side of the default; edge-reaching
+regions only — interior brace regions stay clamped). If even that
+yields the default shape (every master trend sits on a different
+plane), the pin is **refused** with an explanation instead of
+recording a zero-delta no-op — the corner genuinely needs a drawn
+extreme in the source. Synthesis verified against a Python
+extrapolation oracle (`tests/pin_synth_oracle.rs`,
+`spike/compare_pin_synth.py`).
+
 Pins are workspace state: they ride session persistence, the
 workspace zip (`<stem>-cornerpins.json`), the config bundle
 (`corner_pins` section), and rebuilds (Recompile re-applies them).

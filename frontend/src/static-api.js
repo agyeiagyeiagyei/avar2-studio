@@ -343,7 +343,11 @@ const regenerateFont = async (dataset) => {
 //
 // Scaffold choice: sweep from the default location toward the corner
 // (every differing axis interpolated together) and take the measured
-// peak — the last healthy point before the collapse.
+// peak — the last healthy point before the collapse. When the peak IS
+// the default (the sweep only collapses), nothing reusable exists on
+// the path: return null and pin_corner synthesizes the corner shape by
+// extrapolating the model's master trends — and refuses outright when
+// no trend reaches the corner either.
 
 const chooseScaffold = async (dataset, corner) => {
   const defaults = Object.fromEntries(
@@ -358,6 +362,7 @@ const chooseScaffold = async (dataset, corner) => {
   }
   const areas = await measureAt(dataset.fontBytes, PROBE_GLYPHS, steps);
   const peakI = areas.indexOf(Math.max(...areas));
+  if (peakI === 0) return null;
   return steps[peakI];
 };
 

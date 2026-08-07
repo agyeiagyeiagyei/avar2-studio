@@ -237,6 +237,22 @@ impl<'a> GlyphInstancer<'a> {
     /// (a f64 port of read-fonts' `compute_scalar_f32`, which matches
     /// fontTools' `supportScalar(ot=True)`).
     fn instance_points(&self, gid: u16, coords: &[f64]) -> Result<Vec<[f64; 2]>, JsError> {
+        self.instance_points_mode(gid, coords, false)
+    }
+
+    /// Points at `coords` with master tuples EXTRAPOLATED: each simple
+    /// tuple's per-axis factor is the rising-edge line continued past
+    /// the peak (v/peak, unclamped) on its side of the default, 0 on
+    /// the opposite side; peak-at-default (global) axes stay at 1.
+    /// Intermediate (brace) tuples keep the clamped OT scalar — they
+    /// are local edits, not trends. This is the "synthesize an instance
+    /// at the extreme" operation (Glyphs' instance-at-arbitrary-point
+    /// behaviour) used to pin corners no master reaches.
+    fn instance_points_extrapolated(&self, gid: u16, coords: &[f64]) -> Result<Vec<[f64; 2]>, JsError> {
+        self.instance_points_mode(gid, coords, true)
+    }
+
+    fn instance_points_mode(&self, gid: u16, coords: &[f64], extrapolate: bool) -> Result<Vec<[f64; 2]>, JsError> {
         let (base_pts, end_pts) = self.base_points(gid)?;
         let mut pts = base_pts.clone();
         let Some(gvar) = &self.gvar else { return Ok(pts) };
@@ -247,16 +263,55 @@ impl<'a> GlyphInstancer<'a> {
             return Ok(pts);
         };
         for tuple in data.tuples() {
-            let scalar = tuple_scalar(
-                &coords_f64(&tuple.peak(), coords.len()),
-                tuple
-                    .intermediate_start()
-                    .map(|t| coords_f64(&t, coords.len())),
-                tuple
-                    .intermediate_end()
-                    .map(|t| coords_f64(&t, coords.len())),
-                coords,
-            );
+            let peak = coords_f64(&tuple.peak(), coords.len());
+            let start = tuple
+                .intermediate_start()
+                .map(|t| coords_f64(&t, coords.len()));
+            let end = tuple
+                .intermediate_end()
+                .map(|t| coords_f64(&t, coords.len()));
+            let scalar = if extrapolate {
+                // Per axis: v/peak continued past the peak (the master
+                // trend), on the master's side of the default only.
+                // Regions that reach the axis edge are master tents and
+                // extrapolate; strictly interior regions are brace
+                // edits and keep their clamped tent.
+                let mut s = 1.0;
+                for (i, &v) in coords.iter().enumerate() {
+                    let p = peak.get(i).copied().unwrap_or(0.0);
+                    if p == 0.0 {
+                        continue; // global axis: participates at 1
+                    }
+                    if v == 0.0 || v.signum() != p.signum() {
+                        s = 0.0;
+                        break;
+                    }
+                    let reaches_edge = match (&start, &end) {
+                        (Some(st), Some(en)) => {
+                            en.get(i).copied().unwrap_or(0.0).abs() >= 0.999
+                                || st.get(i).copied().unwrap_or(0.0).abs() >= 0.999
+                        }
+                        _ => true,
+                    };
+                    if reaches_edge {
+                        s *= v / p;
+                    } else {
+                        let st = start.as_ref().and_then(|t| t.get(i).copied()).unwrap_or(0.0);
+                        let en = end.as_ref().and_then(|t| t.get(i).copied()).unwrap_or(p);
+                        let axis_val = if v < st || v > en {
+                            0.0
+                        } else if v <= p {
+                            (v - st) / (p - st)
+                        } else {
+                            (v - en) / (p - en)
+                        };
+                        s *= axis_val;
+                    }
+                }
+                s
+            } else {
+                tuple_scalar(&peak, start, end, coords)
+            };
             if scalar == 0.0 {
                 continue;
             }
@@ -834,7 +889,10 @@ pub(crate) fn apply_grade(
 #[derive(Deserialize)]
 pub(crate) struct PinRequest {
     corner: HashMap<String, f64>,
-    scaffold: HashMap<String, f64>,
+    /// Sweep-scaffolded location; null = the sweep collapsed to the
+    /// default, so synthesize the corner shape by extrapolating the
+    /// model's master trends (the "instance at the extreme" workflow).
+    scaffold: Option<HashMap<String, f64>>,
 }
 
 /// Hold an uncovered corner up with the scaffold's shape, the way
@@ -863,7 +921,7 @@ pub(crate) fn pin_corner(
             .collect()
     };
     let corner_norm = norm_loc(&request.corner);
-    let scaffold_norm = norm_loc(&request.scaffold);
+    let scaffold_norm = request.scaffold.as_ref().map(|s| norm_loc(s));
     let axis_order: Vec<Tag> = triples.iter().map(|t| t.0).collect();
     let instancer = GlyphInstancer::new(&font)?;
     let zeroes = vec![0.0; triples.len()];
@@ -915,9 +973,25 @@ pub(crate) fn pin_corner(
             .deltas::<f64, f64>(&indicator)
             .map_err(|e| err(format!("variation model failed: {e:?}")))?;
 
-        let at_scaffold = instancer.instance_points(gid, &scaffold_norm)?;
+        let at_scaffold = match &scaffold_norm {
+            Some(s) => instancer.instance_points(gid, s)?,
+            None => instancer.instance_points_extrapolated(gid, &corner_norm)?,
+        };
         let at_default = instancer.instance_points(gid, &zeroes)?;
         let base_deltas = point_deltas(&at_scaffold, &at_default, 0.0, false);
+        if scaffold_norm.is_none() {
+            // Synthesis path: a glyph whose extrapolated shape is the
+            // default (sub-unit deltas) adds no tuples — and if NO
+            // glyph changes, the corner has no trend reaching it.
+            let max_d = base_deltas
+                .iter()
+                .map(|&(dx, dy)| dx.abs().max(dy.abs()))
+                .max()
+                .unwrap_or(0);
+            if max_d == 0 {
+                continue;
+            }
+        }
         for (region, weights) in decomposition {
             if region.is_default() || weights[0] == 0.0 {
                 continue;
@@ -944,6 +1018,12 @@ pub(crate) fn pin_corner(
         }
     }
     if extras.is_empty() {
+        if scaffold_norm.is_none() {
+            return Err(err(
+                "no design trend reaches this corner — a pin would change nothing. \
+                 Draw the extreme in the source (or add an instance there as a master) to cover it.",
+            ));
+        }
         return Ok(font_bytes);
     }
     // Renderers take advances from HVAR, not gvar phantoms — rebuild it
