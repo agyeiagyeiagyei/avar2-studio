@@ -73,6 +73,49 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   const [dropping, setDropping] = useState(false);
   const dragRef = useRef(null);
   const canvasRef = useRef(null);
+  // Orbit animation/inertia state (see orbitTo / the drag handlers).
+  const animRef = useRef(null);
+  const velRef = useRef({ az: 0, el: 0 });
+  const inertiaRef = useRef(null);
+
+  const DEFAULT_VIEW = { az: -0.62, el: 0.42, wAngle: 0.6 };
+  // Ease the orbit to a target view (reset button, axis-label homes).
+  const orbitTo = (target) => {
+    cancelAnimationFrame(animRef.current);
+    cancelAnimationFrame(inertiaRef.current);
+    const start = { az, el, wAngle };
+    const t0 = performance.now();
+    const dur = 320;
+    const tick = (t) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3); // easeOutCubic
+      setAz(start.az + (target.az !== undefined ? (target.az - start.az) * e : 0));
+      setEl(start.el + (target.el !== undefined ? (target.el - start.el) * e : 0));
+      setWAngle(start.wAngle + (target.wAngle !== undefined ? (target.wAngle - start.wAngle) * e : 0));
+      if (k < 1) animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+  };
+  // Face each axis square-on (label click): the (az, el) that maps that
+  // axis's unit vector to +Z; el is clamped by the drag range.
+  const axisHome = (i) => {
+    if (i === 0) return { az: Math.PI / 2, el: 1.2 };
+    if (i === 1) return { az: 0, el: 1.2 };
+    if (i === 2) return { az: 0, el: 0 };
+    return { ...DEFAULT_VIEW, wAngle: 0 };
+  };
+  const startInertia = () => {
+    cancelAnimationFrame(inertiaRef.current);
+    const decay = () => {
+      velRef.current.az *= 0.94;
+      velRef.current.el *= 0.94;
+      if (Math.abs(velRef.current.az) < 0.0004 && Math.abs(velRef.current.el) < 0.0004) return;
+      setAz(a => a + velRef.current.az);
+      setEl(e => Math.max(-1.2, Math.min(1.2, e + velRef.current.el)));
+      inertiaRef.current = requestAnimationFrame(decay);
+    };
+    inertiaRef.current = requestAnimationFrame(decay);
+  };
 
   const W = 760, H = 520;
   const paramAxes = (axes || []).filter(a => a.has_master_coverage !== false);
@@ -168,14 +211,26 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
 
   const healthOf = (loc) => health[locKey(loc)];
 
+  // Depth of a location in the current view (0 = farthest, 1 = nearest)
+  // — used to fade DOM markers so the figure reads as 3D.
+  const cornerZs = corners.map(c => proj(c)[2]);
+  const zmin = Math.min(...cornerZs), zmax = Math.max(...cornerZs);
+  const depthT = (loc) => {
+    const z = proj(loc)[2];
+    return zmax === zmin ? 1 : (z - zmin) / (zmax - zmin);
+  };
+
   // ---- cube rendering (canvas: box, hull, markers; chips are DOM) ---
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv || !tags.length) return;
     const ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = '#d4d4d8';
-    ctx.lineWidth = 1.5;
+    // Depth cueing: normalize the projected Z over the corners so far
+    // wires/markers can fade and thin.
+    const zs = corners.map(c => proj(c)[2]);
+    const zmin = Math.min(...zs), zmax = Math.max(...zs);
+    const depthT = (z) => (zmax === zmin ? 1 : (z - zmin) / (zmax - zmin));
     // Hypercube edges: corner bitmasks differing in exactly one bit.
     const EDGES = [];
     for (let i = 0; i < (1 << tags.length); i++) {
@@ -186,16 +241,20 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     }
     for (const [u, v] of EDGES) {
       const p = proj(corners[u]), q = proj(corners[v]);
+      const t = (depthT(p[2]) + depthT(q[2])) / 2;
+      ctx.strokeStyle = `rgba(113, 113, 122, ${0.18 + 0.55 * t})`;
+      ctx.lineWidth = 0.9 + 1.1 * t;
       ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
     }
     if (masters.length) {
-      ctx.strokeStyle = 'rgba(29,78,216,.5)';
       ctx.lineWidth = 1.2;
       const M = masters.map(m => proj(m.loc));
       for (let i = 0; i < masters.length; i++) {
         for (let j = i + 1; j < masters.length; j++) {
           const shared = masters[i].loc.filter((v, k) => v === masters[j].loc[k]).length;
           if (shared >= tags.length - 1) {
+            const t = (depthT(M[i][2]) + depthT(M[j][2])) / 2;
+            ctx.strokeStyle = `rgba(29,78,216,${0.15 + 0.4 * t})`;
             ctx.beginPath(); ctx.moveTo(M[i][0], M[i][1]); ctx.lineTo(M[j][0], M[j][1]); ctx.stroke();
           }
         }
@@ -208,12 +267,13 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     items.sort((a, b) => a.p[2] - b.p[2]);
     for (const it of items) {
       const [x, y] = it.p;
+      const t = depthT(it.p[2]);
       if (it.kind === 'master') {
-        ctx.fillStyle = '#1d4ed8';
-        ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(29, 78, 216, ${0.45 + 0.55 * t})`;
+        ctx.beginPath(); ctx.arc(x, y, 4 + 2.5 * t, 0, 7); ctx.fill();
       } else if (it.kind === 'default') {
-        ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(x, y, 8, 0, 7); ctx.stroke();
+        ctx.strokeStyle = `rgba(24, 24, 27, ${0.5 + 0.5 * t})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 6 + 2.5 * t, 0, 7); ctx.stroke();
       }
     }
   });
@@ -226,19 +286,41 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     );
   }
 
+  const SENSITIVITY = 0.0055;
   const onCubeDrag = (e) => {
-    if (e.buttons !== 1) return;
+    if (e.buttons !== 1) {
+      // Gesture ended — a flick keeps gliding (inertia).
+      if (dragRef.current?.active) startInertia();
+      dragRef.current = null;
+      return;
+    }
+    cancelAnimationFrame(animRef.current);
+    cancelAnimationFrame(inertiaRef.current);
     const last = dragRef.current;
     if (last) {
+      // Dead zone: sub-pixel wobbles (e.g. chip clicks) don't move the view.
+      const totalDx = e.clientX - last.startX, totalDy = e.clientY - last.startY;
+      if (!last.active) {
+        if (Math.abs(totalDx) + Math.abs(totalDy) < 3) return;
+        last.active = true;
+        // Orbit the full accumulated delta from the gesture start.
+        last.x = last.startX; last.y = last.startY;
+      }
+      const dx = (e.clientX - last.x) * SENSITIVITY;
+      const dy = (e.clientY - last.y) * SENSITIVITY;
+      last.x = e.clientX; last.y = e.clientY;
       if (e.shiftKey && tags.length > 3) {
         // ⇧drag spins the extra dimensions (the z–w plane rotation).
-        setWAngle(wAngle + (e.clientX - last[0]) * 0.008);
+        setWAngle(wAngle + dx);
       } else {
-        setAz(az + (e.clientX - last[0]) * 0.008);
-        setEl(Math.max(-1.2, Math.min(1.2, el + (e.clientY - last[1]) * 0.008)));
+        velRef.current = { az: dx, el: dy };
+        setAz(az + dx);
+        setEl(Math.max(-1.2, Math.min(1.2, el + dy)));
       }
+    } else {
+      dragRef.current = { startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false };
+      velRef.current = { az: 0, el: 0 };
     }
-    dragRef.current = [e.clientX, e.clientY];
   };
 
   const fvs = (loc) => tags.map((t, i) => `"${t}" ${loc[i]}`).join(', ');
@@ -253,8 +335,23 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
           height={H}
           className="space-cube"
           onMouseMove={onCubeDrag}
-          onMouseLeave={() => { dragRef.current = null; }}
+          onMouseDown={() => {
+            cancelAnimationFrame(animRef.current);
+            cancelAnimationFrame(inertiaRef.current);
+          }}
+          onMouseLeave={() => {
+            if (dragRef.current?.active) startInertia();
+            dragRef.current = null;
+          }}
+          onDoubleClick={() => orbitTo(DEFAULT_VIEW)}
         />
+        <button
+          className="space-reset-view"
+          title="Reset the orbit (or double-click the cube)"
+          onClick={() => orbitTo(DEFAULT_VIEW)}
+        >
+          Reset view
+        </button>
         {/* named instances (teal diamonds) */}
         {(meta?.instances || []).map((inst, i) => {
           const loc = tags.map(t => inst.coordinates[t] ?? paramAxes[tags.indexOf(t)].default);
@@ -263,7 +360,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
             <div
               key={`inst-${i}`}
               className="space-instance"
-              style={{ left: x, top: y }}
+              style={{ left: x, top: y, opacity: 0.45 + 0.55 * depthT(loc) }}
               title={`${inst.name} — ${fmtLoc(tags, loc)}`}
               onClick={() => setProbe({ loc, glyphName: CHIP_GLYPH, label: inst.name })}
             />
@@ -277,19 +374,26 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
             <div
               key={`brace-${i}`}
               className={`space-brace-dot${b.outOfRange ? ' out-of-range' : ''}`}
-              style={{ left: x, top: y }}
+              style={{ left: x, top: y, opacity: 0.45 + 0.55 * depthT(b.loc) }}
               title={`brace layer${b.outOfRange ? ' (out of range)' : ''} — ${b.glyphs.join(', ')} — ${fmtLoc(tags, b.loc)}`}
               onMouseEnter={() => setProbe({ loc: b.loc, glyphName: probeFor(b.glyphs[0]), label: b.glyphs.join(', ') })}
             />
           );
         })}
-        {/* axis labels — DOM so they sit above the chips at any orbit */}
+        {/* axis labels — DOM so they sit above the chips at any orbit;
+            click homes the view square-on to that axis */}
         {tags.map((t, i) => {
           const ext = tags.map((_, j) =>
             i === j ? ranges[j][1] + 0.14 * (ranges[j][1] - ranges[j][0]) : ranges[j][0]);
           const [x, y] = proj(ext);
           return (
-            <span key={t} className="space-axis-label" style={{ left: x, top: y }}>{t} →</span>
+            <span
+              key={t}
+              className="space-axis-label"
+              style={{ left: x, top: y, opacity: 0.55 + 0.45 * depthT(ext) }}
+              title={`Face the ${t} axis`}
+              onClick={() => orbitTo(axisHome(i))}
+            >{t} →</span>
           );
         })}
         {/* corner chips (live specimens; ghost = red, pinned = labelled) */}
@@ -303,7 +407,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
             <div
               key={key}
               className={`space-chip${ghost ? ' ghost' : ''}${pinnedChip ? ' pinned' : ''}`}
-              style={{ left: x, top: y }}
+              style={{ left: x, top: y, opacity: 0.5 + 0.5 * depthT(loc) }}
               title={fmtLoc(tags, loc) + (h !== undefined ? ` · area ${Math.round(h)}` : '')}
               onClick={() => setProbe({ loc, glyphName: CHIP_GLYPH })}
             >
@@ -353,7 +457,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
           <span><i className="dot instance" /> instance</span>
           <span><i className="dot default" /> default</span>
           <span><i className="dot ghost" /> ghost corner</span>
-          <span className="dim">drag to orbit{tags.length > 3 ? ' · ⇧drag spins the 4th axis' : ''} · hover braces for their glyph</span>
+          <span className="dim">drag to orbit{tags.length > 3 ? ' · ⇧drag spins the 4th axis' : ''} · hover braces to preview · axis labels home the view · dbl-click resets</span>
         </div>
         {coverageFindings.length > 0 && (
           <div className="space-findings">
