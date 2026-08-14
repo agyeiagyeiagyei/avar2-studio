@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
-import { isStaticMode, isUploadDataset } from './static-api';
+import { isStaticMode, isUploadDataset, getSampleText, setSampleText as persistSampleText } from './static-api';
 import logoGif from './assets/logo.gif';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -72,7 +72,14 @@ function App() {
   // True ⇒ the CSV changed after the last build (auto-saved edits no
   // longer rebuild per save). The Preview tab rebuilds once on open.
   const [buildStale, setBuildStale] = useState(false);
-  const [sampleText, setSampleText] = useState(DEFAULT_SAMPLE_TEXT);
+  const [sampleText, setSampleTextState] = useState(DEFAULT_SAMPLE_TEXT);
+  // Wrap setSampleText to also persist to the session when in static mode
+  const setSampleText = useCallback((text) => {
+    setSampleTextState(text);
+    if (isStaticMode() && isUploadDataset()) {
+      persistSampleText(text);
+    }
+  }, []);
   const [fontSize, setFontSize] = useState(2); // Default 2rem
   // Which top-level view is active: 'instances' (authoring) or
   // 'preview' (free-form driving of the built font).
@@ -352,6 +359,12 @@ function App() {
       setBuilding(health.building || false);
       setAvar2Error(health.avar2_error || null);
       setBuildStale(health.build_stale || false);
+
+      // Restore persisted sample text (static mode with upload only)
+      if (isStaticMode() && isUploadDataset()) {
+        const savedSample = getSampleText();
+        if (savedSample) setSampleTextState(savedSample);
+      }
 
       // avar2 mappings are per-dataset: clear + refetch on every
       // loadData. The mount effect only fetches when empty, so without

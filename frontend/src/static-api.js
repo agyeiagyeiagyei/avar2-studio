@@ -41,6 +41,15 @@ export const isStaticMode = () => staticMode;
 // source rather than a baked snapshot — Rebuild exists for these.
 export const isUploadDataset = () => !!uploadDataset;
 
+// Sample text persistence — stored on the dataset so it survives reload.
+export const getSampleText = () => uploadDataset?.sampleText || null;
+export const setSampleText = (text) => {
+  if (uploadDataset) {
+    uploadDataset.sampleText = text;
+    persistSoon();
+  }
+};
+
 // ---- dataset (example) state ------------------------------------------------
 
 let dataset = null;               // example id, e.g. 'crispy-mini'
@@ -193,6 +202,7 @@ const serializeDataset = (dataset) => ({
   clampOutOfRange: dataset.clampOutOfRange || false,
   familyName: dataset.health.family_name,
   upm: dataset.health.upm,
+  sampleText: dataset.sampleText || null,
 });
 
 let persistWarned = false;
@@ -243,6 +253,7 @@ const restoreSession = async () => {
       grade: rec.grade || null,
       cornerPins: rec.cornerPins || [],
       clampOutOfRange: rec.clampOutOfRange || false,
+      sampleText: rec.sampleText || null,
       axes: rec.axes,
       instances: { instances: [] },
       coverage: [
