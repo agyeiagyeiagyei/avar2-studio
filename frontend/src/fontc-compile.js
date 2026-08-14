@@ -53,6 +53,8 @@ export function compileFont(source) {
  *  parametricTags for the in/out split when regenerating onto a font
  *  that already carries user axes (default-location rebuild). */
 export function addAvar2(fontBytes, mappingsCsv, axisMetadata = null, parametricTags = null) {
+  console.log('[addAvar2] CSV:', mappingsCsv);
+  console.log('[addAvar2] parametricTags:', parametricTags);
   return send({ kind: 'avar2', fontBytes, csv: mappingsCsv, metadata: axisMetadata, parametricTags });
 }
 
