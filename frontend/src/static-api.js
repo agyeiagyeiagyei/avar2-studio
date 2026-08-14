@@ -743,6 +743,8 @@ const refreshAxesFromFont = (dataset) => {
   );
   console.log('[refreshAxesFromFont] enabled transforms:', dataset.transforms?.filter(t => t.enabled));
   console.log('[refreshAxesFromFont] injectedTags:', [...injectedTags]);
+  console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
+  console.log('[refreshAxesFromFont] compiledTags:', [...compiledTags]);
   const meta = parseFont(dataset.fontBytes);
   console.log('[refreshAxesFromFont] font axes:', meta.axes.map(a => a.tag));
   // Use display_name from axisRanges (user-defined metadata) when

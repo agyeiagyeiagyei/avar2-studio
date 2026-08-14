@@ -253,11 +253,12 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           );
 
           // Sidebar only renders the axes that actively deform the font
-          // (has_master_coverage=true). Empty axes — the avar2 mapping
-          // targets like ``wght`` — live in the AVAR2 MAPPINGS section
-          // below where they belong conceptually (with the mapping rows
-          // that drive them), not duplicated up here.
-          const coreAxes = axes.filter(a => a.has_master_coverage !== false);
+          // (has_master_coverage=true) plus the GRAD axis when grade is
+          // enabled. Empty axes — the avar2 mapping targets like ``wght``
+          // — live in the AVAR2 MAPPINGS section below where they belong
+          // conceptually (with the mapping rows that drive them), not
+          // duplicated up here.
+          const coreAxes = axes.filter(a => a.has_master_coverage !== false || a.is_grade_axis);
 
           return (
             <>
