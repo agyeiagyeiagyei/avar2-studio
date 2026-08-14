@@ -1148,6 +1148,19 @@ const staticOverrides = {
     requireUpload();
     mappingsCsv.renameRow(uploadDataset.instancesCsv, instanceName, newName);
     syncInstancesFromCsv(uploadDataset);
+    // Migrate grade state keyed by instance name
+    const grade = uploadDataset.grade;
+    if (grade) {
+      if (grade.instances) {
+        for (const entry of grade.instances) {
+          if (entry.name === instanceName) entry.name = newName;
+        }
+      }
+      if (grade.max_pct && instanceName in grade.max_pct) {
+        grade.max_pct[newName] = grade.max_pct[instanceName];
+        delete grade.max_pct[instanceName];
+      }
+    }
     persistSoon();
     return {};
   },
