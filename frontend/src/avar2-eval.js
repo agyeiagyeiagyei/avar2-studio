@@ -171,6 +171,7 @@ export function evalAvar2(parsed, coords) {
  */
 export function mappedLocation(fontBytes, axes, coords) {
   const parsed = parseAvar2(fontBytes);
+  console.log('[avar2-eval] parseAvar2 result:', parsed ? `${parsed.axisCount} axes, ${parsed.regions?.length || 0} regions` : 'null (no avar2 table)');
   if (!parsed) return { ...coords };
   const normalize = (v, a) => {
     if (v === a.default) return 0;
