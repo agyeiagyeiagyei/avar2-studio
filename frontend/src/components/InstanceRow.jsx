@@ -4,7 +4,7 @@ import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, onSaveInstanceGrade, onRemoveInstanceGrade }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -396,11 +396,13 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
           {sampleText}
         </div>
         <div className="instance-coordinates">
-          {Object.entries(activeCoordinates).map(([tag, value]) => (
-            <span key={tag} className="coordinate">
-              {tag}: {formatAxisValue(value)}
-            </span>
-          ))}
+          {Object.entries(activeCoordinates)
+            .filter(([tag]) => !parametricTags || parametricTags.has(tag))
+            .map(([tag, value]) => (
+              <span key={tag} className="coordinate">
+                {tag}: {formatAxisValue(value)}
+              </span>
+            ))}
         </div>
       </div>
     </div>

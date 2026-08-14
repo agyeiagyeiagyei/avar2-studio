@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, axes }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -147,6 +147,7 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             gradeDefaultPct={grade?.default_pct ?? 0.25}
             onSaveInstanceGrade={onSaveInstanceGrade}
             onRemoveInstanceGrade={onRemoveInstanceGrade}
+            parametricTags={new Set((axes || []).filter(a => a.has_master_coverage !== false).map(a => a.tag))}
           />
         </div>
       ))}

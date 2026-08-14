@@ -2056,6 +2056,7 @@ function App() {
             grade={grade}
             onSaveInstanceGrade={handleSaveInstanceGrade}
             onRemoveInstanceGrade={handleRemoveInstanceGrade}
+            axes={axes}
           />
         </div>
         ) : (
