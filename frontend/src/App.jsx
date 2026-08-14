@@ -862,16 +862,19 @@ function App() {
 
   // Toggle / default. Toggling (dis)appears the GRAD axis, so rebuild now.
   const commitGrade = async (patch, prevGrade) => {
+    console.log('[App] commitGrade called with:', patch, 'prev:', prevGrade);
     try {
       setBuilding(true);
       setError(null);
       const result = await api.setGrade(patch);
+      console.log('[App] api.setGrade returned:', result);
       setGrade(g => ({ ...g, ...result }));
       await loadData();
+      console.log('[App] loadData completed');
     } catch (err) {
+      console.error('[App] Grade update failed:', err);
       if (prevGrade) setGrade(prevGrade);
       setError(err.message);
-      console.error('Grade update failed:', err);
     } finally {
       setBuilding(false);
     }

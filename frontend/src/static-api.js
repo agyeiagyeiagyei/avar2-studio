@@ -1197,11 +1197,19 @@ const staticOverrides = {
     return {};
   },
   setGrade: async (patch) => {
+    console.log('[static-api] setGrade called with:', patch);
     requireUpload();
     uploadDataset.grade = { ...(uploadDataset.grade || {}), ...patch };
-    await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
-    return uploadDataset.grade;
+    console.log('[static-api] uploadDataset.grade after update:', uploadDataset.grade);
+    try {
+      await rebuildUploadFont(uploadDataset);
+      commitRebuiltFont(uploadDataset);
+      console.log('[static-api] setGrade completed, returning:', uploadDataset.grade);
+      return uploadDataset.grade;
+    } catch (err) {
+      console.error('[static-api] setGrade failed:', err);
+      throw err;
+    }
   },
   setInstanceGrade: async (instanceName, pct) => {
     requireUpload();
