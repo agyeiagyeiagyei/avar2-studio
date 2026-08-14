@@ -790,7 +790,10 @@ const transformsMenu = (dataset) => {
 // current gvar, so the final font carries every stage's advances.
 // Shared by buildFont and updateTransforms (the only way to change the
 // transform set — applied transforms can't be un-baked).
+let rebuildCount = 0;
 const rebuildUploadFont = async (dataset) => {
+  rebuildCount++;
+  console.log(`[static-api] rebuildUploadFont called (#${rebuildCount}) from:`, new Error().stack?.split('\n')[2]?.trim());
   if (dataset.sourceText == null) {
     throw new Error("This needs the full app — the browser can't compile UFO sources yet.");
   }
