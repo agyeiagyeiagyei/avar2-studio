@@ -824,7 +824,10 @@ const rebuildUploadFont = async (dataset) => {
   if (dataset.clampOutOfRange) {
     dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
   }
+  console.log('[rebuildUploadFont] before refreshAxesFromFont, transforms:', dataset.transforms);
+  console.log('[rebuildUploadFont] before refreshAxesFromFont, grade:', dataset.grade);
   refreshAxesFromFont(dataset);
+  console.log('[rebuildUploadFont] after refreshAxesFromFont, axes:', dataset.axes.axes.map(a => ({ tag: a.tag, transform_injected: a.transform_injected, is_grade_axis: a.is_grade_axis })));
 };
 
 // After any rebuild-from-source: swap the object URL, stamp the build
