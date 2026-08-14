@@ -312,6 +312,7 @@ const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
 // axisRanges (axis-metadata semantics) overrides the CSV-derived range
 // for newly declared user axes.
 const regenerateFont = async (dataset) => {
+  console.log('[static-api] regenerateFont called from:', new Error().stack?.split('\n')[2]?.trim());
   persistSoon(); // the CSV changed even when no avar2 regen is needed
   if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
     return;
@@ -326,24 +327,10 @@ const regenerateFont = async (dataset) => {
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
-  // The fvar grew (new user axes): re-read so USER AXES sliders appear.
-  // Parametric tags keep master coverage; user columns don't; anything
-  // else the fvar carries (SPAC/GRAD/control axes from a bundle) is
-  // treated as non-master here too — bundle flags get refreshed on the
-  // next import, and the authoring flow never mixes with snapshots.
-  const meta = parseFont(dataset.fontBytes);
-  const userTags = new Set(
-    mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags])
-      .map(t => mappingsCsv.normalizeInAxisName(t))
-  );
-  dataset.axes = {
-    axes: meta.axes.map(a => ({
-      tag: a.tag, name: a.name,
-      min: a.min, default: a.default, max: a.max,
-      has_master_coverage: dataset.parametricTags.has(a.tag) && !userTags.has(a.tag),
-      is_control_axis: false,
-    })),
-  };
+  // Re-read axes from the patched font — use refreshAxesFromFont so
+  // GRAD/SPAC/control-axis flags are preserved (the inline mapping here
+  // used to drop them, making those axes disappear after avar2 edits).
+  refreshAxesFromFont(dataset);
 };
 
 // ---- corner pinning ---------------------------------------------------------
