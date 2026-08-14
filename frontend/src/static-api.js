@@ -730,7 +730,10 @@ const refreshAxesFromFont = (dataset) => {
       .map(t => KNOWN_TRANSFORMS[t.type || t.id]?.injected_axis_tag)
       .filter(Boolean)
   );
+  console.log('[refreshAxesFromFont] enabled transforms:', dataset.transforms?.filter(t => t.enabled));
+  console.log('[refreshAxesFromFont] injectedTags:', [...injectedTags]);
   const meta = parseFont(dataset.fontBytes);
+  console.log('[refreshAxesFromFont] font axes:', meta.axes.map(a => a.tag));
   // Use display_name from axisRanges (user-defined metadata) when
   // available; the font's name table often lacks entries for avar2 axes.
   const axisRanges = dataset.axisRanges || {};
