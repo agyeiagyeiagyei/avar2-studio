@@ -678,6 +678,7 @@ function App() {
   };
 
   const handleUpdateAvar2Mapping = async (instanceName, axisName, value) => {
+    console.log(`[App] handleUpdateAvar2Mapping: ${instanceName}.${axisName} = ${value}`);
     try {
       await api.updateAvar2Mapping(instanceName, axisName, value);
       // Reload avar2 data to get updated instances
