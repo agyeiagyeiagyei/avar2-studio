@@ -52,11 +52,19 @@ const coordsForColumns = (columns, coords) => {
   return values;
 };
 
-/** Insert or replace a row by name; insertAfter positions a new row. */
+/** Insert or replace a row by name; insertAfter positions a new row.
+ *  Only updates the values present in ``coords`` — other columns keep
+ *  their existing values (previously every column was overwritten,
+ *  wiping sibling slider values on a single-axis edit). */
 export function upsertRow(parsed, name, coords, insertAfter = null) {
   const existing = parsed.rows.find(r => r.name === name);
   if (existing) {
-    Object.assign(existing.values, coordsForColumns(parsed.columns, coords));
+    // Only assign the columns present in coords — leave the rest.
+    for (const [tag, v] of Object.entries(coords || {})) {
+      if (parsed.columns.includes(tag)) {
+        existing.values[tag] = v === undefined || v === null ? '' : String(v);
+      }
+    }
     return;
   }
   const row = { name, values: coordsForColumns(parsed.columns, coords) };
