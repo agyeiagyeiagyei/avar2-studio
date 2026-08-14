@@ -225,6 +225,7 @@ function App() {
 
         // If font was rebuilt (new build time), reload
         if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
+          console.log('[App] Polling detected rebuild, lastBuildTime:', lastBuildTime, '->', health.last_build_time);
           // Store scroll position before reloading
           const scrollY = window.scrollY;
           const selectedInstanceName = selectedInstance?.name;
@@ -397,6 +398,7 @@ function App() {
   };
 
   const loadAvar2Data = async () => {
+    console.log('[App] loadAvar2Data called');
     try {
       // No-op without a loaded source: the avar2 endpoints 404 when
       // there's no CSV, which blind launch (and only blind launch) is
@@ -411,11 +413,13 @@ function App() {
 
       // Load both in parallel, but update state as soon as each arrives
       const instancesPromise = api.getAvar2Instances().then(data => {
+        console.log('[App] getAvar2Instances returned:', data.instances?.length, 'instances');
         setAvar2Instances(data.instances || []);
         return data;
       });
 
       const axesPromise = api.getAvar2Axes().then(data => {
+        console.log('[App] getAvar2Axes returned:', data);
         setAvar2Axes(data);
         return data;
       });
