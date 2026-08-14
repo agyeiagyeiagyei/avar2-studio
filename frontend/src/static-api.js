@@ -1228,6 +1228,7 @@ const staticOverrides = {
   updateAvar2Mapping: async (instanceName, axisName, value) => {
     requireUpload();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, { [axisName]: value });
+    console.log('[updateAvar2Mapping] CSV after update:', mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv));
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
