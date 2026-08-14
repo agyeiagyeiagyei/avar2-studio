@@ -43,7 +43,9 @@ self.onmessage = async (e) => {
       const areas = measure_at(e.data.fontBytes, e.data.request);
       self.postMessage({ ok: true, areas: Array.from(areas) });
     } else if (e.data && e.data.kind === 'avar2') {
-      const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined, e.data.parametricTags ?? undefined);
+      // wasm expects parametricTags as a JSON string, not a JS array
+      const parametricTagsJson = e.data.parametricTags ? JSON.stringify(e.data.parametricTags) : undefined;
+      const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined, parametricTagsJson);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'control') {
       const ttf = apply_control_axes(e.data.fontBytes, e.data.json);
