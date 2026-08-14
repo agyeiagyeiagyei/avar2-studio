@@ -304,6 +304,10 @@ function App() {
         setOriginalCoordinates({});
         setInstanceEditingCoordinates({});
         setInstanceOriginalCoordinates({});
+        // Clear avar2 state only on source swap — the mappings belong
+        // to the old source and would leak into the new one.
+        setAvar2Instances([]);
+        setAvar2Axes(null);
       }
       loadedGlyphsPathRef.current = sourceIdentity;
 
@@ -371,12 +375,9 @@ function App() {
         if (savedSample) setSampleTextState(savedSample);
       }
 
-      // avar2 mappings are per-dataset: clear + refetch on every
-      // loadData. The mount effect only fetches when empty, so without
-      // this the PREVIOUS source's columns/rows stayed on screen after
-      // a source swap (example columns leaking into an upload).
-      setAvar2Instances([]);
-      setAvar2Axes(null);
+      // avar2 mappings are per-dataset: refetch on every loadData to get
+      // the latest CSV state. State is only CLEARED on source swap (see
+      // above) — on rebuilds the refetch carries the same values through.
       loadAvar2Data().catch(() => {});
 
       // If font was rebuilt (new build time), reload the font
