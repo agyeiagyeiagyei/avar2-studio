@@ -802,6 +802,7 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyGrade(
       dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
     );
+    console.log('[rebuildUploadFont] after applyGrade, font axes:', parseFont(dataset.fontBytes).axes.map(a => a.tag));
   }
   const transforms = (dataset.transforms || [])
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
@@ -809,6 +810,7 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyTransforms(
       dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
     );
+    console.log('[rebuildUploadFont] after applyTransforms, font axes:', parseFont(dataset.fontBytes).axes.map(a => a.tag));
   }
   await applyPins(dataset);
   if (dataset.clampOutOfRange) {
