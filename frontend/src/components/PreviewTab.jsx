@@ -153,9 +153,12 @@ function PreviewTab({
     clearTimeout(mapTimer.current);
     mapTimer.current = setTimeout(async () => {
       try {
+        console.log('[PreviewTab] getMappedLocation called with:', effectiveCoords);
         const res = await api.getMappedLocation(effectiveCoords);
+        console.log('[PreviewTab] getMappedLocation returned:', res);
         setMappedParams(res.mapped || {});
-      } catch {
+      } catch (err) {
+        console.warn('[PreviewTab] getMappedLocation failed:', err);
         // No built font / transient error — sliders fall back to inputs.
         setMappedParams({});
       }
