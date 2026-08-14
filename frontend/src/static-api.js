@@ -878,7 +878,7 @@ const staticOverrides = {
     pins: [...(uploadDataset ? uploadDataset.cornerPins || [] : [])],
   }),
   getGrade: async () => (uploadDataset
-    ? { enabled: false, default_pct: 0.25, instances: [], max_pct: {} }
+    ? (uploadDataset.grade || { enabled: false, default_pct: 0.25, instances: [], max_pct: {} })
     : endpoint('grade.json')()),
   listControlAxes: async () => (uploadDataset
     ? { axes: uploadDataset.controlAxes || [] }
