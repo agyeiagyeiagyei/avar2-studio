@@ -275,10 +275,10 @@
   overflow-y: hidden;
   white-space: nowrap;
   padding: 0.5rem 0;
-  padding-bottom: 0.5em;  /* room for descenders at large font sizes */
+  padding-top: 0.5em;     /* room for ascenders at large font sizes */
+  padding-bottom: 0.5em;  /* room for descenders */
   min-height: 3rem;
   border-top: 1px solid var(--zinc-200);
-  padding-top: 0.5rem;
   text-align: left !important;
   background: transparent !important;
   border: none !important;
