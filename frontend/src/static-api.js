@@ -105,7 +105,7 @@ const buildUploadDataset = async ({
     // avar2 generation in-browser: CSV mappings → avar v2 store in the
     // compiled font (fontc-web wasm). The user axes are the CSV columns
     // that aren't already fvar axes in the compiled font.
-    bytes = await addAvar2(bytes, mappingsText);
+    bytes = await addAvar2(bytes, mappingsText, null, [...compiledTags]);
     const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
     // Registered columns normalize to lowercase fvar tags (wght etc.);
     // user-tag matching must use the normalized form.
@@ -322,7 +322,8 @@ const regenerateFont = async (dataset) => {
   dataset.fontBytes = await addAvar2(
     dataset.fontBytes,
     mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
-    ranges
+    ranges,
+    [...dataset.parametricTags]
   );
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
@@ -651,7 +652,7 @@ const applyBundle = async (bundle, dataset) => {
     compiledTags = new Set(
       dataset.axes.axes.filter(a => a.has_master_coverage).map(a => a.tag)
     );
-    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv);
+    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv, null, [...dataset.parametricTags]);
     dataset.mappingsCsv = avar2Csv;
     // The bundle's CSV becomes the authoring source of truth.
     dataset.instancesCsv = mappingsCsv.parseMappingsCsv(avar2Csv);
@@ -786,7 +787,7 @@ const rebuildUploadFont = async (dataset) => {
   }
   let ttf = await compileFont(dataset.sourceText);
   if (dataset.mappingsCsv) {
-    ttf = await addAvar2(ttf, dataset.mappingsCsv);
+    ttf = await addAvar2(ttf, dataset.mappingsCsv, null, [...dataset.parametricTags]);
   }
   dataset.fontBytes = ttf;
   if ((dataset.controlAxes || []).length) {
@@ -1416,7 +1417,9 @@ const staticOverrides = {
     if (uploadDataset.mappingsCsv) {
       uploadDataset.fontBytes = await addAvar2(
         uploadDataset.fontBytes,
-        mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv)
+        mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv),
+        null,
+        [...uploadDataset.parametricTags]
       );
     }
     uploadDataset.fontBytes = await regenStat(uploadDataset.fontBytes);
