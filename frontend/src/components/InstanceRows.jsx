@@ -149,6 +149,7 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             onRemoveInstanceGrade={onRemoveInstanceGrade}
             parametricTags={new Set((axes || []).filter(a => a.has_master_coverage !== false).map(a => a.tag))}
             transformTags={new Set((axes || []).filter(a => a.transform_injected).map(a => a.tag))}
+            gradeTag="GRAD"
           />
         </div>
       ))}

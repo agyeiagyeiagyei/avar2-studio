@@ -732,7 +732,7 @@ const refreshAxesFromFont = (dataset) => {
   const csv = dataset.mappingsCsv || '';
   const compiledTags = new Set(dataset.parametricTags);
   const userTags = csv.trim()
-    ? new Set(csvHeaderTags(csv).filter(t => !compiledTags.has(t) && t !== 'SPAC'))
+    ? new Set(csvHeaderTags(csv).filter(t => !compiledTags.has(t) && t !== 'SPAC').map(t => mappingsCsv.normalizeInAxisName(t)))
     : new Set();
   const controlTags = new Set((dataset.controlAxes || []).map(a => a.tag));
   const injectedTags = new Set(
