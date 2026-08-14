@@ -791,7 +791,10 @@ const rebuildUploadFont = async (dataset) => {
   }
   const grade = dataset.grade || {};
   const gradeInstances = grade.enabled ? (grade.instances || []) : [];
-  if (gradeInstances.length) {
+  // Apply grade whenever enabled — even with no per-instance grades, the
+  // GRAD axis needs to exist so the slider shows. applyGrade with an
+  // empty instances list adds the axis at default (no visual change).
+  if (grade.enabled) {
     const coords = resolveGradeCoords(dataset, dataset.mappingsCsv || '');
     dataset.fontBytes = await applyGrade(
       dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
