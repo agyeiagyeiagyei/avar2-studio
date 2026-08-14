@@ -21,6 +21,16 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   const activeCoordinates = isSelected && Object.keys(editingCoordinates).length > 0
     ? editingCoordinates
     : (instanceEditingCoordinates[instance.name] || instance.coordinates);
+
+  // Apply grade: convert the per-instance grade % to a GRAD axis value
+  // and inject it into the coordinates for preview. GRAD range is
+  // typically -1 to 1 (normalized) or 0 to 100 (percentage) depending
+  // on how the wasm built it — we use the axis's actual min/max.
+  const gradeCoord = React.useMemo(() => {
+    if (!gradeEnabled || gradePct === null || gradePct === undefined) return null;
+    // gradePct is 0–1 (e.g. 0.25 = 25%); GRAD axis uses the same scale
+    return { GRAD: gradePct };
+  }, [gradeEnabled, gradePct]);
   
   // Apply the CONTROL AXES preview-disable: any axis the user has
   // toggled off via the eye icon renders at its axis default,
@@ -28,10 +38,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   // actual edit state is untouched, so re-enabling restores the
   // user's chosen value immediately.
   const previewCoordinates = React.useMemo(() => {
+    let out = { ...activeCoordinates };
+    if (gradeCoord) out = { ...out, ...gradeCoord };
     if (!disabledControlAxes || disabledControlAxes.size === 0) {
-      return activeCoordinates;
+      return out;
     }
-    const out = { ...activeCoordinates };
     for (const tag of disabledControlAxes) {
       const fallback = axisDefaults && axisDefaults[tag];
       if (fallback !== undefined) {
@@ -39,7 +50,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
       }
     }
     return out;
-  }, [activeCoordinates, disabledControlAxes, axisDefaults]);
+  }, [activeCoordinates, disabledControlAxes, axisDefaults, gradeCoord]);
 
   // SPAC support is deferred — the coordinate dict is rendered as-is.
 
