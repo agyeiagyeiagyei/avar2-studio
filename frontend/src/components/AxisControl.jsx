@@ -90,10 +90,14 @@ function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
   // control entirely and surface a clear CTA telling the designer
   // what's missing.
   //
-  // Exception: in the Preview tab (`treatEmptyAsActive`) an avar2-mapped
-  // user-facing axis legitimately has no direct coverage — it moves the
-  // parametric axes through the avar2 table — so it must stay draggable.
-  const emptyAxis = !treatEmptyAsActive && axis.has_master_coverage === false;
+  // Exceptions:
+  // - Preview tab (`treatEmptyAsActive`): avar2-mapped user-facing axes
+  //   legitimately have no direct coverage — they move the parametric
+  //   axes through the avar2 table — so they must stay draggable.
+  // - Grade axes (is_grade_axis): computed by the wasm, not master-based.
+  // - Transform-injected axes (transform_injected): added by SPAC etc.
+  const isComputedAxis = axis.is_grade_axis || axis.transform_injected;
+  const emptyAxis = !treatEmptyAsActive && !isComputedAxis && axis.has_master_coverage === false;
   const effectiveDisabled = disabled || emptyAxis;
   const emptyTooltip = emptyAxis
     ? `${axis.tag} has no master coverage. Add a master at an extreme value (in Glyphs.app or the .designspace) to enable this slider.`
