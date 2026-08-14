@@ -834,6 +834,7 @@ const rebuildUploadFont = async (dataset) => {
 // (the App re-reads fontUrl only when last_build_time changes) and
 // persist the session.
 const commitRebuiltFont = (dataset) => {
+  console.log('[static-api] commitRebuiltFont called from:', new Error().stack?.split('\n')[2]?.trim());
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
