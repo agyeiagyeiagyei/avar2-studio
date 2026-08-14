@@ -1124,7 +1124,11 @@ function App() {
     // which saves again, which rebuilds again — a self-sustaining
     // rebuild loop while the user sits idle (shipped once: 442 PUTs
     // at ~11s intervals). Only genuinely new coordinates get saved.
-    if (autoSaveLastSaved.current[name] === coordsKey) return undefined;
+    if (autoSaveLastSaved.current[name] === coordsKey) {
+      console.log('[App] Auto-save skipped (unchanged):', name);
+      return undefined;
+    }
+    console.log('[App] Auto-save scheduling:', name, coordsKey);
     clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       autoSaveChain.current = autoSaveChain.current.then(async () => {
