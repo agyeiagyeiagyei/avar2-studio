@@ -230,6 +230,7 @@ function App() {
         // If font was rebuilt (new build time), reload
         if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
           console.log('[App] Polling detected rebuild, lastBuildTime:', lastBuildTime, '->', health.last_build_time);
+          console.log('[App] Polling stack:', new Error().stack?.split('\n').slice(2, 5).join(' | '));
           // Store scroll position before reloading
           const scrollY = window.scrollY;
           const selectedInstanceName = selectedInstance?.name;
@@ -403,7 +404,7 @@ function App() {
   };
 
   const loadAvar2Data = async () => {
-    console.log('[App] loadAvar2Data called');
+    console.log('[App] loadAvar2Data called from:', new Error().stack?.split('\n')[2]?.trim());
     try {
       // No-op without a loaded source: the avar2 endpoints 404 when
       // there's no CSV, which blind launch (and only blind launch) is
