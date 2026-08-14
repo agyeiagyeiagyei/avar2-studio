@@ -1896,6 +1896,7 @@ function App() {
         onToggleGrade={handleToggleGrade}
         onGradeDefault={handleGradeDefault}
         staticMode={staticMode}
+        isUploadDataset={isUploadDataset()}
         hideRebuild={staticMode && !isUploadDataset()}
         allowImportInStatic={isUploadDataset()}
         coverageFindings={coverage}

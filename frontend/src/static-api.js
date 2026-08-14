@@ -1196,9 +1196,34 @@ const staticOverrides = {
     await regenerateFont(uploadDataset);
     return {};
   },
-  setGrade: unavailable('Editing grade'),
-  setInstanceGrade: unavailable('Editing grade'),
-  removeInstanceGrade: unavailable('Editing grade'),
+  setGrade: async (patch) => {
+    requireUpload();
+    uploadDataset.grade = { ...(uploadDataset.grade || {}), ...patch };
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return uploadDataset.grade;
+  },
+  setInstanceGrade: async (instanceName, pct) => {
+    requireUpload();
+    const grade = uploadDataset.grade ||= { version: 1, enabled: false, default_pct: 0.25, instances: [] };
+    grade.instances = (grade.instances || []).filter(e => e.name !== instanceName);
+    if (pct !== undefined && pct !== null) {
+      grade.instances.push({ name: instanceName, pct });
+    }
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return grade;
+  },
+  removeInstanceGrade: async (instanceName) => {
+    requireUpload();
+    const grade = uploadDataset.grade;
+    if (grade) {
+      grade.instances = (grade.instances || []).filter(e => e.name !== instanceName);
+    }
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return grade;
+  },
   // Control axes (secondary parametric axes) on uploads: declarations
   // live in dataset.controlAxes using the sidecar shape ({tag, name,
   // min, default, max, layers: [{glyph, location}]}); every mutation

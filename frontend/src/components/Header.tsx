@@ -61,6 +61,9 @@ interface HeaderProps {
   onGradeDefault?: (pct: number) => void;
   // Static demo (GitHub Pages): hide every action that needs the backend.
   staticMode?: boolean;
+  // Static demo showing an uploaded source (not a baked snapshot) —
+  // editing features like grade become available via wasm.
+  isUploadDataset?: boolean;
   // Static demo showing a baked snapshot: nothing exists to rebuild
   // (uploaded sources recompile in-browser, so they keep the button).
   hideRebuild?: boolean;
@@ -110,7 +113,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                  transforms = [], onToggleTransform, onTransformParam,
                  grade, onToggleGrade, onGradeDefault, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onShowCoverage }: HeaderProps) {
+                 coverageFindings = [], onShowCoverage, isUploadDataset = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -406,7 +409,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                       <input
                         type="checkbox"
                         checked={!!grade.enabled}
-                        disabled={busy || staticMode}
+                        disabled={busy || (staticMode && !isUploadDataset)}
                         onChange={(e) => onToggleGrade && onToggleGrade(e.target.checked)}
                       />
                       <span className="transform-name">Grade</span>
@@ -425,7 +428,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                             min={1}
                             max={100}
                             step={1}
-                            disabled={busy || staticMode}
+                            disabled={busy || (staticMode && !isUploadDataset)}
                             onChange={(e) => {
                               const v = parseFloat(e.target.value);
                               if (!Number.isNaN(v) && onGradeDefault) onGradeDefault(v / 100);
