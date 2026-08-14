@@ -185,7 +185,9 @@ function App() {
   }, [avar2Instances.length, avar2Axes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ensure selected instance is in CSV when avar2 data exists (avar2Mode always enabled now)
+  const loadingAvar2Ref = useRef(false);
   useEffect(() => {
+    if (loadingAvar2Ref.current) return;  // Prevent re-entrant loop
     if (selectedInstance && avar2Instances.length > 0) {
       const mapping = avar2Instances.find(
         inst => inst.instance_name === selectedInstance.name
@@ -193,8 +195,10 @@ function App() {
       // If instance not in CSV, it will be added automatically by backend
       // when we fetch avar2 instances (backend handles missing instances)
       if (!mapping || mapping.match_status === 'missing_in_csv') {
-        // Reload avar2 data to get updated CSV
-        loadAvar2Data();
+        loadingAvar2Ref.current = true;
+        loadAvar2Data().finally(() => {
+          loadingAvar2Ref.current = false;
+        });
       }
     }
   }, [selectedInstance, avar2Instances]); // eslint-disable-line react-hooks/exhaustive-deps
