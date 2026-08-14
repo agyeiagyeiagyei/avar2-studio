@@ -55,18 +55,19 @@ function PreviewTab({
   onFontSizeChange,
   jumpLocation,
 }) {
-  const { userAxes, controlAxes, gradeAxes, parametricAxes } = useMemo(() => {
+  const { userAxes, controlAxes, transformAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];
-    const grade = [];
+    const transform = [];
     const param = [];
     for (const a of (axes || [])) {
-      if (a.is_grade_axis) grade.push(a);
-      else if (a.is_control_axis) control.push(a);
+      if (a.is_control_axis) control.push(a);
+      else if (a.transform_injected) transform.push(a);
+      else if (a.is_grade_axis) param.push(a);  // grade rides with parametric
       else if (a.has_master_coverage === false) user.push(a);
       else param.push(a);
     }
-    return { userAxes: user, controlAxes: control, gradeAxes: grade, parametricAxes: param };
+    return { userAxes: user, controlAxes: control, transformAxes: transform, parametricAxes: param };
   }, [axes]);
 
   // A parametric-only font (avar2 mappings whose in: axes ARE the
@@ -443,13 +444,13 @@ function PreviewTab({
           </section>
         )}
 
-        {gradeAxes.length > 0 && (
+        {transformAxes.length > 0 && (
           <section className="preview-axis-group">
             <div className="preview-axis-group-head">
-              <h3>Grade</h3>
-              <span className="preview-axis-group-sub">same advance — no reflow</span>
+              <h3>Transform axes</h3>
+              <span className="preview-axis-group-sub">post-build (SPAC, etc.)</span>
             </div>
-            {gradeAxes.map(renderAxis)}
+            {transformAxes.map(renderAxis)}
           </section>
         )}
 

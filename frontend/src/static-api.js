@@ -731,15 +731,22 @@ const refreshAxesFromFont = (dataset) => {
       .filter(Boolean)
   );
   const meta = parseFont(dataset.fontBytes);
+  // Use display_name from axisRanges (user-defined metadata) when
+  // available; the font's name table often lacks entries for avar2 axes.
+  const axisRanges = dataset.axisRanges || {};
   dataset.axes = {
-    axes: meta.axes.map(a => ({
-      tag: a.tag, name: a.name,
-      min: a.min, default: a.default, max: a.max,
-      has_master_coverage: !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD',
-      is_control_axis: controlTags.has(a.tag),
-      is_grade_axis: a.tag === 'GRAD',
-      transform_injected: injectedTags.has(a.tag),
-    })),
+    axes: meta.axes.map(a => {
+      const rangeOverride = axisRanges[a.tag] || {};
+      return {
+        tag: a.tag,
+        name: rangeOverride.display_name || a.name || a.tag,
+        min: a.min, default: a.default, max: a.max,
+        has_master_coverage: !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD',
+        is_control_axis: controlTags.has(a.tag),
+        is_grade_axis: a.tag === 'GRAD',
+        transform_injected: injectedTags.has(a.tag),
+      };
+    }),
   };
 };
 
