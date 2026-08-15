@@ -105,7 +105,10 @@ const buildUploadDataset = async ({
     // avar2 generation in-browser: CSV mappings → avar v2 store in the
     // compiled font (fontc-web wasm). The user axes are the CSV columns
     // that aren't already fvar axes in the compiled font.
-    bytes = await addAvar2(bytes, mappingsText, null, [...compiledTags]);
+    const ranges = Object.keys(axisMetadata || {}).length
+      ? JSON.stringify(axisMetadata)
+      : null;
+    bytes = await addAvar2(bytes, mappingsText, ranges, [...compiledTags]);
     const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
     // Registered columns normalize to lowercase fvar tags (wght etc.);
     // user-tag matching must use the normalized form.
@@ -787,7 +790,10 @@ const rebuildUploadFont = async (dataset) => {
   }
   let ttf = await compileFont(dataset.sourceText);
   if (dataset.mappingsCsv) {
-    ttf = await addAvar2(ttf, dataset.mappingsCsv, null, [...dataset.parametricTags]);
+    const ranges = Object.keys(dataset.axisRanges || {}).length
+      ? JSON.stringify(dataset.axisRanges)
+      : null;
+    ttf = await addAvar2(ttf, dataset.mappingsCsv, ranges, [...dataset.parametricTags]);
   }
   dataset.fontBytes = ttf;
   if ((dataset.controlAxes || []).length) {
