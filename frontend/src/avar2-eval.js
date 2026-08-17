@@ -50,6 +50,11 @@ export function parseAvar2(bytes) {
     }
   }
   if (!avarRec) return null;
+  console.log('[parseAvar2] avar table found at offset', avarRec.offset, 'length', avarRec.length, 'buffer len', view.byteLength);
+  if (avarRec.offset + avarRec.length > view.byteLength) {
+    console.warn('[parseAvar2] avar table extends beyond buffer — malformed font');
+    return null;
+  }
 
   const base = avarRec.offset;
   const major = safeGetUint16(base);
