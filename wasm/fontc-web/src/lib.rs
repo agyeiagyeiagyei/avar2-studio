@@ -352,8 +352,19 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
     }
 
     // Apply to existing axes (font's fvar already has them from a previous build)
+    // Update the actual fvar records, not just the local triples copy.
+    for axis_rec in fvar.axis_instance_arrays.axes.iter_mut() {
+        for (col_name, (mn, df, mx, _)) in &metadata_map {
+            let normalized = normalize_in_axis_name(col_name);
+            if Tag::from_str(normalized).ok() == Some(axis_rec.axis_tag) {
+                if let Some(v) = mn { axis_rec.min_value = Fixed::from_f64(*v); }
+                if let Some(v) = df { axis_rec.default_value = Fixed::from_f64(*v); }
+                if let Some(v) = mx { axis_rec.max_value = Fixed::from_f64(*v); }
+            }
+        }
+    }
+    // Also update the local triples copy for the VariationModel below.
     for (tag, min, default, max) in existing_axes.iter_mut() {
-        // Find the metadata by matching the tag (normalized form)
         for (col_name, (mn, df, mx, _)) in &metadata_map {
             let normalized = normalize_in_axis_name(col_name);
             if Tag::from_str(normalized).ok() == Some(*tag) {
