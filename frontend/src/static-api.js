@@ -738,6 +738,7 @@ const refreshAxesFromFont = (dataset) => {
   console.log('[refreshAxesFromFont] injectedTags:', [...injectedTags]);
   console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
   console.log('[refreshAxesFromFont] compiledTags:', [...compiledTags]);
+  console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
   const meta = parseFont(dataset.fontBytes);
   console.log('[refreshAxesFromFont] font axes with ranges:', meta.axes.map(a => ({ tag: a.tag, min: a.min, default: a.default, max: a.max })));
   console.log('[refreshAxesFromFont] font axes:', meta.axes.map(a => a.tag));
@@ -747,11 +748,13 @@ const refreshAxesFromFont = (dataset) => {
   dataset.axes = {
     axes: meta.axes.map(a => {
       const rangeOverride = axisRanges[a.tag] || {};
+      const hasCoverage = !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD';
+      console.log(`[refreshAxesFromFont] ${a.tag}: has_master_coverage=${hasCoverage}, in userTags=${userTags.has(a.tag)}`);
       return {
         tag: a.tag,
         name: rangeOverride.display_name || a.name || a.tag,
         min: a.min, default: a.default, max: a.max,
-        has_master_coverage: !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD',
+        has_master_coverage: hasCoverage,
         is_control_axis: controlTags.has(a.tag),
         is_grade_axis: a.tag === 'GRAD',
         transform_injected: injectedTags.has(a.tag),
