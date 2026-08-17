@@ -43,12 +43,13 @@ self.onmessage = async (e) => {
       const areas = measure_at(e.data.fontBytes, e.data.request);
       self.postMessage({ ok: true, areas: Array.from(areas) });
     } else if (e.data && e.data.kind === 'avar2') {
-      // wasm expects parametricTags as a JSON string, not a JS array
+      // wasm expects parametricTags and metadata as JSON strings, not JS objects
       const parametricTagsJson = e.data.parametricTags ? JSON.stringify(e.data.parametricTags) : undefined;
+      const metadataJson = e.data.metadata ? JSON.stringify(e.data.metadata) : undefined;
       console.log('[worker] add_avar2 called, parametricTagsJson:', parametricTagsJson);
-      console.log('[worker] metadata:', e.data.metadata);
+      console.log('[worker] metadataJson:', metadataJson);
       console.log('[worker] CSV preview:', e.data.csv?.substring(0, 200));
-      const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined, parametricTagsJson);
+      const ttf = add_avar2(e.data.fontBytes, e.data.csv, metadataJson, parametricTagsJson);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'control') {
       const ttf = apply_control_axes(e.data.fontBytes, e.data.json);
