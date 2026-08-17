@@ -322,6 +322,8 @@ const regenerateFont = async (dataset) => {
   }  const ranges = Object.keys(dataset.axisRanges || {}).length
     ? JSON.stringify(dataset.axisRanges)
     : null;
+  console.log('[regenerateFont] axisRanges:', dataset.axisRanges);
+  console.log('[regenerateFont] ranges JSON:', ranges);
   dataset.fontBytes = await addAvar2(
     dataset.fontBytes,
     mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
