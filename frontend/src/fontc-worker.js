@@ -43,9 +43,10 @@ self.onmessage = async (e) => {
       const areas = measure_at(e.data.fontBytes, e.data.request);
       self.postMessage({ ok: true, areas: Array.from(areas) });
     } else if (e.data && e.data.kind === 'avar2') {
-      // wasm expects parametricTags and metadata as JSON strings, not JS objects
+      // wasm expects parametricTags as a JSON string (array), but metadata
+      // is ALREADY a JSON string from the caller — don't double-encode it.
       const parametricTagsJson = e.data.parametricTags ? JSON.stringify(e.data.parametricTags) : undefined;
-      const metadataJson = e.data.metadata ? JSON.stringify(e.data.metadata) : undefined;
+      const metadataJson = e.data.metadata; // already a JSON string or null
       console.log('[worker] add_avar2 called, parametricTagsJson:', parametricTagsJson);
       console.log('[worker] metadataJson:', metadataJson);
       console.log('[worker] CSV preview:', e.data.csv?.substring(0, 200));
