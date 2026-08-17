@@ -31,46 +31,54 @@ function tentFactor(start, peak, end, v) {
  */
 export function parseAvar2(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const safeGetUint16 = (off) => {
+    if (off + 2 > view.byteLength) throw new Error(`parseAvar2: offset ${off} out of bounds (len=${view.byteLength})`);
+    return view.getUint16(off);
+  };
+  const safeGetUint32 = (off) => {
+    if (off + 4 > view.byteLength) throw new Error(`parseAvar2: offset ${off} out of bounds (len=${view.byteLength})`);
+    return view.getUint32(off);
+  };
   // table directory
-  const count = view.getUint16(4);
+  const count = safeGetUint16(4);
   let avarRec = null;
   for (let i = 0; i < count; i++) {
     const rec = 12 + i * 16;
     if (String.fromCharCode(view.getUint8(rec), view.getUint8(rec + 1), view.getUint8(rec + 2), view.getUint8(rec + 3)) === 'avar') {
-      avarRec = { offset: view.getUint32(rec + 8), length: view.getUint32(rec + 12) };
+      avarRec = { offset: safeGetUint32(rec + 8), length: safeGetUint32(rec + 12) };
       break;
     }
   }
   if (!avarRec) return null;
 
   const base = avarRec.offset;
-  const major = view.getUint16(base);
+  const major = safeGetUint16(base);
   if (major !== 2) return null; // v1 unsupported here (rare in our pipeline)
 
   let p = base + 8; // skip version(4) + reserved(2) + axisCount(2)
-  const axisCount = view.getUint16(base + 6);
+  const axisCount = safeGetUint16(base + 6);
   // v1 segment maps area (usually empty for a pure v2 table)
   for (let i = 0; i < axisCount; i++) {
-    const mapCount = view.getUint16(p);
+    const mapCount = safeGetUint16(p);
     p += 2 + mapCount * 4;
   }
 
   // Optional DeltaSetIndexMap
   let dsim = null;
-  const maybeFormat = view.getUint16(p);
+  const maybeFormat = safeGetUint16(p);
   if (maybeFormat === 0 || maybeFormat === 1) {
     const entries = [];
     if (maybeFormat === 0) {
-      const mapCount = view.getUint16(p + 2);
+      const mapCount = safeGetUint16(p + 2);
       for (let i = 0; i < mapCount; i++) {
         const e = view.getUint8(p + 4 + i);
         entries.push([e >> 4, e & 0xF]);
       }
       p += 4 + mapCount;
     } else {
-      const mapCount = view.getUint32(p + 2);
+      const mapCount = safeGetUint32(p + 2);
       for (let i = 0; i < mapCount; i++) {
-        const e = view.getUint16(p + 6 + i * 2);
+        const e = safeGetUint16(p + 6 + i * 2);
         entries.push([e >> 8, e & 0xFF]);
       }
       p += 6 + mapCount * 2;
@@ -80,25 +88,26 @@ export function parseAvar2(bytes) {
 
   // ItemVariationStore
   const storeBase = p;
-  const regionListOffset = view.getUint32(storeBase + 2);
-  const dataCount = view.getUint16(storeBase + 6);
+  const regionListOffset = safeGetUint32(storeBase + 2);
+  const dataCount = safeGetUint16(storeBase + 6);
   const dataOffsets = [];
   for (let i = 0; i < dataCount; i++) {
-    dataOffsets.push(view.getUint32(storeBase + 8 + i * 4));
+    dataOffsets.push(safeGetUint32(storeBase + 8 + i * 4));
   }
 
   const rlBase = storeBase + regionListOffset;
-  const regionAxisCount = view.getUint16(rlBase);
-  const regionCount = view.getUint16(rlBase + 2);
+  const regionAxisCount = safeGetUint16(rlBase);
+  const regionCount = safeGetUint16(rlBase + 2);
   const regions = [];
   for (let r = 0; r < regionCount; r++) {
     const rBase = rlBase + 4 + r * regionAxisCount * 6;
     const tents = [];
     for (let a = 0; a < regionAxisCount; a++) {
+      const off = rBase + a * 6;
       tents.push({
-        start: view.getInt16(rBase + a * 6) / F2DOT14,
-        peak: view.getInt16(rBase + a * 6 + 2) / F2DOT14,
-        end: view.getInt16(rBase + a * 6 + 4) / F2DOT14,
+        start: (off + 2 <= view.byteLength ? view.getInt16(off) : 0) / F2DOT14,
+        peak: (off + 4 <= view.byteLength ? view.getInt16(off + 2) : 0) / F2DOT14,
+        end: (off + 6 <= view.byteLength ? view.getInt16(off + 4) : 0) / F2DOT14,
       });
     }
     regions.push(tents);
@@ -106,22 +115,25 @@ export function parseAvar2(bytes) {
 
   const subtables = dataOffsets.map((off) => {
     const dBase = storeBase + off;
-    const itemCount = view.getUint16(dBase);
-    const shortDeltaCount = view.getUint16(dBase + 2);
-    const regionIndexCount = view.getUint16(dBase + 4);
+    const itemCount = safeGetUint16(dBase);
+    const shortDeltaCount = safeGetUint16(dBase + 2);
+    const regionIndexCount = safeGetUint16(dBase + 4);
     const regionIndexes = [];
     for (let i = 0; i < regionIndexCount; i++) {
-      regionIndexes.push(view.getUint16(dBase + 6 + i * 2));
+      regionIndexes.push(safeGetUint16(dBase + 6 + i * 2));
     }
     const itemsBase = dBase + 6 + regionIndexCount * 2;
     const items = [];
     for (let i = 0; i < itemCount; i++) {
       const deltas = [];
+      const itemStride = shortDeltaCount * 2 + (regionIndexCount - shortDeltaCount);
       for (let j = 0; j < shortDeltaCount; j++) {
-        deltas.push(view.getInt16(itemsBase + i * (shortDeltaCount * 2 + (regionIndexCount - shortDeltaCount)) + j * 2));
+        const off = itemsBase + i * itemStride + j * 2;
+        deltas.push(off + 2 <= view.byteLength ? view.getInt16(off) : 0);
       }
       for (let j = shortDeltaCount; j < regionIndexCount; j++) {
-        deltas.push(view.getInt8(itemsBase + i * (shortDeltaCount * 2 + (regionIndexCount - shortDeltaCount)) + shortDeltaCount * 2 + (j - shortDeltaCount)));
+        const off = itemsBase + i * itemStride + shortDeltaCount * 2 + (j - shortDeltaCount);
+        deltas.push(off + 1 <= view.byteLength ? view.getInt8(off) : 0);
       }
       items.push(deltas);
     }
