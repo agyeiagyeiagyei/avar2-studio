@@ -1214,6 +1214,7 @@ const staticOverrides = {
   },
   updateAvar2Axis: async (axisName, axisData) => {
     requireUpload();
+    console.log('[updateAvar2Axis] called with:', axisName, axisData);
     // EditAxisModal payload: {display_name, registered_tag, min,
     // default, max} — merge all of it into the axis-metadata entry
     // (name/tag edits included; earlier this dropped them silently).
@@ -1226,6 +1227,7 @@ const staticOverrides = {
       ...(axisData.default_value !== undefined ? { default: axisData.default_value } : {}),
       ...(axisData.max !== undefined ? { max: axisData.max } : {}),
     };
+    console.log('[updateAvar2Axis] axisRanges after update:', uploadDataset.axisRanges);
     await regenerateFont(uploadDataset);
     return {};
   },
