@@ -737,6 +737,7 @@ const refreshAxesFromFont = (dataset) => {
   console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
   console.log('[refreshAxesFromFont] compiledTags:', [...compiledTags]);
   const meta = parseFont(dataset.fontBytes);
+  console.log('[refreshAxesFromFont] font axes with ranges:', meta.axes.map(a => ({ tag: a.tag, min: a.min, default: a.default, max: a.max })));
   console.log('[refreshAxesFromFont] font axes:', meta.axes.map(a => a.tag));
   // Use display_name from axisRanges (user-defined metadata) when
   // available; the font's name table often lacks entries for avar2 axes.
