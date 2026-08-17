@@ -46,6 +46,7 @@ self.onmessage = async (e) => {
       // wasm expects parametricTags as a JSON string, not a JS array
       const parametricTagsJson = e.data.parametricTags ? JSON.stringify(e.data.parametricTags) : undefined;
       console.log('[worker] add_avar2 called, parametricTagsJson:', parametricTagsJson);
+      console.log('[worker] metadata:', e.data.metadata);
       console.log('[worker] CSV preview:', e.data.csv?.substring(0, 200));
       const ttf = add_avar2(e.data.fontBytes, e.data.csv, e.data.metadata ?? undefined, parametricTagsJson);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
