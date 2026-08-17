@@ -204,7 +204,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
         .fvar()
         .map_err(|e| err(format!("missing/invalid fvar: {e}")))?
         .to_owned_table();
-    let existing_axes: Vec<(Tag, f64, f64, f64)> = fvar
+    let mut existing_axes: Vec<(Tag, f64, f64, f64)> = fvar
         .axis_instance_arrays
         .axes
         .iter()
@@ -317,29 +317,49 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
     // Optional axis-metadata overrides: explicit min/default/max for
     // declared user axes, replacing the CSV-derived (min, default=min,
     // max) — the studio's avar2-axis-metadata.json semantics.
-    if let Some(json) = axis_metadata_json.as_deref() {
-        let meta: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| err(format!("invalid axis metadata JSON: {e}")))?;
-        if let Some(obj) = meta.as_object() {
-            for a in new_axes.iter_mut() {
-                // Metadata is keyed by CSV column header (uppercase).
-                if let Some(m) = obj.get(&a.col_name) {
-                    let get = |k: &str| m.get(k).and_then(serde_json::Value::as_f64);
-                    if let Some(v) = get("min") {
-                        a.min = v;
-                    }
-                    if let Some(v) = get("default") {
-                        a.default = v;
-                    }
-                    if let Some(v) = get("max") {
-                        a.max = v;
-                    }
-                    if let Some(dn) = m.get("display_name").and_then(serde_json::Value::as_str) {
-                        if !dn.is_empty() {
-                            a.name = dn.to_string();
-                        }
-                    }
-                }
+    // Applies to BOTH new axes (this build) AND existing axes (font's
+    // fvar already carries them from a previous build) — without the
+    // existing-axis path, a rebuilt font keeps stale ranges.
+    let metadata_map: HashMap<String, (Option<f64>, Option<f64>, Option<f64>, Option<String>)> =
+        if let Some(json) = axis_metadata_json.as_deref() {
+            let meta: serde_json::Value = serde_json::from_str(json)
+                .map_err(|e| err(format!("invalid axis metadata JSON: {e}")))?;
+            meta.as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .map(|(k, m)| {
+                            let get = |key: &str| m.get(key).and_then(serde_json::Value::as_f64);
+                            let dn = m.get("display_name").and_then(serde_json::Value::as_str).map(|s| s.to_string());
+                            (k.clone(), (get("min"), get("default"), get("max"), dn))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+    // Apply to new axes (this build adds them)
+    for a in new_axes.iter_mut() {
+        if let Some((mn, df, mx, dn)) = metadata_map.get(&a.col_name) {
+            if let Some(v) = mn { a.min = *v; }
+            if let Some(v) = df { a.default = *v; }
+            if let Some(v) = mx { a.max = *v; }
+            if let Some(name) = dn {
+                if !name.is_empty() { a.name = name.clone(); }
+            }
+        }
+    }
+
+    // Apply to existing axes (font's fvar already has them from a previous build)
+    for (tag, min, default, max) in existing_axes.iter_mut() {
+        // Find the metadata by matching the tag (normalized form)
+        for (col_name, (mn, df, mx, _)) in &metadata_map {
+            let normalized = normalize_in_axis_name(col_name);
+            if Tag::from_str(normalized).ok() == Some(*tag) {
+                if let Some(v) = mn { *min = *v; }
+                if let Some(v) = df { *default = *v; }
+                if let Some(v) = mx { *max = *v; }
             }
         }
     }
