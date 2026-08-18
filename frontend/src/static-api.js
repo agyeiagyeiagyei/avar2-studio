@@ -32,6 +32,7 @@ import * as mappingsCsv from './mappings-csv';
 import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
 import { auditCoverage, probeSweeps, PROBE_GLYPHS } from './coverage.js';
+import { lintAvar2Mappings } from './avar2-lint.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -175,6 +176,7 @@ const buildUploadDataset = async ({
     },
   };
   syncInstancesFromCsv(dataset, meta.instances.map(i => i.name));
+  dataset.coverage.push(...lintMappingsFindings(dataset));
   return dataset;
 };
 
@@ -279,6 +281,7 @@ const restoreSession = async () => {
       },
     };
     syncInstancesFromCsv(uploadDataset);
+    uploadDataset.coverage.push(...lintMappingsFindings(uploadDataset));
     transformsState = [];
     bakedEnabledIds = [];
     return true;
@@ -288,6 +291,37 @@ const restoreSession = async () => {
     uploadDataset = null;
     return false;
   }
+};
+
+// avar2 mapping lint (authoring layer): default-location rows the wasm
+// builder silently discards (skewing every other row), and unmapped
+// {min, default, max}^n grid points — the "dead cross" where an input
+// axis at its default zeroes every authored tent. Invisible to
+// auditCoverage, which audits gvar master coverage over the ±1 corners
+// and never probes a coordinate AT an axis default. Ranges come from
+// the patched font's fvar (post-addAvar2, so metadata is baked in);
+// axisRanges fills in for columns fvar doesn't carry yet.
+const lintMappingsFindings = (dataset) => {
+  const parsed = dataset.instancesCsv;
+  if (!parsed?.rows?.length || !parsed?.columns?.length) return [];
+  const byTag = new Map(parseFont(dataset.fontBytes).axes.map(a => [a.tag, a]));
+  const outputRanges = {};
+  const inputRanges = {};
+  for (const col of parsed.columns) {
+    const axis = dataset.parametricTags.has(col)
+      ? byTag.get(col)
+      : byTag.get(mappingsCsv.normalizeInAxisName(col));
+    if (!axis) continue;
+    const triple = { min: axis.min, default: axis.default, max: axis.max };
+    if (dataset.parametricTags.has(col)) outputRanges[col] = triple;
+    else inputRanges[col] = triple;
+  }
+  return lintAvar2Mappings(parsed, {
+    parametricTags: [...dataset.parametricTags],
+    outputRanges,
+    inputRanges: Object.keys(inputRanges).length ? inputRanges : undefined,
+    metadata: dataset.axisRanges || {},
+  }).findings;
 };
 
 // Instance list derives from the CSV rows (every column is a coordinate);
@@ -335,6 +369,12 @@ const regenerateFont = async (dataset) => {
   // GRAD/SPAC/control-axis flags are preserved (the inline mapping here
   // used to drop them, making those axes disappear after avar2 edits).
   refreshAxesFromFont(dataset);
+  // The mapping lint tracks the CSV, so refresh it on every regen;
+  // the gvar/sweep findings are untouched (masters didn't move).
+  dataset.coverage = [
+    ...(dataset.coverage || []).filter(f => !f.type.startsWith('avar2-') && f.type !== 'unmapped-mapping-point'),
+    ...lintMappingsFindings(dataset),
+  ];
 };
 
 // ---- corner pinning ---------------------------------------------------------
@@ -380,7 +420,7 @@ const refreshAfterPin = async (dataset) => {
   dataset.health.last_build_time = Date.now();
   const structural = auditCoverage(dataset.fontBytes).findings;
   const behavioral = await probeSweeps(dataset.fontBytes, parseFont(dataset.fontBytes).axes, (b, g, l) => measureAt(b, g, l));
-  dataset.coverage = [...structural, ...behavioral];
+  dataset.coverage = [...structural, ...behavioral, ...lintMappingsFindings(dataset)];
   persistSoon();
 };
 
@@ -595,6 +635,22 @@ const validateBundle = (bundle, dataset) => {
   for (const t of transforms) {
     if (t.enabled && !KNOWN_TRANSFORMS[t.type]) {
       warnings.push(`Transform '${t.type}': unknown type — skipped by the static demo`);
+    }
+  }
+  // Mapping lint on the bundle's CSV, with the ranges the import will
+  // actually use: applyBundle passes no axis metadata to addAvar2, so
+  // input defaults land on min (the CSV column's smallest value).
+  if (!errors.length && avar2Csv.trim()) {
+    const parsed = mappingsCsv.parseMappingsCsv(avar2Csv);
+    const outputRanges = {};
+    for (const a of dataset.axes.axes) {
+      if (targetTags.has(a.tag)) outputRanges[a.tag] = { min: a.min, default: a.default, max: a.max };
+    }
+    for (const f of lintAvar2Mappings(parsed, {
+      parametricTags: [...targetTags],
+      outputRanges,
+    }).findings) {
+      warnings.push(f.detail);
     }
   }
 

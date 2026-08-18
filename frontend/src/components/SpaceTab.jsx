@@ -45,6 +45,8 @@ const FINDING_LABELS = {
   'out-of-range-source': 'Out-of-range source',
   'collapse': 'Collapse',
   'inert-sweep': 'Inert axis',
+  'avar2-default-row': 'Mapping row at default',
+  'unmapped-mapping-point': 'Unmapped grid point',
 };
 
 /**
@@ -504,7 +506,9 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
               <div key={i} className="coverage-finding-row">
                 <button
                   className="coverage-finding-jump"
-                  disabled={!f.location}
+                  // Mapping-lint locations are in INPUT-axis coords — no
+                  // cube (parametric) tag to fly to.
+                  disabled={!f.location || !tags.some(t => t in f.location)}
                   onClick={() => f.location && setProbe({
                     loc: tags.map(t => f.location[t] ?? 0),
                     glyphName: CHIP_GLYPH,
