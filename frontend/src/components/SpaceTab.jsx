@@ -64,7 +64,7 @@ const FINDING_LABELS = {
  * finding with a click-to-probe shortcut, plus the Pin and Drop
  * actions (the header keeps only a count badge that lands here).
  */
-function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamilyId, onPinCorner, onClampOutOfRange }) {
+function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamilyId, onPinCorner, onClampOutOfRange, onAddMappingRow }) {
   const [bytes, setBytes] = useState(null);
   const [health, setHealth] = useState({});
   const [probe, setProbe] = useState(null); // {loc, glyphName?, label?}
@@ -73,6 +73,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   const [wAngle, setWAngle] = useState(0.6);
   const [pinning, setPinning] = useState(null);
   const [dropping, setDropping] = useState(false);
+  const [addingRow, setAddingRow] = useState(null); // finding key while a grid row is being added
   const [pinNotice, setPinNotice] = useState(null); // refusal/explanation shown inline
   const dragRef = useRef(null);
   const canvasRef = useRef(null);
@@ -528,6 +529,24 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
                     onClick={() => pinAt(locKey(tags.map(t => f.location[t] ?? 0)), f.location)}
                   >
                     {pinning === locKey(tags.map(t => f.location[t] ?? 0)) ? '…' : 'Pin'}
+                  </button>
+                )}
+                {f.type === 'unmapped-mapping-point' && f.location && onAddMappingRow && (
+                  <button
+                    className="coverage-pin-btn"
+                    title="Create a mapping row here, pre-filled with the surface's current value — a behavior-pinning no-op to edit into shape"
+                    disabled={addingRow !== null}
+                    onClick={async () => {
+                      const key = JSON.stringify(f.location);
+                      setAddingRow(key);
+                      try {
+                        await onAddMappingRow(f.location);
+                      } finally {
+                        setAddingRow(null);
+                      }
+                    }}
+                  >
+                    {addingRow === JSON.stringify(f.location) ? '…' : 'Add row'}
                   </button>
                 )}
               </div>

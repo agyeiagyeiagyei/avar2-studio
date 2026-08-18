@@ -2002,6 +2002,11 @@ function App() {
               await api.clampOutOfRange();
               await loadData();
             } : undefined}
+            onAddMappingRow={api.addMappingRow ? async (loc) => {
+              await api.addMappingRow(loc);
+              await loadData();
+              await loadAvar2Data();
+            } : undefined}
             onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
           />
         ) : mainTab === 'instances' ? (

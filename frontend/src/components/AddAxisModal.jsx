@@ -7,6 +7,7 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
   const [defaultValue, setDefaultValue] = useState('0');
   const [minValue, setMinValue] = useState('-1000');
   const [maxValue, setMaxValue] = useState('1000');
+  const [scaffold, setScaffold] = useState(true);
   const [errors, setErrors] = useState({});
   const displayNameRef = useRef(null);
 
@@ -18,6 +19,7 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
       setDefaultValue('0');
       setMinValue('-1000');
       setMaxValue('1000');
+      setScaffold(true);
       setErrors({});
       // Focus input after a brief delay
       setTimeout(() => {
@@ -104,6 +106,7 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
         default_value: parseFloat(defaultValue),
         min: parseFloat(minValue),
         max: parseFloat(maxValue),
+        scaffold,
       });
     }
   };
@@ -207,7 +210,23 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
             {errors.defaultValue && <span className="error-message">{errors.defaultValue}</span>}
             <small>Applied to all instances</small>
           </div>
-          
+
+          <div className="form-group">
+            <label className="add-axis-scaffold">
+              <input
+                type="checkbox"
+                checked={scaffold}
+                onChange={(e) => setScaffold(e.target.checked)}
+              />
+              {' '}Scaffold mapping rows at the new axis extremes
+            </label>
+            <small>
+              Duplicates each existing row at the far end{'('}s{')'} of the new
+              axis so the whole space stays mapped — the axis does nothing
+              until you edit the duplicated values. Recommended.
+            </small>
+          </div>
+
           <div className="modal-buttons">
             <button type="button" onClick={handleCancel} className="btn btn-cancel">
               Cancel

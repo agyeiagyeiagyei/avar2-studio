@@ -357,9 +357,15 @@ const regenerateFont = async (dataset) => {
   const ranges = Object.keys(dataset.axisRanges || {}).length
     ? JSON.stringify(dataset.axisRanges)
     : null;
+  // Keep dataset.mappingsCsv in step with the edited rows: full
+  // rebuilds (transform toggles, grade edits, REBUILD) regenerate the
+  // avar2 store from it, and refreshAxesFromFont categorizes user axes
+  // from its header. When it went stale, a newly added axis column
+  // survived only until the next full rebuild silently dropped it.
+  dataset.mappingsCsv = mappingsCsv.serializeMappingsCsv(dataset.instancesCsv);
   dataset.fontBytes = await addAvar2(
     dataset.fontBytes,
-    mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
+    dataset.mappingsCsv,
     ranges,
     [...dataset.parametricTags]
   );
@@ -691,6 +697,13 @@ const buildConfigBundle = (dataset) => ({
   },
   control_axes: { version: 1, axes: dataset.controlAxes || [] },
   avar2_csv: mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
+  // Axis-metadata overrides (min/default/max/display name per user-axis
+  // column). Without this section a non-min default silently reverts to
+  // the CSV-derived min on reimport — inverting the mapping's neutral
+  // plane. Optional: pre-metadata bundles simply lack it.
+  ...(Object.keys(dataset.axisRanges || {}).length
+    ? { axis_metadata: dataset.axisRanges }
+    : {}),
   transforms: { version: 1, transforms: dataset.transforms || [] },
   grade: dataset.grade || { version: 1, enabled: false, default_pct: 0.25, instances: [] },
   corner_pins: { version: 1, pins: dataset.cornerPins || [] },
@@ -705,14 +718,18 @@ const applyBundle = async (bundle, dataset) => {
   const grade = bundle.grade || {};
   const gradeInstances = grade.enabled ? (grade.instances || []) : [];
 
-  // The compiled font's own (parametric) axes — captured BEFORE the
-  // mappings apply grows the fvar; used to tell user axes apart.
-  let compiledTags = null;
+  // Axis metadata rides the bundle (optional section): adopt it BEFORE
+  // the mappings apply so the declared defaults/ranges shape the fvar,
+  // and so later rebuilds keep using them.
+  if (bundle.axis_metadata && typeof bundle.axis_metadata === 'object') {
+    dataset.axisRanges = bundle.axis_metadata;
+    report.applied.push('axis metadata');
+  }
   if (avar2Csv.trim()) {
-    compiledTags = new Set(
-      dataset.axes.axes.filter(a => a.has_master_coverage).map(a => a.tag)
-    );
-    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv, null, [...dataset.parametricTags]);
+    const ranges = Object.keys(dataset.axisRanges || {}).length
+      ? JSON.stringify(dataset.axisRanges)
+      : null;
+    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv, ranges, [...dataset.parametricTags]);
     dataset.mappingsCsv = avar2Csv;
     // The bundle's CSV becomes the authoring source of truth.
     dataset.instancesCsv = mappingsCsv.parseMappingsCsv(avar2Csv);
@@ -1184,6 +1201,33 @@ const staticOverrides = {
   // The parametric-slider reflection falls back to input coordinates for
   // snapshot datasets (their avar2 isn't parsed); uploads with a
   // mappings CSV get a real client-side avar2 evaluation (avar2-eval.js).
+  // "Add row" on an unmapped-mapping-point finding: create the missing
+  // grid row, outputs pre-filled with the surface's CURRENT value at
+  // that location (the built font's own avar2 evaluation) — so adding
+  // it is a behavior-pinning no-op the designer then edits into shape.
+  addMappingRow: async (location) => {
+    requireUpload();
+    // Finding locations are keyed by CSV column name (WGHT/OPSZ…);
+    // the avar2 evaluator wants the fvar tags (wght/opsz…).
+    const fvarLoc = Object.fromEntries(
+      Object.entries(location).map(([k, v]) => [mappingsCsv.normalizeInAxisName(k), v])
+    );
+    let mapped = {};
+    try {
+      mapped = mappedLocation(uploadDataset.fontBytes, uploadDataset.axes.axes, fvarLoc) || {};
+    } catch {
+      // No avar2 table / parse failure — outputs stay blank (= defaults).
+    }
+    const coords = { ...location };
+    for (const t of uploadDataset.parametricTags) {
+      if (mapped[t] !== undefined) coords[t] = Math.round(mapped[t] * 10) / 10;
+    }
+    const name = Object.entries(location).map(([k, v]) => `${k} ${v}`).join(' ');
+    mappingsCsv.upsertRow(uploadDataset.instancesCsv, name, coords);
+    syncInstancesFromCsv(uploadDataset);
+    await regenerateFont(uploadDataset);
+    return { name };
+  },
   getMappedLocation: async (coordinates) => {
     if (uploadDataset) {
       if (uploadDataset.mappingsCsv) {
@@ -1259,8 +1303,12 @@ const staticOverrides = {
   addAvar2Axis: async (axisData) => {
     requireUpload();
     // AddAxisModal payload: {axis_name (uppercase CSV column),
-    // display_name, registered_tag, default_value, min, max}.
+    // display_name, registered_tag, default_value, min, max, scaffold}.
     const column = axisData.axis_name;
+    // Snapshot BEFORE addColumn stamps the default into every row.
+    const baseRows = uploadDataset.instancesCsv.rows.map(r => ({
+      name: r.name, values: { ...r.values },
+    }));
     mappingsCsv.addColumn(uploadDataset.instancesCsv, column, axisData.default_value);
     uploadDataset.axisRanges[column] = {
       display_name: axisData.display_name,
@@ -1270,6 +1318,27 @@ const staticOverrides = {
       max: axisData.max,
       is_parametric: false,
     };
+    // Scaffold: duplicate every existing row at each non-default extreme
+    // of the new axis, outputs copied. An avar2 tent never crosses an
+    // axis default, so without rows on the far plane(s) the new axis
+    // starts with dead zones (the "dead cross"); with them the space is
+    // fully mapped from the first build — the axis is simply inert until
+    // the designer edits the duplicated values.
+    if (axisData.scaffold !== false && baseRows.length) {
+      const extremes = [axisData.min, axisData.max]
+        .filter(v => v !== axisData.default_value);
+      const taken = new Set(uploadDataset.instancesCsv.rows.map(r => r.name));
+      for (const extreme of extremes) {
+        for (const row of baseRows) {
+          const name = `${row.name} ${column} ${extreme}`;
+          if (taken.has(name)) continue;
+          taken.add(name);
+          mappingsCsv.upsertRow(uploadDataset.instancesCsv, name, {
+            ...row.values, [column]: extreme,
+          });
+        }
+      }
+    }
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
