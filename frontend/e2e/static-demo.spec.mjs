@@ -189,6 +189,31 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'opsz')),
   'opsz user axis appears after mappings import (registered → lowercase)');
+// The reflection must MOVE, not just display a default: drag wght and
+// the parametric sliders' displayed values follow the mapping.
+// (Regression: avar2-eval once read the v2 header's offset fields as
+// inline structures and threw — the catch silently froze the sliders.)
+const paramVal = (tag) => page.evaluate((t) => {
+  const groups = [...document.querySelectorAll('.axis-control')];
+  const g = groups.find(el => [...el.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === t));
+  return parseFloat(g?.querySelector('input[type=range]')?.value);
+}, tag);
+const dragSlider = (tag, value) => page.evaluate(([t, v]) => {
+  const groups = [...document.querySelectorAll('.axis-control')];
+  const g = groups.find(el => [...el.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === t));
+  const input = g && g.querySelector('input[type=range]');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, v);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}, [tag, String(value)]);
+const xopqBefore = await paramVal('XOPQ');
+await dragSlider('wght', 900);
+await sleep(700); // 120ms reflection debounce + evaluation
+const xopqAfter = await paramVal('XOPQ');
+ok(Number.isFinite(xopqAfter) && xopqAfter > xopqBefore + 50,
+  `parametric XOPQ follows wght 900 (${xopqBefore} -> ${xopqAfter})`);
+await dragSlider('wght', 400);
+await sleep(400);
 
 // ---- 8. control axes + GRAD apply from a config bundle ----------------------
 console.log('8. control axes + GRAD apply from bundle');
