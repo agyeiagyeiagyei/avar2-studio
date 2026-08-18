@@ -229,8 +229,6 @@ function App() {
 
         // If font was rebuilt (new build time), reload
         if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
-          console.log('[App] Polling detected rebuild, lastBuildTime:', lastBuildTime, '->', health.last_build_time);
-          console.log('[App] Polling stack:', new Error().stack?.split('\n').slice(2, 5).join(' | '));
           // Store scroll position before reloading
           const scrollY = window.scrollY;
           const selectedInstanceName = selectedInstance?.name;
@@ -404,7 +402,6 @@ function App() {
   };
 
   const loadAvar2Data = async () => {
-    console.log('[App] loadAvar2Data called from:', new Error().stack?.split('\n')[2]?.trim());
     try {
       // No-op without a loaded source: the avar2 endpoints 404 when
       // there's no CSV, which blind launch (and only blind launch) is
@@ -419,13 +416,11 @@ function App() {
 
       // Load both in parallel, but update state as soon as each arrives
       const instancesPromise = api.getAvar2Instances().then(data => {
-        console.log('[App] getAvar2Instances returned:', data.instances?.length, 'instances');
         setAvar2Instances(data.instances || []);
         return data;
       });
 
       const axesPromise = api.getAvar2Axes().then(data => {
-        console.log('[App] getAvar2Axes returned:', data);
         setAvar2Axes(data);
         return data;
       });
@@ -678,7 +673,6 @@ function App() {
   };
 
   const handleUpdateAvar2Mapping = async (instanceName, axisName, value) => {
-    console.log(`[App] handleUpdateAvar2Mapping: ${instanceName}.${axisName} = ${value}`);
     try {
       await api.updateAvar2Mapping(instanceName, axisName, value);
       // Reload avar2 data to get updated instances
@@ -886,15 +880,12 @@ function App() {
 
   // Toggle / default. Toggling (dis)appears the GRAD axis, so rebuild now.
   const commitGrade = async (patch, prevGrade) => {
-    console.log('[App] commitGrade called with:', patch, 'prev:', prevGrade);
     try {
       setBuilding(true);
       setError(null);
       const result = await api.setGrade(patch);
-      console.log('[App] api.setGrade returned:', result);
       setGrade(g => ({ ...g, ...result }));
       await loadData();
-      console.log('[App] loadData completed');
     } catch (err) {
       console.error('[App] Grade update failed:', err);
       if (prevGrade) setGrade(prevGrade);
@@ -1125,10 +1116,8 @@ function App() {
     // rebuild loop while the user sits idle (shipped once: 442 PUTs
     // at ~11s intervals). Only genuinely new coordinates get saved.
     if (autoSaveLastSaved.current[name] === coordsKey) {
-      console.log('[App] Auto-save skipped (unchanged):', name);
       return undefined;
     }
-    console.log('[App] Auto-save scheduling:', name, coordsKey);
     clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       autoSaveChain.current = autoSaveChain.current.then(async () => {

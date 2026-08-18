@@ -50,7 +50,6 @@ export function parseAvar2(bytes) {
     }
   }
   if (!avarRec) return null;
-  console.log('[parseAvar2] avar table found at offset', avarRec.offset, 'length', avarRec.length, 'buffer len', view.byteLength);
   if (avarRec.offset + avarRec.length > view.byteLength) {
     console.warn('[parseAvar2] avar table extends beyond buffer — malformed font');
     return null;
@@ -188,7 +187,6 @@ export function evalAvar2(parsed, coords) {
  */
 export function mappedLocation(fontBytes, axes, coords) {
   const parsed = parseAvar2(fontBytes);
-  console.log('[avar2-eval] parseAvar2 result:', parsed ? `${parsed.axisCount} axes, ${parsed.regions?.length || 0} regions` : 'null (no avar2 table)');
   if (!parsed) return { ...coords };
   const normalize = (v, a) => {
     if (v === a.default) return 0;

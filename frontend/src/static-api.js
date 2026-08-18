@@ -315,15 +315,13 @@ const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
 // axisRanges (axis-metadata semantics) overrides the CSV-derived range
 // for newly declared user axes.
 const regenerateFont = async (dataset) => {
-  console.log('[static-api] regenerateFont called from:', new Error().stack?.split('\n')[2]?.trim());
   persistSoon(); // the CSV changed even when no avar2 regen is needed
   if (mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length === 0) {
     return;
-  }  const ranges = Object.keys(dataset.axisRanges || {}).length
+  }
+  const ranges = Object.keys(dataset.axisRanges || {}).length
     ? JSON.stringify(dataset.axisRanges)
     : null;
-  console.log('[regenerateFont] axisRanges:', dataset.axisRanges);
-  console.log('[regenerateFont] ranges JSON:', ranges);
   dataset.fontBytes = await addAvar2(
     dataset.fontBytes,
     mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
@@ -734,14 +732,7 @@ const refreshAxesFromFont = (dataset) => {
       .map(t => KNOWN_TRANSFORMS[t.type || t.id]?.injected_axis_tag)
       .filter(Boolean)
   );
-  console.log('[refreshAxesFromFont] enabled transforms:', dataset.transforms?.filter(t => t.enabled));
-  console.log('[refreshAxesFromFont] injectedTags:', [...injectedTags]);
-  console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
-  console.log('[refreshAxesFromFont] compiledTags:', [...compiledTags]);
-  console.log('[refreshAxesFromFont] userTags (normalized):', [...userTags]);
   const meta = parseFont(dataset.fontBytes);
-  console.log('[refreshAxesFromFont] font axes with ranges:', meta.axes.map(a => ({ tag: a.tag, min: a.min, default: a.default, max: a.max })));
-  console.log('[refreshAxesFromFont] font axes:', meta.axes.map(a => a.tag));
   // Use display_name from axisRanges (user-defined metadata) when
   // available; the font's name table often lacks entries for avar2 axes.
   const axisRanges = dataset.axisRanges || {};
@@ -749,7 +740,6 @@ const refreshAxesFromFont = (dataset) => {
     axes: meta.axes.map(a => {
       const rangeOverride = axisRanges[a.tag] || {};
       const hasCoverage = !userTags.has(a.tag) && !controlTags.has(a.tag) && a.tag !== 'GRAD';
-      console.log(`[refreshAxesFromFont] ${a.tag}: has_master_coverage=${hasCoverage}, in userTags=${userTags.has(a.tag)}`);
       return {
         tag: a.tag,
         name: rangeOverride.display_name || a.name || a.tag,
@@ -787,10 +777,7 @@ const transformsMenu = (dataset) => {
 // current gvar, so the final font carries every stage's advances.
 // Shared by buildFont and updateTransforms (the only way to change the
 // transform set — applied transforms can't be un-baked).
-let rebuildCount = 0;
 const rebuildUploadFont = async (dataset) => {
-  rebuildCount++;
-  console.log(`[static-api] rebuildUploadFont called (#${rebuildCount}) from:`, new Error().stack?.split('\n')[2]?.trim());
   if (dataset.sourceText == null) {
     throw new Error("This needs the full app — the browser can't compile UFO sources yet.");
   }
@@ -815,7 +802,6 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyGrade(
       dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
     );
-    console.log('[rebuildUploadFont] after applyGrade, font axes:', parseFont(dataset.fontBytes).axes.map(a => a.tag));
   }
   const transforms = (dataset.transforms || [])
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
@@ -823,23 +809,18 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyTransforms(
       dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
     );
-    console.log('[rebuildUploadFont] after applyTransforms, font axes:', parseFont(dataset.fontBytes).axes.map(a => a.tag));
   }
   await applyPins(dataset);
   if (dataset.clampOutOfRange) {
     dataset.fontBytes = await clampOutOfRangeWasm(dataset.fontBytes);
   }
-  console.log('[rebuildUploadFont] before refreshAxesFromFont, transforms:', dataset.transforms);
-  console.log('[rebuildUploadFont] before refreshAxesFromFont, grade:', dataset.grade);
   refreshAxesFromFont(dataset);
-  console.log('[rebuildUploadFont] after refreshAxesFromFont, axes:', dataset.axes.axes.map(a => ({ tag: a.tag, transform_injected: a.transform_injected, is_grade_axis: a.is_grade_axis })));
 };
 
 // After any rebuild-from-source: swap the object URL, stamp the build
 // (the App re-reads fontUrl only when last_build_time changes) and
 // persist the session.
 const commitRebuiltFont = (dataset) => {
-  console.log('[static-api] commitRebuiltFont called from:', new Error().stack?.split('\n')[2]?.trim());
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
@@ -1214,7 +1195,6 @@ const staticOverrides = {
   },
   updateAvar2Axis: async (axisName, axisData) => {
     requireUpload();
-    console.log('[updateAvar2Axis] called with:', axisName, axisData);
     // EditAxisModal payload: {display_name, registered_tag, min,
     // default, max} — merge all of it into the axis-metadata entry
     // (name/tag edits included; earlier this dropped them silently).
@@ -1227,7 +1207,6 @@ const staticOverrides = {
       ...(axisData.default_value !== undefined ? { default: axisData.default_value } : {}),
       ...(axisData.max !== undefined ? { max: axisData.max } : {}),
     };
-    console.log('[updateAvar2Axis] axisRanges after update:', uploadDataset.axisRanges);
     await regenerateFont(uploadDataset);
     return {};
   },
@@ -1242,25 +1221,16 @@ const staticOverrides = {
   updateAvar2Mapping: async (instanceName, axisName, value) => {
     requireUpload();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, { [axisName]: value });
-    console.log('[updateAvar2Mapping] CSV after update:', mappingsCsv.serializeMappingsCsv(uploadDataset.instancesCsv));
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
   },
   setGrade: async (patch) => {
-    console.log('[static-api] setGrade called with:', patch);
     requireUpload();
     uploadDataset.grade = { ...(uploadDataset.grade || {}), ...patch };
-    console.log('[static-api] uploadDataset.grade after update:', uploadDataset.grade);
-    try {
-      await rebuildUploadFont(uploadDataset);
-      commitRebuiltFont(uploadDataset);
-      console.log('[static-api] setGrade completed, returning:', uploadDataset.grade);
-      return uploadDataset.grade;
-    } catch (err) {
-      console.error('[static-api] setGrade failed:', err);
-      throw err;
-    }
+    await rebuildUploadFont(uploadDataset);
+    commitRebuiltFont(uploadDataset);
+    return uploadDataset.grade;
   },
   setInstanceGrade: async (instanceName, pct) => {
     requireUpload();

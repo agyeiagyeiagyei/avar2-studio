@@ -47,9 +47,6 @@ self.onmessage = async (e) => {
       // is ALREADY a JSON string from the caller — don't double-encode it.
       const parametricTagsJson = e.data.parametricTags ? JSON.stringify(e.data.parametricTags) : undefined;
       const metadataJson = e.data.metadata; // already a JSON string or null
-      console.log('[worker] add_avar2 called, parametricTagsJson:', parametricTagsJson);
-      console.log('[worker] metadataJson:', metadataJson);
-      console.log('[worker] CSV preview:', e.data.csv?.substring(0, 200));
       const ttf = add_avar2(e.data.fontBytes, e.data.csv, metadataJson, parametricTagsJson);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'control') {
