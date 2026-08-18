@@ -212,20 +212,28 @@ def grade_coords(
     x, o, y = base.get("XTRA", 0.0), base.get("XOPQ", 0.0), base.get("YOPQ", 0.0)
     dO = pct * o            # stem weight (driver)
     dY = pct * K_YOPQ * y   # horizontal weight (driver)
-    dX = COMP_RATIO * dO    # counters follow to hold width
 
     def clamp(tag, v):
         lo, hi = param_ranges.get(tag, (float("-inf"), float("inf")))
         return max(lo, min(hi, v))
 
+    # The follower (XTRA) tracks the ACHIEVED stem move per side, not the
+    # requested one: when the driver clamps at the box edge (an instance
+    # already at XOPQ max darkens by nothing), the counters must not move
+    # either — otherwise the "dark" brace is a pure condense inside a held
+    # advance and the grade reads as deformed spacing instead of weight.
+    # Away from the edges the achieved move IS the requested move, so the
+    # values are unchanged. (Mirrored in the wasm port, braces.rs.)
+    dark_o = clamp("XOPQ", o + dO / 2)
+    light_o = clamp("XOPQ", o - dO / 2)
     light = {
-        "XTRA": clamp("XTRA", x + dX / 2),
-        "XOPQ": clamp("XOPQ", o - dO / 2),
+        "XTRA": clamp("XTRA", x + COMP_RATIO * (o - light_o)),
+        "XOPQ": light_o,
         "YOPQ": clamp("YOPQ", y - dY / 2),
     }
     dark = {
-        "XTRA": clamp("XTRA", x - dX / 2),
-        "XOPQ": clamp("XOPQ", o + dO / 2),
+        "XTRA": clamp("XTRA", x - COMP_RATIO * (dark_o - o)),
+        "XOPQ": dark_o,
         "YOPQ": clamp("YOPQ", y + dY / 2),
     }
     return light, dark

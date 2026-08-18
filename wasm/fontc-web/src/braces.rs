@@ -750,19 +750,27 @@ fn grade_coords(
     let (x, o, y) = (get("XTRA"), get("XOPQ"), get("YOPQ"));
     let d_o = pct * o;
     let d_y = pct * K_YOPQ * y;
-    let d_x = COMP_RATIO * d_o;
     let clamp = |tag: &str, v: f64| {
         let t = Tag::from_str(tag).expect("PARAM_TAGS are valid tags");
         let (lo, hi) = ranges.get(&t).copied().unwrap_or((f64::MIN, f64::MAX));
         v.clamp(lo, hi)
     };
+    // The follower (XTRA) tracks the ACHIEVED stem move per side, not
+    // the requested one. When the driver clamps at the box edge (an
+    // instance already at XOPQ max grades darker by nothing), the
+    // counters must not move either — otherwise the "dark" brace is a
+    // pure condense inside a held advance and the grade reads as
+    // deformed spacing instead of weight. Away from the edges the
+    // achieved move IS the requested move, so values are unchanged.
+    let dark_o = clamp("XOPQ", o + d_o / 2.0);
+    let light_o = clamp("XOPQ", o - d_o / 2.0);
     let mut light = HashMap::new();
-    light.insert(Tag::new(b"XTRA"), clamp("XTRA", x + d_x / 2.0));
-    light.insert(Tag::new(b"XOPQ"), clamp("XOPQ", o - d_o / 2.0));
+    light.insert(Tag::new(b"XTRA"), clamp("XTRA", x + COMP_RATIO * (o - light_o)));
+    light.insert(Tag::new(b"XOPQ"), light_o);
     light.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y - d_y / 2.0));
     let mut dark = HashMap::new();
-    dark.insert(Tag::new(b"XTRA"), clamp("XTRA", x - d_x / 2.0));
-    dark.insert(Tag::new(b"XOPQ"), clamp("XOPQ", o + d_o / 2.0));
+    dark.insert(Tag::new(b"XTRA"), clamp("XTRA", x - COMP_RATIO * (dark_o - o)));
+    dark.insert(Tag::new(b"XOPQ"), dark_o);
     dark.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y + d_y / 2.0));
     (light, dark)
 }
