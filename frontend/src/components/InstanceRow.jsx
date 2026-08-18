@@ -22,15 +22,16 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
     ? editingCoordinates
     : (instanceEditingCoordinates[instance.name] || instance.coordinates);
 
-  // Apply grade: convert the per-instance grade % to a GRAD axis value
-  // and inject it into the coordinates for preview. GRAD range is
-  // typically -1 to 1 (normalized) or 0 to 100 (percentage) depending
-  // on how the wasm built it — we use the axis's actual min/max.
+  // Graded rows preview AT their grade: the instance's dark brace
+  // already encodes its own grade% (grade.py / braces.rs compute the
+  // light/dark tuples at pct and pin them to GRAD −10/+10), so "the
+  // instance at its grade" is the GRAD axis MAX — full application of
+  // its dark tuple — not the pct itself (0.25 on a −10..+10 axis is
+  // 1/40th of the intended darkening).
   const gradeCoord = React.useMemo(() => {
     if (!gradeEnabled || gradePct === null || gradePct === undefined) return null;
-    // gradePct is 0–1 (e.g. 0.25 = 25%); GRAD axis uses the same scale
-    return { GRAD: gradePct };
-  }, [gradeEnabled, gradePct]);
+    return { [gradeTag]: 10 }; // grade.py GRAD_MAX
+  }, [gradeEnabled, gradePct, gradeTag]);
   
   // Apply the CONTROL AXES preview-disable: any axis the user has
   // toggled off via the eye icon renders at its axis default,

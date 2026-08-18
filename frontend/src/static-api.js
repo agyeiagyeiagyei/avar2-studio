@@ -33,6 +33,7 @@ import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
 import { auditCoverage, probeSweeps, PROBE_GLYPHS } from './coverage.js';
 import { lintAvar2Mappings } from './avar2-lint.js';
+import { maxPctFor } from './grade-model.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -723,12 +724,15 @@ const applyBundle = async (bundle, dataset) => {
     dataset.controlAxes = controlAxes;
     report.applied.push('control axes');
   }
+  // The grade DECLARATION is retained even when it changes nothing in
+  // the font (toggle off, or no graded instances): per-instance grades
+  // persist across the toggle — the server's save_all semantics.
+  if (bundle.grade) dataset.grade = grade;
   if (gradeInstances.length) {
     const coords = resolveGradeCoords(dataset, avar2Csv);
     dataset.fontBytes = await applyGrade(
       dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
     );
-    dataset.grade = grade; // kept so rebuilds re-apply it
     report.applied.push('grade');
   }
   // SPAC transforms apply last (they rebuild HVAR from the gvar the
@@ -849,10 +853,9 @@ const rebuildUploadFont = async (dataset) => {
     dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(dataset.controlAxes));
   }
   const grade = dataset.grade || {};
-  const gradeInstances = grade.enabled ? (grade.instances || []) : [];
-  // Apply grade whenever enabled — even with no per-instance grades, the
-  // GRAD axis needs to exist so the slider shows. applyGrade with an
-  // empty instances list adds the axis at default (no visual change).
+  // The GRAD axis materialises only when enabled AND ≥1 instance is
+  // graded (the wasm no-ops otherwise) — with no grades there are no
+  // brace tuples and the axis would be inert, matching the server.
   if (grade.enabled) {
     const coords = resolveGradeCoords(dataset, dataset.mappingsCsv || '');
     dataset.fontBytes = await applyGrade(
@@ -949,9 +952,23 @@ const staticOverrides = {
     // React's Object.is state check blind to the update.
     pins: [...(uploadDataset ? uploadDataset.cornerPins || [] : [])],
   }),
-  getGrade: async () => (uploadDataset
-    ? (uploadDataset.grade || { enabled: false, default_pct: 0.25, instances: [], max_pct: {} })
-    : endpoint('grade.json')()),
+  getGrade: async () => {
+    if (!uploadDataset) return endpoint('grade.json')();
+    const grade = uploadDataset.grade || { enabled: false, default_pct: 0.25, instances: [] };
+    // Per-instance slider caps, the server's _grade_state_payload
+    // semantics: bound each instance's grade% by its own parametric
+    // headroom so an undeliverable grade is unreachable in the UI.
+    const ranges = {};
+    for (const a of parseFont(uploadDataset.fontBytes).axes) {
+      if (PARAM_TAGS.includes(a.tag)) ranges[a.tag] = [a.min, a.max];
+    }
+    const coords = resolveGradeCoords(uploadDataset, uploadDataset.mappingsCsv || '');
+    const max_pct = {};
+    if (Object.keys(ranges).length) {
+      for (const name of Object.keys(coords)) max_pct[name] = maxPctFor(coords[name], ranges);
+    }
+    return { ...grade, max_pct };
+  },
   listControlAxes: async () => (uploadDataset
     ? { axes: uploadDataset.controlAxes || [] }
     : endpoint('control-axes.json')()),
@@ -1032,14 +1049,16 @@ const staticOverrides = {
       // Harvested control axes / transforms apply through the bundle
       // machinery (same wasm steps, same warnings); the CSV was already
       // applied by the dataset build above. Corner pins apply after.
-      if (ws.controlText || ws.transformsText) {
+      if (ws.controlText || ws.transformsText || ws.gradeText) {
         await applyBundle({
           format: 'avar2-studio-config', format_version: 1,
           source: { avar2_out_columns: [...uploadDataset.parametricTags] },
           control_axes: ws.controlText ? JSON.parse(ws.controlText) : { version: 1, axes: [] },
           avar2_csv: '',
           transforms: ws.transformsText ? JSON.parse(ws.transformsText) : { version: 1, transforms: [] },
-          grade: { version: 1, enabled: false, default_pct: 0.25, instances: [] },
+          grade: ws.gradeText
+            ? JSON.parse(ws.gradeText)
+            : { version: 1, enabled: false, default_pct: 0.25, instances: [] },
         }, uploadDataset);
       }
       if (ws.cornerPinsText) {
@@ -1226,6 +1245,12 @@ const staticOverrides = {
   deleteInstance: async (instanceName) => {
     requireUpload();
     mappingsCsv.deleteRow(uploadDataset.instancesCsv, instanceName);
+    // A deleted instance takes its grade with it (server semantics for
+    // a full delete; demote keeps the instance, so the grade stays).
+    if (uploadDataset.grade?.instances?.length) {
+      uploadDataset.grade.instances =
+        uploadDataset.grade.instances.filter(e => e.name !== instanceName);
+    }
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
@@ -1292,9 +1317,9 @@ const staticOverrides = {
     requireUpload();
     const grade = uploadDataset.grade ||= { version: 1, enabled: false, default_pct: 0.25, instances: [] };
     grade.instances = (grade.instances || []).filter(e => e.name !== instanceName);
-    if (pct !== undefined && pct !== null) {
-      grade.instances.push({ name: instanceName, pct });
-    }
+    // pct omitted → seed with the global default (the server's
+    // set_instance_grade(pct=None) semantics; removal is its own call).
+    grade.instances.push({ name: instanceName, pct: pct ?? grade.default_pct ?? 0.25 });
     await rebuildUploadFont(uploadDataset);
     commitRebuiltFont(uploadDataset);
     return grade;

@@ -123,6 +123,7 @@ export function readWorkspaceZip(u8) {
     metadataText: text(beside('-axis-metadata.json')) || text(studioMetaPath),
     controlText: text(beside('-control.json')),
     transformsText: text(beside('-transforms.json')),
+    gradeText: text(beside('-grade.json')),
     cornerPinsText: text(beside('-cornerpins.json')),
     previewTtf,
   };
@@ -145,6 +146,7 @@ export function buildWorkspaceZip(dataset) {
       || base.endsWith('-avar.csv')
       || base.endsWith('-control.json')
       || base.endsWith('-transforms.json')
+      || base.endsWith('-grade.json')
       || base.endsWith('-cornerpins.json')
       || base.endsWith('-axis-metadata.json');
   };
@@ -173,6 +175,13 @@ export function buildWorkspaceZip(dataset) {
     }));
     out[`${dir}${stem}-transforms.json`] = strToU8(
       JSON.stringify({ version: 1, transforms }, null, 2));
+  }
+  // Grade sidecar (server convention: <basename>-grade.json). Written
+  // whenever any state exists — grades persist even with the toggle off.
+  if (dataset.grade && (dataset.grade.enabled || dataset.grade.instances?.length)) {
+    const { enabled = false, default_pct = 0.25, instances = [] } = dataset.grade;
+    out[`${dir}${stem}-grade.json`] = strToU8(
+      JSON.stringify({ version: 1, enabled: !!enabled, default_pct, instances }, null, 2));
   }
   if (Object.keys(dataset.axisRanges || {}).length) {
     out[`${dir}.avar2-studio/axis-metadata.json`] = strToU8(
