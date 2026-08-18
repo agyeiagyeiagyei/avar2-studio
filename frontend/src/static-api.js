@@ -89,6 +89,19 @@ const datasetDir = async () => {
 
 let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
 
+// Axes the behavioral sweep probe may cover: only those gvar actually
+// varies. User (avar2-input) axes act entirely through the mapping —
+// which measure_at does not evaluate — and transform/grade axes are
+// injected post-build (SPAC moves advances, not outlines): probing any
+// of them reports a false "inert axis" per axis.
+const gvarSweepAxes = (fontBytes, axesMeta) => {
+  const flags = new Map((axesMeta || []).map(a => [a.tag, a]));
+  return parseFont(fontBytes).axes.filter(a => {
+    const f = flags.get(a.tag);
+    return !f || (f.has_master_coverage && !f.transform_injected && !f.is_grade_axis);
+  });
+};
+
 // sourceFormat is 'glyphs' (sourceText set — compiles/rebuilds in-browser)
 // or 'designspace' (fontBytes = baked preview TTF from the project zip —
 // fontc can't compile UFO sources off the filesystem). csvText/metadataText
@@ -152,10 +165,13 @@ const buildUploadDataset = async ({
     instances: { instances: [] },
     // Coverage audit (structural gvar regions + behavioral sweeps via
     // the measure_at probe): missing corners, out-of-range sources,
-    // collapses and inert regions, found at load time.
+    // collapses and inert regions, found at load time. Sweeps cover
+    // only axes gvar actually varies: user (avar2-input) axes act
+    // entirely through the mapping, which measure_at does not evaluate
+    // — probing them reports every one as a false "inert axis".
     coverage: [
       ...auditCoverage(bytes).findings,
-      ...await probeSweeps(bytes, meta.axes, (b, g, l) => measureAt(b, g, l)),
+      ...await probeSweeps(bytes, meta.axes.filter(a => !userAxisTags.has(a.tag)), (b, g, l) => measureAt(b, g, l)),
     ],
     cornerPins: [],
     health: {
@@ -264,7 +280,7 @@ const restoreSession = async () => {
       instances: { instances: [] },
       coverage: [
         ...auditCoverage(rec.fontBytes).findings,
-        ...await probeSweeps(rec.fontBytes, parseFont(rec.fontBytes).axes, (b, g, l) => measureAt(b, g, l)),
+        ...await probeSweeps(rec.fontBytes, gvarSweepAxes(rec.fontBytes, rec.axes?.axes), (b, g, l) => measureAt(b, g, l)),
       ],
       health: {
         static: true, demo: false, building: false,
@@ -426,7 +442,7 @@ const refreshAfterPin = async (dataset) => {
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
   const structural = auditCoverage(dataset.fontBytes).findings;
-  const behavioral = await probeSweeps(dataset.fontBytes, parseFont(dataset.fontBytes).axes, (b, g, l) => measureAt(b, g, l));
+  const behavioral = await probeSweeps(dataset.fontBytes, gvarSweepAxes(dataset.fontBytes, dataset.axes?.axes), (b, g, l) => measureAt(b, g, l));
   dataset.coverage = [...structural, ...behavioral, ...lintMappingsFindings(dataset)];
   persistSoon();
 };
