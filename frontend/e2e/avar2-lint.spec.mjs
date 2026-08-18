@@ -153,6 +153,42 @@ D,3330.0,900.0,200.0
     findings.map(f => f.detail).join(' | '));
 }
 
+section('reachable-but-unpinned points are info, not fail (additive extrapolation)');
+{
+  // The crispy-demo 3-axis shape: BC participates only on WGHT (wdth/opsz
+  // at their defaults), Min Min Opsz only on OPSZ — both REACH the
+  // unauthored bold-caption corner, so the model renders an additive
+  // stack there instead of collapsing to output defaults.
+  const csv = `Instance Name,XTRA,XOPQ,YOPQ,WGHT,WDTH,OPSZ
+Min,47,1,1,100,5,144
+Min Min Opsz,128.5,9.2,9.2,100,5,12
+BC,47,143.5,193.6,900,5,144
+Control Test,1665,700,275,900,200,144
+WL,1665,1,1,100,200,144
+WL Min Opsz,1665,15.2,12.3,100,200,12
+`;
+  const { findings } = lintAvar2Mappings(parseMappingsCsv(csv), {
+    parametricTags: PARAMETRIC,
+    outputRanges: OUTPUT_RANGES,
+    inputRanges: {
+      WGHT: { min: 100, default: 100, max: 900 },
+      WDTH: { min: 5, default: 5, max: 200 },
+      OPSZ: { min: 12, default: 144, max: 144 },
+    },
+  });
+  const at = (w, d, o) => findings.find(f =>
+    f.type === 'unmapped-mapping-point' &&
+    f.location.WGHT === w && f.location.WDTH === d && f.location.OPSZ === o);
+  const boldCaption = at(900, 5, 12);
+  check('bold-caption corner is INFO (BC + Min Min Opsz reach it)',
+    boldCaption?.severity === 'info', boldCaption?.detail);
+  check('detail names the reaching rows',
+    !!boldCaption && boldCaption.detail.includes('Min Min Opsz') && boldCaption.detail.includes('BC'));
+  const boldWideCaption = at(900, 200, 12);
+  check('bold-wide-caption corner is INFO (Control Test + WL Min Opsz reach it)',
+    boldWideCaption?.severity === 'info', boldWideCaption?.detail);
+}
+
 section('degenerate inputs');
 {
   check('no input columns -> no findings',

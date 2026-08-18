@@ -155,6 +155,33 @@ export function lintAvar2Mappings(parsed, opts = {}) {
     if (usable.every(t => Math.abs(point[t] - inputRanges[t].default) < EPS)) continue;
     if (covered(point)) continue;
     const where = usable.map(t => `${t} ${fmt(point[t])}`).join(', ');
+    // A row still REACHES this point when its every participating
+    // (non-default) coordinate sits exactly at the point's value — its
+    // tent has no opinion on the point's other axes. (A row at an
+    // intermediate position never reaches the exact extreme: its tent
+    // ends there.) The surface at the point is then the model's
+    // ADDITIVE stack of those rows' effects — rendered, plausible, but
+    // designer-unspecified. Only with NO reaching rows does the point
+    // truly fall back to the output defaults (the dead-cross collapse).
+    const reachedBy = parsed.rows
+      .filter(row => usable.every(t => {
+        const rv = cellValue(row, t, inputRanges[t]);
+        if (Math.abs(rv - inputRanges[t].default) < EPS) return true; // non-participating
+        return Math.abs(rv - point[t]) < EPS;
+      }))
+      .map(r => r.name);
+    if (reachedBy.length) {
+      const names = reachedBy.slice(0, 3).join(', ') + (reachedBy.length > 3 ? `, +${reachedBy.length - 3} more` : '');
+      findings.push({
+        severity: 'info',
+        type: 'unmapped-mapping-point',
+        location: point,
+        detail:
+          `(${where}): no row sits here — the surface is the model's additive extrapolation from ${names}. ` +
+          `It renders, but the design here is unspecified and shifts when those rows change. Add a row to pin it.`,
+      });
+      continue;
+    }
     const onDefaultLine = usable.filter(t => Math.abs(point[t] - inputRanges[t].default) < EPS);
     findings.push({
       severity: 'fail',
