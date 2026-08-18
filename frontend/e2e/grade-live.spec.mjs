@@ -108,8 +108,26 @@ await sleep(400);
 await page.keyboard.press('Escape');
 await waitSettled();
 
+// Row-render regression: a graded row's outline must be IDENTICAL to
+// its ungraded self (rows render at GRAD 0 — the chip says 0; an
+// earlier revision injected GRAD max into row previews, which showed
+// closed counters under a chip claiming 0).
+const rowShot = async (name) => {
+  const handle = await page.evaluateHandle((n) => {
+    const rows = [...document.querySelectorAll('.instance-row')];
+    const el = rows.find(r => r.textContent.includes(n))?.querySelector('.preview-text');
+    el?.scrollIntoView({ block: 'center' });
+    return el;
+  }, name);
+  await sleep(400);
+  return page.screenshot({ clip: await handle.asElement().boundingBox() });
+};
+const rowUngraded = await rowShot('Bold Normal');
+
 console.log('A. mid-box instance (Bold Normal) at 30%');
 await gradeInstance('Bold Normal', 30);
+const rowGraded = await rowShot('Bold Normal');
+ok(rowUngraded.equals(rowGraded), 'graded row renders identical to ungraded (GRAD 0)');
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 await sleep(800);

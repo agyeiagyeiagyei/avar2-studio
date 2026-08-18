@@ -22,25 +22,20 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
     ? editingCoordinates
     : (instanceEditingCoordinates[instance.name] || instance.coordinates);
 
-  // Graded rows preview AT their grade: the instance's dark brace
-  // already encodes its own grade% (grade.py / braces.rs compute the
-  // light/dark tuples at pct and pin them to GRAD −10/+10), so "the
-  // instance at its grade" is the GRAD axis MAX — full application of
-  // its dark tuple — not the pct itself (0.25 on a −10..+10 axis is
-  // 1/40th of the intended darkening).
-  const gradeCoord = React.useMemo(() => {
-    if (!gradeEnabled || gradePct === null || gradePct === undefined) return null;
-    return { [gradeTag]: 10 }; // grade.py GRAD_MAX
-  }, [gradeEnabled, gradePct, gradeTag]);
-  
+  // Graded rows render at GRAD 0 — the badge marks the grade, the GRAD
+  // chip shows 0, and the outline must agree with both (server-app
+  // behavior). The grade itself is inspected with the Preview tab's
+  // GRAD slider. (An earlier revision injected GRAD at max here so the
+  // row showed "the instance at its grade" — near the grade cap that
+  // renders closed counters under a chip claiming GRAD: 0.)
+
   // Apply the CONTROL AXES preview-disable: any axis the user has
   // toggled off via the eye icon renders at its axis default,
   // regardless of the slider / CSV value. Frontend-only — the
   // actual edit state is untouched, so re-enabling restores the
   // user's chosen value immediately.
   const previewCoordinates = React.useMemo(() => {
-    let out = { ...activeCoordinates };
-    if (gradeCoord) out = { ...out, ...gradeCoord };
+    const out = { ...activeCoordinates };
     if (!disabledControlAxes || disabledControlAxes.size === 0) {
       return out;
     }
@@ -51,7 +46,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
       }
     }
     return out;
-  }, [activeCoordinates, disabledControlAxes, axisDefaults, gradeCoord]);
+  }, [activeCoordinates, disabledControlAxes, axisDefaults]);
 
   // SPAC support is deferred — the coordinate dict is rendered as-is.
 

@@ -262,7 +262,12 @@ const setSlider = async (tag, value) => {
   }, [tag, String(value)]);
 };
 ok(await (await sliderFor('crbr')).evaluate(el => !!el), 'crbr slider in Preview (secondary parametric axes)');
-ok(await (await sliderFor('GRAD')).evaluate(el => !!el), 'GRAD slider in Preview (Grade group)');
+// GRAD is transform-injected: it rides in the Transform axes section.
+ok(await page.evaluate(() => {
+  const groups = [...document.querySelectorAll('.preview-axis-group')];
+  const g = groups.find(el => el.querySelector('h3')?.textContent.trim() === 'Transform axes');
+  return !!g && [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'GRAD');
+}), 'GRAD slider in Preview (Transform axes group)');
 // Specimen shows 'e' only, so the pixel diff is the brace-layer effect.
 const setSpecimen = (text) => page.evaluate((t) => {
   const el = document.querySelector('.preview-tab-sample');
@@ -301,15 +306,15 @@ const waRowChecked = await page.evaluate(() => {
 });
 ok(waRowChecked === true, 'Transforms menu shows width-aware SPAC enabled');
 await page.keyboard.press('Escape');
-// SPAC is transform-injected: it sits in the parametric group with
-// XTRA/XOPQ/YOPQ, a live slider on the built font.
-const spacInParametric = await page.evaluate(() => {
+// SPAC is transform-injected: it sits in the Transform axes section
+// (the Aug-14 preview reorg gave transform axes their own group; this
+// check used to look in the parametric group and failed ever since).
+const spacInTransform = await page.evaluate(() => {
   const groups = [...document.querySelectorAll('.preview-axis-group')];
-  const g = groups.find(el =>
-    [...el.querySelectorAll('.preview-axis-group-title')].some(x => x.textContent.trim() === 'Parametric axes'));
+  const g = groups.find(el => el.querySelector('h3')?.textContent.trim() === 'Transform axes');
   return !!g && [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'SPAC');
 });
-ok(spacInParametric, 'SPAC slider exists in the parametric group');
+ok(spacInTransform, 'SPAC slider exists in the Transform axes group');
 // Pixel-width check on the specimen text run: SPAC tracks the advances
 // (width-aware: 'n' is narrower than the glyph mean, so it tracks less
 // than an average glyph — but still monotonically).

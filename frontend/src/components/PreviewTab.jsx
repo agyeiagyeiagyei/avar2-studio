@@ -63,7 +63,7 @@ function PreviewTab({
     for (const a of (axes || [])) {
       if (a.is_control_axis) control.push(a);
       else if (a.transform_injected) transform.push(a);
-      else if (a.is_grade_axis) param.push(a);  // grade rides with parametric
+      else if (a.is_grade_axis) transform.push(a);  // grade is transform-injected too
       else if (a.has_master_coverage === false) user.push(a);
       else param.push(a);
     }
