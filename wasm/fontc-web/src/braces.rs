@@ -775,6 +775,48 @@ fn grade_coords(
     (light, dark)
 }
 
+/// Scoped grade tuple: peak at the instance's normalized parametric
+/// location × GRAD ±1, with an intermediate region spanning each
+/// participating parametric axis (0 → peak → axis end) — so the grade
+/// applies fully AT its instance and fades to nothing at the origin
+/// and the far corners, mirroring grade_shadow's brace placement.
+///
+/// The earlier port used a GRAD-only tent, which applied every graded
+/// instance's ABSOLUTE deltas at every parametric location (and summed
+/// them across instances): at locations lighter than the instance the
+/// light brace drove stem widths negative, inverting contours — glyphs
+/// rendered as filled blobs at GRAD −10.
+fn grade_tuple_coords(
+    total_axes: usize,
+    base_loc: &[f64],
+    grad_idx: usize,
+    grad_norm: f64,
+) -> NewTuple {
+    let mut peak = vec![0.0; total_axes];
+    let mut start = vec![0.0; total_axes];
+    let mut end = vec![0.0; total_axes];
+    for (i, &p) in base_loc.iter().enumerate() {
+        if p == 0.0 {
+            continue; // axis at its default: non-participating
+        }
+        peak[i] = p;
+        if p > 0.0 {
+            end[i] = 1.0; // start stays 0
+        } else {
+            start[i] = -1.0; // end stays 0
+        }
+    }
+    peak[grad_idx] = grad_norm;
+    start[grad_idx] = grad_norm.min(0.0);
+    end[grad_idx] = grad_norm.max(0.0);
+    NewTuple {
+        peak,
+        start,
+        end,
+        deltas: Vec::new(),
+    }
+}
+
 pub(crate) fn apply_grade(
     font_bytes: Vec<u8>,
     grade_json: &str,
@@ -864,7 +906,8 @@ pub(crate) fn apply_grade(
                 if deltas.iter().all(|&(dx, dy)| dx == 0 && dy == 0) {
                     continue; // nothing to say (e.g. space): advance held, shape unchanged
                 }
-                let mut tuple = brace_coords(total_axes, grad_idx, grad_norm);
+                let mut tuple =
+                    grade_tuple_coords(total_axes, &base_loc, grad_idx, grad_norm);
                 tuple.deltas = deltas;
                 extras.entry(gid).or_default().push(tuple);
             }

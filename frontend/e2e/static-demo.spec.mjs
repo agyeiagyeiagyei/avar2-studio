@@ -286,11 +286,27 @@ await setSlider('crbr', 0);
 await sleep(600);
 const shotReset = await specimenShot();
 ok(shotDefault.equals(shotReset), 'crbr back to default restores the specimen');
+// Grade tuples are SCOPED to their instance's parametric location: at
+// the default location GRAD is inert; at the graded instance's coords
+// (test bundle grades "Narrow Heavy 12" at 222.8/279.6/250.2) it
+// applies fully.
 await setSlider('GRAD', 10);
 await sleep(600);
-const shotGrad = await specimenShot();
-ok(!shotDefault.equals(shotGrad), 'GRAD +10 darkens the specimen');
+const shotGradAtOrigin = await specimenShot();
+ok(shotDefault.equals(shotGradAtOrigin), 'GRAD +10 inert at the default location (scoped grade)');
+await setSlider('XTRA', 222.8);
+await setSlider('XOPQ', 279.6);
+await setSlider('YOPQ', 250.2);
 await setSlider('GRAD', 0);
+await sleep(700);
+const shotAtInstance = await specimenShot();
+await setSlider('GRAD', 10);
+await sleep(700);
+const shotGrad = await specimenShot();
+ok(!shotAtInstance.equals(shotGrad), "GRAD +10 darkens the specimen at the graded instance's location");
+await setSlider('GRAD', 0);
+await page.click('button:has-text("Reset")');
+await sleep(600);
 
 // ---- 9. SPAC transform applies from the bundle (width-aware) ----------------
 // The test bundle imported in section 8 has spac_widthaware ENABLED —

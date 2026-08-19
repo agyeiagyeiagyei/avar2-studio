@@ -131,33 +131,65 @@ ok(rowUngraded.equals(rowGraded), 'graded row renders identical to ungraded (GRA
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 await sleep(800);
+
+// Blob regression: grade tuples are SCOPED to their instance's
+// parametric location. At the DEFAULT (hairline) location GRAD must be
+// inert in BOTH directions — the global tuple used to apply Bold
+// Normal's absolute deltas here, and at GRAD −10 the light brace drove
+// hairline stems negative (inverted contours rendered as solid blobs).
+const originAt0 = await specimenShot();
+await setSlider('GRAD', 10);
+await sleep(800);
+const originAt10 = await specimenShot();
+await setSlider('GRAD', -10);
+await sleep(800);
+const originAtM10 = await specimenShot();
+ok(originAt0.equals(originAt10), 'GRAD +10 inert at the default location (scoped)');
+ok(originAt0.equals(originAtM10), 'GRAD −10 inert at the default location — no inverted-contour blob');
+await setSlider('GRAD', 0);
+
+// At the instance's own location the grade applies fully.
+await setSlider('wght', 900);
+await setSlider('wdth', 100);
+await sleep(900);
 const midAt0 = await specimenShot();
 const widthAt0 = await specimenWidth();
 await setSlider('GRAD', 10);
 await sleep(800);
 const midAt10 = await specimenShot();
 const widthAt10 = await specimenWidth();
-ok(!midAt0.equals(midAt10), 'GRAD +10 visibly darkens the specimen (mid-box grade)');
+ok(!midAt0.equals(midAt10), "GRAD +10 visibly darkens the specimen at Bold Normal's location");
 ok(Math.abs(widthAt10 - widthAt0) < 1.5, `advance held: width ${widthAt0.toFixed(1)} -> ${widthAt10.toFixed(1)}`);
+await setSlider('GRAD', -10);
+await sleep(800);
+const midAtM10 = await specimenShot();
+const widthAtM10 = await specimenWidth();
+ok(!midAt0.equals(midAtM10), "GRAD −10 visibly lightens the specimen at Bold Normal's location");
+ok(Math.abs(widthAtM10 - widthAt0) < 1.5, `advance held on the light side: width ${widthAt0.toFixed(1)} -> ${widthAtM10.toFixed(1)}`);
 await setSlider('GRAD', 0);
 await sleep(500);
 
-console.log('B. ceiling instance (Control Test) at the slider max');
+// (A former leg graded "Control Test" and asserted GRAD +10 was a
+// zero-headroom no-op — retired: the source's XOPQ range grew to 1500,
+// putting that instance mid-box with real dark headroom. The
+// clamped-follower model stays covered by the cargo braces oracle and
+// e2e/grade-model.spec.mjs.)
+console.log('B. cross-instance isolation (scoped tuples)');
 await page.click('button:text-is("Instances")');
 await sleep(400);
-await removeGrade('Bold Normal');
-await gradeInstance('Control Test', 200);
+await gradeInstance('BC', 25); // second grade, at the narrow-bold corner
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 await sleep(800);
-const ceilAt0 = await specimenShot();
-const ceilWidth0 = await specimenWidth();
-await setSlider('GRAD', 10);
+// With Bold Normal AND BC graded, the default location must still be
+// untouched — grades no longer sum globally.
+const twoGradesOrigin0 = await specimenShot();
+await setSlider('GRAD', -10);
 await sleep(800);
-const ceilAt10 = await specimenShot();
-const ceilWidth10 = await specimenWidth();
-ok(ceilAt0.equals(ceilAt10), 'GRAD +10 on a zero-headroom grade is a clean no-op (no condense/deform)');
-ok(Math.abs(ceilWidth10 - ceilWidth0) < 1.5, `spacing intact: width ${ceilWidth0.toFixed(1)} -> ${ceilWidth10.toFixed(1)}`);
+const twoGradesOriginM10 = await specimenShot();
+ok(twoGradesOrigin0.equals(twoGradesOriginM10),
+  'two grades active: GRAD −10 still inert at the default location (no summed blob)');
+await setSlider('GRAD', 0);
 
 await browser.close();
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall passed');
