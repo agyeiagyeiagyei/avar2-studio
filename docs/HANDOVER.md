@@ -16,6 +16,10 @@ doesn't repeat them:
 - [docs/migration-github-pages.md](./migration-github-pages.md) — the
   static (GitHub Pages) port: wasm crate internals, coverage audit,
   corner pinning, dropping out-of-range sources, zip workspaces
+- [docs/debugging-2026-08-18.md](./debugging-2026-08-18.md) — the
+  Aug-18 bug-hunt record: dead default cross, avar2-eval spec-layout
+  rewrite, grade clamping at the box edge, stale-CSV axis loss, the
+  mapping lint — supersedes several claims in §4 below (noted inline)
 
 Everything below is tribal knowledge as of this handover.
 
@@ -291,11 +295,14 @@ docs/migration-github-pages.md.
    the same font produces the full effect — the Python evaluator is the
    outlier, not the table. Users see the understatement as sliders not
    going all the way.
-3. **`avar2-eval.js` (static) parses only wasm-written avar2 tables** —
-   it crashes (DataView offset) on the server-written layout. No live
-   breakage (snapshot datasets use identity mapping, uploads build
-   tables via the wasm crate), but any future "load a server-built
-   font into the static app" path hits it.
+3. ~~`avar2-eval.js` (static) parses only wasm-written avar2 tables~~
+   **Superseded (Aug 18):** the parser was rewritten to the spec layout
+   (offset fields, entryFormat-aware DSIM, OT tent semantics) after it
+   turned out to parse NOTHING correctly — reflection had been silently
+   dead (see debugging-2026-08-18.md §4). It now has a fontTools oracle
+   test (`e2e/avar2-eval.spec.mjs`). Whether it handles the
+   server-written layout has not been re-verified — test before wiring
+   a "load a server-built font into the static app" path.
 4. **Shadow wipe loses drawn outlines** (model β, §3) — biggest
    data-integrity foot-gun for users.
 5. **Fontra port 8001 collision** across simultaneous instances (§3);
@@ -329,7 +336,10 @@ docs/migration-github-pages.md.
 cd wasm/fontc-web && cargo test                 # crate oracles (avar2/braces/clamp/pin/spac/stat/measure)
 cd frontend && npx vite build --base=./ --outDir dist-pages
 python3 -m http.server 8123 -d frontend/dist-pages &
-cd frontend && node e2e/static-demo.spec.mjs    # 23 sections against :8123
+cd frontend && node e2e/static-demo.spec.mjs    # full suite against :8123 (green end-to-end since Aug 18)
+cd frontend && node e2e/avar2-lint.spec.mjs     # mapping lint (pure JS, no server)
+cd frontend && node e2e/grade-model.spec.mjs    # grade cap model vs the Python oracle
+cd frontend && node e2e/avar2-eval.spec.mjs     # avar2 evaluator vs fontTools (needs /tmp fixture)
 
 .venv/bin/python -m avar2_studio examples/crispy-mini/sources/CrispyMini.glyphs --port 5070
 curl -s localhost:5070/api/health            # status ok, font_built true, building false
@@ -337,6 +347,14 @@ curl -s localhost:5070/api/glyph-coverage    # axes with layers/min/default/max/
 curl -s -X POST localhost:5070/api/control-axes/<studio-tag>/open-editor
                                              # editing_original false, project = shadow file
 ```
+The cargo oracles need `/tmp/fontc-wasm-spike.ttf` and
+`/tmp/av2-oracle.ttf` — regeneration recipe in
+[debugging-2026-08-18.md](./debugging-2026-08-18.md) (fontc from the
+Crispy design repo's venv + `spike/build_oracle.py`). `clamp_oracle`
+compiles the LIVE `../Crispy/sources/Crispy.glyphs` and fails vacuously
+once that design file no longer carries stranded sources —
+environmental, not a code failure.
+
 Repeat with `examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace`:
 scoped axes must show the read-only layers panel with digit/letter
 thumbnails, and open-editor must return `editing_original: true` with
