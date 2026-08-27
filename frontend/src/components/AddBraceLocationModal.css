@@ -295,3 +295,56 @@
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+
+/* "Add to all applicable glyphs" — spans the axis's coverage set with
+   the location being added. Sits between the glyph field and the
+   location controls; reads as a sibling of the corner-picker rows. */
+.all-applicable-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.7rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.all-applicable-row:hover {
+  background: var(--zinc-50);
+}
+.all-applicable-row.selected {
+  background: var(--primary-soft);
+  border-style: solid;
+  border-color: transparent;
+}
+.all-applicable-row input[type=checkbox] {
+  margin-top: 0.15rem;
+}
+.all-applicable-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.all-applicable-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.all-applicable-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--zinc-500);
+  background: var(--zinc-100);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+}
+.all-applicable-row.selected .all-applicable-count {
+  background: rgba(255, 255, 255, 0.7);
+}
+.all-applicable-hint {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

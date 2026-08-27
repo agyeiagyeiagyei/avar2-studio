@@ -1059,6 +1059,94 @@ ok(await page.evaluate(() => {
   const row = rows.find(r => r.textContent.includes('crnr'));
   return row && [...row.querySelectorAll('.layers-glyph-name')].some(el => el.textContent.trim() === 'e');
 }), 'brace layer for e listed under the control axis');
+
+// ---- 24b. one location across every applicable glyph ----------------------
+// "+ Add layer for all N glyphs" opens the modal with the all-applicable
+// toggle on. Naming an extra glyph widens coverage in the same submit; a
+// layer that already exists at that location (e @ XOPQ 700) is a no-op,
+// not a duplicate. Then a genuinely new location lands on every covered
+// glyph at once.
+console.log('24b. add a layer across all applicable glyphs');
+const crnrLayerCounts = () => page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.control-axis-row')];
+  const row = rows.find(r => r.textContent.includes('crnr'));
+  const out = {};
+  for (const block of row?.querySelectorAll('.layers-glyph-block') || []) {
+    const name = block.querySelector('.layers-glyph-name')?.textContent.trim();
+    out[name] = block.querySelector('.layers-glyph-count')?.textContent.trim();
+  }
+  return out;
+});
+const openAddForAll = async () => {
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.control-axis-row')];
+    const row = rows.find(r => r.textContent.includes('crnr'));
+    row?.querySelector('.layer-add-all')?.click();
+  });
+  await page.waitForSelector('#brace-all-applicable', { timeout: 10000 });
+};
+const setControlValue = async (v) => page.evaluate((val) => {
+  const input = document.querySelector('.control-value-row .pin-value');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, val);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}, String(v));
+// The custom location is remembered from the previous add (XOPQ 700) and
+// comes back ticked — only tick it if it isn't.
+const ensureCustomOn = async () => {
+  const on = await page.$eval('.corner-custom input[type=checkbox]', el => el.checked);
+  if (!on) await page.click('.corner-custom input[type=checkbox]');
+  await page.waitForTimeout(300);
+};
+const waitForBuild = async () => {
+  await page.waitForFunction(() =>
+    !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+    { timeout: 300000 });
+  await page.waitForTimeout(1000);
+};
+
+await openAddForAll();
+ok(await page.$eval('#brace-all-applicable', el => el.checked),
+  'all-applicable toggle is on when opened from "+ Add layer for all"');
+await page.fill('#brace-glyphs', 'o');
+await setControlValue(100);
+await ensureCustomOn();
+ok(await page.evaluate(() => document.querySelector('.location-preview code')?.textContent.includes('2 glyphs')),
+  'summary counts the typed glyph plus the covered one');
+await page.click('.add-brace-location-modal .btn-confirm');
+await waitForBuild();
+const crnrCounts = await crnrLayerCounts();
+ok(crnrCounts.o === '1 layer', `o gained the layer (${JSON.stringify(crnrCounts)})`);
+ok(crnrCounts.e === '1 layer', `e was not duplicated at the same location (${JSON.stringify(crnrCounts)})`);
+
+// The static app keys a layer by its PARAMETRIC location only — the
+// control-axis value is stripped on store (braces are computed tuples at
+// the axis extreme; see controlAxisLayerDelta's clean()). So a "new
+// location" here means a different parametric point, not a different
+// crnr value: move the remembered custom XOPQ 700 to 400.
+await openAddForAll();
+await setControlValue(100);
+await ensureCustomOn();
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.location-pin-row.pinned')]
+    .find(r => r.querySelector('.pin-tag')?.textContent.trim() === 'XOPQ');
+  const input = row?.querySelector('.pin-value') || row?.querySelector('.pin-slider');
+  if (input) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '400');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+});
+ok(await page.evaluate(() => document.querySelector('.location-preview code')?.textContent.includes('× 2 glyphs')),
+  'second span targets both covered glyphs with nothing typed');
+await page.click('.add-brace-location-modal .btn-confirm');
+await waitForBuild();
+const crnrCounts2 = await crnrLayerCounts();
+ok(crnrCounts2.e === '2 layers' && crnrCounts2.o === '2 layers',
+  `new location landed on every applicable glyph (${JSON.stringify(crnrCounts2)})`);
+
 // The exported font carries the new axis.
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });

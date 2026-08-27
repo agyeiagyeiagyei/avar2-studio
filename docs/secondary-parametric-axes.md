@@ -125,6 +125,25 @@ Two ways, both in the glyph's tray:
   when you want a distinct drawing at the extreme, not just a moved
   copy of the intermediate.
 
+### One location across every applicable glyph
+
+Once an axis covers several glyphs, a new location — a further extreme,
+a master corner you hadn't anchored yet — usually needs to land on *all*
+of them, not just the glyph you happen to be looking at. Two ways:
+
+- **+ Add layer for all N glyphs** at the bottom of the axis row opens
+  the add modal targeting the whole coverage set. Set the axis value and
+  the corners as usual; one layer is created per covered glyph. Name
+  extra glyphs in the field to widen coverage in the same step.
+- **Add to all applicable glyphs** — the same toggle inside any add or
+  duplicate modal, including the per-glyph *+ Add layer for `<glyph>`*.
+  Tick it and the submit spans the coverage set instead of the one glyph
+  it was opened for.
+
+A glyph that already has a layer at that exact location is left alone —
+the sidecar de-duplicates on (glyph, location) — so spanning is safe to
+repeat.
+
 ## The shadow source file
 
 For studio-declared secondary-axis authoring, the studio operates on a

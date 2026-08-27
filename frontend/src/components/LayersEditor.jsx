@@ -351,6 +351,22 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
           >
             + Add applicable glyphs
           </button>
+          {/* One location across the whole coverage set — the
+              alternative to walking every glyph's "+ Add layer for X". */}
+          {orderedGlyphs.length > 0 && (
+            <button
+              type="button"
+              className="layer-add-all"
+              onClick={() => onRequestAddModal && onRequestAddModal({
+                tag,
+                axisDefault: axis.default,
+                allApplicable: true,
+              })}
+              title={`Add one new layer to every glyph this axis covers (${orderedGlyphs.join(', ')}) at a location you choose — instead of adding it glyph by glyph.`}
+            >
+              + Add layer for all {orderedGlyphs.length} glyph{orderedGlyphs.length === 1 ? '' : 's'}
+            </button>
+          )}
         </div>
       )}
     </div>

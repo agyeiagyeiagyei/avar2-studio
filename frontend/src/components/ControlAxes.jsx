@@ -88,6 +88,14 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
   // under AVAR2 MAPPINGS / parametric, not here.
   const controlLikeAxes = (axes || []).filter(ax => ax.kind === 'scoped');
 
+  // Coverage is derived, not stored: the unique glyph names in the axis's
+  // layers list. The add-layer modal needs it to offer "all applicable
+  // glyphs" as a target.
+  const coveredGlyphsFor = (tag) => {
+    const ax = controlLikeAxes.find(a => a.tag === tag);
+    return ax ? [...new Set((ax.layers || []).map(l => l.glyph))] : [];
+  };
+
   const resolvedExpandedTags = expandedTags;
 
   const toggleAxisExpanded = (tag) => {
@@ -321,6 +329,8 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
           lockGlyphs={addLocationFor.lockGlyphs}
           editLayer={addLocationFor.editLayer}
           duplicateFrom={addLocationFor.duplicateFrom}
+          applicableGlyphs={coveredGlyphsFor(addLocationFor.tag)}
+          initialAllApplicable={!!addLocationFor.allApplicable}
           allAxes={allAxes || []}
           allMasters={allMasters || []}
           vfFamilyId={vfFamilyId}

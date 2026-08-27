@@ -30,8 +30,14 @@ import './AddBraceLocationModal.css';
  *                        CREATE a new one (parent's onCreate appends). The
  *                        glyph stays editable so the same coordinates can be
  *                        duplicated onto other glyphs.
+ *   applicableGlyphs   — every glyph this axis already covers. Enables the
+ *                        "Add to all applicable glyphs" toggle, which unions
+ *                        them with the typed/prefilled glyphs so one location
+ *                        lands on the whole coverage set in a single submit.
+ *   initialAllApplicable — open with that toggle on (the panel's
+ *                        "+ Add layer for all N glyphs" button sets this).
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded, glyphChars = {} }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded, glyphChars = {}, applicableGlyphs = [], initialAllApplicable = false }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});           // edit mode: the single location
   const [controlValue, setControlValue] = useState(0);  // add mode: the crbr value
@@ -40,6 +46,9 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   const [customPins, setCustomPins] = useState({}); // parametric coords for the custom point
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // Span the whole coverage set: the submit targets every glyph the axis
+  // already covers, not just the ones named in the glyph field.
+  const [allApplicable, setAllApplicable] = useState(false);
 
   // Parametric axes (everything except the control axis) — the corner
   // picker fixes these; the custom-location sliders edit them.
@@ -87,9 +96,11 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     }
     setCustomPins(cp);
     setCustomOn(!!remembered && !seedFrom);
+    // Never span coverage on an edit — an edit targets one existing layer.
+    setAllApplicable(!!initialAllApplicable && !editLayer);
     setError(null);
     setSubmitting(false);
-  }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer, duplicateFrom]);
+  }, [isOpen, prefillGlyphs, axisTag, allAxes, editLayer, duplicateFrom, initialAllApplicable]);
 
   // Clear any stale error the moment the designer changes an input.
   useEffect(() => {
@@ -144,6 +155,16 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   if (!isOpen) return null;
 
   const parsedGlyphs = parseGlyphString(glyphsInput);
+  // "Add to all applicable glyphs": offered whenever the axis covers a
+  // glyph beyond the one this modal was opened for (a per-glyph add whose
+  // glyph is the axis's only coverage has nothing to span). Off for edit.
+  const lockedGlyph = (lockGlyphs || editLayer) ? (prefillGlyphs || '').trim() : null;
+  const otherApplicable = (applicableGlyphs || []).filter(g => g !== lockedGlyph);
+  const canSpanApplicable = !editLayer && otherApplicable.length > 0;
+  const spanAll = canSpanApplicable && allApplicable;
+  // The glyphs the submit actually targets: typed/prefilled, plus the
+  // whole coverage set when spanning. Order: typed first, then coverage.
+  const targetGlyphs = spanAll ? unionGlyphs(parsedGlyphs, applicableGlyphs) : parsedGlyphs;
 
   const togglePin = (axisInfo) => {
     setPins(prev => {
@@ -165,7 +186,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     e.preventDefault();
     if (submitting) return;
     setError(null);
-    if (parsedGlyphs.length === 0) {
+    if (targetGlyphs.length === 0) {
       setError('Enter at least one glyph');
       return;
     }
@@ -181,7 +202,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
         const n = Number(v);
         if (Number.isFinite(n)) loc[t] = n;
       }
-      const entries = parsedGlyphs.map(g => ({ glyph: g, location: loc }));
+      const entries = targetGlyphs.map(g => ({ glyph: g, location: loc }));
       setSubmitting(true);
       try {
         await onCreate(entries);
@@ -214,7 +235,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     // control-axis value. Stored as a full location so it lands exactly
     // at the chosen corner.
     const entries = [];
-    for (const g of parsedGlyphs) {
+    for (const g of targetGlyphs) {
       for (const parametric of locations) {
         entries.push({ glyph: g, location: { ...parametric, [axisTag]: Number(controlValue) } });
       }
@@ -245,7 +266,9 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
       ? `Duplicate layer from ${duplicateFrom.glyph}`
       : effectiveLockGlyphs
         ? `Add layer for ${prefillGlyphs || ''}`.trim()
-        : `Add applicable glyphs to ${axisTag}`;
+        : initialAllApplicable
+          ? `Add layer for all ${axisTag} glyphs`
+          : `Add applicable glyphs to ${axisTag}`;
 
   return (
     <div className="modal-overlay">
@@ -258,6 +281,11 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               ? <>Starts at the same coordinates — change what you need, then save as a NEW layer. Edit the glyph field to duplicate this location onto other glyphs.</>
             : effectiveLockGlyphs
               ? <>Add {axisTag} views for <code>{prefillGlyphs}</code> — one editable layer per master corner you tick.</>
+              : initialAllApplicable
+                ? <>One new layer for every glyph this axis already covers, at the location
+                  you set below. Name extra glyphs in the field to widen coverage in the
+                  same step. A glyph that already has a layer at that exact location is
+                  left as is.</>
               : <>Each view is one editable layer: a master corner × the {axisTag} value.
                 Set the {axisTag} value, tick the corners to define it at, then edit
                 each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>) or
@@ -283,9 +311,33 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 onChange={e => setGlyphsInput(e.target.value)}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="e.g. AEFH or /idotless or A E F H"
+                placeholder={spanAll ? 'optional — extra glyphs to add alongside the covered ones' : 'e.g. AEFH or /idotless or A E F H'}
               />
             </div>
+          )}
+
+          {/* Span the axis's whole coverage set with this one location —
+              "not just the glyph I opened this for". Hidden on edit and
+              when there's nothing beyond the locked glyph to span. */}
+          {canSpanApplicable && (
+            <label className={`all-applicable-row ${allApplicable ? 'selected' : ''}`}>
+              <input
+                id="brace-all-applicable"
+                type="checkbox"
+                checked={allApplicable}
+                onChange={() => setAllApplicable(v => !v)}
+              />
+              <span className="all-applicable-text">
+                <span className="all-applicable-title">
+                  Add to all applicable glyphs
+                  <span className="all-applicable-count">{applicableGlyphs.length}</span>
+                </span>
+                <span className="form-row-hint all-applicable-hint" title={applicableGlyphs.join(', ')}>
+                  {summariseGlyphs(applicableGlyphs)}
+                  {lockedGlyph ? ` — not just ${lockedGlyph}` : ''}
+                </span>
+              </span>
+            </label>
           )}
 
           {usePinEditor ? (
@@ -372,12 +424,12 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   picked location, rendered from the built VF at crbr=0
                   (there's no brace yet, so crbr doesn't change it). This
                   is exactly what the seeded layer opens on in Fontra. */}
-              {fontLoaded && vfFamilyId && parsedGlyphs[0] && (() => {
+              {fontLoaded && vfFamilyId && targetGlyphs[0] && (() => {
                 // The preview typesets text — map the glyph NAME to
                 // its character ("eight" → "8"); single-char names
                 // pass through, unmappable names get no preview.
-                const previewChar = glyphChars[parsedGlyphs[0]]
-                  || (parsedGlyphs[0].length === 1 ? parsedGlyphs[0] : null);
+                const previewChar = glyphChars[targetGlyphs[0]]
+                  || (targetGlyphs[0].length === 1 ? targetGlyphs[0] : null);
                 if (!previewChar) return null;
                 const items = [];
                 for (const m of (allMasters || [])) {
@@ -420,13 +472,13 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             <strong>{isEdit ? 'New location:' : 'Will create:'}</strong>{' '}
             <code>
               {usePinEditor
-                ? `${parsedGlyphs.join(', ') || '(no glyphs)'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
+                ? `${targetGlyphs.join(', ') || '(no glyphs)'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
                 : (() => {
                     const nLoc = selectedCorners.size + (customOn ? 1 : 0);
-                    const nViews = parsedGlyphs.length * nLoc;
-                    if (parsedGlyphs.length === 0) return '(no glyphs)';
+                    const nViews = targetGlyphs.length * nLoc;
+                    if (targetGlyphs.length === 0) return '(no glyphs)';
                     if (nLoc === 0) return '(pick a corner)';
-                    return `${nViews} view${nViews === 1 ? '' : 's'} @ ${axisTag}=${controlValue} · ${nLoc} corner${nLoc === 1 ? '' : 's'} × ${parsedGlyphs.length} glyph${parsedGlyphs.length === 1 ? '' : 's'}`;
+                    return `${nViews} view${nViews === 1 ? '' : 's'} @ ${axisTag}=${controlValue} · ${nLoc} corner${nLoc === 1 ? '' : 's'} × ${targetGlyphs.length} glyph${targetGlyphs.length === 1 ? '' : 's'}`;
                   })()}
             </code>
           </div>
@@ -443,9 +495,9 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 : isEdit
                   ? 'Save changes'
                   : isDuplicate
-                    ? `Create ${parsedGlyphs.length || ''} layer${parsedGlyphs.length === 1 ? '' : 's'}`.replace(/\s+/g, ' ').trim()
+                    ? `Create ${targetGlyphs.length || ''} layer${targetGlyphs.length === 1 ? '' : 's'}`.replace(/\s+/g, ' ').trim()
                     : (() => {
-                      const nViews = parsedGlyphs.length * (selectedCorners.size + (customOn ? 1 : 0));
+                      const nViews = targetGlyphs.length * (selectedCorners.size + (customOn ? 1 : 0));
                       return `Add ${nViews || ''} view${nViews === 1 ? '' : 's'}`.trim();
                     })()}
             </button>
@@ -513,6 +565,31 @@ function seedControlValue(ax) {
 function round1(value) {
   const n = parseFloat(value);
   return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0;
+}
+
+/**
+ * Union two glyph lists, first-seen order, no repeats. Used to merge the
+ * typed glyphs with the axis's coverage set when spanning all applicable
+ * glyphs — the backend also de-duplicates (glyph, location) pairs, so a
+ * glyph named twice can never yield two layers.
+ */
+function unionGlyphs(first, second) {
+  const out = [];
+  const seen = new Set();
+  for (const g of [...(first || []), ...(second || [])]) {
+    if (g && !seen.has(g)) {
+      seen.add(g);
+      out.push(g);
+    }
+  }
+  return out;
+}
+
+/** "A E F H … +12 more" — a scannable summary of a coverage set. */
+function summariseGlyphs(list, limit = 8) {
+  const names = (list || []).map(g => (g.length === 1 ? g : `/${g}`));
+  if (names.length <= limit) return names.join(' ');
+  return `${names.slice(0, limit).join(' ')} … +${names.length - limit} more`;
 }
 
 /**

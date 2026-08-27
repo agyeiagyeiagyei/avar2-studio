@@ -1058,6 +1058,29 @@
 
 .layers-editor-toplevel-add {
   margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* Secondary to "+ Add applicable glyphs": same dashed treatment as the
+   per-glyph add, but spanning the whole coverage set. */
+.layer-add-all {
+  background: none;
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
+  color: var(--zinc-600);
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+  transition: background-color 0.15s;
+}
+
+.layer-add-all:hover {
+  background: var(--zinc-50);
 }
 
 .layer-add-toplevel {
