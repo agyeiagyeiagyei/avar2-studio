@@ -214,15 +214,26 @@ def update_csv_from_glyphs(
     csv_path: Path,
     dry_run: bool = False,
     skip_instances: Optional[set] = None,
+    remove_missing: bool = False,
 ) -> bool:
     """Sync source-file instance coordinates into the CSV.
 
-    Adds rows for new source instances, updates coordinates for
-    existing ones, removes rows whose names no longer appear in the
-    source. Studio-only rows whose names aren't in the source ARE
-    removed too — this preserves the historical sync semantics.
-    ``skip_instances`` shields named rows from sync entirely (used to
+    Adds rows for new source instances and updates coordinates for existing
+    ones. ``skip_instances`` shields named rows from sync entirely (used to
     avoid clobbering an in-flight edit).
+
+    ``remove_missing`` drops rows whose names are absent from the source, and
+    DEFAULTS OFF. It used to be unconditional, which quietly destroyed the
+    designer's work: studio-only instances live in this CSV and by definition
+    are not in the source, so any background sync deleted them. That sync runs
+    on every source touch — including the shadow regeneration behind every
+    secondary-axis edit — so adding one brace layer wiped every studio-only
+    instance in the file.
+
+    A row absent from the source is ambiguous: it may be a studio-only
+    instance, or one the designer deleted in Glyphs. Nothing distinguishes
+    them, so the safe reading is to keep it. A stale row is visible and
+    removable; a deleted one is gone.
     """
     try:
         glyphs_instances = get_glyphs_instances(source_path)
@@ -315,6 +326,11 @@ def update_csv_from_glyphs(
                 updated_rows.append(row)
                 glyphs_instance_names.discard(instance_name)
             else:
+                if not remove_missing:
+                    # Not in the source — but that is not evidence it should
+                    # go. Keep it (see remove_missing in the docstring).
+                    updated_rows.append(row)
+                    continue
                 removed_count += 1
                 if not dry_run:
                     print(
