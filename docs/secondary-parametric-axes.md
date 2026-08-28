@@ -168,10 +168,41 @@ should differ (untick axes keep the layer's own value). Combined with
 layer row shows the target as *as if XOPQ 1100 · computed*, and Fontra's
 source list names it "… → as if XOPQ1100".
 
+### Pin the correction, or it leaks
+
+A brace layer compiles to a gvar tuple whose peak is the layer's location in
+*normalized* space, and **an axis whose normalized peak is 0 is omitted from
+the tuple — which makes it unrestricted**. Normalized 0 means "sits at the
+axis default", i.e. at the default master's coordinate on that axis.
+
+For a plain brace layer that is harmless. For a correction layer it is not:
+the correction applies at *every* value of the omitted axis.
+
+Crispy hits this squarely. Its default master is at XTRA 47, and the natural
+correction corner (47 · 1462 · 275) is *also* at XTRA 47 — so XTRA drops out
+and the lowercase correction leaks across the whole width axis. Measured on
+a 2000 upm:
+
+| | leak at the far end of the ramp | leak at the opposite corner |
+|---|---|---|
+| correction alone | 276 units | 578 units |
+| with an anchor layer | 13–24 units | 1 unit |
+
+The fix is an **anchor**: a second layer for the same glyph, at the same
+secondary-axis value, at a *different* value of the unpinned axis, with **no
+correction**. Its delta is zero, so it changes nothing where it sits and
+bounds the tuple everywhere else. For Crispy that is a plain layer at
+(XTRA 1715, XOPQ 1462, YOPQ 275) alongside the corrected one at XTRA 47.
+
+The studio flags this: a glyph whose correction is unpinned on a parametric
+axis shows **⚠ unpinned correction**, and the tooltip names the axis and the
+anchor to add.
+
 Rules:
 
 - A target overrides **parametric** axes only; a target on the secondary
   axis itself is ignored.
+- **Pin every parametric axis, or add an anchor** — see above.
 - Computed layers are **re-derived on every rebuild** so changing the
   target takes effect. Fontra edits on such a layer are overwritten —
   edit the layer and remove the correction to hand-draw it instead.

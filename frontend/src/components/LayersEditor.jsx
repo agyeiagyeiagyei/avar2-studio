@@ -56,6 +56,45 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
   const axisMax = axis ? axis.max : 0;
   const axisDefault = axis ? axis.default : 0;
 
+  // UNBOUNDED-CORRECTION check.
+  //
+  // A brace layer becomes a gvar tuple whose peak is the layer's location in
+  // NORMALIZED space. An axis whose normalized peak is 0 — i.e. the layer sits
+  // at that axis's default, which is the default master's coordinate — is
+  // OMITTED from the tuple, and an omitted axis is unrestricted: the delta
+  // then applies at every value of it.
+  //
+  // For a plain brace layer that is harmless (the delta is the glyph's own
+  // shape there). For a CORRECTION layer it is not: the correction leaks
+  // across the whole axis. Measured on Crispy, a lowercase correction pinned
+  // at XTRA 47 (= the axis default) leaked 276 units at the other end of the
+  // weight ramp and 578 units at the opposite corner, on a 2000 upm.
+  //
+  // The fix is an ANCHOR: a second layer for the same glyph at the same
+  // secondary-axis value but a different value of the unbounded axis, with NO
+  // correction. Its delta is zero, which bounds the tuple.
+  const unboundedAxesFor = (entry, entries) => {
+    if (!entry.target || Object.keys(entry.target).length === 0) return [];
+    const loc = entry.location || {};
+    const ctrlValue = loc[tag];
+    const out = [];
+    for (const ax of (allAxes || [])) {
+      if (ax.tag === tag) continue;
+      // Only axes the masters actually span can bound a tuple.
+      if (ax.has_master_coverage === false || ax.is_control_axis || ax.transform_injected || ax.is_grade_axis) continue;
+      const v = loc[ax.tag];
+      if (v === undefined || Number(v) !== Number(ax.default)) continue;
+      // Bounded already if another layer for this glyph shares the secondary
+      // value but sits elsewhere on this axis.
+      const anchored = entries.some(other =>
+        other !== entry &&
+        Number((other.location || {})[tag]) === Number(ctrlValue) &&
+        Number((other.location || {})[ax.tag]) !== Number(ax.default));
+      if (!anchored) out.push(ax);
+    }
+    return out;
+  };
+
   const classifyGlyphCoverage = (entries) => {
     let belowVal = null;     // most-negative axis value among entries
     let aboveVal = null;     // most-positive axis value among entries
@@ -87,6 +126,14 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
       if (!hasAbove) issues.push({ kind: 'no-above' });
       else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
     }
+    // Corrections that aren't pinned on every parametric axis leak across it.
+    const unbounded = new Map();
+    for (const e of entries) {
+      for (const ax of unboundedAxesFor(e, entries)) {
+        if (!unbounded.has(ax.tag)) unbounded.set(ax.tag, { kind: 'unbounded-correction', axis: ax, at: (e.location || {})[tag] });
+      }
+    }
+    for (const u of unbounded.values()) issues.push(u);
     return {
       ok: issues.length === 0,
       issues,
@@ -104,6 +151,10 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
       if (i.kind === 'no-above') return `No layer above default — slider toward ${axisMax} won't deform this glyph.`;
       if (i.kind === 'extrapolates-below') return `Lowest layer is at ${tag}=${i.at}; the axis goes to ${axisMin}. Slider between ${i.at} and ${axisMin} will extrapolate from your authored outline (usually overshoot / broken).`;
       if (i.kind === 'extrapolates-above') return `Highest layer is at ${tag}=${i.at}; the axis goes to ${axisMax}. Slider between ${i.at} and ${axisMax} will extrapolate.`;
+      if (i.kind === 'unbounded-correction') {
+        const a = i.axis;
+        return `This correction sits at ${a.tag}=${a.default}, which is ${a.tag}'s default — so it is NOT pinned on ${a.tag} and will apply at every ${a.tag} value, not just here. Add a layer for this glyph at ${tag}=${i.at} and a different ${a.tag} (e.g. ${a.max}) with NO correction: its delta is zero and it bounds the correction.`;
+      }
       return '';
     }).filter(Boolean).join(' ');
   };
@@ -191,7 +242,11 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                   className="layers-glyph-warning"
                   title={describeIssues(coverage)}
                 >
-                  ⚠ extrapolates
+                  {/* Two different defects share the badge; name whichever
+                      is present so the label matches the tooltip. */}
+                  ⚠ {coverage.issues.some(i => i.kind === 'unbounded-correction')
+                    ? (coverage.issues.some(i => i.kind !== 'unbounded-correction') ? 'needs attention' : 'unpinned correction')
+                    : 'extrapolates'}
                 </span>
               )}
             </div>
