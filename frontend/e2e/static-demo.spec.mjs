@@ -1014,6 +1014,20 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.control-axes *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'crnr')),
   'declared control axis shows in the sidebar');
+// A declared axis is in the fvar before it has layers (the wasm grows
+// fvar per declaration), so the Instances-tab sidebar must already offer
+// its slider — in its own group, not among the core parametric ones.
+const sidebarSliderGroups = await page.evaluate(() => {
+  const tagsIn = (sel) => [...document.querySelectorAll(`${sel} .axis-control .axis-tag`)].map(el => el.textContent.trim());
+  return {
+    secondary: tagsIn('.sidebar .axis-group-secondary'),
+    core: tagsIn('.sidebar .axis-group:not(.axis-group-secondary)'),
+  };
+});
+ok(sidebarSliderGroups.secondary.includes('crnr'),
+  `crnr slider renders under Secondary parametric axes in the Instances sidebar (${sidebarSliderGroups.secondary})`);
+ok(!sidebarSliderGroups.core.includes('crnr'),
+  'crnr slider is not mixed into the core parametric group');
 // Add a computed brace layer: expand the row, add 'e' at XOPQ 700.
 await page.evaluate(() => {
   const rows = [...document.querySelectorAll('.control-axis-row')];

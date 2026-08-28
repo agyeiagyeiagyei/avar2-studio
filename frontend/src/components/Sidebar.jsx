@@ -258,7 +258,14 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           // — live in the AVAR2 MAPPINGS section below where they belong
           // conceptually (with the mapping rows that drive them), not
           // duplicated up here.
-          const coreAxes = axes.filter(a => a.has_master_coverage !== false || a.is_grade_axis);
+          // Secondary parametric (control) axes get their own group: they
+          // deform only their applicable glyphs, and their value is preview
+          // state — saves strip it, like SPAC. The static app flags them
+          // has_master_coverage=false (they'd vanish from Core), the server
+          // flags true (they'd blend into Core); splitting on is_control_axis
+          // gives both the same sidebar as the Preview tab.
+          const secondaryAxes = axes.filter(a => a.is_control_axis);
+          const coreAxes = axes.filter(a => !a.is_control_axis && (a.has_master_coverage !== false || a.is_grade_axis));
 
           return (
             <>
@@ -269,6 +276,33 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                 </div>
               )}
 
+              {secondaryAxes.length > 0 && (
+                <div className="axis-group axis-group-secondary">
+                  <h3 className="axis-group-heading">
+                    Secondary parametric axes
+                    <span className="axis-group-sub">glyph-scoped · preview only</span>
+                  </h3>
+                  {secondaryAxes.map(axis => {
+                    const off = !!(disabledControlAxes && disabledControlAxes.has(axis.tag));
+                    return (
+                      <div
+                        key={axis.tag}
+                        className={`axis-secondary${off ? ' axis-secondary-off' : ''}`}
+                        title={off
+                          ? `${axis.tag} is disabled in preview (eye icon in the section below) — rows render it at the axis default.`
+                          : `Moves only the glyphs ${axis.tag} has layers for. Preview state: not saved with the instance.`}
+                      >
+                        <AxisControl
+                          axis={axis}
+                          value={coordinates[axis.tag] ?? axis.default}
+                          onChange={(value) => onAxisChange(axis.tag, value)}
+                          disabled={disabled || off}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           );
         })()}

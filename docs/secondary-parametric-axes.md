@@ -144,6 +144,24 @@ A glyph that already has a layer at that exact location is left alone —
 the sidecar de-duplicates on (glyph, location) — so spanning is safe to
 repeat.
 
+## Previewing a secondary axis
+
+Every declared secondary axis gets a slider in two places:
+
+- **Instances tab → sidebar**, under its own *Secondary parametric axes*
+  group beneath the core parametric sliders. Move it and every instance
+  row re-renders at that value — only the axis's applicable glyphs
+  change. The slider is present from the moment the axis is declared
+  (it does nothing until the axis has layers).
+- **Preview tab**, in the *Secondary parametric axes* group, for the
+  sample text.
+
+The value is **preview state, not instance data**: like SPAC, it is
+stripped from instance saves and never lands in the instances CSV or the
+source file. The eye icon on the axis row (SECONDARY PARAMETRIC AXES
+section) disables it in preview — the slider dims and rows render at the
+axis default — for a quick with/without comparison.
+
 ## The shadow source file
 
 For studio-declared secondary-axis authoring, the studio operates on a

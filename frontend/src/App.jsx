@@ -633,13 +633,14 @@ function App() {
     [axes],
   );
 
-  // Transform-injected axes (SPAC): live preview state, never
+  // Preview-only axes: transform-injected (SPAC) and secondary
+  // parametric (control) axes are live preview state, never
   // per-instance data. Excluded from dirtiness checks and save
-  // payloads — the server refuses to persist them anyway, so counting
-  // them as "edits" left dots permanently red and saves apparent
-  // no-ops.
+  // payloads — the server refuses to persist them anyway (and on the
+  // static app they'd become instances-CSV columns), so counting them
+  // as "edits" left dots permanently red and saves apparent no-ops.
   const injectedAxisTags = React.useMemo(
-    () => new Set((axes || []).filter(a => a.transform_injected).map(a => a.tag)),
+    () => new Set((axes || []).filter(a => a.transform_injected || a.is_control_axis).map(a => a.tag)),
     [axes],
   );
 
@@ -1005,7 +1006,7 @@ function App() {
 
     if (edits && Object.keys(edits).length > 0) {
       const dirty = Object.keys(edits).some(k => {
-        if (injectedAxisTags.has(k)) return false;   // live preview axis (SPAC) — never persisted
+        if (injectedAxisTags.has(k)) return false;   // preview-only axis (SPAC, secondary) — never persisted
         if (!(k in persisted)) return true;          // value with no persisted home
         const ve = Number(edits[k]);
         const vp = Number(persisted[k]);
@@ -1106,8 +1107,9 @@ function App() {
     if (!editingCoordinates || Object.keys(editingCoordinates).length === 0) return undefined;
     const name = selectedInstance.name;
     const coords = { ...selectedInstance.coordinates, ...editingCoordinates };
-    // Injected preview axes (SPAC) never persist — dragging Spacing
-    // must not schedule CSV writes or destabilize the saved-key guard.
+    // Preview-only axes (SPAC, secondary parametric) never persist —
+    // dragging them must not schedule CSV writes or destabilize the
+    // saved-key guard.
     for (const t of injectedAxisTags) delete coords[t];
     const coordsKey = JSON.stringify(Object.keys(coords).sort().map(k => [k, coords[k]]));
     // Idempotence guard. WITHOUT it, a completed rebuild (font reload,
@@ -1471,6 +1473,9 @@ function App() {
           coordinatesToUse[axis.tag] = axis.default;
         }
       });
+      // Preview-only axes (SPAC, secondary parametric) never persist —
+      // on the static app they'd become instances-CSV columns.
+      for (const t of injectedAxisTags) delete coordinatesToUse[t];
 
       await api.createInstance(newInstanceName, coordinatesToUse);
 
@@ -1502,8 +1507,12 @@ function App() {
         ? editingCoordinates
         : selectedInstance.coordinates;
       
-      // Create new instance, inserting after the selected instance
-      await api.createInstance(newInstanceName, coordinatesToUse, selectedInstance.name);
+      // Create new instance, inserting after the selected instance.
+      // Preview-only axes (SPAC, secondary parametric) are not instance data.
+      const persistedCoords = Object.fromEntries(
+        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag))
+      );
+      await api.createInstance(newInstanceName, persistedCoords, selectedInstance.name);
       
       // Reload instances to get the new one
       const instancesData = await api.getInstances();

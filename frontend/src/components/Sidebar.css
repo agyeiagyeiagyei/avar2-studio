@@ -499,6 +499,22 @@
   color: var(--amber-800);
 }
 
+/* Secondary parametric axes group — the heading's sub-label reads as a
+   note, not a second heading. Disabled-in-preview sliders dim. */
+.axis-group-sub {
+  margin-left: auto;
+  font-size: 0.6rem;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--zinc-400);
+}
+
+.axis-secondary-off {
+  opacity: 0.55;
+}
+
 .axis-group-heading-help {
   display: inline-flex;
   align-items: center;
