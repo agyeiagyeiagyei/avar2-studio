@@ -1615,6 +1615,7 @@ def update_instance(instance_name: str):
         if csv_path and csv_path.exists():
             try:
                 if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name}):
+                    _update_csv_modification_time(csv_path)   # ours, not external
                     print("CSV synced after instance update", file=sys.stderr)
             except Exception as e:
                 print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
@@ -4998,6 +4999,7 @@ def sync_csv():
         )
         if not ok:
             return jsonify({"error": "Failed to sync CSV"}), 500
+        _update_csv_modification_time(csv_path)   # ours, not external
 
         return jsonify({
             "success": True,
@@ -5058,6 +5060,12 @@ def add_avar2_axis():
         if min_value >= max_value:
             return jsonify({"error": "min must be less than max"}), 400
         
+        # Normalized up front: the duplicate-tag check below compares against
+        # it, and it used to be assigned only after that loop — a
+        # use-before-assignment that stayed hidden until the font had axis
+        # metadata for the loop to iterate over.
+        axis_name_normalized = axis_name.upper()
+
         # Check for duplicate registered tags in existing metadata
         metadata = _load_axis_metadata()
         for existing_axis, existing_meta in metadata.items():
@@ -5067,10 +5075,7 @@ def add_avar2_axis():
         # Read CSV using normalized function
         
         rows, fieldnames, _, _, fieldname_mapping = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
-        # Normalize axis_name to uppercase for consistency
-        axis_name_normalized = axis_name.upper()
-        
+
         # Check if axis already exists (case-insensitive)
         if axis_name_normalized in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' already exists"}), 400
@@ -6190,6 +6195,13 @@ def main():
                 skip_instances=set(EDITING_INSTANCES),
             )
             if ok:
+                # OUR write, not an external one. Without this the
+                # external-edit guard sees the new mtime on the next save and
+                # refuses it — and since every secondary-axis layer edit
+                # regenerates the shadow, which trips this watcher, that made
+                # "changed outside this window" fire on essentially every
+                # avar2 save.
+                _update_csv_modification_time(csv_path)
                 skipped_msg = (
                     f" (skipped {len(EDITING_INSTANCES)} editing instances)"
                     if EDITING_INSTANCES else ""
