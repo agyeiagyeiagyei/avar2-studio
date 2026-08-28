@@ -1155,11 +1155,42 @@ await page.evaluate(() => {
 });
 ok(await page.evaluate(() => document.querySelector('.location-preview code')?.textContent.includes('× 2 glyphs')),
   'second span targets both covered glyphs with nothing typed');
+// Correction target: "as if XOPQ 300". The static app stores it (so a
+// bundle round-trips to the full app, which computes the outline there)
+// and the layer row shows it.
+await page.click('#brace-correction');
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.correction-pins .location-pin-row')]
+    .find(r => r.querySelector('.pin-tag')?.textContent.trim() === 'XOPQ');
+  row?.querySelector('.pin-toggle input')?.click();
+});
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.correction-pins .location-pin-row')]
+    .find(r => r.querySelector('.pin-tag')?.textContent.trim() === 'XOPQ');
+  const input = row?.querySelector('.correction-value');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, '300');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+ok(await page.evaluate(() => document.querySelector('.location-preview code')?.textContent.includes('as if XOPQ=300')),
+  'summary names the correction target');
 await page.click('.add-brace-location-modal .btn-confirm');
 await waitForBuild();
 const crnrCounts2 = await crnrLayerCounts();
 ok(crnrCounts2.e === '2 layers' && crnrCounts2.o === '2 layers',
   `new location landed on every applicable glyph (${JSON.stringify(crnrCounts2)})`);
+// expand e's block and look for the computed-correction row
+await page.evaluate(() => {
+  const rows = [...document.querySelectorAll('.control-axis-row')];
+  const row = rows.find(r => r.textContent.includes('crnr'));
+  const block = [...row.querySelectorAll('.layers-glyph-block')].find(b => b.querySelector('.layers-glyph-name')?.textContent.trim() === 'e');
+  block?.querySelector('.layers-glyph-header')?.click();
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() =>
+  [...document.querySelectorAll('.layer-coords-target')].some(el => el.textContent.includes('XOPQ') && el.textContent.includes('300'))),
+  'layer row shows the "as if XOPQ 300" computed correction');
 
 // The exported font carries the new axis.
 await page.click('button:text-is("Preview")');

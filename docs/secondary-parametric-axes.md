@@ -144,6 +144,44 @@ A glyph that already has a layer at that exact location is left alone —
 the sidecar de-duplicates on (glyph, location) — so spanning is safe to
 repeat.
 
+## Correction layers — "as if at" another parametric point
+
+A brace layer normally starts as the glyph's natural shape at its own
+location and is then drawn by hand in Fontra. A **correction layer** is
+different: its outline is *computed* as the glyph interpolated at a
+**target** parametric point, and re-derived on every rebuild.
+
+This is the mechanism for a glyph-scoped correction axis. Take a
+lowercase correction axis `LCOR` (0…100, default 0). At the wide-ultra
+corner the global axes drive XOPQ to 1462, which reads too heavy on the
+lowercase. Add a layer for every lowercase glyph *at that corner* with
+`LCOR` at 100 and the correction **as if XOPQ 1100**: at the corner with
+`LCOR` up, each lowercase glyph renders as it would at XOPQ 1100 — stems
+lighter — while every uncovered glyph (the capitals) is untouched. The
+layer sits at the corner so it engages there; its influence fades toward
+the neighbouring masters exactly like any brace layer, and an avar2
+mapping column can ramp `LCOR` in on the rows that need it.
+
+In the add modal, tick **Correction** and override only the axes that
+should differ (untick axes keep the layer's own value). Combined with
+**+ Add layer for all N glyphs** this is one submit per corner. The
+layer row shows the target as *as if XOPQ 1100 · computed*, and Fontra's
+source list names it "… → as if XOPQ1100".
+
+Rules:
+
+- A target overrides **parametric** axes only; a target on the secondary
+  axis itself is ignored.
+- Computed layers are **re-derived on every rebuild** so changing the
+  target takes effect. Fontra edits on such a layer are overwritten —
+  edit the layer and remove the correction to hand-draw it instead.
+- The correction only *moves* the glyph within the box the masters
+  define: a target outside the master range interpolates like any
+  out-of-range coordinate (extrapolation, usually not what you want).
+- The static (GitHub Pages) app stores the target so a bundle round-trips
+  it, but its computed braces are deltas from the default master and do
+  not honour the target yet — preview corrections in the full app.
+
 ## Previewing a secondary axis
 
 Every declared secondary axis gets a slider in two places:

@@ -1027,6 +1027,7 @@ const staticOverrides = {
           glyph: l.glyph,
           location: l.location || {},
           location_user: l.location || {},
+          ...(l.target && Object.keys(l.target).length ? { target: l.target } : {}),
         })),
       };
     });
@@ -1466,10 +1467,19 @@ const staticOverrides = {
     ax.layers ||= [];
     const allowed = new Set([...uploadDataset.parametricTags]);
     for (const t of csvHeaderTags(uploadDataset.mappingsCsv || '')) allowed.add(t);
-    const clean = (l) => ({
-      glyph: l.glyph,
-      location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
-    });
+    const clean = (l) => {
+      const out = {
+        glyph: l.glyph,
+        location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
+      };
+      // Correction target (render "as if at" another parametric point):
+      // kept so a bundle round-trips it to the full app. The static
+      // wasm build ignores it for now (computed braces there are
+      // deltas from the default master).
+      const target = Object.fromEntries(Object.entries(l.target || {}).filter(([k]) => allowed.has(k)));
+      if (Object.keys(target).length) out.target = target;
+      return out;
+    };
     const sameLayer = (a, b) =>
       a.glyph === b.glyph &&
       JSON.stringify(Object.entries(a.location || {}).sort()) ===

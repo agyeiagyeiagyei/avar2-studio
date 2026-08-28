@@ -391,12 +391,34 @@ def _normalise(data: Dict) -> Dict:
 
 def _normalise_layers(raw) -> List[Dict]:
     """Validate + dedup the unified layers list. Each entry shape:
-    ``{glyph: str, location: {axis_tag: number}}``. Duplicates by
-    (glyph, location) are folded — last write wins."""
+    ``{glyph: str, location: {axis_tag: number}, target?: {axis_tag: number}}``.
+    Duplicates by (glyph, location) are folded — last write wins.
+
+    ``target`` is the optional CORRECTION: parametric overrides naming
+    the location the outline should be computed *as if at*. A layer at
+    the wide-ultra corner with ``target {XOPQ: 1100}`` renders the glyph
+    interpolated at XOPQ 1100 — how a lowercase correction axis reduces
+    stem weight at a corner the global axes drive to 1462. Layers with a
+    target are always (re)computed by ``regenerate_shadow``; layers
+    without one seed once and keep whatever Fontra draws."""
     out: List[Dict] = []
     seen: set = set()
     if not isinstance(raw, list):
         return out
+
+    def _clean_numbers(d):
+        clean: Dict[str, float] = {}
+        if not isinstance(d, dict):
+            return clean
+        for k, v in d.items():
+            if not isinstance(k, str) or not k.strip():
+                continue
+            try:
+                clean[k.strip()] = float(v)
+            except (TypeError, ValueError):
+                continue
+        return clean
+
     for entry in raw:
         if not isinstance(entry, dict):
             continue
@@ -406,21 +428,18 @@ def _normalise_layers(raw) -> List[Dict]:
             continue
         if not isinstance(location, dict) or not location:
             continue
-        clean_loc: Dict[str, float] = {}
-        for k, v in location.items():
-            if not isinstance(k, str) or not k.strip():
-                continue
-            try:
-                clean_loc[k.strip()] = float(v)
-            except (TypeError, ValueError):
-                continue
+        clean_loc = _clean_numbers(location)
         if not clean_loc:
             continue
         key = (glyph.strip(), tuple(sorted(clean_loc.items())))
         if key in seen:
             continue
         seen.add(key)
-        out.append({"glyph": glyph.strip(), "location": clean_loc})
+        item: Dict = {"glyph": glyph.strip(), "location": clean_loc}
+        clean_target = _clean_numbers(entry.get("target"))
+        if clean_target:
+            item["target"] = clean_target
+        out.append(item)
     return out
 
 
@@ -791,12 +810,32 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                         continue
                 if not pinned_any:
                     continue
-                seed_jobs.append((glyph_name, location, dict(pinned)))
+                # Correction target: the outline is computed as if the
+                # glyph sat at the layer's parametric location with these
+                # overrides applied (parametric axes only — a target on
+                # the control axis itself is meaningless).
+                seed_location = None
+                target = entry.get("target") or {}
+                if isinstance(target, dict) and target:
+                    seed_location = list(location)
+                    applied = False
+                    for t_tag, t_value in target.items():
+                        idx = full_axis_index_by_tag.get(str(t_tag).lower())
+                        if idx is None or idx in control_axis_indices:
+                            continue
+                        try:
+                            seed_location[idx] = float(t_value)
+                            applied = True
+                        except (TypeError, ValueError):
+                            continue
+                    if not applied:
+                        seed_location = None
+                seed_jobs.append((glyph_name, location, dict(pinned), seed_location))
 
         # De-duplicate seed jobs — same (glyph, location) added by
         # multiple paths only needs writing once.
         seen_jobs: set = set()
-        for glyph_name, location, pinned in seed_jobs:
+        for glyph_name, location, pinned, seed_location in seed_jobs:
             job_key = (glyph_name, tuple(location))
             if job_key in seen_jobs:
                 continue
@@ -844,13 +883,20 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                 preserved is not None
                 and _paths_sig(preserved.get("paths")) != _paths_sig(default_layer.paths)
             )
+            # A correction layer (seed_location set) is COMPUTED, not
+            # drawn: it is re-derived from its target on every regen so
+            # changing the target in the studio takes effect. Fontra
+            # edits on such a layer are therefore overwritten — drop the
+            # target to hand-draw it.
+            if seed_location is not None:
+                preserved_is_edit = False
             if preserved_is_edit:
                 layer_paths = preserved["paths"]
                 layer_components = preserved["components"]
                 layer_anchors = preserved["anchors"]
                 layer_width = preserved["width"]
             else:
-                interp = _interpolated_seed(glyph, location)
+                interp = _interpolated_seed(glyph, seed_location or location)
                 if interp is not None:
                     layer_paths, layer_width = interp
                 else:
@@ -881,6 +927,16 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # "{...}" name; the "{...}" name stays for glyphsLib brace
             # recognition.
             source_label = _brace_source_label(location)
+            if source_label and seed_location is not None:
+                # Name the correction so the Fontra source list says what
+                # this computed view is: "… · crbr 100 → as if XOPQ 1100".
+                as_if = ", ".join(
+                    f"{font.axes[i].axisTag}{_fmt_coord(v)}"
+                    for i, v in enumerate(seed_location)
+                    if i < len(location) and float(v) != float(location[i])
+                )
+                if as_if:
+                    source_label = f"{source_label} → as if {as_if}"
             if source_label:
                 brace.userData["xyz.fontra.source-name"] = source_label
 

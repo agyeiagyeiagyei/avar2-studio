@@ -5,6 +5,11 @@
   padding: 1.25rem 1.4rem 1.1rem;
   width: 460px;
   max-width: 92vw;
+  /* Corner list + custom location + correction pins can outgrow a
+     short viewport; the modal scrolls rather than pushing its buttons
+     off-screen. */
+  max-height: 92vh;
+  overflow-y: auto;
 }
 
 .add-brace-location-modal h3 {
@@ -347,4 +352,36 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Correction ("as if at") block — the layer's outline is computed at
+   another parametric point. Same dashed-row language as the
+   all-applicable toggle; the pin rows reuse .location-pins. */
+.correction-block {
+  margin: 0.6rem 0 0.7rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed var(--zinc-300);
+  border-radius: 6px;
+}
+.correction-block.on {
+  border-style: solid;
+  border-color: var(--zinc-200);
+  background: var(--zinc-50);
+}
+.correction-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.correction-toggle input[type=checkbox] {
+  margin-top: 0.15rem;
+}
+.correction-toggle-text {
+  display: flex;
+  flex-direction: column;
+}
+.correction-pins {
+  margin-top: 0.5rem;
 }

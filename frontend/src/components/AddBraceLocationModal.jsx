@@ -49,10 +49,22 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   // Span the whole coverage set: the submit targets every glyph the axis
   // already covers, not just the ones named in the glyph field.
   const [allApplicable, setAllApplicable] = useState(false);
+  // Correction: compute the layer's outline as if the glyph sat at a
+  // different parametric point (e.g. XOPQ 1100 at a corner the global
+  // axes drive to 1462). Stored as sparse parametric overrides in
+  // ``target``; the shadow regen interpolates the outline there.
+  const [correctionOn, setCorrectionOn] = useState(false);
+  const [correction, setCorrection] = useState({});   // {tag: value} — only overridden axes
 
   // Parametric axes (everything except the control axis) — the corner
   // picker fixes these; the custom-location sliders edit them.
   const parametricAxes = (allAxes || []).filter(a => a.tag !== axisTag);
+  // Correction targets can only be TRUE parametric axes — ones the
+  // masters span. User/mapping axes (wght…), other secondary axes and
+  // transform-injected ones (GRAD, SPAC) have no master outlines to
+  // interpolate toward, so they're not offered.
+  const correctionAxes = parametricAxes.filter(a =>
+    a.has_master_coverage !== false && !a.is_control_axis && !a.transform_injected && !a.is_grade_axis);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -71,7 +83,15 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
         fullPins[ax.tag] = stored !== undefined ? Number(stored) : Number(ax.default);
       }
       setPins(fullPins);
+      const seedTarget = {};
+      for (const [t, v] of Object.entries(seedFrom.target || {})) {
+        if (Number.isFinite(Number(v))) seedTarget[t] = Number(v);
+      }
+      setCorrection(seedTarget);
+      setCorrectionOn(Object.keys(seedTarget).length > 0);
     } else {
+      setCorrection({});
+      setCorrectionOn(false);
       setGlyphsInput(prefillGlyphs || '');
       const controlAxis = (allAxes || []).find(a => a.tag === axisTag);
       // Seed the control value to a NON-default value so the modal
@@ -166,6 +186,32 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   // whole coverage set when spanning. Order: typed first, then coverage.
   const targetGlyphs = spanAll ? unionGlyphs(parsedGlyphs, applicableGlyphs) : parsedGlyphs;
 
+  // The correction overrides that will be stored, if any.
+  const targetOverrides = (() => {
+    if (!correctionOn) return null;
+    const out = {};
+    for (const [t, v] of Object.entries(correction)) {
+      const n = Number(v);
+      if (Number.isFinite(n)) out[t] = n;
+    }
+    return Object.keys(out).length ? out : null;
+  })();
+  const withTarget = (entry) => (targetOverrides ? { ...entry, target: targetOverrides } : entry);
+  const toggleCorrectionAxis = (axis) => {
+    setCorrection(prev => {
+      const next = { ...prev };
+      if (axis.tag in next) delete next[axis.tag];
+      else next[axis.tag] = Number(axis.default);
+      return next;
+    });
+  };
+  const setCorrectionValue = (tag, value) => {
+    setCorrection(prev => ({ ...prev, [tag]: round1(value) }));
+  };
+  const describeTarget = () => targetOverrides
+    ? ` → as if ${Object.entries(targetOverrides).map(([t, v]) => `${t}=${v}`).join(', ')}`
+    : '';
+
   const togglePin = (axisInfo) => {
     setPins(prev => {
       const next = { ...prev };
@@ -202,7 +248,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
         const n = Number(v);
         if (Number.isFinite(n)) loc[t] = n;
       }
-      const entries = targetGlyphs.map(g => ({ glyph: g, location: loc }));
+      const entries = targetGlyphs.map(g => withTarget({ glyph: g, location: loc }));
       setSubmitting(true);
       try {
         await onCreate(entries);
@@ -237,7 +283,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     const entries = [];
     for (const g of targetGlyphs) {
       for (const parametric of locations) {
-        entries.push({ glyph: g, location: { ...parametric, [axisTag]: Number(controlValue) } });
+        entries.push(withTarget({ glyph: g, location: { ...parametric, [axisTag]: Number(controlValue) } }));
       }
     }
     setSubmitting(true);
@@ -468,17 +514,63 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             </>
           )}
 
+          {/* Correction: the outline is COMPUTED as the glyph interpolated
+              at the layer's parametric point with these overrides — how a
+              lowercase-correction axis reduces stem weight at a corner
+              the global axes drive to max. Computed layers are re-derived
+              on every rebuild; Fontra edits on them are overwritten. */}
+          <div className={`correction-block ${correctionOn ? 'on' : ''}`}>
+            <label className="correction-toggle">
+              <input
+                id="brace-correction"
+                type="checkbox"
+                checked={correctionOn}
+                onChange={() => setCorrectionOn(v => !v)}
+              />
+              <span className="correction-toggle-text">
+                Correction — compute the outline as if at a different parametric point
+                <span className="form-row-hint">
+                  e.g. XOPQ 1100 at a corner where the global axes reach 1462. Computed on every rebuild — not hand-drawn.
+                </span>
+              </span>
+            </label>
+            {correctionOn && (
+              <div className="location-pins correction-pins">
+                {correctionAxes.map(axis => {
+                  const isOn = axis.tag in correction;
+                  const val = isOn ? correction[axis.tag] : axis.default;
+                  return (
+                    <div key={axis.tag} className={`location-pin-row ${isOn ? 'pinned' : ''}`}>
+                      <label className="pin-toggle">
+                        <input type="checkbox" checked={isOn} onChange={() => toggleCorrectionAxis(axis)} />
+                        <span className="pin-tag">{axis.tag}</span>
+                      </label>
+                      <div className="pin-slider-wrap">
+                        <input type="range" className="pin-slider" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
+                        <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
+                      </div>
+                      <input type="number" className="pin-value correction-value" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
+                    </div>
+                  );
+                })}
+                {!targetOverrides && (
+                  <div className="corner-empty">Tick an axis to override it — unticked axes keep the layer's own value.</div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="location-preview">
             <strong>{isEdit ? 'New location:' : 'Will create:'}</strong>{' '}
             <code>
               {usePinEditor
-                ? `${targetGlyphs.join(', ') || '(no glyphs)'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}`
+                ? `${targetGlyphs.join(', ') || '(no glyphs)'} @ {${Object.entries(pins).map(([t, v]) => `${t}=${v}`).join(', ')}}${describeTarget()}`
                 : (() => {
                     const nLoc = selectedCorners.size + (customOn ? 1 : 0);
                     const nViews = targetGlyphs.length * nLoc;
                     if (targetGlyphs.length === 0) return '(no glyphs)';
                     if (nLoc === 0) return '(pick a corner)';
-                    return `${nViews} view${nViews === 1 ? '' : 's'} @ ${axisTag}=${controlValue} · ${nLoc} corner${nLoc === 1 ? '' : 's'} × ${targetGlyphs.length} glyph${targetGlyphs.length === 1 ? '' : 's'}`;
+                    return `${nViews} view${nViews === 1 ? '' : 's'} @ ${axisTag}=${controlValue} · ${nLoc} corner${nLoc === 1 ? '' : 's'} × ${targetGlyphs.length} glyph${targetGlyphs.length === 1 ? '' : 's'}${describeTarget()}`;
                   })()}
             </code>
           </div>

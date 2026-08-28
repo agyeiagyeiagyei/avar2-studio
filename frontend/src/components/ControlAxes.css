@@ -1108,3 +1108,20 @@
   font-size: 0.65rem;
   margin-left: 0.4rem;
 }
+
+/* Computed-correction row under a layer: "as if XOPQ 1100 · computed". */
+.layer-coords-target .layer-coords-context-prefix {
+  color: var(--amber-800);
+}
+.layer-coords-computed-badge {
+  margin-left: 0.35rem;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--amber-800);
+  background: var(--amber-50);
+  border: 1px solid var(--amber-200);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+}

@@ -276,6 +276,21 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                               </span>
                             ))}
                           </div>
+                          {entry.target && Object.keys(entry.target).length > 0 && (
+                            <div
+                              className="layer-coords-context layer-coords-target"
+                              title="Computed correction: the outline is the glyph interpolated at these parametric values instead of the layer's own. Re-derived on every rebuild — Fontra edits on this layer are overwritten; remove the correction to hand-draw it."
+                            >
+                              <span className="layer-coords-context-prefix">as if</span>
+                              {Object.entries(entry.target).map(([t, v]) => (
+                                <span key={t} className="layer-coords-axis-pair">
+                                  <span className="layer-coords-axis-tag" title={(axisByTag.get(t)?.name) || t}>{t}</span>
+                                  <span className="layer-coords-axis-val">{v}</span>
+                                </span>
+                              ))}
+                              <span className="layer-coords-computed-badge">computed</span>
+                            </div>
+                          )}
                         </div>
                         <div className="layer-actions" onClick={e => e.stopPropagation()}>
                           <button
