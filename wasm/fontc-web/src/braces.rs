@@ -89,6 +89,11 @@ struct ControlLayer {
     glyph: String,
     #[serde(default)]
     location: HashMap<String, f64>,
+    /// CORRECTION target: parametric overrides naming the point the outline
+    /// should be computed *as if at*. Empty for a plain brace layer. See
+    /// `apply_control_axes` for the two different delta models.
+    #[serde(default)]
+    target: HashMap<String, f64>,
 }
 
 #[derive(Deserialize)]
@@ -615,6 +620,21 @@ pub(crate) fn brace_coords(total_axes: usize, control_idx: usize, control_norm: 
     }
 }
 
+/// A tuple peaked at an explicit normalized location, with the inferred
+/// (start,end) region each axis implies. Unlike `brace_coords`, which pins
+/// only the control axis, this pins every axis whose peak is non-zero — so a
+/// correction stays in the region it was authored for.
+pub(crate) fn peaked_tuple(peak: Vec<f64>) -> NewTuple {
+    let start = peak.iter().map(|p| p.min(0.0)).collect();
+    let end = peak.iter().map(|p| p.max(0.0)).collect();
+    NewTuple {
+        peak,
+        start,
+        end,
+        deltas: Vec::new(),
+    }
+}
+
 /// fontTools `otRound`.
 fn ot_round(v: f64) -> f64 {
     (v + 0.5).floor()
@@ -707,6 +727,13 @@ pub(crate) fn apply_control_axes(
             for (pin_tag, value) in &layer.location {
                 let ptag = Tag::from_str(pin_tag)
                     .map_err(|e| err(format!("bad axis tag '{pin_tag}': {e}")))?;
+                // The sidecar stores a full N-D point, so the location carries
+                // the control axis's own value. It isn't in fvar yet (we are
+                // adding it), and the engaged extreme is already implied by
+                // `control_norm` — skip it rather than rejecting the layer.
+                if ptag == tag {
+                    continue;
+                }
                 let &idx = existing.get(&ptag).ok_or_else(|| {
                     err(format!(
                         "control axis '{tag}': layer on '{}' references unknown axis '{ptag}'",
@@ -717,10 +744,72 @@ pub(crate) fn apply_control_axes(
                 coords[idx] = normalize(*value, min, default, max).clamp(-1.0, 1.0);
             }
             let at_loc = instancer.instance_points(gid, &coords)?;
-            let at_default = instancer.instance_points(gid, &zeroes)?;
-            let mut tuple = brace_coords(total_axes, control_idx, control_norm);
-            tuple.deltas = point_deltas(&at_loc, &at_default, 0.0, false);
+
+            if layer.target.is_empty() {
+                // PLAIN brace layer. The static build has no drawn outlines, so
+                // the demo approximation stands: engaging the control axis morphs
+                // the glyph toward its own shape at the layer's parametric
+                // location. Delta is measured from the default master and the
+                // tuple pins only the control axis.
+                let at_default = instancer.instance_points(gid, &zeroes)?;
+                let mut tuple = brace_coords(total_axes, control_idx, control_norm);
+                tuple.deltas = point_deltas(&at_loc, &at_default, 0.0, false);
+                extras.entry(gid).or_default().push(tuple);
+                continue;
+            }
+
+            // CORRECTION layer. The outline is the glyph as if it sat at
+            // `target`, so the delta is measured from the layer's own location —
+            // exactly the full app's model, which makes the two agree.
+            let mut target_coords = coords.clone();
+            for (pin_tag, value) in &layer.target {
+                let ptag = Tag::from_str(pin_tag)
+                    .map_err(|e| err(format!("bad axis tag '{pin_tag}': {e}")))?;
+                // A target on the control axis itself is meaningless; ignore it
+                // rather than failing, matching the sidecar's own rule.
+                if let Some(&idx) = existing.get(&ptag) {
+                    let (_, min, default, max) = triples[idx];
+                    target_coords[idx] = normalize(*value, min, default, max).clamp(-1.0, 1.0);
+                }
+            }
+            let at_target = instancer.instance_points(gid, &target_coords)?;
+            let deltas = point_deltas(&at_target, &at_loc, 0.0, false);
+
+            // Pin the correction to where it was authored: peak every parametric
+            // axis at the layer's own normalized value, plus the control axis.
+            let mut peak = vec![0.0; total_axes];
+            peak[..old_axis_count].copy_from_slice(&coords);
+            peak[control_idx] = control_norm;
+            let mut tuple = peaked_tuple(peak.clone());
+            tuple.deltas = deltas.clone();
             extras.entry(gid).or_default().push(tuple);
+
+            // An axis whose normalized peak is 0 is OMITTED from a gvar tuple,
+            // and an omitted axis is unrestricted — so a correction authored at
+            // an axis's default would otherwise apply at every value of it.
+            // gvar cannot peak at 0, so instead we cancel: a companion tuple
+            // peaked at that axis's extreme carrying the negated delta. The two
+            // sum to delta*(1 - |axis|), which is delta at the authored end and
+            // zero at the far end — the same shape a hand-authored anchor layer
+            // produces in the full app, without needing one here.
+            let negated: Vec<(i16, i16)> =
+                deltas.iter().map(|(x, y)| (-x, -y)).collect();
+            for (idx, &(_, min, default, max)) in triples.iter().enumerate() {
+                if coords[idx] != 0.0 {
+                    continue; // already pinned by its own peak
+                }
+                for extreme in [1.0_f64, -1.0_f64] {
+                    let has_travel = if extreme > 0.0 { max > default } else { min < default };
+                    if !has_travel {
+                        continue;
+                    }
+                    let mut cancel_peak = peak.clone();
+                    cancel_peak[idx] = extreme;
+                    let mut cancel = peaked_tuple(cancel_peak);
+                    cancel.deltas = negated.clone();
+                    extras.entry(gid).or_default().push(cancel);
+                }
+            }
         }
         new_axes.push(NewFvarAxis {
             tag,

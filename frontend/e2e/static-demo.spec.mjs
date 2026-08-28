@@ -1192,6 +1192,35 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.layer-coords-target')].some(el => el.textContent.includes('XOPQ') && el.textContent.includes('300'))),
   'layer row shows the "as if XOPQ 300" computed correction');
 
+// The correction must actually REACH the rendered font, not just the sidecar:
+// the wasm reads `target` and emits a pinned tuple. Covered glyphs move when
+// the axis moves; uncovered ones must not.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+await setSpecimen('oooo');           // 'o' is covered by crnr
+await sleep(600);
+await setSlider('crnr', 0);
+await sleep(600);
+const crnrOff = await specimenWidth();
+await setSlider('crnr', 100);
+await sleep(600);
+const crnrOn = await specimenWidth();
+ok(Math.abs(crnrOn - crnrOff) > 0.5,
+  `secondary axis deforms its covered glyphs in the built font (o: ${crnrOff.toFixed(2)}px -> ${crnrOn.toFixed(2)}px)`);
+await setSpecimen('HHHH');           // 'H' has no crnr layers
+await sleep(600);
+await setSlider('crnr', 0);
+await sleep(600);
+const upperOff = await specimenWidth();
+await setSlider('crnr', 100);
+await sleep(600);
+const upperOn = await specimenWidth();
+ok(Math.abs(upperOn - upperOff) < 0.01,
+  `uncovered glyphs are untouched by the secondary axis (H: ${upperOff.toFixed(2)}px = ${upperOn.toFixed(2)}px)`);
+await setSlider('crnr', 0);
+await page.click('button:text-is("Instances")');
+await page.waitForSelector('.sidebar .control-axes', { timeout: 20000 });
+
 // The exported font carries the new axis.
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });

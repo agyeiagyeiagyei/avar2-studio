@@ -209,9 +209,30 @@ Rules:
 - The correction only *moves* the glyph within the box the masters
   define: a target outside the master range interpolates like any
   out-of-range coordinate (extrapolation, usually not what you want).
-- The static (GitHub Pages) app stores the target so a bundle round-trips
-  it, but its computed braces are deltas from the default master and do
-  not honour the target yet — preview corrections in the full app.
+- The static (GitHub Pages) app honours targets too — see below.
+
+### Corrections in the static (GitHub Pages) app
+
+The static app compiles in the browser rather than through fontc, so it
+builds control-axis geometry itself. It handles the two layer kinds
+differently, and the difference is worth knowing:
+
+- **Plain brace layer** — the static build has no drawn outlines, so it
+  keeps a demo approximation: engaging the axis morphs the glyph toward
+  its own shape at the layer's parametric location. The tuple pins only
+  the secondary axis.
+- **Correction layer** — the same model as the full app: the delta is
+  measured from the layer's own location to its target, so the corrected
+  glyph *is* the glyph at the target point.
+
+Corrections are also **pinned automatically here**, which the fontc path
+cannot do. gvar can't peak an axis at 0, so where the full app needs a
+hand-authored anchor layer, the static build emits a companion tuple at
+that axis's extreme carrying the negated delta; the two sum to
+`delta × (1 − |axis|)` — full strength where the correction was authored,
+zero at the far end. So a correction authored in the static app needs no
+anchor, and an anchor layer carried in from a bundle is simply a plain
+layer that contributes nothing at its own location.
 
 ## Previewing a secondary axis
 
