@@ -85,12 +85,12 @@ class WidthAwareSpacTransform(Transform):
         name="Spacing — width-aware",
         description="Inject a SPAC axis that loosens every glyph by a consistent proportion of its width (wider glyphs get more), including composites.",
         params=[
-            ParamSpec(key="min", label="Min", type="int", default=-20),
+            ParamSpec(key="min", label="Min", type="int", default=-40),
             ParamSpec(key="max", label="Max", type="int", default=40),
             # 1.0 = proportional (added space ÷ width is constant). >1 gives
             # wide glyphs progressively more than proportional; normalized so
             # an average-width glyph has factor 1 at any bias.
-            ParamSpec(key="bias", label="Wide bias", type="float", default=1.0, min=1.0, max=2.5),
+            ParamSpec(key="bias", label="Wide bias", type="float", default=1.0, min=1.0, max=4.0),
             # Per-unit rate multiplier. 1.0 = ±N SPAC ≈ ∓N per sidebearing
             # for an average-width glyph (±2N advance — i.e. exactly the
             # uniform gftools amount). 1.25 lands lowercase-heavy sample
@@ -102,14 +102,14 @@ class WidthAwareSpacTransform(Transform):
     )
 
     def validate(self, params: dict) -> None:
-        lo = int(params.get("min", -20))
+        lo = int(params.get("min", -40))
         hi = int(params.get("max", 40))
         if lo >= hi:
             raise ValueError(f"SPAC min ({lo}) must be less than max ({hi}).")
 
     def apply(self, vf_path: Path, params: dict, ctx: BuildContext) -> Path:
         vf_path = Path(vf_path)
-        lo = int(params.get("min", -20))
+        lo = int(params.get("min", -40))
         hi = int(params.get("max", 40))
         if lo >= hi:
             raise ValueError(f"SPAC min ({lo}) must be less than max ({hi}).")

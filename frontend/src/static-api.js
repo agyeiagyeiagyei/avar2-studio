@@ -554,9 +554,9 @@ const KNOWN_TRANSFORMS = {
     description: 'Inject a SPAC axis that loosens every glyph by a consistent proportion of its width (wider glyphs get more), including composites.',
     injected_axis_tag: 'SPAC',
     params_schema: [
-      { key: 'min', label: 'Min', type: 'int', default: -20 },
+      { key: 'min', label: 'Min', type: 'int', default: -40 },
       { key: 'max', label: 'Max', type: 'int', default: 40 },
-      { key: 'bias', label: 'Wide bias', type: 'float', default: 1.0, min: 1.0, max: 2.5 },
+      { key: 'bias', label: 'Wide bias', type: 'float', default: 1.0, min: 1.0, max: 4.0 },
       { key: 'scale', label: 'Scale', type: 'float', default: 1.25, min: 0.1, max: 10.0 },
     ],
   },

@@ -69,7 +69,7 @@ fn int_param(params: &HashMap<String, serde_json::Value>, key: &str, default: i3
 }
 
 /// `float(params.get(key, default))` with the reference's try/except
-/// fallback to the default, then the ParamSpec clamp (bias [1.0, 2.5],
+/// fallback to the default, then the ParamSpec clamp (bias [1.0, 4.0],
 /// scale [0.1, 10.0]).
 fn float_param(params: &HashMap<String, serde_json::Value>, key: &str, default: f64, clamp: (f64, f64)) -> f64 {
     params
@@ -535,7 +535,10 @@ fn apply_spac(
     let total_axes = old_axis_count + 1;
     let spac_idx = old_axis_count;
 
-    let lo = int_param(&entry.params, "min", -20)?;
+    // Width-aware defaults to a symmetric tightening range (-40..40); the
+    // uniform gftools port keeps gen_spac's -20 floor.
+    let default_lo = if entry.kind == "spac_widthaware" { -40 } else { -20 };
+    let lo = int_param(&entry.params, "min", default_lo)?;
     let hi = int_param(&entry.params, "max", 40)?;
     if lo >= hi {
         return Err(err(format!("SPAC min ({lo}) must be less than max ({hi})")));
@@ -545,7 +548,7 @@ fn apply_spac(
     let extras = match entry.kind.as_str() {
         "spac" => uniform_extras(&view, spac_idx, total_axes, lo, hi)?,
         _ => {
-            let bias = float_param(&entry.params, "bias", 1.0, (1.0, 2.5));
+            let bias = float_param(&entry.params, "bias", 1.0, (1.0, 4.0));
             let scale = float_param(&entry.params, "scale", 1.25, (0.1, 10.0));
             widthaware_extras(&view, spac_idx, total_axes, lo, hi, bias, scale)?
         }
