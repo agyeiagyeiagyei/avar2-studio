@@ -31,7 +31,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, allAxes, allMasters, vfFamilyId, fontLoaded, building = false, glyphChars = {} }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onReferenceFontUrl, onLayerDelta, allAxes, allMasters, vfFamilyId, fontLoaded, building = false, glyphChars = {} }) {
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -260,6 +260,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       allAxes={allAxes || []}
                       onLayerDelta={(...args) => { markEdit(); return onLayerDelta(...args); }}
                       onOpenInEditor={onOpenInEditor}
+                      onReferenceFontUrl={onReferenceFontUrl}
                       onRequestAddModal={setAddLocationFor}
                       vfFamilyId={vfFamilyId}
                       fontLoaded={fontLoaded}
@@ -280,6 +281,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       layers={ax.layers}
                       allAxes={allAxes || []}
                       onOpenInEditor={onOpenInEditor}
+                      onReferenceFontUrl={onReferenceFontUrl}
                       vfFamilyId={vfFamilyId}
                       fontLoaded={fontLoaded}
                       glyphChars={glyphChars}

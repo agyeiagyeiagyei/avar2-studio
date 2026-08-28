@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import subprocess
+import io
 import sys
 import tempfile
 import threading
@@ -4161,6 +4162,88 @@ def patch_control_axis_layers(tag: str):
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
         print(f"Error setting control-axis layers: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/control-axes/<tag>/reference-font', methods=['GET'])
+def control_axis_reference_font(tag: str):
+    """A static instance cut at ONE brace layer's location, with this axis OFF.
+
+    Drawing a correction layer in Fontra otherwise means eyeballing how far you
+    have moved from the shape you started with: Fontra can show other *sources*
+    as background layers, but the thing you want behind you here — the same
+    glyph at the same parametric point with the correction at zero — is an
+    interpolated location, not a source, so there is nothing for it to show.
+
+    A reference font sidesteps that. Fontra's Reference Font panel takes any
+    .ttf, so we hand it a static cut of the current build at exactly the
+    layer's coordinates with this axis pinned to its default. Drawing then
+    happens directly on top of the uncorrected outline, at a true 1:1.
+
+    Query: ``glyph`` (required) and optionally ``index`` to pick among several
+    layers on that glyph (default 0, ordered as stored).
+    """
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    if not (VARIABLE_FONT_PATH and Path(VARIABLE_FONT_PATH).exists()):
+        return jsonify({"error": "Font not built yet"}), 404
+    glyph = (request.args.get("glyph") or "").strip()
+    if not glyph:
+        return jsonify({"error": "glyph is required"}), 400
+    try:
+        index = int(request.args.get("index") or 0)
+    except ValueError:
+        index = 0
+
+    axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
+    if axis is None:
+        return jsonify({"error": f"No secondary axis '{tag}'"}), 404
+    layers = [l for l in (axis.get("layers") or []) if l.get("glyph") == glyph]
+    if not layers:
+        return jsonify({"error": f"'{glyph}' has no layers on '{tag}'"}), 404
+    layer = layers[min(index, len(layers) - 1)]
+
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib.instancer import instantiateVariableFont
+
+    try:
+        font = TTFont(str(VARIABLE_FONT_PATH))
+        fvar_axes = {a.axisTag: a for a in font["fvar"].axes}
+        # Pin EVERY axis: the layer's own parametric coordinates, this axis at
+        # its default (correction off), and everything else at its default —
+        # a fully static cut, which is what a reference font should be.
+        location = {}
+        stored = {str(k).lower(): v for k, v in (layer.get("location") or {}).items()}
+        for a_tag, a in fvar_axes.items():
+            if a_tag.lower() == tag.lower():
+                location[a_tag] = a.defaultValue
+            elif a_tag.lower() in stored:
+                location[a_tag] = float(stored[a_tag.lower()])
+            else:
+                location[a_tag] = a.defaultValue
+        try:
+            inst = instantiateVariableFont(font, location, inplace=False)
+        except NotImplementedError:
+            # fontTools refuses to instance through an avar2 table. A fully
+            # static cut has no axes left for avar to act on, so dropping it
+            # and retrying yields the same outlines.
+            font = TTFont(str(VARIABLE_FONT_PATH))
+            if "avar" in font:
+                del font["avar"]
+            inst = instantiateVariableFont(font, location, inplace=False)
+
+        coord_label = "-".join(
+            f"{t}{location[t]:g}" for t in sorted(location) if t.lower() != tag.lower()
+        )
+        name = f"reference-{glyph}-{tag}off-{coord_label}.ttf"
+        buf = io.BytesIO()
+        inst.save(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="font/ttf", as_attachment=True, download_name=name)
+    except Exception as e:
+        print(f"Error building reference font: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

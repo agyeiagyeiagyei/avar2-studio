@@ -469,6 +469,14 @@ export const api = {
     return parseJSON(response);
   },
 
+  // A static cut of the current build at one brace layer's location with the
+  // secondary axis OFF — drop it into Fontra's Reference Font panel to draw
+  // the correction directly on top of the shape you started from.
+  controlAxisReferenceFontUrl(tag, glyph, index = 0) {
+    return `${API_BASE}/control-axes/${encodeURIComponent(tag)}/reference-font`
+      + `?glyph=${encodeURIComponent(glyph)}&index=${index}`;
+  },
+
   async listExamples() {
     const response = await fetch(`${API_BASE}/examples`);
     if (!response.ok) {
