@@ -69,12 +69,14 @@ export const api = {
       method: 'POST',
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Build failed');
-      } catch (e) {
-        throw new Error(`Build failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Build failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -130,12 +132,14 @@ export const api = {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Create failed');
-      } catch (e) {
-        throw new Error(`Create failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Create failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -154,12 +158,14 @@ export const api = {
       body: JSON.stringify({ coordinates }),
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Update failed');
-      } catch (e) {
-        throw new Error(`Update failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Update failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -173,12 +179,14 @@ export const api = {
       body: JSON.stringify({ new_name: newName }),
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Rename failed');
-      } catch (e) {
-        throw new Error(`Rename failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Rename failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -195,12 +203,14 @@ export const api = {
       method: 'DELETE',
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Delete failed');
-      } catch (e) {
-        throw new Error(`Delete failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Delete failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -210,12 +220,14 @@ export const api = {
       method: 'POST',
     });
     if (!response.ok) {
+      // Parse inside the try, THROW outside it. Throwing in the try was
+      // caught by this same catch, which discarded the server's explanation
+      // ("Instance 'X' already exists") and left a bare status code.
+      let detail = null;
       try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || 'Add to source failed');
-      } catch (e) {
-        throw new Error(`Add to source failed: ${response.status} ${response.statusText}`);
-      }
+        detail = (await parseJSON(response)).error;
+      } catch (e) { /* non-JSON body — fall through to the status */ }
+      throw new Error(detail || `Add to source failed: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },

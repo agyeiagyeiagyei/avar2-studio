@@ -657,6 +657,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           onDuplicateInstance(newName);
         }}
         instanceName={selectedInstance?.name || ''}
+        existingNames={(instances || []).map(i => i.name)}
       />
 
       <DuplicateModal

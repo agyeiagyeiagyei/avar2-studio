@@ -640,7 +640,15 @@ function App() {
   // static app they'd become instances-CSV columns), so counting them
   // as "edits" left dots permanently red and saves apparent no-ops.
   const injectedAxisTags = React.useMemo(
-    () => new Set((axes || []).filter(a => a.transform_injected || a.is_control_axis).map(a => a.tag)),
+    // LOWERCASED on purpose. fvar carries tags as authored ('lcwd', 'SPAC')
+    // while instance coordinates are keyed by CSV column name, which is
+    // upper-cased ('LCWD'). Comparing the two literally never matched, so
+    // preview-only axes leaked into saved instances as blank columns — and a
+    // blank column reads as a required-but-empty parametric axis, which fails
+    // the whole avar2 build.
+    () => new Set((axes || [])
+      .filter(a => a.transform_injected || a.is_control_axis)
+      .map(a => String(a.tag).toLowerCase())),
     [axes],
   );
 
@@ -1006,7 +1014,7 @@ function App() {
 
     if (edits && Object.keys(edits).length > 0) {
       const dirty = Object.keys(edits).some(k => {
-        if (injectedAxisTags.has(k)) return false;   // preview-only axis (SPAC, secondary) — never persisted
+        if (injectedAxisTags.has(String(k).toLowerCase())) return false;   // preview-only axis — never persisted
         if (!(k in persisted)) return true;          // value with no persisted home
         const ve = Number(edits[k]);
         const vp = Number(persisted[k]);
@@ -1110,7 +1118,9 @@ function App() {
     // Preview-only axes (SPAC, secondary parametric) never persist —
     // dragging them must not schedule CSV writes or destabilize the
     // saved-key guard.
-    for (const t of injectedAxisTags) delete coords[t];
+    for (const k of Object.keys(coords)) {
+      if (injectedAxisTags.has(k.toLowerCase())) delete coords[k];
+    }
     const coordsKey = JSON.stringify(Object.keys(coords).sort().map(k => [k, coords[k]]));
     // Idempotence guard. WITHOUT it, a completed rebuild (font reload,
     // instances refetch) re-fires this effect with UNCHANGED coords,
@@ -1175,7 +1185,7 @@ function App() {
     // makes saves look like no-ops.
     if (injectedAxisTags.size > 0) {
       coordinatesToUse = Object.fromEntries(
-        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag))
+        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag.toLowerCase()))
       );
     }
 
@@ -1475,7 +1485,9 @@ function App() {
       });
       // Preview-only axes (SPAC, secondary parametric) never persist —
       // on the static app they'd become instances-CSV columns.
-      for (const t of injectedAxisTags) delete coordinatesToUse[t];
+      for (const k of Object.keys(coordinatesToUse)) {
+        if (injectedAxisTags.has(k.toLowerCase())) delete coordinatesToUse[k];
+      }
 
       await api.createInstance(newInstanceName, coordinatesToUse);
 
@@ -1510,7 +1522,7 @@ function App() {
       // Create new instance, inserting after the selected instance.
       // Preview-only axes (SPAC, secondary parametric) are not instance data.
       const persistedCoords = Object.fromEntries(
-        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag))
+        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag.toLowerCase()))
       );
       await api.createInstance(newInstanceName, persistedCoords, selectedInstance.name);
       

@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
+
+/** "X Copy", then "X Copy 2", "X Copy 3"… — the first not already taken. */
+function nextFreeName(base, taken) {
+  const used = new Set(taken || []);
+  let candidate = `${base} Copy`;
+  let n = 2;
+  while (used.has(candidate)) candidate = `${base} Copy ${n++}`;
+  return candidate;
+}
 import './DuplicateModal.css';
 
-function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'duplicate', axes = [] }) {
+function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'duplicate', axes = [] , existingNames = [] }) {
   const [newName, setNewName] = useState('');
   const [coords, setCoords] = useState({});
   const inputRef = useRef(null);
@@ -24,7 +33,10 @@ function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'dupl
   // time is sufficient since the modal is short-lived.
   useEffect(() => {
     if (isOpen) {
-      setNewName(isNew ? '' : `${instanceName} Copy`);
+      // Propose a name that is actually free. "X Copy" collides the second
+      // time you duplicate X, and the server rejects it — which read as an
+      // unexplained 400 rather than "pick another name".
+      setNewName(isNew ? '' : nextFreeName(instanceName, existingNames));
       const initial = {};
       axes.forEach(a => { initial[a.tag] = a.default; });
       setCoords(initial);
