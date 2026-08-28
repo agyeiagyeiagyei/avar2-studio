@@ -19,6 +19,8 @@ helpers below. Studio-only instances exist purely as rows in
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -28,6 +30,36 @@ from fontTools.designspaceLib import (
     InstanceDescriptor,
 )
 from glyphsLib import GSFont, load as _glyphs_load
+
+
+def save_font_atomically(font: GSFont, path: Path) -> None:
+    """Write a .glyphs file so a reader never sees it half-written.
+
+    ``GSFont.save`` truncates and rewrites in place, and these files run to
+    hundreds of kilobytes — wide enough that a build kicked off by the file
+    watcher can start parsing while the write is still going. That surfaced as
+    "Loading Glyphs file failed: Missing ',' for array at line N", a corrupt
+    file that parses cleanly seconds later.
+
+    Writing to a sibling temp file and renaming makes the swap atomic: a reader
+    gets either the old complete file or the new one. The temp file is a
+    sibling so the rename stays on one filesystem, and it is cleaned up if the
+    write fails, leaving the original intact.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        font.save(str(tmp))
+        os.replace(str(tmp), str(path))
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
 
 
 SUPPORTED_SUFFIXES = (".glyphs", ".designspace")
@@ -338,7 +370,7 @@ def _update_instance_in_glyphs(font: GSFont, path: Path, name: str, coords: Dict
         else:
             new_axes.append(0.0)
     target.axes = new_axes
-    font.save(str(path))
+    save_font_atomically(font, path)
     return True
 
 
@@ -373,7 +405,7 @@ def _add_instance_to_glyphs(
         font.instances.insert(insert_index, new_instance)
     else:
         font.instances.append(new_instance)
-    font.save(str(path))
+    save_font_atomically(font, path)
     return True
 
 
@@ -389,7 +421,7 @@ def _rename_instance_in_glyphs(font: GSFont, path: Path, old_name: str, new_name
     if target is None:
         return False
     target.name = new_name
-    font.save(str(path))
+    save_font_atomically(font, path)
     return True
 
 
@@ -402,7 +434,7 @@ def _delete_instance_in_glyphs(font: GSFont, path: Path, name: str) -> bool:
     if target is None:
         return False
     font.instances.remove(target)
-    font.save(str(path))
+    save_font_atomically(font, path)
     return True
 
 

@@ -876,6 +876,36 @@ def _build_context():
     )
 
 
+def _strip_injected_axes(vf_path: Path, tags: set) -> Path:
+    """Remove axes a transform is about to inject, so re-running is a no-op.
+
+    Pins each named axis to its default and instances it away, leaving the
+    outlines exactly where the default sat. Returns the original path
+    untouched when there is nothing to strip, so the common case costs one
+    fvar read.
+    """
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib.instancer import instantiateVariableFont
+
+    font = TTFont(str(vf_path))
+    if "fvar" not in font:
+        return vf_path
+    present = [a.axisTag for a in font["fvar"].axes]
+    doomed = [t for t in tags if t in present]
+    if not doomed:
+        return vf_path
+    location = {t: font["fvar"].axes[present.index(t)].defaultValue for t in doomed}
+    inst = instantiateVariableFont(font, location, inplace=False)
+    out = Path(vf_path)
+    inst.save(str(out))
+    print(
+        f"transforms: stripped {len(doomed)} previously-injected "
+        f"{'axis' if len(doomed) == 1 else 'axes'} ({', '.join(doomed)}) before re-applying",
+        file=sys.stderr,
+    )
+    return out
+
+
 def _apply_transform_chain(vf_path):
     """Run the project's enabled post-build transforms (e.g. SPAC) over a
     freshly-compiled VF, in order, and return the final font path. Applied at
@@ -898,6 +928,21 @@ def _apply_transform_chain(vf_path):
         return vf_path
     out = Path(vf_path)
     errors = []
+    # A transform that injects an axis appends it unconditionally, so running
+    # the chain over a font that already carries that axis stacks a duplicate.
+    # The chain is not always handed a fresh compile — the plain-VF fallback
+    # runs it over whatever build_variable_font returned, so a run of failed
+    # builds could pile up several SPAC axes (observed: four, which makes an
+    # invalid font). Pin any previously-injected axis out first, so applying
+    # the chain twice lands in the same place as applying it once.
+    injected_tags = {
+        t.spec.injected_axis_tag for t, _ in chain if getattr(t.spec, "injected_axis_tag", None)
+    }
+    if injected_tags:
+        try:
+            out = Path(_strip_injected_axes(out, injected_tags))
+        except Exception as e:  # noqa: BLE001
+            print(f"transforms: could not strip prior injected axes: {e}", file=sys.stderr)
     for transform, params in chain:
         try:
             result = transform.apply(out, params, _build_context())

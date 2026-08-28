@@ -966,7 +966,8 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
 
             glyph.layers.append(brace)
 
-    font.save(str(shadow_path))
+    from .source_font import save_font_atomically
+    save_font_atomically(font, shadow_path)
     return shadow_path
 
 

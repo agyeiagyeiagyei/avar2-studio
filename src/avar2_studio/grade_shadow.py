@@ -247,5 +247,6 @@ def apply_grades(
 
     if applied == 0:
         return None
-    font.save(str(shadow_path))
+    from .source_font import save_font_atomically
+    save_font_atomically(font, shadow_path)
     return shadow_path
