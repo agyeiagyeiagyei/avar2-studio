@@ -365,7 +365,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                               className="layer-reference-font"
                               href={onReferenceFontUrl(tag, glyphName, i)}
                               download
-                              title={`Download a reference font: this glyph cut at this exact location with ${tag} off. Drop it into Fontra's Reference Font panel to draw the correction on top of the shape you started from, instead of judging it by eye.`}
+                              title={`Download this font cut at this layer's exact coordinates. Load it in Fontra's Reference Font panel and set "Custom character" to a glyph that already reads right — N, O, H — to draw ${glyphName} against it at the same designspace location, instead of judging by eye.`}
                             >
                               ⧉↓
                             </a>

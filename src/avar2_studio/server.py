@@ -4169,18 +4169,23 @@ def patch_control_axis_layers(tag: str):
 
 @app.route('/api/control-axes/<tag>/reference-font', methods=['GET'])
 def control_axis_reference_font(tag: str):
-    """A static instance cut at ONE brace layer's location, with this axis OFF.
+    """A static cut of the WHOLE font at one brace layer's location.
 
-    Drawing a correction layer in Fontra otherwise means eyeballing how far you
-    have moved from the shape you started with: Fontra can show other *sources*
-    as background layers, but the thing you want behind you here — the same
-    glyph at the same parametric point with the correction at zero — is an
-    interpolated location, not a source, so there is nothing for it to show.
+    The point is comparing the glyph you are drawing against OTHER GLYPHS at
+    the same designspace coordinates — matching E's horizontals to the N, O or
+    H that already read correctly. Fontra can show other *sources* of the same
+    glyph as background layers, but not a different glyph, and the coordinates
+    you care about are an interpolated location rather than a source.
 
-    A reference font sidesteps that. Fontra's Reference Font panel takes any
-    .ttf, so we hand it a static cut of the current build at exactly the
-    layer's coordinates with this axis pinned to its default. Drawing then
-    happens directly on top of the uncorrected outline, at a true 1:1.
+    Its Reference Font panel takes any .ttf and has a "Custom character" field
+    that picks which character to draw from it. So a static cut of this font at
+    the layer's exact coordinates, loaded there, lets you put any glyph of the
+    same design at the same location behind the one you are editing.
+
+    Every glyph is included, not just the one asked for — ``glyph`` only
+    identifies WHICH LAYER supplies the coordinates. The secondary axis is
+    pinned to its default, which matters only for glyphs that axis covers;
+    the reference glyphs you would compare against are untouched by it.
 
     Query: ``glyph`` (required) and optionally ``index`` to pick among several
     layers on that glyph (default 0, ordered as stored).
@@ -4234,10 +4239,12 @@ def control_axis_reference_font(tag: str):
                 del font["avar"]
             inst = instantiateVariableFont(font, location, inplace=False)
 
+        # Named for the LOCATION, not the glyph: the cut carries the whole
+        # font, and one download serves every layer at these coordinates.
         coord_label = "-".join(
             f"{t}{location[t]:g}" for t in sorted(location) if t.lower() != tag.lower()
         )
-        name = f"reference-{glyph}-{tag}off-{coord_label}.ttf"
+        name = f"reference-at-{coord_label}.ttf"
         buf = io.BytesIO()
         inst.save(buf)
         buf.seek(0)
