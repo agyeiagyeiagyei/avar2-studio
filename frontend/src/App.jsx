@@ -553,7 +553,7 @@ function App() {
   const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName, layerLocation) => {
     try {
       setError(null);
-      const data = await api.openControlAxisInEditor(tag);
+      const data = await api.openControlAxisInEditor(tag, glyphName);
       let url = data.url;
       let directUrl = data.direct_url;
       if (glyphName) {

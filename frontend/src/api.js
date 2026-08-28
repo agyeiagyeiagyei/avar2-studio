@@ -458,9 +458,13 @@ export const api = {
     return parseJSON(response);
   },
 
-  async openControlAxisInEditor(tag) {
+  async openControlAxisInEditor(tag, glyph) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/open-editor`, {
       method: 'POST',
+      // The glyph rides along so the injected shim can show reference
+      // measurements for THIS layer without reading Fontra's scene state.
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ glyph: glyph || null }),
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));

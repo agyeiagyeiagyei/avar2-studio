@@ -3741,6 +3741,65 @@ _FONTRA_STUDIO_SHIM_JS = """
       });
     };
     setInterval(sweep, 500);
+
+    // REFERENCE MEASUREMENTS.
+    //
+    // Correcting a glyph's horizontals means matching it to the glyphs that
+    // already read right — E's bar to H's, at the same designspace point.
+    // Fontra's ruler can measure what you have drawn, but it cannot tell you
+    // what to aim at, because the target lives in a different glyph. This HUD
+    // supplies those numbers: every figure is measured on the built font at
+    // THIS layer's exact coordinates.
+    //
+    // Deliberately a plain DOM panel rather than a canvas visualization layer:
+    // it needs none of Fontra's internals, so a Fontra upgrade cannot silently
+    // break it. The edited glyph's own row is its PRE-EDIT state — the server
+    // measures the last build, not what is on the canvas right now.
+    if (!cfg.glyph) return;
+    const fmt = (v) => (v === undefined || v === null) ? '–' : String(v);
+    fetch('/api/control-axes/' + encodeURIComponent(cfg.tag)
+          + '/reference-metrics?glyph=' + encodeURIComponent(cfg.glyph))
+      .then(r => r.ok ? r.json() : null)
+      .then((m) => {
+        if (!m || !m.metrics) return;
+        const box = document.createElement('div');
+        box.id = 'avar2-studio-metrics';
+        const loc = Object.entries(m.location || {})
+          .filter(([k]) => k.toLowerCase() !== 'lcwd')
+          .map(([k, v]) => k + ' ' + v).join(' · ');
+        const rows = Object.entries(m.metrics).map(([name, v]) => {
+          const isEdited = name === m.glyph;
+          return '<tr class="' + (isEdited ? 'edited' : '') + '">'
+            + '<td class="g">' + name + (isEdited ? ' *' : '') + '</td>'
+            + '<td>' + fmt(v.bar) + '</td>'
+            + '<td>' + fmt(v.stem) + '</td>'
+            + '<td>' + fmt(v.contrast) + '</td></tr>';
+        }).join('');
+        box.innerHTML =
+          '<div class="hd">reference at ' + loc + '</div>'
+          + '<table><tr><th></th><th>bar</th><th>stem</th><th>s/b</th></tr>'
+          + rows + '</table>'
+          + '<div class="ft">* pre-edit. Match the bar to a reference row; '
+          + 'measure what you draw with Fontra\\'s ruler.</div>';
+        const st = document.createElement('style');
+        st.textContent =
+          '#avar2-studio-metrics{position:fixed;right:12px;bottom:12px;z-index:99999;'
+          + 'background:rgba(28,28,30,.94);color:#eee;font:11px/1.45 ui-monospace,monospace;'
+          + 'padding:8px 10px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.4);'
+          + 'pointer-events:none;min-width:190px}'
+          + '#avar2-studio-metrics .hd{color:#9a9aa0;margin-bottom:5px;font-size:10px}'
+          + '#avar2-studio-metrics table{border-collapse:collapse;width:100%}'
+          + '#avar2-studio-metrics th{color:#8a8a90;font-weight:400;text-align:right;'
+          + 'padding:0 0 2px 10px;font-size:10px}'
+          + '#avar2-studio-metrics td{text-align:right;padding:1px 0 1px 10px}'
+          + '#avar2-studio-metrics td.g{text-align:left;padding-left:0;color:#9a9aa0}'
+          + '#avar2-studio-metrics tr.edited td{color:#ffd479}'
+          + '#avar2-studio-metrics .ft{color:#7a7a80;margin-top:6px;font-size:9.5px;'
+          + 'max-width:210px;white-space:normal;line-height:1.35}';
+        document.head.appendChild(st);
+        document.body.appendChild(box);
+      })
+      .catch((e) => console.warn('avar2-studio metrics:', e));
   }).catch((e) => console.warn('avar2-studio shim:', e));
 })();
 </script>
@@ -4058,11 +4117,16 @@ def open_control_axis_in_editor(tag: str):
         ),
         None,
     ) if is_studio_axis else None
+    # The glyph is the frontend's to know (it builds Fontra's URL fragment from
+    # it); recording it here lets the injected shim ask for THIS layer's
+    # reference measurements without reaching into Fontra's scene state.
+    body = request.get_json(silent=True) or {}
     FONTRA_EDITOR_SESSION = {
         "studio": bool(is_studio_axis and not editing_original),
         "tag": tag.lower(),
         "axis_name": (spec or {}).get("display_name") or tag.lower(),
         "axis_default": float((spec or {}).get("default") or 0.0),
+        "glyph": (body.get("glyph") or "").strip() or None,
     }
 
     try:
@@ -4251,6 +4315,152 @@ def control_axis_reference_font(tag: str):
         return send_file(buf, mimetype="font/ttf", as_attachment=True, download_name=name)
     except Exception as e:
         print(f"Error building reference font: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+def _measure_strokes(glyph_set, hmtx, name, x_height, cap_height):
+    """Vertical-stem and horizontal-bar thickness for one glyph.
+
+    A horizontal scanline across the letter cuts its vertical stems; a vertical
+    scanline cuts its horizontal bars. Ink runs on each are the stroke widths.
+    Returns the thinnest of each, which is what "how heavy is this stroke"
+    means for a correction like ymod, or None where the scan is degenerate.
+    """
+    from fontTools.pens.recordingPen import DecomposingRecordingPen
+
+    pen = DecomposingRecordingPen(glyph_set)
+    try:
+        glyph_set[name].draw(pen)
+    except Exception:
+        return None
+    contours, cur = [], []
+    for op, args in pen.value:
+        if op == "moveTo":
+            cur = [args[0]]
+        elif op in ("lineTo", "curveTo", "qCurveTo"):
+            cur.extend([p for p in args if p])
+        elif op == "closePath":
+            if cur:
+                contours.append(cur)
+                cur = []
+    if cur:
+        contours.append(cur)
+    if not contours:
+        return None
+
+    def runs(coord, vertical):
+        vals = []
+        for c in contours:
+            for i in range(len(c)):
+                p, q = c[i], c[(i + 1) % len(c)]
+                a1, b1, a2, b2 = (p[0], p[1], q[0], q[1]) if vertical else (p[1], p[0], q[1], q[0])
+                if (a1 <= coord < a2) or (a2 <= coord < a1):
+                    vals.append(b1 + (coord - a1) * (b2 - b1) / (a2 - a1))
+        vals.sort()
+        return [vals[i + 1] - vals[i] for i in range(0, len(vals) - 1, 2)]
+
+    height = x_height if name[:1].islower() else cap_height
+    advance = hmtx[name][0]
+    # Sample the stems below the middle (crossbars usually sit at mid-height,
+    # where a horizontal scan would read one solid run instead of two stems).
+    stems = [r for r in runs(height * 0.25, False) if r > 5]
+    bars = [r for r in runs(advance * 0.5, True) if r > 5]
+    out = {"advance": round(float(advance), 1)}
+    if stems:
+        out["stem"] = round(float(min(stems)), 1)
+    if bars:
+        out["bar"] = round(float(min(bars)), 1)
+    if stems and bars:
+        out["contrast"] = round(float(min(stems)) / float(min(bars)), 2)
+    return out
+
+
+@app.route('/api/control-axes/<tag>/reference-metrics', methods=['GET'])
+def control_axis_reference_metrics(tag: str):
+    """Stroke thicknesses for a layer's glyph and its reference glyphs, all cut
+    at that layer's exact coordinates with the secondary axis OFF.
+
+    Drawing a horizontal correction means matching a glyph's bars to the ones
+    that already read correctly — E's to H's, at the same designspace point.
+    Fontra can measure what you have drawn (its ruler stays enabled in studio
+    sessions) but it cannot tell you what to aim AT, because the reference is
+    another glyph. These are those target numbers.
+
+    The edited glyph's own figures are its pre-edit state — where you started,
+    not what is on screen once you begin drawing.
+
+    Query: ``glyph`` (required), ``index`` (which layer, default 0),
+    ``refs`` (comma-separated reference glyphs, default "H,N,O").
+    """
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    if not (VARIABLE_FONT_PATH and Path(VARIABLE_FONT_PATH).exists()):
+        return jsonify({"error": "Font not built yet"}), 404
+    glyph = (request.args.get("glyph") or "").strip()
+    if not glyph:
+        return jsonify({"error": "glyph is required"}), 400
+    try:
+        index = int(request.args.get("index") or 0)
+    except ValueError:
+        index = 0
+    refs = [g.strip() for g in (request.args.get("refs") or "H,N,O").split(",") if g.strip()]
+
+    axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
+    if axis is None:
+        return jsonify({"error": f"No secondary axis '{tag}'"}), 404
+    layers = [l for l in (axis.get("layers") or []) if l.get("glyph") == glyph]
+    if not layers:
+        return jsonify({"error": f"'{glyph}' has no layers on '{tag}'"}), 404
+    layer = layers[min(index, len(layers) - 1)]
+
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib.instancer import instantiateVariableFont
+
+    try:
+        font = TTFont(str(VARIABLE_FONT_PATH))
+        fvar_axes = {a.axisTag: a for a in font["fvar"].axes}
+        stored = {str(k).lower(): v for k, v in (layer.get("location") or {}).items()}
+        location = {}
+        for a_tag, a in fvar_axes.items():
+            if a_tag.lower() == tag.lower():
+                location[a_tag] = a.defaultValue
+            elif a_tag.lower() in stored:
+                location[a_tag] = float(stored[a_tag.lower()])
+            else:
+                location[a_tag] = a.defaultValue
+        try:
+            inst = instantiateVariableFont(font, location, inplace=False)
+        except NotImplementedError:
+            font = TTFont(str(VARIABLE_FONT_PATH))
+            if "avar" in font:
+                del font["avar"]
+            inst = instantiateVariableFont(font, location, inplace=False)
+
+        gs = inst.getGlyphSet()
+        hmtx = inst["hmtx"]
+        os2 = inst["OS/2"] if "OS/2" in inst else None
+        x_height = float(getattr(os2, "sxHeight", 0) or 0) or 1000.0
+        cap_height = float(getattr(os2, "sCapHeight", 0) or 0) or 1400.0
+
+        order = set(inst.getGlyphOrder())
+        measured = {}
+        for name in [glyph] + [r for r in refs if r != glyph]:
+            if name not in order:
+                continue
+            m = _measure_strokes(gs, hmtx, name, x_height, cap_height)
+            if m:
+                measured[name] = m
+        return jsonify({
+            "tag": tag,
+            "glyph": glyph,
+            "location": {k: v for k, v in location.items() if k.lower() != tag.lower()},
+            "metrics": measured,
+            "note": "Figures for the edited glyph are its pre-edit state.",
+        })
+    except Exception as e:
+        print(f"Error measuring reference metrics: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
