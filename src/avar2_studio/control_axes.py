@@ -439,6 +439,12 @@ def _normalise_layers(raw) -> List[Dict]:
         clean_target = _clean_numbers(entry.get("target"))
         if clean_target:
             item["target"] = clean_target
+        # A captured DRAWING (model α). Carried through untouched so a
+        # sidecar — and the config bundle built from it — is a complete
+        # backup of hand-drawn brace layers, not just their locations.
+        outline = entry.get("outline")
+        if isinstance(outline, dict) and outline.get("paths") is not None:
+            item["outline"] = outline
         out.append(item)
     return out
 
@@ -830,12 +836,13 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                             continue
                     if not applied:
                         seed_location = None
-                seed_jobs.append((glyph_name, location, dict(pinned), seed_location))
+                seed_jobs.append((glyph_name, location, dict(pinned), seed_location,
+                                  entry.get("outline")))
 
         # De-duplicate seed jobs — same (glyph, location) added by
         # multiple paths only needs writing once.
         seen_jobs: set = set()
-        for glyph_name, location, pinned, seed_location in seed_jobs:
+        for glyph_name, location, pinned, seed_location, stored_outline in seed_jobs:
             job_key = (glyph_name, tuple(location))
             if job_key in seen_jobs:
                 continue
@@ -890,7 +897,16 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # target to hand-draw it.
             if seed_location is not None:
                 preserved_is_edit = False
-            if preserved_is_edit:
+            # A drawing captured into the sidecar (model α) outranks both the
+            # prior shadow and the seed: it is the portable copy, so restoring
+            # a sidecar into an empty workspace reproduces the drawn outlines.
+            restored = _outline_to_layer_data(stored_outline) if seed_location is None else None
+            if restored is not None:
+                layer_paths = restored["paths"]
+                layer_components = restored["components"]
+                layer_anchors = restored["anchors"]
+                layer_width = restored["width"]
+            elif preserved_is_edit:
                 layer_paths = preserved["paths"]
                 layer_components = preserved["components"]
                 layer_anchors = preserved["anchors"]
@@ -926,6 +942,14 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # userData["xyz.fontra.source-name"] over the positional
             # "{...}" name; the "{...}" name stays for glyphsLib brace
             # recognition.
+            # Stamp what we seeded. capture_outlines compares the layer's
+            # current geometry against this to tell a hand-drawn edit from an
+            # untouched seed — without it, capturing would freeze seeds into
+            # the sidecar and stop them re-interpolating when masters change.
+            brace.userData["xyz.avar2studio.seed-sig"] = _geometry_sig(
+                layer_paths, layer_width
+            )
+
             source_label = _brace_source_label(location)
             if source_label and seed_location is not None:
                 # Name the correction so the Fontra source list says what
@@ -1218,6 +1242,168 @@ def _regenerate_shadow_designspace(
     return shadow_path
 
 
+def _geometry_sig(paths, width) -> str:
+    """A short, stable signature of a layer's geometry, stored on the seeded
+    brace layer so a later edit can be told apart from an untouched seed."""
+    import hashlib
+
+    parts = [f"{float(width or 0):.2f}"]
+    for p in paths or []:
+        for n in getattr(p, "nodes", None) or []:
+            parts.append(f"{float(n.position.x):.2f},{float(n.position.y):.2f}")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _parts_to_outline(src_paths, src_components, src_anchors, width) -> Dict:
+    """Serialise brace-layer geometry to plain JSON for the sidecar.
+
+    Deliberately a value dump rather than glif XML: it round-trips through
+    ``json`` unchanged, so a config bundle carries the drawing verbatim.
+    Takes the parts rather than a layer because ``_extract_brace_outlines``
+    hands back exactly these lists.
+    """
+    paths = []
+    for p in src_paths or []:
+        paths.append({
+            "closed": bool(getattr(p, "closed", True)),
+            "nodes": [
+                [float(n.position.x), float(n.position.y), str(n.type)]
+                for n in (getattr(p, "nodes", None) or [])
+            ],
+        })
+    components = []
+    for c in src_components or []:
+        try:
+            xform = [float(v) for v in c.transform.value]
+        except Exception:
+            xform = None
+        entry = {"name": getattr(c, "name", None)}
+        if xform:
+            entry["transform"] = xform
+        components.append(entry)
+    anchors = [
+        {"name": a.name, "x": float(a.position.x), "y": float(a.position.y)}
+        for a in (src_anchors or [])
+    ]
+    return {
+        "width": float(width or 0),
+        "paths": paths,
+        "components": components,
+        "anchors": anchors,
+    }
+
+
+def _outline_to_layer_data(outline) -> Optional[Dict[str, object]]:
+    """Inverse of ``_layer_to_outline``: rebuild glyphsLib objects, in the
+    shape regenerate_shadow's seeding block expects. Returns None for a
+    missing or malformed entry so the caller falls back to seeding."""
+    if not isinstance(outline, dict) or outline.get("paths") is None:
+        return None
+    try:
+        from glyphsLib.classes import GSAnchor, GSComponent, GSNode, GSPath
+        from glyphsLib.types import Transform
+
+        paths = []
+        for p in outline.get("paths") or []:
+            gp = GSPath()
+            gp.closed = bool(p.get("closed", True))
+            for node in p.get("nodes") or []:
+                x, y, ntype = node[0], node[1], (node[2] if len(node) > 2 else "line")
+                gp.nodes.append(GSNode((float(x), float(y)), ntype))
+            paths.append(gp)
+        components = []
+        for c in outline.get("components") or []:
+            if not c.get("name"):
+                continue
+            gc = GSComponent(c["name"])
+            if c.get("transform"):
+                gc.transform = Transform(*[float(v) for v in c["transform"]])
+            components.append(gc)
+        anchors = [
+            GSAnchor(a.get("name"), (float(a.get("x", 0)), float(a.get("y", 0))))
+            for a in (outline.get("anchors") or [])
+        ]
+        return {
+            "paths": paths,
+            "components": components,
+            "anchors": anchors,
+            "width": float(outline.get("width", 0) or 0),
+        }
+    except Exception as exc:
+        print(f"Warning: could not restore a stored outline: {exc}", file=sys.stderr)
+        return None
+
+
+def capture_outlines(source_path: Path) -> int:
+    """Copy hand-drawn brace outlines out of the shadow and INTO the sidecar.
+
+    This is what makes ``-control.json`` (and any config bundle built from it) a
+    real backup: without it the sidecar holds only layer locations and every
+    drawing lives solely in ``.avar2-studio/shadow/``, which is derived and gets
+    wiped. Layers that still match their computed seed are left alone so the
+    sidecar doesn't fill with no-ops, and correction layers (those carrying a
+    ``target``) are skipped because they are recomputed on every regeneration.
+
+    Returns the number of layers captured.
+    """
+    shadow = shadow_path_for(source_path)
+    if not shadow.exists():
+        return 0
+    drawn = _extract_brace_outlines(shadow)
+    if not drawn:
+        return 0
+
+    from glyphsLib import GSFont
+
+    try:
+        shadow_font = GSFont(str(shadow))
+    except Exception as exc:
+        print(f"Warning: could not read the shadow to capture outlines: {exc}", file=sys.stderr)
+        return 0
+    axis_tags = [str(a.axisTag) for a in shadow_font.axes]
+    # A sidecar location is SPARSE. regenerate_shadow fills the gaps with the
+    # default master's coordinates, so the brace layer's stored coordinates —
+    # and therefore the extractor's key — use those, not zeros.
+    default_axes = list(getattr(shadow_font.masters[0], "axes", None) or []) if shadow_font.masters else []
+    defaults = {
+        tag: float(default_axes[i]) if i < len(default_axes) else 0.0
+        for i, tag in enumerate(axis_tags)
+    }
+
+    data = load(source_path)
+    captured = 0
+    for ax in data.get("axes") or []:
+        for entry in ax.get("layers") or []:
+            if entry.get("target"):
+                continue  # computed, not drawn
+            loc = entry.get("location") or {}
+            # Match case-insensitively: sidecar tags are stored as the designer
+            # typed them, the shadow's axis tags are canonical.
+            lower = {str(k).lower(): v for k, v in loc.items()}
+            key_loc = tuple(
+                float(lower.get(tag.lower(), defaults[tag])) for tag in axis_tags
+            )
+            found = drawn.get((entry.get("glyph"), key_loc))
+            if not found:
+                continue
+            # Untouched seeds still carry the signature they were stamped with;
+            # skip those so the sidecar only ever holds real drawing.
+            seed_sig = found.get("seed_sig")
+            if seed_sig and seed_sig == _geometry_sig(found.get("paths"), found.get("width")):
+                continue
+            serialised = _parts_to_outline(
+                found.get("paths"), found.get("components"),
+                found.get("anchors"), found.get("width"),
+            )
+            if entry.get("outline") == serialised:
+                continue
+            entry["outline"] = serialised
+            captured += 1
+    if captured:
+        _save(source_path, data)
+    return captured
+
+
 def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]:
     """Read every brace layer from a shadow .glyphs and return a
     map keyed by ``(glyph_name, location_tuple)`` to the layer's
@@ -1266,6 +1452,11 @@ def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]
                 "components": list(layer.components) if layer.components else [],
                 "anchors": list(layer.anchors) if layer.anchors else [],
                 "width": layer.width,
+                # Stamped when the layer was seeded; lets capture_outlines tell
+                # an untouched seed from a hand-drawn edit.
+                "seed_sig": (getattr(layer, "userData", None) or {}).get(
+                    "xyz.avar2studio.seed-sig"
+                ),
             }
     return out
 
