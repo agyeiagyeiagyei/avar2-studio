@@ -1126,21 +1126,3 @@
   padding: 0 0.35rem;
 }
 
-/* Reference-font download on a layer row: a static cut at that layer's
-   location with the axis off, for Fontra's Reference Font panel. Sits with
-   the other per-layer actions and matches their weight. */
-.layer-reference-font {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--zinc-300);
-  border-radius: 4px;
-  padding: 0.05rem 0.3rem;
-  font-size: 0.62rem;
-  line-height: 1.35;
-  color: var(--zinc-600);
-  text-decoration: none;
-  cursor: pointer;
-}
-.layer-reference-font:hover {
-  background: var(--zinc-100);
-}

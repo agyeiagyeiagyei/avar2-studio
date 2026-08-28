@@ -3708,13 +3708,27 @@ _FONTRA_STUDIO_SHIM_JS = """
         tabOpened = true;
       }
       if (!panelTrimmed && panel.shadowRoot) {
-        const st = document.createElement('style');
-        st.textContent =
+        // The accordion items live TWO shadow roots deep —
+        // panel-designspace-navigation#shadow > ui-accordion#shadow — so a
+        // style appended to the panel's own root never reaches them (CSS does
+        // not cross a shadow boundary). Verified against a live editor: the
+        // ids resolve only inside the inner ui-accordion.
+        const rules =
           '#font-axes-accordion-item,#glyph-axes-accordion-item,' +
           '#glyph-layers-accordion-item,#sources-list-add-remove-buttons' +
           '{display:none !important;}';
-        panel.shadowRoot.appendChild(st);
-        panelTrimmed = true;
+        const roots = [panel.shadowRoot];
+        const inner = panel.shadowRoot.querySelector('ui-accordion');
+        if (inner && inner.shadowRoot) roots.push(inner.shadowRoot);
+        for (const root of roots) {
+          const st = document.createElement('style');
+          st.textContent = rules;
+          root.appendChild(st);
+        }
+        // Only claim success once the inner root — the one that matters — was
+        // actually reachable; otherwise retry on the next sweep, since the
+        // accordion may not have upgraded yet.
+        panelTrimmed = roots.length > 1;
       }
       const list = panel.sourcesList;
       const items = list.items || [];
@@ -4226,95 +4240,6 @@ def patch_control_axis_layers(tag: str):
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
         print(f"Error setting control-axis layers: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/control-axes/<tag>/reference-font', methods=['GET'])
-def control_axis_reference_font(tag: str):
-    """A static cut of the WHOLE font at one brace layer's location.
-
-    The point is comparing the glyph you are drawing against OTHER GLYPHS at
-    the same designspace coordinates — matching E's horizontals to the N, O or
-    H that already read correctly. Fontra can show other *sources* of the same
-    glyph as background layers, but not a different glyph, and the coordinates
-    you care about are an interpolated location rather than a source.
-
-    Its Reference Font panel takes any .ttf and has a "Custom character" field
-    that picks which character to draw from it. So a static cut of this font at
-    the layer's exact coordinates, loaded there, lets you put any glyph of the
-    same design at the same location behind the one you are editing.
-
-    Every glyph is included, not just the one asked for — ``glyph`` only
-    identifies WHICH LAYER supplies the coordinates. The secondary axis is
-    pinned to its default, which matters only for glyphs that axis covers;
-    the reference glyphs you would compare against are untouched by it.
-
-    Query: ``glyph`` (required) and optionally ``index`` to pick among several
-    layers on that glyph (default 0, ordered as stored).
-    """
-    if ORIGINAL_PATH is None:
-        return jsonify({"error": "No source loaded"}), 400
-    if not (VARIABLE_FONT_PATH and Path(VARIABLE_FONT_PATH).exists()):
-        return jsonify({"error": "Font not built yet"}), 404
-    glyph = (request.args.get("glyph") or "").strip()
-    if not glyph:
-        return jsonify({"error": "glyph is required"}), 400
-    try:
-        index = int(request.args.get("index") or 0)
-    except ValueError:
-        index = 0
-
-    axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
-    if axis is None:
-        return jsonify({"error": f"No secondary axis '{tag}'"}), 404
-    layers = [l for l in (axis.get("layers") or []) if l.get("glyph") == glyph]
-    if not layers:
-        return jsonify({"error": f"'{glyph}' has no layers on '{tag}'"}), 404
-    layer = layers[min(index, len(layers) - 1)]
-
-    from fontTools.ttLib import TTFont
-    from fontTools.varLib.instancer import instantiateVariableFont
-
-    try:
-        font = TTFont(str(VARIABLE_FONT_PATH))
-        fvar_axes = {a.axisTag: a for a in font["fvar"].axes}
-        # Pin EVERY axis: the layer's own parametric coordinates, this axis at
-        # its default (correction off), and everything else at its default —
-        # a fully static cut, which is what a reference font should be.
-        location = {}
-        stored = {str(k).lower(): v for k, v in (layer.get("location") or {}).items()}
-        for a_tag, a in fvar_axes.items():
-            if a_tag.lower() == tag.lower():
-                location[a_tag] = a.defaultValue
-            elif a_tag.lower() in stored:
-                location[a_tag] = float(stored[a_tag.lower()])
-            else:
-                location[a_tag] = a.defaultValue
-        try:
-            inst = instantiateVariableFont(font, location, inplace=False)
-        except NotImplementedError:
-            # fontTools refuses to instance through an avar2 table. A fully
-            # static cut has no axes left for avar to act on, so dropping it
-            # and retrying yields the same outlines.
-            font = TTFont(str(VARIABLE_FONT_PATH))
-            if "avar" in font:
-                del font["avar"]
-            inst = instantiateVariableFont(font, location, inplace=False)
-
-        # Named for the LOCATION, not the glyph: the cut carries the whole
-        # font, and one download serves every layer at these coordinates.
-        coord_label = "-".join(
-            f"{t}{location[t]:g}" for t in sorted(location) if t.lower() != tag.lower()
-        )
-        name = f"reference-at-{coord_label}.ttf"
-        buf = io.BytesIO()
-        inst.save(buf)
-        buf.seek(0)
-        return send_file(buf, mimetype="font/ttf", as_attachment=True, download_name=name)
-    except Exception as e:
-        print(f"Error building reference font: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

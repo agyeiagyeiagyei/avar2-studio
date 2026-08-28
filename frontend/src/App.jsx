@@ -2050,7 +2050,6 @@ function App() {
             onSetControlAxisLayers={handleSetControlAxisLayers}
             onControlAxisLayerDelta={handleControlAxisLayerDelta}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
-            onControlAxisReferenceFontUrl={api.controlAxisReferenceFontUrl ? (t, g, i) => api.controlAxisReferenceFontUrl(t, g, i) : undefined}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}
             onDeleteAvar2Axis={api.deleteAvar2Axis ? handleDeleteAvar2Axis : undefined}

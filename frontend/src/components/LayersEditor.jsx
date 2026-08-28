@@ -18,8 +18,6 @@ import React, { useState } from 'react';
  *   onLayerDelta       — async (tag, {add, remove}) => void; sends only
  *                        what changed so concurrent edits can't clobber
  *   onOpenInEditor     — (tag, glyphName?) => void
- *   onReferenceFontUrl — (tag, glyph, index) => url for a static cut at that
- *                        layer's location with the axis off (Fontra reference font)
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
  *   readOnly           — source-derived axes: the layers live in the
  *                        source file itself (brace layers / alternate
@@ -27,7 +25,7 @@ import React, { useState } from 'react';
  *                        hidden. Thumbnails, coverage warnings, and
  *                        the open-in-Fontra flyout stay.
  */
-function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, onReferenceFontUrl, vfFamilyId, fontLoaded, readOnly = false, glyphChars = {} }) {
+function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded, readOnly = false, glyphChars = {} }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -360,16 +358,6 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                           >
                             ↗
                           </button>
-                          {!readOnly && !entry.target && onReferenceFontUrl && (
-                            <a
-                              className="layer-reference-font"
-                              href={onReferenceFontUrl(tag, glyphName, i)}
-                              download
-                              title={`Download this font cut at this layer's exact coordinates. Load it in Fontra's Reference Font panel and set "Custom character" to a glyph that already reads right — N, O, H — to draw ${glyphName} against it at the same designspace location, instead of judging by eye.`}
-                            >
-                              ⧉↓
-                            </a>
-                          )}
                           {!readOnly && (
                             <>
                               <button
