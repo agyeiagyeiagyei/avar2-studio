@@ -215,12 +215,19 @@ def update_csv_from_glyphs(
     dry_run: bool = False,
     skip_instances: Optional[set] = None,
     remove_missing: bool = False,
+    exclude_axes: Optional[set] = None,
 ) -> bool:
     """Sync source-file instance coordinates into the CSV.
 
     Adds rows for new source instances and updates coordinates for existing
     ones. ``skip_instances`` shields named rows from sync entirely (used to
     avoid clobbering an in-flight edit).
+
+    ``exclude_axes`` names axis tags that must never become CSV columns. The
+    studio's own secondary axes live in the SHADOW font this often reads, and a
+    column for one is poison: everything in this CSV that is not a mapping
+    input counts as a required parametric output, so its blank cells abort the
+    whole avar2 build with "parametric axis 'lcwd' is blank".
 
     ``remove_missing`` drops rows whose names are absent from the source, and
     DEFAULTS OFF. It used to be unconditional, which quietly destroyed the
@@ -260,7 +267,11 @@ def update_csv_from_glyphs(
         # Without the casefold, the sync would append wght alongside
         # WGHT and the CSV ends up with two columns for the same axis.
         csv_axes_ci = {c.upper(): c for c in fieldnames if c != name_col}
-        new_axes = {a for a in all_axes if a.upper() not in csv_axes_ci}
+        _excluded = {str(a).upper() for a in (exclude_axes or set())}
+        new_axes = {
+            a for a in all_axes
+            if a.upper() not in csv_axes_ci and a.upper() not in _excluded
+        }
 
         if new_axes:
             print(

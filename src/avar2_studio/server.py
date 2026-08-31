@@ -1659,7 +1659,8 @@ def update_instance(instance_name: str):
         csv_path = _get_avar2_csv_path()
         if csv_path and csv_path.exists():
             try:
-                if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name}):
+                if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name},
+                                                  exclude_axes=_secondary_axis_tags()):
                     _update_csv_modification_time(csv_path)   # ours, not external
                     print("CSV synced after instance update", file=sys.stderr)
             except Exception as e:
@@ -2561,6 +2562,26 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
     except Exception as e:
         print(f"Error saving axis metadata: {e}", file=sys.stderr)
         return False
+
+
+
+def _secondary_axis_tags() -> set:
+    """Tags the studio injects into the shadow (secondary/control axes).
+
+    They exist in the shadow font but are NOT avar2 mapping columns, so the
+    CSV sync must never create columns for them — see exclude_axes in
+    csv_io.update_csv_from_glyphs.
+    """
+    try:
+        if ORIGINAL_PATH is None:
+            return set()
+        return {
+            str(ax.get("tag") or "").upper()
+            for ax in (_control_axes.list_axes(ORIGINAL_PATH) or [])
+            if ax.get("tag")
+        }
+    except Exception:
+        return set()
 
 
 def _check_csv_external_edit(csv_path: Path) -> bool:
@@ -5041,6 +5062,7 @@ def sync_csv():
             GLYPHS_PATH,
             csv_path,
             skip_instances=set(EDITING_INSTANCES),
+            exclude_axes=_secondary_axis_tags(),
         )
         if not ok:
             return jsonify({"error": "Failed to sync CSV"}), 500
@@ -6238,6 +6260,7 @@ def main():
                 GLYPHS_PATH,
                 csv_path,
                 skip_instances=set(EDITING_INSTANCES),
+                exclude_axes=_secondary_axis_tags(),
             )
             if ok:
                 # OUR write, not an external one. Without this the
