@@ -6276,11 +6276,21 @@ def main():
             # (build only; instances didn't change).
             src = Path(event.src_path)
             is_source = src.resolve() == GLYPHS_PATH.resolve()
+            # GLYPHS_PATH is the SHADOW once a secondary axis has layers, so
+            # comparing only against it meant edits to the designer's actual
+            # source never fired: deleting an instance in Glyphs left the
+            # shadow stale, and the studio kept listing the deleted instance
+            # (and its duplicates) because it reads instances from the shadow.
+            is_original = (
+                ORIGINAL_PATH is not None
+                and src.resolve() == Path(ORIGINAL_PATH).resolve()
+                and src.resolve() != GLYPHS_PATH.resolve()
+            )
             is_glif = (
                 GLYPHS_PATH.suffix.lower() == ".designspace"
                 and src.suffix.lower() in (".glif", ".plist")
             )
-            if not (is_source or is_glif):
+            if not (is_source or is_glif or is_original):
                 return
 
             # Debounce rapid saves
@@ -6301,7 +6311,17 @@ def main():
                 return
 
             try:
-                if is_source:
+                if is_original:
+                    # The user's own file changed. Rebuild the shadow FROM it
+                    # so masters, instances and glyph edits propagate; without
+                    # this the shadow keeps serving a stale copy.
+                    print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
+                    try:
+                        _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                    except Exception as exc:
+                        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+                    sync_csv_with_glyphs()
+                elif is_source:
                     print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
                     # Sync CSV first (skips editing instances)
                     sync_csv_with_glyphs()
@@ -6326,6 +6346,16 @@ def main():
             path=str(GLYPHS_PATH.parent),
             recursive=GLYPHS_PATH.suffix.lower() == ".designspace",
         )
+        # Watch the ORIGINAL's directory too when the build source is the
+        # shadow — they live in different directories, and edits to the real
+        # file are the ones the designer actually makes.
+        try:
+            if ORIGINAL_PATH is not None:
+                orig_dir = Path(ORIGINAL_PATH).parent.resolve()
+                if orig_dir != GLYPHS_PATH.parent.resolve():
+                    observer.schedule(event_handler, path=str(orig_dir), recursive=False)
+        except Exception as exc:
+            print(f"Warning: could not watch the original source: {exc}", file=sys.stderr)
         observer.start()
         OBSERVER = observer
         print(f"Real-time file watching enabled: watching {GLYPHS_PATH}", file=sys.stderr)
