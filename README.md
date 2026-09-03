@@ -17,7 +17,8 @@ editor), and chain optional **post-build transforms** onto every build.
 ![avar2-studio — the Instances tab, each instance rendering live in the built font](docs/images/app-overview.png)
 
 Try it without installing: the [static demo](https://agyeiagyeiagyei.github.io/avar2-studio/)
-(example fonts, plus in-browser compile of uploaded `.glyphs`).
+(example fonts, plus in-browser compile of uploaded `.glyphs` — including
+secondary-axis authoring, correction layers, and the fixer transforms).
 
 ## Getting started
 
@@ -52,7 +53,9 @@ MyFont-grade.json         # grade settings (once used)
 ```
 
 Studio axis authoring never modifies your original source: builds
-compile from a shadow copy once studio-authored brace layers exist.
+compile from a shadow copy once studio-authored brace layers exist —
+and the studio watches your original, regenerating the shadow
+automatically when you edit it in Glyphs.
 
 ## Features
 
@@ -67,10 +70,41 @@ walks the full workflow.
 
 - **CORE / PARAMETRIC AXES** — deform every glyph in the font.
 - **SECONDARY PARAMETRIC AXES** — deform only chosen glyphs (`scoped`
-  and `studio` badges). **+ Add** to declare one: pick its glyphs, pin
-  brace layers at any designspace location, draw the outlines in the
-  embedded Fontra editor. Deep-dive:
-  [docs/secondary-parametric-axes.md](./docs/secondary-parametric-axes.md).
+  and `studio` badges). See the next section.
+- **Mapping lint** flags rows the build would silently drop: grid
+  points no axis reaches, and rows sitting at the default location
+  (discarded, skewing every sibling row) — before they bite.
+
+### Secondary parametric axes
+
+Sometimes the global axes are *almost* right. Crispy's `wght` runs to
+1000, and the heavy end gains contrast that sits wrong on the
+lowercase — so Crispy declares `lcwd`, an axis that renders each
+lowercase glyph there *as if at* a lighter XOPQ, while the capitals
+stay put. A secondary parametric axis is a slider that deforms only
+the glyphs you give it, built from brace layers pinned anywhere in the
+designspace.
+
+- **+ Add** to declare one: name it, pick its glyphs, pin the
+  locations. New locations can land on every applicable glyph in one
+  submit.
+- **Correction layers** compute an outline *as if at* another
+  parametric point, re-derived on every build; the studio warns when a
+  correction is unpinned and would leak along an axis.
+- Draw the outlines in the **embedded Fontra editor** — against a
+  reference font, with live measurements in the HUD.
+- Everything lands in the `-control.json` sidecar, drawings included.
+
+![Secondary parametric axes in the sidebar](docs/images/secondary-axes-sidebar.png)
+
+![Correction layers — computed "as if at" another parametric point](docs/images/correction-layers.png)
+
+<img src="docs/images/fontra-reference.png" width="450" alt="Embedded Fontra editor: drawing a brace layer against a reference font, with live measurements">
+
+![At wght 1000, engaging lcwd de-contrasts the lowercase only](docs/images/wght-heavy-lcwd.gif)
+
+Deep-dive:
+[docs/secondary-parametric-axes.md](./docs/secondary-parametric-axes.md).
 
 ### Preview & export
 
@@ -99,13 +133,15 @@ source file is never touched).
 
 ### Space tab
 
-The **Space** tab shows the designspace as an orbitable Noordzij cube:
-masters, brace layers and instances as points in the axis box, corner
-chips rendering live specimens at their exact locations — red when a
-corner has no source coverage (a ghost), with one-click pinning. The
-Coverage panel in the header lists the same audit (missing corners,
-out-of-range sources, collapses) and offers the fixes: pin a ghost
-corner, or drop out-of-range sources.
+The **Space** tab shows the designspace as an orbitable Noordzij cube —
+N-dimensional, so a fourth master-covered axis renders as a tesseract
+you can spin. Masters, brace layers and instances appear as points in
+the axis box, corner chips render live specimens at their exact
+locations — red when a corner has no source coverage (a ghost), with
+one-click pinning that **synthesizes the corner by extrapolation** when
+no sweep reaches it (and refuses inline, with the reason, when it
+can't). The findings rail in the tab lists the same audit — missing
+corners, out-of-range sources, collapses — with the fixes alongside.
 
 ![The Space tab — the designspace as an orbitable cube with live corner specimens](docs/images/space-tab.png)
 

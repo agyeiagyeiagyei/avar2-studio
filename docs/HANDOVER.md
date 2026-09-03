@@ -102,11 +102,13 @@ Everything below is tribal knowledge as of this handover.
   on first load (edits persist; repo fixtures stay git-clean). Uploads
   go to `~/.avar2-studio/workspace/uploaded/`, which is **wiped on every
   new upload**.
-- Outline preservation is "model β": drawn brace-layer outlines live
-  **only in the shadow file** and survive regeneration by being read
-  back from the previous shadow. **Deleting `.avar2-studio/` loses
-  drawn outlines.** True model α (outlines captured into the sidecar)
-  is designed but unbuilt — see secondary-parametric-axes.md.
+- Outline preservation: drawn brace-layer outlines live **in the
+  shadow file** and survive regeneration by being read back from the
+  previous shadow. The model-α machinery (capture into the sidecar +
+  restore from it) is implemented — `capture_outlines` and the
+  stored-`outline` restore in `regenerate_shadow` — but **no server
+  path calls `capture_outlines` yet**, so deleting `.avar2-studio/`
+  still loses drawn outlines in practice.
 
 ### Build orchestration (server.py)
 - `trigger_build()` coalesces: if a build is running, it sets
@@ -303,8 +305,10 @@ docs/migration-github-pages.md.
    test (`e2e/avar2-eval.spec.mjs`). Whether it handles the
    server-written layout has not been re-verified — test before wiring
    a "load a server-built font into the static app" path.
-4. **Shadow wipe loses drawn outlines** (model β, §3) — biggest
-   data-integrity foot-gun for users.
+4. **Shadow wipe loses drawn outlines** (§3) — the capture half of
+   model α (`capture_outlines`) exists and is tested but is never
+   invoked by the server; until it's wired (e.g. on Fontra drawer
+   close), drawings still live only in the shadow.
 5. **Fontra port 8001 collision** across simultaneous instances (§3);
    `/api/coverage` 500s silently when Fontra is down (§3).
 6. `/api/glyph-coverage` re-parses the source (and re-reads every glif

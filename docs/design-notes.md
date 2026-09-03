@@ -21,35 +21,40 @@ inline outline editing through an embedded Fontra drawer with studio-restricted
 multi-source batch editing; disable-in-preview.
 
 **Not built:** push-to-source / demote sync and the tri-state badge for
-secondary axes; capturing drawn outlines back into the sidecar ("model α");
-mtime-driven shadow regeneration; and the editing-context trio
-(interpolation-compat validation, context-string editing, axis-aware context
-rendering).
+secondary axes; and the editing-context trio (interpolation-compat
+validation, context-string editing, axis-aware context rendering).
+Model α is half-landed — see below.
 
 ## Model α vs. model β — where outlines live
 
-- **Model β (ships).** The sidecar stores only axis declarations + brace-layer
-  *locations* — no glif/outline XML. Drawn outlines live only in the shadow
-  `.glyphs`; they survive regeneration because `regenerate_shadow` reads them
-  back out of the *previous* shadow. **Wiping `.avar2-studio/` loses drawn
-  outlines** — with no glif in the sidecar and no prior shadow, every brace
-  layer re-seeds as a copy of the default master.
-- **Model α (goal).** Capture drawn outlines back into `-control.json` as glif
-  snippets, so the shadow is fully re-derivable from `original + sidecar` with
-  no data loss. This is the prerequisite for a truly disposable `.avar2-studio/`,
-  for original↔shadow auto-sync, and for a future Fontra Path 3 reading outlines
-  from the sidecar.
+- **Model β (current behaviour).** The sidecar stores only axis
+  declarations + brace-layer *locations* — no glif/outline XML by
+  default. Drawn outlines live only in the shadow `.glyphs`; they
+  survive regeneration because `regenerate_shadow` reads them back out
+  of the *previous* shadow. **Wiping `.avar2-studio/` loses drawn
+  outlines** — with no outline in the sidecar and no prior shadow,
+  every brace layer re-seeds as a copy of the default master.
+- **Model α (half-shipped).** The sidecar schema carries an `outline`
+  value-dump (paths/nodes, components, anchors, width), and
+  `regenerate_shadow` restores it ahead of the prior-shadow copy and
+  any seed — a sidecar with outlines regenerates the drawings with the
+  shadow wiped. `capture_outlines` does the shadow → sidecar copy,
+  skipping untouched seeds (via a seed signature stamp) and correction
+  layers (recomputed anyway). **But no server path calls it yet** — the
+  wiring (e.g. on Fontra drawer close) is the missing slice, so model β
+  behaviour is what users get today.
 
 ## Not-built roadmap
 
-- **Original↔shadow auto-sync.** No mtime-driven `regenerate_shadow`: the
-  watcher re-syncs the CSV and triggers a build but never regenerates the
-  shadow, and when the shadow is the active build path the watcher observes the
-  shadow, not the original. After editing the original outside the studio, a
-  secondary-axis action (or reload) is needed to fold the change in. A
-  model-α-era goal.
-- **Capture-back into sidecar.** Closing the Fontra drawer just rebuilds;
-  outlines persist only inside the shadow (model β).
+- ~~**Original↔shadow auto-sync**~~ **Shipped.** The watcher matches the
+  original's path too (and watches its directory); a change there runs
+  `_resolve_active_source()` — regenerating the shadow from the original —
+  then syncs the CSV and rebuilds.
+- **Capture-back into sidecar (model α).** Half-shipped: the schema, the
+  `capture_outlines` copy, and the restore in `regenerate_shadow` all
+  exist (tested round-trip), but nothing invokes the capture — closing
+  the Fontra drawer just rebuilds, so outlines persist only inside the
+  shadow until the trigger is wired.
 - **Push-to-source / demote.** No endpoint writes a studio axis into the
   original; add/delete mutate only the sidecar.
 - **Sync-state tri-state.** The red/orange/green tri-state, SRC badge, and
@@ -83,8 +88,8 @@ shipping two half-products. Path 2 bounds scope and proves the value first.
 Path 4 doesn't deliver the editor that motivates the work; it's a possible
 invisible step toward Path 3. If Path 3 is ever pursued, keep the sidecar
 simple enough to be a second consumer (stable `version`, no studio-specific
-per-axis metadata) — and note model α is a prerequisite for Fontra reading
-outlines out of it.
+per-axis metadata); the model-α `outline` field it would read already exists
+in the schema.
 
 ## Open questions
 

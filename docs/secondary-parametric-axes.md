@@ -286,17 +286,23 @@ On each secondary-axis action (and once at load), `regenerate_shadow`:
    list, and pads every master's and existing brace layer's coordinate
    vector to match.
 3. Seeds a brace layer for each `{glyph, location}` entry in the
-   sidecar. The seed outline is a **copy of the glyph's default-master
-   outline**, *or* — if a previous shadow already had a drawing at that
-   location — the **preserved prior-shadow outline** (via
-   `_extract_brace_outlines`).
+   sidecar. The outline comes from, in priority order: the **stored
+   `outline` in the sidecar** (a drawing captured by
+   `capture_outlines`), then the **preserved prior-shadow outline**
+   (via `_extract_brace_outlines`), then a **copy of the glyph's
+   default-master outline**.
 
 `.designspace` is not handled: `regenerate_shadow` returns `None` for
 any non-`.glyphs` source (see "Source-format scope").
 
-> **Outlines live only in the shadow, not the sidecar** — so wiping
-> `.avar2-studio/` loses drawn outlines. This "model β" limitation, and the
-> "model α" design that would fix it, are in [design-notes.md](design-notes.md).
+> **Outlines live in the shadow; the sidecar can carry them, but nothing
+> captures them yet.** `regenerate_shadow` restores a stored `outline`
+> ahead of the prior-shadow copy and any seed, and the sidecar schema
+> carries the field through saves — so a sidecar that has outlines is a
+> complete backup. But `capture_outlines` (the model-α half that copies
+> drawings shadow → sidecar) has no caller in the server yet, so in
+> practice wiping `.avar2-studio/` still loses drawn outlines. See
+> [design-notes.md](design-notes.md).
 
 ### Sidecar JSON shape
 
@@ -327,7 +333,10 @@ Key facts about the real shape:
   a per-glyph object keyed by glyph name. Grouping-by-glyph is a
   frontend display concern (`LayersEditor` builds a `byGlyph` Map);
   it isn't the storage shape.
-- **No `glif` / outline field.** Entries are `{glyph, location}` only.
+- **No `glif` / outline field by default.** Entries are `{glyph,
+  location}` (plus `target` for corrections). A `outline` value-dump
+  (paths/nodes, components, anchors, width) appears only on layers
+  `capture_outlines` has captured — see the note above.
 - **No `coverage` field.** Coverage is derived from the unique glyph
   names in `layers`. (`coverage` and `extra_locations` exist only as
   *legacy* keys, migrated into `layers` on load and never re-emitted.)
@@ -338,10 +347,10 @@ Key facts about the real shape:
 - **`version: 1`** so future tooling can read/write the format.
 
 The shadow is created lazily: it appears only once an axis has its first brace
-layer (the build stays on the original until then). After editing the original
-outside the studio, trigger a secondary-axis action or reload to fold the change
-into the shadow — there's no automatic original↔shadow sync yet (see
-[design-notes.md](design-notes.md)).
+layer (the build stays on the original until then). The studio also watches the
+**original** source: editing it in Glyphs regenerates the shadow from it and
+rebuilds automatically, so master/instance/glyph edits propagate without a
+reload.
 
 ## Source-format scope
 
