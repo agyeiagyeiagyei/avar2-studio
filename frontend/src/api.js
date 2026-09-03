@@ -457,6 +457,26 @@ export const api = {
     return parseJSON(response);
   },
 
+  // Re-seed brace layers from the current source. `layers` omitted targets the
+  // whole axis. A 409 means some layers hold hand-drawn outlines; the rejection
+  // payload rides on the thrown Error as `.conflict` so the caller can list the
+  // affected glyphs and offer to force, rather than reducing it to a string.
+  async reseedControlAxisLayers(tag, { layers = null, force = false } = {}) {
+    const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/reseed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(layers ? { layers, force } : { force }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      const e = new Error(err.error || `Failed to re-seed layers: ${response.status}`);
+      if (response.status === 409) e.conflict = err;
+      e.detail = err.detail;
+      throw e;
+    }
+    return parseJSON(response);
+  },
+
   async setControlAxisLayers(tag, layers) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/layers`, {
       method: 'PUT',

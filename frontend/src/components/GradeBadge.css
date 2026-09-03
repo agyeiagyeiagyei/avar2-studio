@@ -128,3 +128,25 @@
 .grade-popover-remove:hover {
   background: var(--red-50);
 }
+
+/* A grade that cannot be delivered (no counter headroom) or that clamps
+   part-way must not look identical to one that works. */
+.grade-badge-error   { border-color: #d98a80 !important; }
+.grade-badge-warning { border-color: #e0bd6a !important; }
+
+.grade-badge-flag {
+  display: inline-block;
+  margin-left: 4px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  color: #fff;
+  vertical-align: 1px;
+}
+
+.grade-badge-error   .grade-badge-flag { background: #c0392b; }
+.grade-badge-warning .grade-badge-flag { background: #c98a10; }

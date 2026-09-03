@@ -26,19 +26,20 @@ Schema (versioned)::
     }
 
 ``layers`` is a flat per-axis list of ``{glyph, location}`` — NOT a
-per-glyph object, and it stores no outline/glif data. ``location`` is
-sparse (only pinned axes) and keyed by axis tag. Coverage is derived
-from the unique glyph names in ``layers``; it is not stored. (Legacy
-``coverage`` + ``extra_locations`` keys are migrated into ``layers``
-on load by ``_normalise`` and never re-emitted.)
+per-glyph object. ``location`` is sparse (only pinned axes) and keyed
+by axis tag. Coverage is derived from the unique glyph names in
+``layers``; it is not stored. (Legacy ``coverage`` +
+``extra_locations`` keys are migrated into ``layers`` on load by
+``_normalise`` and never re-emitted.)
 
-Outline storage is **model β, best-effort**, not the design doc's
-model α: drawn brace outlines live only in the shadow ``.glyphs`` and
-are preserved across regeneration by reading the previous shadow —
-they are never captured into this sidecar. Wiping ``.avar2-studio/``
-therefore loses drawn outlines (they re-seed as default-master
-copies). Model α (sidecar-canonical outlines, full no-data-loss
-regen) is future work. See docs/control-axes.md.
+Outline storage (model α) is half-wired: the schema carries an
+``outline`` value-dump per layer, and ``regenerate_shadow`` restores a
+stored outline ahead of the prior-shadow copy and any seed — so a
+sidecar holding outlines fully rebuilds the drawings. But
+``capture_outlines`` (shadow → sidecar) has no caller yet, so drawn
+outlines still live only in the shadow ``.glyphs`` in practice, and
+wiping ``.avar2-studio/`` still loses them. See
+docs/secondary-parametric-axes.md.
 """
 
 from __future__ import annotations
@@ -321,6 +322,87 @@ def apply_layer_delta(source_path: Path, tag: str, add=None, remove=None) -> Lis
     target["layers"] = merged
     _save(source_path, data)
     return merged
+
+
+def reseed_layers(
+    source_path: Path,
+    tag: str,
+    layers: Optional[List[Dict]] = None,
+    force: bool = False,
+) -> Dict:
+    """Drop stored drawings so the next regeneration re-seeds from the CURRENT
+    source, and report what that would cost.
+
+    A hand-drawn brace layer's outline is captured into the sidecar, and
+    ``regenerate_shadow`` restores it in preference to re-seeding. That is what
+    lets a drawing survive the shadow being wiped — but it is also what freezes
+    the layer against later edits to the masters it was drawn over. Re-seeding
+    is how an updated source gets pulled through, and it DISCARDS the drawing,
+    so any layer holding one is refused unless ``force``.
+
+    ``layers`` selects entries by ``{glyph, location}``; omit it for the whole
+    axis. Correction layers (those carrying a ``target``) are reported
+    separately: they are recomputed on every regeneration already, so there is
+    nothing to re-seed and nothing at risk.
+
+    Returns ``{reseeded, blocked, computed, clean, missing}`` — each a list of
+    ``{glyph, location}`` — and does not save when nothing changed.
+    """
+    tag_norm = (tag or "").strip().lower()
+    data = load(source_path)
+    axis = None
+    for ax in data.get("axes") or []:
+        if str(ax.get("tag", "")).lower() == tag_norm:
+            axis = ax
+            break
+    if axis is None:
+        raise KeyError(f"control axis {tag!r} not found")
+
+    entries = axis.get("layers") or []
+    wanted = None
+    if layers is not None:
+        wanted = {_layer_key(_normalise_one(e)) for e in layers}
+        wanted.discard(("", ()))
+
+    result = {"reseeded": [], "blocked": [], "computed": [], "clean": [],
+              "missing": []}
+    changed = 0
+    matched = set()
+    for entry in entries:
+        key = _layer_key(entry)
+        if wanted is not None and key not in wanted:
+            continue
+        matched.add(key)
+        ident = {"glyph": entry.get("glyph"), "location": entry.get("location")}
+        if entry.get("target"):
+            result["computed"].append(ident)
+            continue
+        if not entry.get("outline"):
+            # Nothing stored: this layer already re-seeds from the source on
+            # every regeneration, so it is up to date by construction.
+            result["clean"].append(ident)
+            continue
+        if not force:
+            result["blocked"].append(ident)
+            continue
+        entry.pop("outline", None)
+        result["reseeded"].append(ident)
+        changed += 1
+
+    if wanted is not None:
+        for key in sorted(wanted - matched):
+            result["missing"].append({"glyph": key[0], "location": dict(key[1])})
+
+    if changed:
+        _save(source_path, data)
+    return result
+
+
+def _normalise_one(entry: Dict) -> Dict:
+    """Normalise a single caller-supplied layer identity the same way the
+    stored list was, so keys compare equal."""
+    got = _normalise_layers([entry])
+    return got[0] if got else {"glyph": "", "location": {}}
 
 
 def _layer_key(entry: Dict):

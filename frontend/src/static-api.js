@@ -33,7 +33,7 @@ import { readWorkspaceZip, buildWorkspaceZip } from './zip-workspace';
 import { saveSession, loadSession, clearSession, SESSION_VERSION } from './session';
 import { auditCoverage, probeSweeps, PROBE_GLYPHS } from './coverage.js';
 import { lintAvar2Mappings } from './avar2-lint.js';
-import { maxPctFor } from './grade-model.js';
+import { maxPctFor, gradeDiagnostics } from './grade-model.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -1000,7 +1000,9 @@ const staticOverrides = {
     if (Object.keys(ranges).length) {
       for (const name of Object.keys(coords)) max_pct[name] = maxPctFor(coords[name], ranges);
     }
-    return { ...grade, max_pct };
+    // Same warnings the server reports, so the hosted demo flags an
+    // undeliverable grade exactly as the local studio does.
+    return { ...grade, max_pct, diagnostics: gradeDiagnostics(grade, coords, ranges) };
   },
   listControlAxes: async () => (uploadDataset
     ? { axes: uploadDataset.controlAxes || [] }
@@ -1509,6 +1511,9 @@ const staticOverrides = {
     commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
+  // Re-seeding rewrites the sidecar and re-derives the shadow, which the
+  // static demo has no writable source for.
+  reseedControlAxisLayers: unavailable('Re-seeding a layer from source'),
   openControlAxisInEditor: unavailable('The glyph editor'),
   exportFont: async (options) => {
     const { hidden_axes = [], default_location } = options || {};

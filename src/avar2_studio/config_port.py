@@ -11,9 +11,11 @@ of the same source):
   - grade transform (toggle + default + per-instance grade%)
                                                 ← ``<basename>-grade.json``
 
-Drawn outlines are NOT part of the bundle (model β: they live in the
-source's ``.avar2-studio/shadow/`` workdir). Imported brace layers are
-re-seeded by interpolation on the target.
+Drawn outlines ride along only if the sidecar already holds them
+(model-α ``outline`` fields — see control_axes). Today nothing captures
+them into the sidecar automatically, so in practice a bundle carries
+locations only and imported brace layers are re-seeded by interpolation
+on the target.
 
 Import is **all-or-nothing**: ``validate_bundle`` runs first and
 ``apply_bundle`` refuses to write anything unless the report is clean.

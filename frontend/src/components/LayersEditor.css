@@ -1,0 +1,32 @@
+
+/* A layer holding hand work must not look like a seed — re-seeding it is
+   destructive, and the badge is the only warning before the ⟳. */
+.layer-coords-drawn-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid #cbb07a;
+  background: #fdf6e6;
+  color: #7a5a14;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.layer-reseed {
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0.65;
+}
+
+.layer-reseed:hover {
+  opacity: 1;
+  border-color: #cbb07a;
+  background: #fdf6e6;
+}

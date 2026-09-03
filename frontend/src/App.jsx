@@ -49,7 +49,8 @@ function App() {
   const [transforms, setTransforms] = useState([]);
   // Grade transform (source-level, its own /api/transforms/grade sidecar):
   // { enabled, default_pct, instances: [{name, pct}], max_pct: {name: cap} }.
-  const [grade, setGrade] = useState({ enabled: false, default_pct: 0.25, instances: [], max_pct: {} });
+  const [grade, setGrade] = useState({ enabled: false, default_pct: 0.25, intensity: 1,
+                                      clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] });
   const [axes, setAxes] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [editingCoordinates, setEditingCoordinates] = useState({});
@@ -342,7 +343,7 @@ function App() {
         api.getAxes(),
         api.getMasters().catch(() => ({ masters: [] })),
         api.getTransforms().catch(() => ({ transforms: [] })),
-        api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, instances: [], max_pct: {} })),
+        api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, intensity: 1, clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] })),
         api.getCoverage ? api.getCoverage().catch(() => ({ findings: [] })) : Promise.resolve({ findings: [] }),
       ]);
 
@@ -355,8 +356,11 @@ function App() {
       setGrade({
         enabled: !!gradeData.enabled,
         default_pct: gradeData.default_pct ?? 0.25,
+        intensity: gradeData.intensity ?? 1,
+        clamp_to_headroom: gradeData.clamp_to_headroom !== false,
         instances: gradeData.instances || [],
         max_pct: gradeData.max_pct || {},
+        diagnostics: gradeData.diagnostics || [],
       });
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
@@ -529,6 +533,56 @@ function App() {
   const handleControlAxisLayerDelta = useCallback(async (tag, delta) => {
     await api.controlAxisLayerDelta(tag, delta);
     await refreshAfterControlAxisChange();
+  }, [refreshAfterControlAxisChange]);
+
+  // CONTROL AXES — pull an updated source through a brace layer.
+  //
+  // A drawn layer's outline is stored in the sidecar and restored on every
+  // rebuild, which is what makes it survive the shadow being wiped — and also
+  // what stops it following the masters it was drawn over. Re-seeding
+  // recomputes it from the current source and DISCARDS the drawing.
+  //
+  // Two guards, because the badge the UI renders can be stale: we confirm up
+  // front when we already know a drawing is there, and the server refuses with
+  // 409 when it finds one we didn't know about (drawn since the last poll).
+  // Only that second confirmation sends force.
+  const handleControlAxisReseed = useCallback(async (tag, { layers, hasDrawing } = {}) => {
+    const names = [...new Set((layers || []).map(l => l.glyph))].join(', ') || 'this layer';
+    if (hasDrawing) {
+      const ok = window.confirm(
+        `Replace the hand-drawn outline on ${names}?\n\n` +
+        `Re-seeding recomputes the layer from the current masters and discards the drawing. ` +
+        `This rewrites the sidecar and can't be undone from here.`
+      );
+      if (!ok) return;
+    }
+    const send = async (force) => {
+      await api.reseedControlAxisLayers(tag, { layers, force });
+      await refreshAfterControlAxisChange();
+    };
+    try {
+      setError(null);
+      setBuilding(true);
+      await send(!!hasDrawing);
+    } catch (err) {
+      if (err.conflict) {
+        const blocked = [...new Set((err.conflict.blocked || []).map(b => b.glyph))].join(', ');
+        const ok = window.confirm(
+          `${blocked} now hold hand-drawn outlines.\n\n` +
+          `${err.detail || 'Re-seeding would replace them.'}\n\nReplace them anyway?`
+        );
+        if (!ok) { setBuilding(false); return; }
+        try {
+          await send(true);
+        } catch (e2) {
+          setError(e2.message);
+        }
+      } else {
+        setError(err.message);
+      }
+    } finally {
+      setBuilding(false);
+    }
   }, [refreshAfterControlAxisChange]);
 
   // CONTROL AXES — open the shadow in Fontra.
@@ -920,6 +974,26 @@ function App() {
       gradeCommitTimer.current = null;
       api.setGrade({ default_pct: pct }).catch(err => setError(err.message));
     }, 600);
+  };
+
+  // Intensity scales EVERY authored grade%, so the built font changes —
+  // debounce the typing, then commit once (the commit rebuilds).
+  const handleGradeIntensity = (value) => {
+    setGrade(g => ({ ...g, intensity: value }));   // immediate input feedback
+    if (gradeCommitTimer.current) clearTimeout(gradeCommitTimer.current);
+    const prev = grade;
+    gradeCommitTimer.current = setTimeout(() => {
+      gradeCommitTimer.current = null;
+      commitGrade({ intensity: value }, prev);
+    }, 600);
+  };
+
+  // Whether a grade may thicken where the counters have no room to open.
+  // Deliberate toggle — rebuild now.
+  const handleGradeClamp = (value) => {
+    const prev = grade;
+    setGrade(g => ({ ...g, clamp_to_headroom: value }));
+    commitGrade({ clamp_to_headroom: value }, prev);
   };
 
   // Per-instance grade% — committed ONLY on an explicit Save from the badge
@@ -1936,6 +2010,8 @@ function App() {
         grade={grade}
         onToggleGrade={handleToggleGrade}
         onGradeDefault={handleGradeDefault}
+        onGradeIntensity={handleGradeIntensity}
+        onGradeClamp={handleGradeClamp}
         staticMode={staticMode}
         isUploadDataset={isUploadDataset()}
         hideRebuild={staticMode && !isUploadDataset()}
@@ -2061,6 +2137,7 @@ function App() {
             controlAxisAuthoringDisabledReason={null}
             onSetControlAxisLayers={handleSetControlAxisLayers}
             onControlAxisLayerDelta={handleControlAxisLayerDelta}
+            onControlAxisReseed={handleControlAxisReseed}
             onOpenControlAxisInEditor={handleOpenControlAxisInEditor}
             onAddAvar2Axis={handleAddAvar2Axis}
             onUpdateAvar2Axis={handleUpdateAvar2Axis}

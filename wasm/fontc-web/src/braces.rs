@@ -100,6 +100,11 @@ struct ControlLayer {
 struct GradeDoc {
     enabled: bool,
     default_pct: Option<f64>,
+    /// Global multiplier on every authored grade% (grade.py `intensity`).
+    intensity: Option<f64>,
+    /// Limit the stem move to the counter headroom available
+    /// (grade.py `clamp_to_headroom`). Defaults to true when absent.
+    clamp_to_headroom: Option<bool>,
     #[serde(default)]
     instances: Vec<GradeInstance>,
 }
@@ -830,37 +835,59 @@ pub(crate) fn apply_control_axes(
 /// grade.py `grade_coords`: (light, dark) parametric coords for a grade
 /// at `base` (XTRA/XOPQ/YOPQ user-space values), clamped to the axis
 /// ranges so a grade never asks for an out-of-range coordinate.
+///
+/// The stem move (the driver) is limited to what BOTH the driver's own
+/// range and the follower's headroom can absorb, then the horizontals
+/// are scaled by the fraction actually achieved. So an instance at the
+/// XOPQ edge darkens by nothing and keeps its counters and bars put,
+/// and — with `clamp_to_headroom` — an instance pinned on the XTRA
+/// floor does not thicken either, because there are no counters left to
+/// open and every added stem unit would bleed straight into them.
 fn grade_coords(
     base: &HashMap<String, f64>,
     pct: f64,
     ranges: &HashMap<Tag, (f64, f64)>,
+    clamp_to_headroom: bool,
 ) -> (HashMap<Tag, f64>, HashMap<Tag, f64>) {
     let get = |tag: &str| base.get(tag).copied().unwrap_or(0.0);
     let (x, o, y) = (get("XTRA"), get("XOPQ"), get("YOPQ"));
-    let d_o = pct * o;
-    let d_y = pct * K_YOPQ * y;
-    let clamp = |tag: &str, v: f64| {
+    let d_o_half = pct * o / 2.0;
+    let d_y_half = pct * K_YOPQ * y / 2.0;
+    let range = |tag: &str| -> (f64, f64) {
         let t = Tag::from_str(tag).expect("PARAM_TAGS are valid tags");
-        let (lo, hi) = ranges.get(&t).copied().unwrap_or((f64::MIN, f64::MAX));
+        ranges.get(&t).copied().unwrap_or((f64::MIN, f64::MAX))
+    };
+    let clamp = |tag: &str, v: f64| {
+        let (lo, hi) = range(tag);
         v.clamp(lo, hi)
     };
-    // The follower (XTRA) tracks the ACHIEVED stem move per side, not
-    // the requested one. When the driver clamps at the box edge (an
-    // instance already at XOPQ max grades darker by nothing), the
-    // counters must not move either — otherwise the "dark" brace is a
-    // pure condense inside a held advance and the grade reads as
-    // deformed spacing instead of weight. Away from the edges the
-    // achieved move IS the requested move, so values are unchanged.
-    let dark_o = clamp("XOPQ", o + d_o / 2.0);
-    let light_o = clamp("XOPQ", o - d_o / 2.0);
+    let (lo_o, hi_o) = range("XOPQ");
+    let (lo_x, hi_x) = range("XTRA");
+
+    // Room for the driver, in driver units, on each side.
+    let mut dark_room = (hi_o - o).max(0.0);
+    let mut light_room = (o - lo_o).max(0.0);
+    if clamp_to_headroom && COMP_RATIO > 0.0 {
+        // Darkening spends XTRA downward, lightening spends it upward.
+        dark_room = dark_room.min(((x - lo_x) / COMP_RATIO).max(0.0));
+        light_room = light_room.min(((hi_x - x) / COMP_RATIO).max(0.0));
+    }
+    let dark_d_o = d_o_half.min(dark_room);
+    let light_d_o = d_o_half.min(light_room);
+
+    // Horizontals track the ACHIEVED stem move, so the grade stays
+    // weight-led: if the stems cannot thicken, the bars must not either.
+    let s_dark = if d_o_half > 0.0 { dark_d_o / d_o_half } else { 0.0 };
+    let s_light = if d_o_half > 0.0 { light_d_o / d_o_half } else { 0.0 };
+
     let mut light = HashMap::new();
-    light.insert(Tag::new(b"XTRA"), clamp("XTRA", x + COMP_RATIO * (o - light_o)));
-    light.insert(Tag::new(b"XOPQ"), light_o);
-    light.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y - d_y / 2.0));
+    light.insert(Tag::new(b"XTRA"), clamp("XTRA", x + COMP_RATIO * light_d_o));
+    light.insert(Tag::new(b"XOPQ"), clamp("XOPQ", o - light_d_o));
+    light.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y - s_light * d_y_half));
     let mut dark = HashMap::new();
-    dark.insert(Tag::new(b"XTRA"), clamp("XTRA", x - COMP_RATIO * (dark_o - o)));
-    dark.insert(Tag::new(b"XOPQ"), dark_o);
-    dark.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y + d_y / 2.0));
+    dark.insert(Tag::new(b"XTRA"), clamp("XTRA", x - COMP_RATIO * dark_d_o));
+    dark.insert(Tag::new(b"XOPQ"), clamp("XOPQ", o + dark_d_o));
+    dark.insert(Tag::new(b"YOPQ"), clamp("YOPQ", y + s_dark * d_y_half));
     (light, dark)
 }
 
@@ -950,6 +977,9 @@ pub(crate) fn apply_grade(
     let grad_idx = old_axis_count;
     let zeroes = vec![0.0; old_axis_count];
     let default_pct = doc.default_pct.unwrap_or(0.25);
+    // Global knobs, mirroring grade_shadow.py.
+    let intensity = doc.intensity.unwrap_or(1.0).max(0.0);
+    let headroom_capped = doc.clamp_to_headroom.unwrap_or(true);
 
     let norm_coords = |vals: &HashMap<Tag, f64>| -> Vec<f64> {
         let mut coords = zeroes.clone();
@@ -967,7 +997,7 @@ pub(crate) fn apply_grade(
         let Some(base) = instance_coords.get(&entry.name) else {
             continue; // grade_shadow: skip instances with no resolved coords
         };
-        let pct = entry.pct.unwrap_or(default_pct);
+        let pct = entry.pct.unwrap_or(default_pct).max(0.0) * intensity;
         if pct <= 0.0 {
             continue;
         }
@@ -975,7 +1005,7 @@ pub(crate) fn apply_grade(
             .iter()
             .map(|t| (param_tag(t), base.get(*t).copied().unwrap_or(0.0)))
             .collect();
-        let (light, dark) = grade_coords(base, pct, &ranges);
+        let (light, dark) = grade_coords(base, pct, &ranges, headroom_capped);
         let base_loc = norm_coords(&base_tags);
         let light_loc = norm_coords(&light);
         let dark_loc = norm_coords(&dark);

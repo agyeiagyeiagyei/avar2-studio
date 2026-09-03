@@ -1,0 +1,46 @@
+.grade-diags {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.grade-diag {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 7px 9px;
+  border-radius: 5px;
+  border: 1px solid;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.grade-diag-error   { background: #fdf1f0; border-color: #f0c8c4; color: #8a2418; }
+.grade-diag-warning { background: #fdf7e8; border-color: #efdcae; color: #7a5410; }
+.grade-diag-info    { background: #f2f5fa; border-color: #d3ddec; color: #3c5170; }
+
+.grade-diag-icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+}
+
+.grade-diag-error   .grade-diag-icon { background: #c0392b; }
+.grade-diag-warning .grade-diag-icon { background: #c98a10; }
+.grade-diag-info    .grade-diag-icon { background: #64789b; }
+
+.grade-diag-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.grade-diag-message { font-weight: 600; }
+.grade-diag-detail { opacity: 0.85; font-weight: 400; }
+
+.grade-diags-compact .grade-diag { padding: 5px 7px; font-size: 10.5px; }

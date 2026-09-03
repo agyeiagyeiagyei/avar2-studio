@@ -3,6 +3,7 @@ import './Header.css';
 import { api } from '../api';
 import logoGif from '../assets/logo.gif';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
+import GradeDiagnostics from './GradeDiagnostics';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +60,8 @@ interface HeaderProps {
   grade?: GradeState;
   onToggleGrade?: (enabled: boolean) => void;
   onGradeDefault?: (pct: number) => void;
+  onGradeIntensity?: (value: number) => void;
+  onGradeClamp?: (value: boolean) => void;
   // Static demo (GitHub Pages): hide every action that needs the backend.
   staticMode?: boolean;
   // Static demo showing an uploaded source (not a baked snapshot) —
@@ -86,11 +89,24 @@ interface CoverageFinding {
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
 // here, per-instance grade% in each style's row menu.
+interface GradeDiagnostic {
+  level: 'error' | 'warning' | 'info';
+  code: string;
+  instance: string | null;
+  message: string;
+  detail?: string;
+}
+
 interface GradeState {
   enabled?: boolean;
   default_pct?: number;
+  /** Global multiplier on every authored grade%. */
+  intensity?: number;
+  /** Stop a grade thickening where the counters have no room to open. */
+  clamp_to_headroom?: boolean;
   instances?: { name: string; pct: number }[];
   max_pct?: Record<string, number>;
+  diagnostics?: GradeDiagnostic[];
 }
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
@@ -111,7 +127,7 @@ interface GradeState {
 // dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
-                 grade, onToggleGrade, onGradeDefault, staticMode = false,
+                 grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
                  coverageFindings = [], onShowCoverage, isUploadDataset = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
@@ -435,8 +451,42 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                             }}
                           />
                         </label>
+                        {/* One knob to ratchet the whole axis without
+                            re-tuning every instance: built grade = pct x this. */}
+                        <label
+                          className="transform-param"
+                          title="Scales every style's grade at once. 100% = as authored; 50% = half as strong everywhere; 0% disables grading without forgetting the values."
+                        >
+                          <span className="transform-param-label">Intensity %</span>
+                          <input
+                            type="number"
+                            className="transform-param-input"
+                            value={Math.round((grade.intensity ?? 1) * 100)}
+                            min={0}
+                            max={200}
+                            step={5}
+                            disabled={busy || (staticMode && !isUploadDataset)}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (!Number.isNaN(v) && onGradeIntensity) onGradeIntensity(v / 100);
+                            }}
+                          />
+                        </label>
+                        <label
+                          className="transform-toggle transform-param-check"
+                          title="A grade darkens by thickening stems and opening counters to keep the width. Where counters are already as tight as the design allows, there is nothing to open and the added stem fills them in. With this on, such styles simply do not darken."
+                        >
+                          <input
+                            type="checkbox"
+                            checked={grade.clamp_to_headroom !== false}
+                            disabled={busy || (staticMode && !isUploadDataset)}
+                            onChange={(e) => onGradeClamp && onGradeClamp(e.target.checked)}
+                          />
+                          <span className="transform-name">Limit grade to counter headroom</span>
+                        </label>
                       </div>
                     )}
+                    <GradeDiagnostics diagnostics={grade.diagnostics} scope="axis" />
                   </div>
                 </>
               )}

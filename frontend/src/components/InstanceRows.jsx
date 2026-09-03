@@ -145,6 +145,7 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             gradePct={(grade?.instances || []).find(e => e.name === instance.name)?.pct ?? null}
             gradeMaxPct={grade?.max_pct?.[instance.name]}
             gradeDefaultPct={grade?.default_pct ?? 0.25}
+            gradeDiagnostics={grade?.diagnostics}
             onSaveInstanceGrade={onSaveInstanceGrade}
             onRemoveInstanceGrade={onRemoveInstanceGrade}
             parametricTags={new Set((axes || []).filter(a => a.has_master_coverage !== false).map(a => a.tag))}

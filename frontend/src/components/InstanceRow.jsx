@@ -4,7 +4,7 @@ import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -196,6 +196,7 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               pct={gradePct}
               maxPct={gradeMaxPct}
               defaultPct={gradeDefaultPct}
+              diagnostics={gradeDiagnostics}
               onSave={onSaveInstanceGrade}
               onRemove={onRemoveInstanceGrade}
             />

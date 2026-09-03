@@ -3327,25 +3327,161 @@ def _grade_instance_coords():
     return coords
 
 
-def _grade_state_payload():
-    """Grade sidecar + per-instance slider caps for the UI."""
-    data = _grade.load(ORIGINAL_PATH)
-    # bound each graded instance's slider by its own axis headroom
+def _grade_param_ranges():
+    """(min, max) per parametric tag, or {} when the source can't be read."""
+    ranges = {}
     try:
-        param_ranges = {}
         axes = _source_font.get_axes(_source_font.load_source(ORIGINAL_PATH)[0])
         by_tag = {a["tag"].upper(): a for a in axes}
         for t in _grade.PARAM_TAGS:
             if t in by_tag:
-                param_ranges[t] = (by_tag[t]["min"], by_tag[t]["max"])
+                ranges[t] = (by_tag[t]["min"], by_tag[t]["max"])
+    except Exception:  # noqa: BLE001
+        return {}
+    return ranges
+
+
+def _grade_diagnostics(data, coords, param_ranges):
+    """Problems with the CURRENT grade declaration, worst first.
+
+    Each entry is ``{level, code, instance, message, detail}`` where level is
+    "error" (the axis won't build, or this instance contributes nothing),
+    "warning" (it builds but the result is degraded) or "info".
+
+    The checks exist because the failure modes here are invisible in the
+    preview until you drag the slider to an extreme: an instance pinned on the
+    XTRA floor has no counters left to open, so every stem unit the grade adds
+    lands in the counter and the glyph bleeds shut.
+    """
+    out = []
+    strength = float(data.get("intensity", 1.0))
+    capped = bool(data.get("clamp_to_headroom", True))
+    entries = list(data.get("instances") or [])
+    live = [e for e in entries
+            if _grade.effective_pct(e.get("pct", 0.0), strength) > 0]
+
+    # --- axis-level: will GRAD exist at all? ------------------------------
+    if not data.get("enabled"):
+        out.append({
+            "level": "info", "code": "grade_disabled", "instance": None,
+            "message": "Grade is switched off, so the GRAD axis is not built.",
+            "detail": "Per-instance grades are remembered and return when you switch it back on.",
+        })
+    elif not entries:
+        out.append({
+            "level": "error", "code": "no_graded_instances", "instance": None,
+            "message": "No instance is graded, so the GRAD axis is not built.",
+            "detail": "Grade at least one instance to bring the axis into the font.",
+        })
+    elif strength <= 0:
+        out.append({
+            "level": "error", "code": "intensity_zero", "instance": None,
+            "message": "Grade intensity is 0, so every grade is cancelled and the GRAD axis is not built.",
+            "detail": f"{len(entries)} instance(s) are graded. Raise intensity above 0 to bring them back.",
+        })
+    elif not live:
+        out.append({
+            "level": "error", "code": "all_grades_zero", "instance": None,
+            "message": "Every graded instance sits at 0%, so the GRAD axis is not built.",
+            "detail": "Give at least one instance a grade above 0.",
+        })
+    elif len(live) == 1:
+        out.append({
+            "level": "info", "code": "single_anchor", "instance": live[0].get("name"),
+            "message": f"Only \u201c{live[0].get('name')}\u201d is graded, so GRAD fades to nothing away from it.",
+            "detail": "Grade more instances to carry the axis across the space.",
+        })
+
+    if not param_ranges:
+        return out
+
+    # --- per-instance --------------------------------------------------
+    for entry in entries:
+        name = entry.get("name")
+        authored = float(entry.get("pct", 0.0) or 0.0)
+        pct = _grade.effective_pct(authored, strength)
+        base = coords.get(name)
+        if base is None:
+            out.append({
+                "level": "error", "code": "unknown_instance", "instance": name,
+                "message": f"\u201c{name}\u201d is graded but no longer exists.",
+                "detail": "It was renamed or deleted. Remove the grade or re-add the instance.",
+            })
+            continue
+        if pct <= 0:
+            continue
+
+        cap = _grade.max_pct_for(base, param_ranges)
+        lo_x = param_ranges.get("XTRA", (None, None))[0]
+        x = base.get("XTRA")
+        room = None if (x is None or lo_x is None) else max(0.0, x - lo_x)
+
+        # What the model actually delivers here, both directions.
+        light, dark = _grade.grade_coords(base, pct, param_ranges,
+                                          clamp_to_headroom=capped)
+        o = base.get("XOPQ", 0.0)
+        want = pct * o / 2.0
+        got_dark = dark.get("XOPQ", o) - o
+        got_light = o - light.get("XOPQ", o)
+
+        if room == 0:
+            if capped:
+                out.append({
+                    "level": "error", "code": "no_headroom_capped", "instance": name,
+                    "message": f"\u201c{name}\u201d cannot darken: its counters are already as tight as the design allows.",
+                    "detail": ("XTRA is at its minimum, so there is no counter room to absorb a thicker "
+                               "stem. The darkening half of the grade is held at 0 here; the lightening "
+                               "half still works. Move the instance off the XTRA floor, or turn off "
+                               "\u201climit grade to counter headroom\u201d to allow uncompensated darkening."),
+                })
+            else:
+                out.append({
+                    "level": "warning", "code": "no_headroom_uncompensated", "instance": name,
+                    "message": f"\u201c{name}\u201d darkens straight into its counters.",
+                    "detail": (f"XTRA is at its minimum, so none of the {2 * want:.0f} units of counter "
+                               f"relief this grade needs are available: all {want:.0f} units of added stem "
+                               "fill the counters. Lower this instance's grade%, or turn on "
+                               "\u201climit grade to counter headroom\u201d."),
+                })
+        elif authored > cap + 1e-9:
+            out.append({
+                "level": "warning", "code": "pct_over_cap", "instance": name,
+                "message": f"\u201c{name}\u201d is graded beyond what its parametric space can deliver.",
+                "detail": (f"Grade is {authored:.0%} but only {cap:.0%} fits before an axis hits its limit; "
+                           "the excess is discarded, so raising it further changes nothing."),
+            })
+        elif want > 0 and (got_dark < want - 0.5 or got_light < want - 0.5):
+            worst = min(got_dark, got_light)
+            out.append({
+                "level": "warning", "code": "partially_clamped", "instance": name,
+                "message": f"\u201c{name}\u201d only reaches part of its grade.",
+                "detail": (f"{worst:.0f} of {want:.0f} stem units are delivered before an axis hits its "
+                           "limit, so the two directions are no longer symmetric."),
+            })
+
+    order = {"error": 0, "warning": 1, "info": 2}
+    out.sort(key=lambda d: order.get(d["level"], 3))
+    return out
+
+
+def _grade_state_payload():
+    """Grade sidecar + per-instance slider caps and diagnostics for the UI."""
+    data = _grade.load(ORIGINAL_PATH)
+    param_ranges = _grade_param_ranges()
+    try:
         coords = _grade_instance_coords()
         caps = {
             name: _grade.max_pct_for(coords[name], param_ranges)
             for name in coords if param_ranges
         }
     except Exception:  # noqa: BLE001
-        caps = {}
+        coords, caps = {}, {}
     data["max_pct"] = caps
+    try:
+        data["diagnostics"] = _grade_diagnostics(data, coords, param_ranges)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: grade diagnostics failed: {exc}", file=sys.stderr)
+        data["diagnostics"] = []
     data["sidecar_path"] = str(_grade.sidecar_path_for(ORIGINAL_PATH))
     return data
 
@@ -3364,11 +3500,14 @@ def get_grade():
 
 @app.route('/api/transforms/grade', methods=['PUT'])
 def set_grade():
-    """Set the Grade toggle and/or global default. Body::
+    """Set the Grade toggle and/or the global knobs. Body::
 
-        { "enabled": true, "default_pct": 0.25 }
+        { "enabled": true, "default_pct": 0.25,
+          "intensity": 1.0, "clamp_to_headroom": true }
 
-    Either field optional. Rebuilds so the GRAD axis (dis)appears."""
+    All fields optional. ``intensity`` scales every authored grade% at once;
+    ``clamp_to_headroom`` stops a grade thickening where the counters have no
+    room to open. Rebuilds when the built font would change."""
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -3381,6 +3520,13 @@ def set_grade():
             # The default only seeds NEW grades; changing it never alters the
             # built font, so persist without a rebuild.
             _grade.set_default_pct(ORIGINAL_PATH, data["default_pct"])
+        if "intensity" in data:
+            # Scales every authored grade%, so the built font changes.
+            _grade.set_intensity(ORIGINAL_PATH, data["intensity"])
+            rebuild = True
+        if "clamp_to_headroom" in data:
+            _grade.set_clamp_to_headroom(ORIGINAL_PATH, bool(data["clamp_to_headroom"]))
+            rebuild = True
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     if rebuild:
@@ -3431,8 +3577,22 @@ def list_control_axes():
     if ORIGINAL_PATH is None:
         return jsonify({"axes": []})
     try:
+        # Strip the captured drawings. They are large path dumps the UI never
+        # reads, and this endpoint is polled — but WHETHER a layer holds one
+        # matters, because that is the hand work a re-seed would discard.
+        slim = []
+        for ax in _control_axes.list_axes(ORIGINAL_PATH):
+            entry = dict(ax)
+            entry["layers"] = [
+                dict(
+                    {k: v for k, v in (layer or {}).items() if k != "outline"},
+                    has_outline=bool((layer or {}).get("outline")),
+                )
+                for layer in (ax.get("layers") or [])
+            ]
+            slim.append(entry)
         return jsonify({
-            "axes": _control_axes.list_axes(ORIGINAL_PATH),
+            "axes": slim,
             "sidecar_path": str(_control_axes.sidecar_path_for(ORIGINAL_PATH)),
         })
     except Exception as e:
@@ -4459,6 +4619,51 @@ def _measure_strokes(glyph_set, hmtx, name):
     if stems and bars:
         out["contrast"] = round(float(min(stems)) / float(min(bars)), 2)
     return out
+
+
+@app.route('/api/control-axes/<tag>/reseed', methods=['POST'])
+def reseed_control_axis_layers(tag: str):
+    """Re-seed brace layers from the CURRENT source. Body::
+
+        { "layers": [{"glyph": "e", "location": {...}}], "force": false }
+
+    Omit ``layers`` to target the whole axis.
+
+    A drawn layer's outline is captured into the sidecar and restored in
+    preference to re-seeding, so it survives the shadow being wiped — and stays
+    frozen against later edits to the masters it was drawn over. Re-seeding
+    pulls the updated source through and DISCARDS the drawing, so layers
+    holding one come back as 409 ``blocked`` unless ``force`` is set. There is
+    no undo once the sidecar is written.
+    """
+    if ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    body = request.get_json(silent=True) or {}
+    layers = body.get("layers")
+    if layers is not None and not isinstance(layers, list):
+        return jsonify({"error": "layers must be a list of {glyph, location}"}), 400
+    force = bool(body.get("force"))
+    try:
+        result = _control_axes.reseed_layers(ORIGINAL_PATH, tag, layers, force)
+    except KeyError:
+        return jsonify({"error": f"control axis '{tag}' not found"}), 404
+    except Exception as e:  # noqa: BLE001
+        print(f"Error re-seeding control axis layers: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+    if result["blocked"]:
+        names = ", ".join(sorted({str(b["glyph"]) for b in result["blocked"]}))
+        return jsonify({
+            "error": "Some layers hold hand-drawn outlines",
+            "detail": ("Re-seeding replaces the drawing with a fresh "
+                       "interpolation of the current source, and cannot be "
+                       "undone. Affected glyphs: %s." % names),
+            **result,
+        }), 409
+
+    if result["reseeded"]:
+        schedule_shadow_rebuild()
+    return jsonify(result)
 
 
 @app.route('/api/control-axes/<tag>/reference-metrics', methods=['GET'])
@@ -6335,12 +6540,16 @@ def main():
 
             try:
                 if is_original:
-                    # The user's own file changed. Rebuild the shadow FROM it
-                    # so masters, instances and glyph edits propagate; without
-                    # this the shadow keeps serving a stale copy.
+                    # The user's own file changed. Re-derive the active source
+                    # FROM it so masters, instances and glyph edits propagate;
+                    # without this the shadow keeps serving a stale copy.
+                    # Go through _resolve_active_source, NOT regenerate_shadow:
+                    # the latter rebuilds only the control-axis shadow, so every
+                    # save in Glyphs silently dropped the grade braces (and the
+                    # GRAD axis with them) until an unrelated grade edit ran.
                     print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
                     try:
-                        _control_axes.regenerate_shadow(ORIGINAL_PATH)
+                        _resolve_active_source()
                     except Exception as exc:
                         print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
                     sync_csv_with_glyphs()

@@ -103,6 +103,33 @@ def default_pct(source_path: Path) -> float:
     return float(load(source_path).get("default_pct", 0.25))
 
 
+def intensity(source_path: Path) -> float:
+    """Global multiplier on EVERY instance's grade%.
+
+    One knob to ratchet the whole axis up or down without re-tuning each
+    instance: the built grade is ``pct * intensity``. 1.0 is "as authored".
+    """
+    return float(load(source_path).get("intensity", 1.0))
+
+
+def clamp_to_headroom(source_path: Path) -> bool:
+    """Whether the stem move is limited to the counter headroom available.
+
+    On (default), a grade never thickens where the counters cannot open to
+    absorb it. Off restores the older behaviour, where the stems move by the
+    full grade% and any shortfall lands in the counters.
+    """
+    return bool(load(source_path).get("clamp_to_headroom", True))
+
+
+def effective_pct(pct: float, strength: float) -> float:
+    """The grade% actually built: the authored value scaled by ``intensity``."""
+    try:
+        return max(0.0, float(pct)) * max(0.0, float(strength))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def list_graded_instances(source_path: Path) -> List[Dict]:
     """Return ``[{name, pct}]`` for every graded instance. Empty when the
     toggle is off, so callers can treat "off" and "no grades" identically."""
@@ -136,6 +163,22 @@ def set_enabled(source_path: Path, enabled: bool) -> Dict:
 def set_default_pct(source_path: Path, pct: float) -> Dict:
     data = load(source_path)
     data["default_pct"] = _validate_pct(pct)
+    _save(source_path, data)
+    return data
+
+
+def set_intensity(source_path: Path, value: float) -> Dict:
+    """Set the global grade multiplier. 0 disables every grade without
+    forgetting the authored per-instance values."""
+    data = load(source_path)
+    data["intensity"] = _validate_pct(value)
+    _save(source_path, data)
+    return data
+
+
+def set_clamp_to_headroom(source_path: Path, value: bool) -> Dict:
+    data = load(source_path)
+    data["clamp_to_headroom"] = bool(value)
     _save(source_path, data)
     return data
 
@@ -201,40 +244,69 @@ def grade_coords(
     base: Dict[str, float],
     pct: float,
     param_ranges: Dict[str, Tuple[float, float]],
+    clamp_to_headroom: bool = True,
 ) -> Tuple[Dict[str, float], Dict[str, float]]:
     """Derive (light, dark) parametric coords for a grade at ``base``.
 
     ``base`` and the returned dicts are keyed by parametric tag
-    (XTRA/XOPQ/YOPQ). ``param_ranges`` maps tag → (min, max) for clamping so a
-    grade never asks for an out-of-range coordinate. Dark = more weight (higher
-    XOPQ/YOPQ, lower XTRA); light = the inverse.
+    (XTRA/XOPQ/YOPQ). ``param_ranges`` maps tag -> (min, max). Dark = more
+    weight (higher XOPQ/YOPQ, lower XTRA); light = the inverse.
+
+    The stem move (the driver) is limited to what BOTH the driver's own range
+    and the follower's headroom can absorb, then the horizontals are scaled by
+    the fraction actually achieved. Two things fall out of that:
+
+    * An instance already at the XOPQ edge darkens by nothing, and its counters
+      and bars stay put — otherwise the "dark" brace is a pure condense inside
+      a held advance and reads as deformed spacing rather than weight.
+    * An instance pinned at the XTRA floor (the widest/heaviest corners, where
+      counters are already as tight as the design allows) has NO room to open
+      counters, so with ``clamp_to_headroom`` it does not thicken either.
+      Without the cap every added stem unit lands in the counters and the grade
+      bleeds shut. Callers that prefer the uncompensated look — advance is held
+      exactly by per-glyph equalisation downstream regardless — pass False.
+
+    (Mirrored in the wasm port, braces.rs.)
     """
     x, o, y = base.get("XTRA", 0.0), base.get("XOPQ", 0.0), base.get("YOPQ", 0.0)
-    dO = pct * o            # stem weight (driver)
-    dY = pct * K_YOPQ * y   # horizontal weight (driver)
+    dO_half = pct * o / 2.0            # requested stem half-move (driver)
+    dY_half = pct * K_YOPQ * y / 2.0   # requested horizontal half-move
+
+    def rng(tag):
+        return param_ranges.get(tag, (float("-inf"), float("inf")))
 
     def clamp(tag, v):
-        lo, hi = param_ranges.get(tag, (float("-inf"), float("inf")))
+        lo, hi = rng(tag)
         return max(lo, min(hi, v))
 
-    # The follower (XTRA) tracks the ACHIEVED stem move per side, not the
-    # requested one: when the driver clamps at the box edge (an instance
-    # already at XOPQ max darkens by nothing), the counters must not move
-    # either — otherwise the "dark" brace is a pure condense inside a held
-    # advance and the grade reads as deformed spacing instead of weight.
-    # Away from the edges the achieved move IS the requested move, so the
-    # values are unchanged. (Mirrored in the wasm port, braces.rs.)
-    dark_o = clamp("XOPQ", o + dO / 2)
-    light_o = clamp("XOPQ", o - dO / 2)
+    lo_o, hi_o = rng("XOPQ")
+    lo_x, hi_x = rng("XTRA")
+
+    # Room for the driver, in driver units, on each side.
+    dark_room = max(0.0, hi_o - o)
+    light_room = max(0.0, o - lo_o)
+    if clamp_to_headroom and COMP_RATIO > 0:
+        # Darkening spends XTRA downward, lightening spends it upward.
+        dark_room = min(dark_room, max(0.0, (x - lo_x) / COMP_RATIO))
+        light_room = min(light_room, max(0.0, (hi_x - x) / COMP_RATIO))
+
+    dark_dO = min(dO_half, dark_room)
+    light_dO = min(dO_half, light_room)
+
+    # Horizontals track the ACHIEVED stem move, so the grade stays weight-led:
+    # if the stems cannot thicken, the bars must not thicken on their own.
+    s_dark = (dark_dO / dO_half) if dO_half > 0 else 0.0
+    s_light = (light_dO / dO_half) if dO_half > 0 else 0.0
+
     light = {
-        "XTRA": clamp("XTRA", x + COMP_RATIO * (o - light_o)),
-        "XOPQ": light_o,
-        "YOPQ": clamp("YOPQ", y - dY / 2),
+        "XTRA": clamp("XTRA", x + COMP_RATIO * light_dO),
+        "XOPQ": clamp("XOPQ", o - light_dO),
+        "YOPQ": clamp("YOPQ", y - s_light * dY_half),
     }
     dark = {
-        "XTRA": clamp("XTRA", x - COMP_RATIO * (dark_o - o)),
-        "XOPQ": dark_o,
-        "YOPQ": clamp("YOPQ", y + dY / 2),
+        "XTRA": clamp("XTRA", x - COMP_RATIO * dark_dO),
+        "XOPQ": clamp("XOPQ", o + dark_dO),
+        "YOPQ": clamp("YOPQ", y + s_dark * dY_half),
     }
     return light, dark
 
@@ -242,13 +314,20 @@ def grade_coords(
 def max_pct_for(base: Dict[str, float], param_ranges: Dict[str, Tuple[float, float]]) -> float:
     """Largest grade% before any axis would clamp at ``base`` — the value the
     UI uses to bound the slider so a grade the parametric space can't deliver
-    is simply unreachable. Returns a generous cap (2.0) when nothing binds."""
+    is simply unreachable. Returns a generous cap (2.0) when nothing binds.
+
+    A cap of exactly 0 is a REAL answer, not a missing one: an instance sitting
+    on the XTRA floor has no counter headroom, so no grade% is deliverable
+    there. Filtering it out (``c > 0``) silently advertised the next-loosest
+    axis's cap instead, which is how the widest/heaviest instances came to
+    offer grades that could only bleed into the counters.
+    """
     o = base.get("XOPQ")
     if o is None or o <= 0:
         return 2.0
-    caps = []
+    caps: List[float] = []
 
-    def bound(v, half_per_pct):
+    def bound(tag: str, v: float, half_per_pct: float) -> None:
         # half-move at a given pct = half_per_pct * pct; keep v in [lo, hi].
         lo, hi = param_ranges.get(tag, (float("-inf"), float("inf")))
         if half_per_pct <= 0:
@@ -259,16 +338,16 @@ def max_pct_for(base: Dict[str, float], param_ranges: Dict[str, Tuple[float, flo
             caps.append((hi - v) / half_per_pct)
 
     # XOPQ (driver): half-move = pct*o/2
-    tag = "XOPQ"; bound(o, o / 2.0)
+    bound("XOPQ", o, o / 2.0)
     # YOPQ (driver): half-move = pct*K_YOPQ*y/2
     y = base.get("YOPQ")
     if y and y > 0:
-        tag = "YOPQ"; bound(y, K_YOPQ * y / 2.0)
+        bound("YOPQ", y, K_YOPQ * y / 2.0)
     # XTRA (follower): half-move = COMP_RATIO*pct*o/2 — scales with XOPQ, not XTRA
     x = base.get("XTRA")
     if x and x > 0:
-        tag = "XTRA"; bound(x, COMP_RATIO * o / 2.0)
-    return min([c for c in caps if c > 0] + [2.0])
+        bound("XTRA", x, COMP_RATIO * o / 2.0)
+    return min([c for c in caps if c >= 0] + [2.0])
 
 
 # --------------------------------------------------------------------------
@@ -277,7 +356,14 @@ def max_pct_for(base: Dict[str, float], param_ranges: Dict[str, Tuple[float, flo
 
 
 def _empty() -> Dict:
-    return {"version": _SCHEMA_VERSION, "enabled": False, "default_pct": 0.25, "instances": []}
+    return {
+        "version": _SCHEMA_VERSION,
+        "enabled": False,
+        "default_pct": 0.25,
+        "intensity": 1.0,
+        "clamp_to_headroom": True,
+        "instances": [],
+    }
 
 
 def _normalise(data: Dict) -> Dict:
@@ -302,10 +388,16 @@ def _normalise(data: Dict) -> Dict:
         dflt = float(data.get("default_pct", 0.25))
     except (TypeError, ValueError):
         dflt = 0.25
+    try:
+        strength = float(data.get("intensity", 1.0))
+    except (TypeError, ValueError):
+        strength = 1.0
     return {
         "version": data.get("version") or _SCHEMA_VERSION,
         "enabled": bool(data.get("enabled", False)),
         "default_pct": max(0.0, dflt),
+        "intensity": max(0.0, strength),
+        "clamp_to_headroom": bool(data.get("clamp_to_headroom", True)),
         "instances": instances,
     }
 

@@ -19,13 +19,16 @@ import React, { useState } from 'react';
  *                        what changed so concurrent edits can't clobber
  *   onOpenInEditor     — (tag, glyphName?) => void
  *   onRequestAddModal  — ({tag, axisDefault, prefillGlyphs?}) => void
+ *   onReseed           — async (tag, {layers?, force?}) => void; pulls an
+ *                        updated source through a brace layer. Discards
+ *                        any drawing on it, so the caller confirms first.
  *   readOnly           — source-derived axes: the layers live in the
  *                        source file itself (brace layers / alternate
  *                        masters), so add/remove/edit affordances are
  *                        hidden. Thumbnails, coverage warnings, and
  *                        the open-in-Fontra flyout stay.
  */
-function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, vfFamilyId, fontLoaded, readOnly = false, glyphChars = {} }) {
+function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor, onRequestAddModal, onReseed, vfFamilyId, fontLoaded, readOnly = false, glyphChars = {} }) {
   // Per-glyph block expansion. Tracks the set of EXPLICITLY
   // EXPANDED glyphs — anything else is collapsed (showing just
   // the glyph name + layer count). Designer clicks the caret to
@@ -316,6 +319,14 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             ) : (
                               <span className="layer-coords-studio-badge" title="Brace layer authored through avar2-studio. Lives in the sidecar; written to the shadow .glyphs on save.">studio</span>
                             )}
+                            {entry.has_outline && (
+                              <span
+                                className="layer-coords-drawn-badge"
+                                title="Hand-drawn: this layer's outline is stored in the sidecar and restored on every rebuild, so it survives the shadow being wiped. It also means the layer no longer follows the masters it was drawn over — use ⟳ to pull an updated source through."
+                              >
+                                drawn
+                              </span>
+                            )}
                           </div>
                           <div className="layer-coords-context">
                             <span className="layer-coords-context-prefix">at</span>
@@ -372,6 +383,21 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                               >
                                 ⧉
                               </button>
+                              {!entry.target && (
+                                <button
+                                  type="button"
+                                  className="layer-reseed"
+                                  title={entry.has_outline
+                                    ? "Update from source — recompute this layer from the CURRENT masters. This REPLACES the hand-drawn outline and cannot be undone; you'll be asked to confirm."
+                                    : "Update from source — recompute this layer from the current masters. Nothing is drawn on it, so this only refreshes the seed."}
+                                  onClick={() => onReseed && onReseed(tag, {
+                                    layers: [{ glyph: glyphName, location: entry.location }],
+                                    hasDrawing: !!entry.has_outline,
+                                  })}
+                                >
+                                  ⟳
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="layer-remove"

@@ -205,15 +205,23 @@ def apply_grades(
         font.customParameters.append(GSCustomParameter("Virtual Master", value))
 
     # --- inject braces per graded instance ---------------------------------
+    # Global knobs read once: ``intensity`` scales every authored grade% so the
+    # whole axis can be ratcheted without re-tuning each instance, and
+    # ``clamp_to_headroom`` decides whether a stem move may exceed the counter
+    # room available to absorb it.
+    strength = _grade.intensity(original_path)
+    headroom_capped = _grade.clamp_to_headroom(original_path)
     interp_cache: Dict[str, Optional[object]] = {}
     applied = 0
     for entry in graded:
         name = entry.get("name")
-        pct = float(entry.get("pct", 0.0))
+        pct = _grade.effective_pct(entry.get("pct", 0.0), strength)
         base = instance_coords.get(name)
         if base is None or pct <= 0:
             continue
-        light_c, dark_c = _grade.grade_coords(base, pct, param_ranges)
+        light_c, dark_c = _grade.grade_coords(
+            base, pct, param_ranges, clamp_to_headroom=headroom_capped
+        )
         base_loc = coords_to_pnorm(base)
         light_loc = coords_to_pnorm(light_c)
         dark_loc = coords_to_pnorm(dark_c)
