@@ -32,14 +32,12 @@ by axis tag. Coverage is derived from the unique glyph names in
 ``extra_locations`` keys are migrated into ``layers`` on load by
 ``_normalise`` and never re-emitted.)
 
-Outline storage (model α) is half-wired: the schema carries an
-``outline`` value-dump per layer, and ``regenerate_shadow`` restores a
-stored outline ahead of the prior-shadow copy and any seed — so a
-sidecar holding outlines fully rebuilds the drawings. But
-``capture_outlines`` (shadow → sidecar) has no caller yet, so drawn
-outlines still live only in the shadow ``.glyphs`` in practice, and
-wiping ``.avar2-studio/`` still loses them. See
-docs/secondary-parametric-axes.md.
+Outline storage (model α) is wired end to end: the schema carries an
+``outline`` value-dump per layer, ``regenerate_shadow`` restores a stored
+outline ahead of the prior-shadow copy and any seed, and
+``capture_outlines`` (shadow → sidecar) runs on config export, so a
+drawing survives ``.avar2-studio/`` being wiped and travels inside a
+config bundle. See docs/secondary-parametric-axes.md.
 """
 
 from __future__ import annotations
@@ -625,6 +623,9 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     # original wipes it, then merge any matching brace-layer
     # outlines back in after the axes get re-applied.
     preserved_layers = _extract_brace_outlines(shadow_path) if shadow_path.exists() else {}
+    # (glyph, location) of every layer we SEED this run — stamped after the
+    # save, from the persisted geometry. See _restamp_seeds.
+    seeded_keys: set = set()
 
     # Always re-copy from original. The shadow is fully derived;
     # incremental updates would just multiply the bug surface.
@@ -983,6 +984,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # prior shadow and the seed: it is the portable copy, so restoring
             # a sidecar into an empty workspace reproduces the drawn outlines.
             restored = _outline_to_layer_data(stored_outline) if seed_location is None else None
+            was_seeded = False
             if restored is not None:
                 layer_paths = restored["paths"]
                 layer_components = restored["components"]
@@ -994,6 +996,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                 layer_anchors = preserved["anchors"]
                 layer_width = preserved["width"]
             else:
+                was_seeded = True
                 interp = _interpolated_seed(glyph, seed_location or location)
                 if interp is not None:
                     layer_paths, layer_width = interp
@@ -1028,9 +1031,15 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # current geometry against this to tell a hand-drawn edit from an
             # untouched seed — without it, capturing would freeze seeds into
             # the sidecar and stop them re-interpolating when masters change.
-            brace.userData["xyz.avar2studio.seed-sig"] = _geometry_sig(
-                layer_paths, layer_width
-            )
+            # Only a SEEDED layer gets a stamp, and it is written after the
+            # save (see _restamp_seeds). Stamping a restored drawing or a
+            # preserved edit with its own geometry made it indistinguishable
+            # from an untouched seed, so capture_outlines skipped it and the
+            # drawing never reached the sidecar. Stamping before the save was
+            # wrong too: the persisted geometry differs from the in-memory
+            # values, so every seed came back looking hand-drawn.
+            if was_seeded:
+                seeded_keys.add((glyph_name, tuple(float(v) for v in location)))
 
             source_label = _brace_source_label(location)
             if source_label and seed_location is not None:
@@ -1050,6 +1059,13 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
 
     from .source_font import save_font_atomically
     save_font_atomically(font, shadow_path)
+    # Stamp the seeds from the file as WRITTEN. glyphsLib's first save
+    # normalises coordinates, so a signature taken in memory never matches the
+    # layer that comes back — every untouched seed then looked hand-drawn.
+    # Save/reload is idempotent after that first normalisation, so a stamp
+    # taken here stays valid until someone actually edits the layer.
+    if seeded_keys:
+        _restamp_seeds(shadow_path, seeded_keys)
     return shadow_path
 
 
@@ -1335,6 +1351,47 @@ def _geometry_sig(paths, width) -> str:
         for n in getattr(p, "nodes", None) or []:
             parts.append(f"{float(n.position.x):.2f},{float(n.position.y):.2f}")
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _restamp_seeds(shadow_path: Path, seeded_keys) -> None:
+    """Write the seed signature for freshly-seeded braces, reading the geometry
+    back off the SAVED shadow.
+
+    The signature exists so ``capture_outlines`` can tell a hand-drawn edit from
+    an untouched seed. Taking it in memory before the save does not work:
+    glyphsLib's first write normalises coordinates, so the reloaded layer
+    hashes differently and every seed reads as drawn. Reloading once here costs
+    a parse but makes the stamp mean what it claims.
+    """
+    import sys as _sys
+
+    from glyphsLib import GSFont
+
+    from .source_font import save_font_atomically
+
+    try:
+        font = GSFont(str(shadow_path))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not re-stamp seeds: {exc}", file=_sys.stderr)
+        return
+    master_ids = {m.id for m in font.masters}
+    stamped = 0
+    for glyph in font.glyphs:
+        for layer in glyph.layers:
+            if layer.layerId in master_ids:
+                continue
+            coords = (getattr(layer, "attributes", None) or {}).get("coordinates")
+            if not coords:
+                continue
+            key = (glyph.name, tuple(float(v) for v in coords))
+            if key not in seeded_keys:
+                continue
+            layer.userData["xyz.avar2studio.seed-sig"] = _geometry_sig(
+                layer.paths, layer.width
+            )
+            stamped += 1
+    if stamped:
+        save_font_atomically(font, shadow_path)
 
 
 def _parts_to_outline(src_paths, src_components, src_anchors, width) -> Dict:

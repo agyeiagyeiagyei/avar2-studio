@@ -11,11 +11,15 @@ of the same source):
   - grade transform (toggle + default + per-instance grade%)
                                                 ← ``<basename>-grade.json``
 
-Drawn outlines ride along only if the sidecar already holds them
-(model-α ``outline`` fields — see control_axes). Today nothing captures
-them into the sidecar automatically, so in practice a bundle carries
-locations only and imported brace layers are re-seeded by interpolation
-on the target.
+Drawn outlines ride along too: ``build_export`` runs
+``control_axes.capture_outlines`` first, copying any hand-drawn brace
+geometry out of the shadow and into the sidecar (model-α ``outline``
+fields) so the bundle is the whole session in one file. Layers still
+matching their computed seed are skipped, and correction layers (those
+with a ``target``) are recomputed on the target rather than carried, so
+the bundle stays small. Without that capture step a bundle held
+locations only and every drawing was silently replaced by a fresh
+interpolation on import — the export looked complete and was not.
 
 Import is **all-or-nothing**: ``validate_bundle`` runs first and
 ``apply_bundle`` refuses to write anything unless the report is clean.
@@ -31,10 +35,12 @@ transforms are always replaced wholesale.
 
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import json
 import re
+import sys as _sys
 from datetime import datetime, timezone
 from importlib import metadata as _importlib_metadata
 from pathlib import Path
@@ -72,9 +78,28 @@ def bundle_filename(family_name: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def build_export(source_path: Path, csv_path: Optional[Path]) -> Dict:
+def build_export(source_path: Path, csv_path: Optional[Path],
+                 capture: bool = True) -> Dict:
     """Assemble the bundle dict for ``source_path``. ``csv_path`` is the
-    server's currently-resolved avar2 CSV (may be None / nonexistent)."""
+    server's currently-resolved avar2 CSV (may be None / nonexistent).
+
+    ``capture`` (default on) first copies hand-drawn brace outlines from the
+    shadow into the sidecar, so they are in the bundle. It WRITES to the
+    sidecar — that is the point: the sidecar is the durable home for a
+    drawing, the shadow is derived and gets wiped. Pass False for a
+    read-only export.
+    """
+    if capture:
+        try:
+            n = _control_axes.capture_outlines(source_path)
+            if n:
+                print(f"Captured {n} drawn brace layer(s) into the sidecar "
+                      f"before export", file=_sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            # An export that loses drawings is bad; one that refuses to run
+            # is worse. Warn and carry on with whatever the sidecar holds.
+            print(f"Warning: could not capture drawn outlines for export: {exc}",
+                  file=_sys.stderr)
     font, _fmt = _source_font.load_source(source_path)
     axes = _source_font.get_axes(font)
     family = _source_font.get_family_name(font, source_path)
@@ -108,7 +133,9 @@ def build_export(source_path: Path, csv_path: Optional[Path]) -> Dict:
             ],
             "avar2_out_columns": out_columns,
         },
-        "control_axes": _control_axes.load(source_path),
+        "control_axes": _portable_control_axes(
+            _control_axes.load(source_path), {a.get("tag") for a in axes}
+        ),
         "avar2_csv": csv_text,
         "transforms": _tx_config.load(source_path),
         "grade": _grade.load(source_path),
@@ -118,6 +145,40 @@ def build_export(source_path: Path, csv_path: Optional[Path]) -> Dict:
 # --------------------------------------------------------------------------
 # Validate
 # --------------------------------------------------------------------------
+
+
+def _portable_control_axes(data: Dict, source_tags) -> Dict:
+    """Drop layer pins for axes the TARGET source cannot have.
+
+    Layers authored while the studio was showing the built font's axis list
+    picked up pins on transform-injected axes — SPAC from the spacing
+    transform, GRAD from grade. Those exist only in the compiled font, never
+    in a .glyphs source, so validate_bundle rejects them and the bundle will
+    not import anywhere, including back onto the source it came from.
+
+    Every such pin observed sits at the axis default, so dropping it changes
+    nothing about where the layer lives. Pins on the bundle's own control axes
+    are kept — those are declared by the bundle itself.
+    """
+    out = copy.deepcopy(data)
+    declared = {str(a.get("tag")) for a in (out.get("axes") or [])}
+    keep = {str(t) for t in source_tags if t} | declared
+    dropped = 0
+    for axis in out.get("axes") or []:
+        for layer in axis.get("layers") or []:
+            for field in ("location", "target"):
+                loc = layer.get(field)
+                if not isinstance(loc, dict):
+                    continue
+                phantom = [k for k in loc if k not in keep]
+                for k in phantom:
+                    del loc[k]
+                    dropped += 1
+    if dropped:
+        print(f"Export: dropped {dropped} layer pin(s) on axes absent from the "
+              f"source (transform-injected); the bundle stays portable",
+              file=_sys.stderr)
+    return out
 
 
 def _num(v) -> Optional[float]:

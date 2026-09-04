@@ -4850,6 +4850,11 @@ def export_config_bundle():
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:
+        # build_export captures drawn outlines into the sidecar first, which
+        # is a write next to the watched source — suppress the watcher so an
+        # export does not look like a designer edit and trigger a rebuild.
+        global _SUPPRESS_WATCHDOG_UNTIL
+        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
         bundle = _config_port.build_export(ORIGINAL_PATH, _get_avar2_csv_path())
     except Exception as e:
         print(f"Error exporting config: {e}", file=sys.stderr)
