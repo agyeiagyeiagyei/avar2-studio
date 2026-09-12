@@ -191,6 +191,15 @@ LAST_TRANSFORM_ERROR: Optional[str] = None
 # build drains this when it finishes, so a change made mid-build still lands in
 # the font instead of being silently dropped.
 REBUILD_PENDING: bool = False
+# Set by the file watcher when a SOURCE change lands mid-build: "original"
+# (the designer's file — needs the shadow re-derived and the CSV synced
+# before the queued rebuild) or "source" (the shadow itself — CSV sync only).
+# Without this a queued rebuild would run against the OLD shadow and report
+# success with stale outlines. "original" outranks "source".
+SOURCE_REFRESH_PENDING: Optional[str] = None
+# sync_csv_with_glyphs is a closure inside main(); it registers here so the
+# drain loop in trigger_build can run it for a queued source change.
+_SYNC_CSV_HOOK = None
 # Count of background regen/rebuild tasks in flight. The sidecar write returns
 # immediately so the UI stays responsive, but the shadow regen + font build
 # take seconds — /api/health folds this into `building` so the frontend can
@@ -208,13 +217,20 @@ SIDECAR_LOCK = threading.Lock()
 # "saved, saved, rebuilt, rebuilt" sequence). External saves from
 # Glyphs.app outside the window still sync + rebuild as before.
 _SUPPRESS_WATCHDOG_UNTIL: float = 0.0
-_SUPPRESS_WATCHDOG_SECONDS = 6.0
+_SUPPRESS_WATCHDOG_SECONDS = 2.5   # outlast the server's own shadow write (~1s), no more
+# The one server path that writes the designer's ORIGINAL is the instance-edit
+# round-trip through Glyphs.app (save / close / reopen via AppleScript), which
+# can take several seconds. It gets its own window so a designer's save is
+# never held hostage to the shadow-regen window above: the two files are
+# written by different things and must be suppressed for different reasons.
+_SUPPRESS_ORIGINAL_SECONDS = 6.0
+_SUPPRESS_ORIGINAL_UNTIL = 0.0
 # Debounced shadow-regen + rebuild. Layer edits arrive in bursts (clicking ✕ a
 # few times, adding several glyphs); regenerating the shadow and recompiling
 # per edit costs seconds each and would queue up. Coalesce a burst into one job.
 _REBUILD_TIMER = None
 _REBUILD_TIMER_LOCK = threading.Lock()
-_REBUILD_DEBOUNCE_SECONDS = 1.2
+_REBUILD_DEBOUNCE_SECONDS = 0.4    # sized for a ~1s in-process build, not the old 9s one
 OBSERVER: Optional[Observer] = None
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
@@ -298,8 +314,9 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
     # This write (and the Glyphs.app save/close/reopen dance below) is
     # server-initiated — suppress the file watcher so it doesn't queue a
     # redundant sync + second build on top of the caller's own rebuild.
-    global _SUPPRESS_WATCHDOG_UNTIL
+    global _SUPPRESS_WATCHDOG_UNTIL, _SUPPRESS_ORIGINAL_UNTIL
     _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+    _SUPPRESS_ORIGINAL_UNTIL = time.time() + _SUPPRESS_ORIGINAL_SECONDS
     try:
         # Touch the file to update its modification time
         current_time = time.time()
@@ -1095,7 +1112,7 @@ def trigger_build():
     left stale. Instead flag it and rebuild once the in-flight build finishes,
     draining whatever landed meanwhile.
     """
-    global REBUILD_PENDING
+    global REBUILD_PENDING, SOURCE_REFRESH_PENDING
 
     if BUILDING:
         REBUILD_PENDING = True
@@ -1109,6 +1126,20 @@ def trigger_build():
     while REBUILD_PENDING and passes < 3:
         REBUILD_PENDING = False
         passes += 1
+        kind, SOURCE_REFRESH_PENDING = SOURCE_REFRESH_PENDING, None
+        if kind == "original":
+            # A Glyphs save landed during the last build: pull it through the
+            # shadow first, exactly as the watcher would have.
+            print("Queued source change: re-deriving the shadow before rebuilding...", file=sys.stderr)
+            try:
+                _resolve_active_source()
+            except Exception as exc:  # noqa: BLE001
+                print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+        if kind in ("original", "source") and _SYNC_CSV_HOOK is not None:
+            try:
+                _SYNC_CSV_HOOK()
+            except Exception as exc:  # noqa: BLE001
+                print(f"Warning: CSV sync for queued change failed: {exc}", file=sys.stderr)
         print("Rebuilding for state that changed during the last build...", file=sys.stderr)
         ok = _run_build()
     return ok
@@ -6556,11 +6587,19 @@ def main():
         except Exception as e:
             print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
     
+    global _SYNC_CSV_HOOK
+    _SYNC_CSV_HOOK = sync_csv_with_glyphs
+
     class GlyphsFileHandler(FileSystemEventHandler):
         """Watchdog handler for real-time Glyphs file changes."""
         
         def __init__(self):
-            self.last_modified = 0
+            # Per-PATH: a Glyphs save is a write + rename (two events, ms
+            # apart) and must fold to one build; but the server's own shadow
+            # write arrives in the same drain as a designer's save that
+            # landed mid-build, and with one shared timestamp the shadow's
+            # events spent the throttle budget and the save was dropped.
+            self.last_modified: Dict[str, float] = {}
             self.debounce_interval = 0.5  # seconds
         
         def on_modified(self, event):
@@ -6594,19 +6633,39 @@ def main():
 
             # Debounce rapid saves
             current_time = time.time()
-            if current_time - self.last_modified < self.debounce_interval:
+            key = str(src.resolve())
+            if current_time - self.last_modified.get(key, 0.0) < self.debounce_interval:
                 return
-            self.last_modified = current_time
+            self.last_modified[key] = current_time
 
             # Server-initiated write (instance edit / shadow regen): the
             # triggering code already queued its rebuild — a watcher-driven
             # sync+build here would duplicate it.
-            if current_time < _SUPPRESS_WATCHDOG_UNTIL:
+            # Server-initiated writes: the shadow regen sets the first window
+            # and only ever writes the SHADOW; a designer's save to the
+            # original must not be dropped because of it. Only the Glyphs.app
+            # instance-edit round-trip writes the original, and it sets the
+            # second window for itself.
+            if is_original:
+                if current_time < _SUPPRESS_ORIGINAL_UNTIL:
+                    return
+            elif current_time < _SUPPRESS_WATCHDOG_UNTIL:
                 return
 
             global BUILDING, VARIABLE_FONT_PATH, LAST_BUILD_TIME
+            global REBUILD_PENDING, SOURCE_REFRESH_PENDING
 
             if BUILDING:
+                # Do NOT drop the save. Record what changed so the in-flight
+                # build's drain loop re-derives the source before rebuilding;
+                # a queued rebuild from the old shadow would look like success
+                # while serving stale outlines.
+                if is_original:
+                    SOURCE_REFRESH_PENDING = "original"
+                elif is_source and SOURCE_REFRESH_PENDING != "original":
+                    SOURCE_REFRESH_PENDING = "source"
+                REBUILD_PENDING = True
+                print("Source changed mid-build; queued for after this build.", file=sys.stderr)
                 return
 
             try:
