@@ -525,6 +525,9 @@ def _normalise_layers(raw) -> List[Dict]:
         outline = entry.get("outline")
         if isinstance(outline, dict) and outline.get("paths") is not None:
             item["outline"] = outline
+            sig = entry.get("source_sig")
+            if isinstance(sig, str) and sig:
+                item["source_sig"] = sig
         out.append(item)
     return out
 
@@ -1341,6 +1344,32 @@ def _regenerate_shadow_designspace(
     return shadow_path
 
 
+def glyph_masters_sig(font, glyph_name: str) -> str:
+    """Signature of one glyph's MASTER geometry — every master layer's nodes
+    and width, in master order.
+
+    Stored on a captured drawing as ``source_sig`` so the studio can say
+    whether the masters that drawing was made over have changed since. A
+    per-glyph hash is deliberately coarse: it flags any master edit to the
+    glyph, not just ones near the layer's location, because the honest
+    statement is "the source this was drawn against moved", and a designer
+    can judge the rest from the overlay.
+    """
+    import hashlib
+
+    glyph = font.glyphs[glyph_name] if font is not None else None
+    if glyph is None:
+        return ""
+    parts = []
+    for m in font.masters:
+        layer = glyph.layers[m.id]
+        if layer is None:
+            parts.append("-")
+            continue
+        parts.append(_geometry_sig(layer.paths, layer.width))
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
 def _geometry_sig(paths, width) -> str:
     """A short, stable signature of a layer's geometry, stored on the seeded
     brace layer so a later edit can be told apart from an untouched seed."""
@@ -1538,6 +1567,9 @@ def capture_outlines(source_path: Path) -> int:
             if entry.get("outline") == serialised:
                 continue
             entry["outline"] = serialised
+            # Remember what the masters looked like when this was captured, so
+            # a later master edit can be reported as "source changed since".
+            entry["source_sig"] = glyph_masters_sig(shadow_font, entry.get("glyph"))
             captured += 1
     if captured:
         _save(source_path, data)

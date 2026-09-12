@@ -321,10 +321,12 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             )}
                             {entry.has_outline && (
                               <span
-                                className="layer-coords-drawn-badge"
-                                title="Hand-drawn: this layer's outline is stored in the sidecar and restored on every rebuild, so it survives the shadow being wiped. It also means the layer no longer follows the masters it was drawn over — use ⟳ to pull an updated source through."
+                                className={`layer-coords-drawn-badge${entry.source_changed ? ' layer-coords-drawn-stale' : ''}`}
+                                title={entry.source_changed
+                                  ? "Hand-drawn, and the masters it was drawn over have CHANGED since. The stored outline no longer follows the source — compare it against the overlay, then use ⟳ to re-seed from the current masters (this replaces the drawing) or keep it as is."
+                                  : "Hand-drawn: this layer's outline is stored and restored on every rebuild, so it survives the shadow being wiped. It also means the layer no longer follows the masters it was drawn over — use ⟳ to pull an updated source through."}
                               >
-                                drawn
+                                {entry.source_changed ? 'drawn · source changed' : 'drawn'}
                               </span>
                             )}
                           </div>
@@ -388,7 +390,9 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                                   type="button"
                                   className="layer-reseed"
                                   title={entry.has_outline
-                                    ? "Update from source — recompute this layer from the CURRENT masters. This REPLACES the hand-drawn outline and cannot be undone; you'll be asked to confirm."
+                                    ? (entry.source_changed
+                                      ? "Update from source — the masters have changed since this was drawn. Recomputes the layer from the CURRENT masters; this REPLACES the hand-drawn outline and cannot be undone. You'll be asked to confirm."
+                                      : "Update from source — recompute this layer from the CURRENT masters. This REPLACES the hand-drawn outline and cannot be undone; you'll be asked to confirm.")
                                     : "Update from source — recompute this layer from the current masters. Nothing is drawn on it, so this only refreshes the seed."}
                                   onClick={() => onReseed && onReseed(tag, {
                                     layers: [{ glyph: glyphName, location: entry.location }],

@@ -3492,6 +3492,32 @@ def delete_instance_grade(instance_name: str):
 # ----------------------------------------------------------------------
 
 
+_SOURCE_GLYPH_SIGS: "tuple" = (None, {})   # (source mtime_ns, {glyph: sig})
+
+
+def _source_glyph_sigs():
+    """{glyph: master-geometry signature} for the ORIGINAL source, recomputed
+    only when the file's mtime changes. /api/control-axes is polled, and a
+    glyphsLib parse per poll would be the wrong price for a staleness flag."""
+    global _SOURCE_GLYPH_SIGS
+    if ORIGINAL_PATH is None or not ORIGINAL_PATH.exists():
+        return None
+    try:
+        mtime = ORIGINAL_PATH.stat().st_mtime_ns
+    except OSError:
+        return None
+    if _SOURCE_GLYPH_SIGS[0] == mtime:
+        return _SOURCE_GLYPH_SIGS[1]
+    try:
+        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
+        sigs = {g.name: _control_axes.glyph_masters_sig(font, g.name) for g in font.glyphs}
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not fingerprint source glyphs: {exc}", file=sys.stderr)
+        return None
+    _SOURCE_GLYPH_SIGS = (mtime, sigs)
+    return sigs
+
+
 @app.route('/api/control-axes', methods=['GET'])
 def list_control_axes():
     """Return the sidecar's control-axis declarations."""
@@ -3501,16 +3527,28 @@ def list_control_axes():
         # Strip the captured drawings. They are large path dumps the UI never
         # reads, and this endpoint is polled — but WHETHER a layer holds one
         # matters, because that is the hand work a re-seed would discard.
+        sigs = _source_glyph_sigs()
         slim = []
         for ax in _control_axes.list_axes(ORIGINAL_PATH):
             entry = dict(ax)
-            entry["layers"] = [
-                dict(
-                    {k: v for k, v in (layer or {}).items() if k != "outline"},
-                    has_outline=bool((layer or {}).get("outline")),
-                )
-                for layer in (ax.get("layers") or [])
-            ]
+            layers = []
+            for layer in (ax.get("layers") or []):
+                layer = layer or {}
+                has_outline = bool(layer.get("outline"))
+                stored = layer.get("source_sig")
+                # A drawing is stale when the masters it was made over have
+                # changed since capture. Only answerable for drawings that
+                # recorded their source_sig; older captures report unknown.
+                if has_outline and stored and sigs is not None:
+                    source_changed = sigs.get(layer.get("glyph")) != stored
+                else:
+                    source_changed = None
+                layers.append(dict(
+                    {k: v for k, v in layer.items() if k not in ("outline", "source_sig")},
+                    has_outline=has_outline,
+                    source_changed=source_changed,
+                ))
+            entry["layers"] = layers
             slim.append(entry)
         return jsonify({
             "axes": slim,

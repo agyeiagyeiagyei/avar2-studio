@@ -30,3 +30,11 @@
   border-color: #cbb07a;
   background: #fdf6e6;
 }
+
+/* The drawing's source has moved on underneath it — worth a stronger cue
+   than the plain "drawn" badge, since nothing else in the row will show it. */
+.layer-coords-drawn-stale {
+  border-color: #d98a80;
+  background: #fdf1f0;
+  color: #8a2418;
+}
