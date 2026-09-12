@@ -1966,6 +1966,43 @@ def _is_build_stale() -> bool:
         return False
 
 
+# --------------------------------------------------------------------------
+# Build gate: a source that does not compile stops the studio
+# --------------------------------------------------------------------------
+# When the linked source fails to compile, the server keeps serving the
+# last-good font so the UI can still render. It must NOT keep accepting
+# edits: every instance, grade, layer or mapping change would be authored
+# against a font that no longer exists, and an export would ship a stale
+# build as if it were current. So while LAST_BUILD_STATUS is "failed" every
+# mutating request is refused with 409. Reads stay open so the UI can show
+# the error, and a short allowlist stays open purely so the user can
+# RECOVER: retry the build, switch source, and the in-memory editing
+# bookkeeping. One hook rather than a check in each of ~25 routes, so it
+# cannot be forgotten by the next endpoint.
+_BUILD_GATE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_BUILD_GATE_ALLOW_EXACT = {"/api/build", "/api/load-source"}
+_BUILD_GATE_ALLOW_SUFFIX = ("/editing",)
+
+
+@app.before_request
+def _refuse_edits_while_source_is_broken():
+    if request.method not in _BUILD_GATE_METHODS:
+        return None
+    if LAST_BUILD_STATUS != "failed":
+        return None
+    path = request.path
+    if path in _BUILD_GATE_ALLOW_EXACT or path.endswith(_BUILD_GATE_ALLOW_SUFFIX):
+        return None
+    if not path.startswith("/api/") and not path.startswith("/fontra"):
+        return None
+    return jsonify({
+        "error": "The source file does not compile, so the studio is paused.",
+        "detail": LAST_BUILD_ERROR,
+        "build_blocked": True,
+        "hint": "Fix the source and save it (the studio rebuilds on save), or press Rebuild.",
+    }), 409
+
+
 @app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint."""

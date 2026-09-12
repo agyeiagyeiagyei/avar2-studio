@@ -145,3 +145,30 @@
 }
 
 
+
+/* Build gate: the source does not compile. The server refuses edits; the
+   workspace must look as paused as it is. */
+.build-blocked {
+  margin: 0 0 8px;
+  padding: 14px 18px;
+  border: 1px solid #e0a39a;
+  border-left: 6px solid #c0392b;
+  background: #fdf1f0;
+  color: #6b1a12;
+}
+.build-blocked-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.build-blocked-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  max-height: 140px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #f0c8c4;
+  border-radius: 4px;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.build-blocked-actions { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
+.build-blocked-actions button { padding: 5px 12px; font-weight: 600; cursor: pointer; }
+.main-content-blocked { pointer-events: none; opacity: 0.45; filter: grayscale(0.6); user-select: none; }

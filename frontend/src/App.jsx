@@ -1968,12 +1968,28 @@ function App() {
       )}
 
       {lastBuildStatus === 'failed' && (
+        // The source does not compile. The server refuses every edit with 409
+        // while this is true (see _refuse_edits_while_source_is_broken), so the
+        // workspace below is made inert rather than left looking editable.
+        <div className="build-blocked" role="alert">
+          <div className="build-blocked-title">The source file does not compile — the studio is paused.</div>
+          <pre className="build-blocked-error">{lastBuildError}</pre>
+          <div className="build-blocked-actions">
+            <span>Fix the source and save it; the studio rebuilds on save. Or</span>
+            <button type="button" onClick={handleBuildFont} disabled={building}>
+              {building ? 'Rebuilding…' : 'Rebuild now'}
+            </button>
+          </div>
+        </div>
+      )}
+      {lastBuildStatus !== 'failed' && avar2Error && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
-          Build failed — preview is stale. {lastBuildError}
+          The mapped font failed to build; the preview is showing the plain fallback without your mappings. {avar2Error}
         </div>
       )}
 
-      <div className="main-content">
+      <div className={`main-content${lastBuildStatus === 'failed' ? ' main-content-blocked' : ''}`}
+           aria-disabled={lastBuildStatus === 'failed' ? 'true' : undefined}>
         {!familyName ? (
           // Blind launch — nothing loaded server-side. Steer the user
           // to the Header dropdown. Header keeps rendering, so the
