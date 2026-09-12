@@ -93,32 +93,6 @@ export const api = {
     return `${API_BASE}/avar2-font?t=${timestamp}`;
   },
 
-  async checkSyncStatus() {
-    const response = await fetch(`${API_BASE}/check-sync-status`);
-    if (!response.ok) {
-      throw new Error('Failed to check sync status');
-    }
-    return parseJSON(response);
-  },
-
-  async buildAvar2Font(traditionalAxes, avar2Axes) {
-    const response = await fetch(`${API_BASE}/build-avar2`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        traditional_axes: traditionalAxes,
-        avar2_axes: avar2Axes,
-      }),
-    });
-    if (!response.ok) {
-      const error = await parseJSON(response);
-      throw new Error(error.error || 'Build failed');
-    }
-    return parseJSON(response);
-  },
-
   async createInstance(instanceName, coordinates, insertAfter = null) {
     const body = { name: instanceName, coordinates };
     if (insertAfter) {
@@ -569,27 +543,6 @@ export const api = {
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({}));
       throw new Error(err.error || `Failed to map location: ${response.status}`);
-    }
-    return parseJSON(response);
-  },
-
-  async getTextWidth(text, coordinates, fontSizeRem = 2.0) {
-    const params = new URLSearchParams({
-      text: text,
-      coordinates: JSON.stringify(coordinates),
-      font_size_rem: fontSizeRem.toString(),
-    });
-    const response = await fetch(`${API_BASE}/text-width?${params}`);
-    if (!response.ok) {
-      try {
-        const error = await parseJSON(response);
-        throw new Error(error.error || `Failed to measure text width: ${response.status} ${response.statusText}`);
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('error')) {
-          throw e;
-        }
-        throw new Error(`Failed to measure text width: ${response.status} ${response.statusText}`);
-      }
     }
     return parseJSON(response);
   },

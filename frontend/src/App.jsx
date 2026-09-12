@@ -142,8 +142,6 @@ function App() {
   // from the project context.
   const [glyphsFileHasUnsavedChanges, setGlyphsFileHasUnsavedChanges] = useState(false);
   const [avar2PreviewMode, setAvar2PreviewMode] = useState(false); // New mode: Default vs Avar2 Preview
-  const [syncStatus, setSyncStatus] = useState(null);
-  const [showBuildAvar2Modal, setShowBuildAvar2Modal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [instanceToDelete, setInstanceToDelete] = useState(null);
   const [avar2FontUrl, setAvar2FontUrl] = useState(null);
@@ -161,8 +159,6 @@ function App() {
     // Preload CONTROL AXES coverage. Hidden in the UI unless the
     // source ships glyph-scoped variation.
     loadGlyphCoverage();
-    // Check sync status
-    checkSyncStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Intentionally empty - only run on mount
   
@@ -755,68 +751,6 @@ function App() {
   // were removed when SPAC support was deferred. The state, props, and
   // backend endpoints they relied on are all dormant.
 
-  const checkSyncStatus = async () => {
-    try {
-      const status = await api.checkSyncStatus();
-      setSyncStatus(status);
-    } catch (err) {
-      console.error('Failed to check sync status:', err);
-      setSyncStatus({ synced: false, message: 'Failed to check sync status' });
-    }
-  };
-
-  const handleBuildAvar2Font = async ({ traditionalAxes, avar2Axes }) => {
-    try {
-      setBuilding(true);
-      setError(null);
-
-      const result = await api.buildAvar2Font(traditionalAxes, avar2Axes);
-      
-      // Update sync status from response
-      if (result.sync_status) {
-        setSyncStatus(result.sync_status);
-      }
-      
-      // If in avar2 preview mode, load the font
-      // Also auto-switch to avar2 preview mode after successful build
-      if (!avar2PreviewMode) {
-        setAvar2PreviewMode(true);
-      }
-      
-      const fontUrl = api.getAvar2FontUrl();
-      setAvar2FontUrl(fontUrl);
-      setAvar2FontLoaded(true);
-      
-      // Load font using FontFace API
-      try {
-        if (!vfFamilyId) {
-          throw new Error("vfFamilyId not yet known — health check has not returned family_name");
-        }
-        // Remove old font if it exists to force reload
-        const oldFont = Array.from(document.fonts).find(f => f.family === vfFamilyId);
-        if (oldFont) {
-          document.fonts.delete(oldFont);
-        }
-
-        const fontFace = new FontFace(vfFamilyId, `url(${fontUrl})`);
-        await fontFace.load();
-        document.fonts.add(fontFace);
-        await document.fonts.ready;
-      } catch (err) {
-        console.error('Failed to load avar2 font:', err);
-      }
-      
-      // Show success message (could be a toast notification)
-      
-      return result;
-    } catch (err) {
-      setError(err.message || 'Failed to build avar2 font');
-      throw err;
-    } finally {
-      setBuilding(false);
-    }
-  };
-
   const handleAvar2PreviewModeChange = async (enabled) => {
     setAvar2PreviewMode(enabled);
     
@@ -1116,7 +1050,6 @@ function App() {
   // designer's request — it dominated request traffic. The backend
   // endpoint survives for easy reinstatement.
 
-
   const handleSelectInstance = useCallback((instance) => {
     // If clicking the same instance, don't reset coordinates
     if (selectedInstance && selectedInstance.name === instance.name) {
@@ -1170,7 +1103,6 @@ function App() {
       return updated;
     });
   }, [selectedInstance, editingCoordinates]);
-
 
   // AUTO-PERSIST studio-instance coordinate edits (debounced,
   // serialized). The old contract — slider edits live in page state
@@ -1896,8 +1828,6 @@ function App() {
 
         // Additional small delay to ensure DOM is updated after font load
         await new Promise(resolve => setTimeout(resolve, 200));
-
-
 
         // Reset building state after font is fully loaded and ready
         setBuilding(false);

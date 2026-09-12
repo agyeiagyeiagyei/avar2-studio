@@ -1125,7 +1125,7 @@ def _run_build():
     global LAST_BUILD_STATUS, LAST_BUILD_ERROR, LAST_AVAR2_ERROR
 
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
-    avar2_result = _perform_avar2_build(check_sync=False)
+    avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
         LAST_AVAR2_ERROR = None
         print(f"Avar2 font built: {avar2_result['font_path']}", file=sys.stderr)
@@ -2123,84 +2123,6 @@ def _get_avar2_font_dir() -> Optional[Path]:
     return font_dir
 
 
-def _check_preview_csv_sync_status() -> Dict[str, any]:
-    """
-    Check if preview CSV is synced with Glyphs file.
-    
-    Returns dict with:
-    - synced: bool
-    - message: str
-    - glyphs_instances: list of instance names in Glyphs
-    - csv_instances: list of instance names in CSV
-    """
-    try:
-        csv_path = _get_preview_csv_path()
-        if not csv_path or not csv_path.exists():
-            return {
-                "synced": False,
-                "message": "Preview CSV not found",
-                "glyphs_instances": [],
-                "csv_instances": []
-            }
-        
-        if not GLYPHS_PATH or not GLYPHS_PATH.exists():
-            return {
-                "synced": False,
-                "message": "Glyphs file not found",
-                "glyphs_instances": [],
-                "csv_instances": []
-            }
-        
-        glyphs_instances_dict = _csv_io.get_glyphs_instances(GLYPHS_PATH)
-        glyphs_instances = set(glyphs_instances_dict.keys())
-
-        csv_rows, fieldnames = _csv_io.read_csv_mappings(csv_path)
-        instance_name_col = "Instance Name"
-        if instance_name_col not in fieldnames:
-            return {
-                "synced": False,
-                "message": "CSV missing 'Instance Name' column",
-                "glyphs_instances": sorted(glyphs_instances),
-                "csv_instances": []
-            }
-        
-        csv_instances = {row[instance_name_col].strip() for row in csv_rows if row.get(instance_name_col)}
-        
-        # Check if they match
-        missing_in_csv = glyphs_instances - csv_instances
-        missing_in_glyphs = csv_instances - glyphs_instances
-        
-        synced = len(missing_in_csv) == 0 and len(missing_in_glyphs) == 0
-        
-        if synced:
-            message = "CSV is synced with Glyphs file"
-        else:
-            parts = []
-            if missing_in_csv:
-                parts.append(f"{len(missing_in_csv)} instance(s) in Glyphs but not in CSV: {', '.join(sorted(missing_in_csv))}")
-            if missing_in_glyphs:
-                parts.append(f"{len(missing_in_glyphs)} instance(s) in CSV but not in Glyphs: {', '.join(sorted(missing_in_glyphs))}")
-            message = "; ".join(parts)
-        
-        return {
-            "synced": synced,
-            "message": message,
-            "glyphs_instances": sorted(glyphs_instances),
-            "csv_instances": sorted(csv_instances),
-            "missing_in_csv": sorted(missing_in_csv),
-            "missing_in_glyphs": sorted(missing_in_glyphs)
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {
-            "synced": False,
-            "message": f"Error checking sync status: {str(e)}",
-            "glyphs_instances": [],
-            "csv_instances": []
-        }
-
-
 def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
     """Initialize preview CSV from the source file.
 
@@ -2562,7 +2484,6 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
     except Exception as e:
         print(f"Error saving axis metadata: {e}", file=sys.stderr)
         return False
-
 
 
 def _secondary_axis_tags() -> set:
@@ -5640,18 +5561,6 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/check-sync-status', methods=['GET'])
-def check_sync_status():
-    """Check if preview CSV is synced with Glyphs file."""
-    try:
-        status = _check_preview_csv_sync_status()
-        return jsonify(status)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
 def _record_build_failure(result: Dict) -> Dict:
     """Stamp the global last-build status as failed and return the dict."""
     global LAST_BUILD_STATUS, LAST_BUILD_ERROR
@@ -5718,7 +5627,7 @@ def _builder_env(default_overrides: Optional[Dict[str, float]] = None) -> Dict[s
     return build_env
 
 
-def _perform_avar2_build(check_sync: bool = True) -> Dict:
+def _perform_avar2_build() -> Dict:
     """Build the avar2 variable font in-process.
 
     Returns a dict with ``success: bool`` and either ``font_path`` (on success)
@@ -5738,16 +5647,6 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
 
     if BUILDING:
         return {"success": False, "error": "Build already in progress"}
-
-    if check_sync:
-        sync_status = _check_preview_csv_sync_status()
-        if not sync_status.get("synced", False):
-            return _record_build_failure({
-                "success": False,
-                "error": "CSV is not synced with Glyphs file",
-                "details": sync_status.get("message", "Unknown sync error"),
-                "sync_status": sync_status,
-            })
 
     preview_csv = _get_preview_csv_path()
     if not preview_csv or not preview_csv.exists():
@@ -5849,33 +5748,6 @@ def _perform_avar2_build(check_sync: bool = True) -> Dict:
 
     finally:
         BUILDING = False
-
-
-@app.route('/api/build-avar2', methods=['POST'])
-def build_avar2_font():
-    """Build avar2 font from preview CSV with selected axes."""
-    try:
-        data = request.get_json(silent=True) or {}
-
-        # Selected-axes filtering is not yet wired through — params accepted
-        # for compatibility with the existing client.
-        result = _perform_avar2_build(check_sync=True)
-        if not result.get("success"):
-            status = 409 if result.get("error") == "Build already in progress" else 500
-            payload = {k: v for k, v in result.items() if k != "success"}
-            return jsonify(payload), status
-
-        return jsonify({
-            "success": True,
-            "font_path": result["font_path"],
-            "message": "Avar2 font built successfully",
-            "sync_status": _check_preview_csv_sync_status(),
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/avar2-font', methods=['GET'])

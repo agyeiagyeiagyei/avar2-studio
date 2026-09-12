@@ -1270,7 +1270,6 @@ const staticOverrides = {
   // Everything that writes is unavailable on SNAPSHOT datasets (they are
   // read-only demos). On uploaded sources the instance lifecycle is real:
   // the CSV is the source of truth, mutations regenerate the avar2 store.
-  buildAvar2Font: unavailable('Building'),
   createInstance: async (instanceName, coordinates, insertAfter = null) => {
     requireUpload();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates, insertAfter);
