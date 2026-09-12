@@ -3104,13 +3104,23 @@ def export_font():
                 fontc_path = shutil.which("fontc", path=build_env["PATH"])
                 if not fontc_path:
                     return jsonify({"error": "fontc not found in PATH"}), 500
-                builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(export_config.resolve())]
-                result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(export_workdir), env=build_env)
-                if result.returncode != 0:
-                    return jsonify({
-                        "error": "Export build failed",
-                        "details": (result.stderr or result.stdout or "")[-800:],
-                    }), 500
+                # Same in-process pipeline as the preview build (see
+                # _build_in_process); the requested default location rides in
+                # as the declared-axis override, exactly as it did via env.
+                if os.environ.get("AVAR2_STUDIO_GFTOOLS_BUILDER") == "1":
+                    builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(export_config.resolve())]
+                    result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(export_workdir), env=build_env)
+                    if result.returncode != 0:
+                        return jsonify({
+                            "error": "Export build failed",
+                            "details": (result.stderr or result.stdout or "")[-800:],
+                        }), 500
+                else:
+                    try:
+                        _build_in_process(export_config, export_workdir, fontc_path,
+                                          default_overrides=requested)
+                    except Exception as e:  # noqa: BLE001
+                        return jsonify({"error": "Export build failed", "details": str(e)[-800:]}), 500
                 produced = []
                 for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
                     produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
@@ -5634,35 +5644,165 @@ def _builder_env(default_overrides: Optional[Dict[str, float]] = None) -> Dict[s
         + os.pathsep
         + build_env.get("PATH", "")
     )
+    _ranges = _declared_axis_ranges(default_overrides)
+    if _ranges:
+        build_env["AVAR2_STUDIO_AXIS_RANGES"] = json.dumps(_ranges)
+    return build_env
+
+
+def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) -> Dict[str, list]:
+    """{fvar tag: [min, default, max]} for the studio's CREATED axes.
+
+    Upstream gen-avar2 derives a created axis's range purely from the
+    mapping's in: values and sets default=min, which makes the lowest-mapped
+    instance the un-remappable origin of the space. These declared triples
+    put the default where the designer said it is. Shared by the subprocess
+    shim (via env) and the in-process build (directly).
+    """
     try:
         _meta = _load_axis_metadata() or {}
-        _ranges = {}
-        for _col, _m in _meta.items():
-            _tag = (_m.get("registered_tag") or "").strip()
-            if not _tag or _m.get("is_parametric"):
-                continue
-            _lo, _hi = _m.get("min"), _m.get("max")
-            if _lo is None or _hi is None:
-                continue
-            # Same fallback chain as /api/avar2/axes: explicit metadata
-            # default, else the registered-axis convention (wght 400,
-            # opsz 72, …), else the minimum — clamped into range so the
-            # shim never rejects the triple.
-            _d = _m.get("default")
-            if _d is None:
-                _d = TRADITIONAL_AXIS_DEFAULTS.get(_tag.lower(), _lo)
-            _d = max(float(_lo), min(float(_hi), float(_d)))
-            _ranges[_tag] = [float(_lo), _d, float(_hi)]
-        if default_overrides:
-            for _tag, _val in default_overrides.items():
-                if _tag in _ranges:
-                    _lo, _, _hi = _ranges[_tag]
-                    _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
-        if _ranges:
-            build_env["AVAR2_STUDIO_AXIS_RANGES"] = json.dumps(_ranges)
-    except Exception:
-        pass
-    return build_env
+    except Exception:  # noqa: BLE001
+        return {}
+    _ranges: Dict[str, list] = {}
+    for _col, _m in _meta.items():
+        _tag = (_m.get("registered_tag") or "").strip()
+        if not _tag or _m.get("is_parametric"):
+            continue
+        _lo, _hi = _m.get("min"), _m.get("max")
+        if _lo is None or _hi is None:
+            continue
+        # Same fallback chain as /api/avar2/axes: explicit metadata default,
+        # else the registered-axis convention (wght 400, opsz 72, …), else the
+        # minimum — clamped into range so the triple is never rejected.
+        _d = _m.get("default")
+        if _d is None:
+            _d = TRADITIONAL_AXIS_DEFAULTS.get(_tag.lower(), _lo)
+        _d = max(float(_lo), min(float(_hi), float(_d)))
+        _ranges[_tag] = [float(_lo), _d, float(_hi)]
+    if default_overrides:
+        for _tag, _val in default_overrides.items():
+            if _tag in _ranges:
+                _lo, _, _hi = _ranges[_tag]
+                _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
+    return _ranges
+
+
+def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
+                      default_overrides: Optional[Dict[str, float]] = None) -> Path:
+    """The gftools-builder pipeline, without gftools-builder.
+
+    Profiling a rebuild put fontc at 0.06s and ``gftools builder`` at 9.5s:
+    after the compile, ninja spawned four separate Python processes (fix,
+    STAT, avar2, fvar instances), each paying interpreter start-up and a
+    fontTools import, serially. None of that was compilation. This runs the
+    same four library functions the CLIs wrap, in one process, and hands back
+    the font gftools would have written — same name, same tables — so
+    everything downstream (transform chain, promotion to VARIABLE_FONT_PATH)
+    is untouched.
+
+    Fidelity, step by step, each mirroring the CLI it replaces:
+      - fontc gets the flags gftools rewrites from the recipe's fontmake
+        filters (flatten components, decompose transformed components).
+      - fix_font returns a deepcopy; it is saved and re-read so every later
+        step sees exactly what the CLI chain would have loaded from disk.
+      - gen_avar2's gen_fvar_axes is patched with the same fix build/_shims
+        applies: drop in: axes the font already has (the upstream membership
+        bug that duplicated every parametric axis) and give created axes their
+        declared min/default/max.
+      - Per-font sections are passed as LISTS, not filename-keyed dicts, so
+        nothing reaches for TTFont.reader.file.name.
+    """
+    import yaml
+    from fontTools.ttLib import TTFont as _TTFont
+    from gftools.fix import fix_font
+    from gftools.stat import gen_stat_tables_from_config
+    from gftools.scripts import gen_avar2 as _gen_avar2
+    from gftools.scripts.gen_fvar_instances import gen_fvar_instances
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    sources = config.get("sources") or []
+    if not sources:
+        raise RuntimeError("config has no sources")
+    source = Path(sources[0])
+    if not source.is_absolute():
+        source = (config_path.parent / source).resolve()
+
+    # The target filename is the key every per-font section shares. gftools
+    # derives it from family name + source axes; reading it off the config is
+    # exact by construction and avoids re-implementing the naming.
+    keys = [k for k in (config.get("avar2") or {}) if "SC[" not in k] \
+        or [k for k in (config.get("stat") or {}) if "SC[" not in k]
+    if not keys:
+        raise RuntimeError("config has no avar2/stat entry to name the font from")
+    name = keys[0]
+    out_dir = workdir.parent / "fonts" / "variable"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / name
+
+    # 1. compile — the only step that was ever fast
+    cmd = [fontc_path, "-o", str(out), str(source),
+           "--flatten-components", "--decompose-transformed-components"]
+    res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(workdir))
+    if res.returncode != 0 or not out.exists():
+        raise RuntimeError("fontc failed: " + (res.stderr or res.stdout or "no output")[-1000:])
+
+    # 2. fix  (gftools-fix-font -o out in)
+    font = _TTFont(str(out))
+    font = fix_font(font)
+    font.save(str(out)); font.close()
+
+    # 3. STAT  (gftools-gen-stat --inplace --src <stat section>)
+    stat_cfg = (config.get("stat") or {}).get(name)
+    if stat_cfg:
+        font = _TTFont(str(out))
+        gen_stat_tables_from_config(stat_cfg, [font])
+        font.save(str(out)); font.close()
+
+    # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
+    avar2_cfg = (config.get("avar2") or {}).get(name)
+    if avar2_cfg:
+        declared = _declared_axis_ranges(default_overrides)
+        _orig = _gen_avar2.gen_fvar_axes
+
+        def _fixed_gen_fvar_axes(font, mapping):
+            existing = {str(a.axisTag) for a in font["fvar"].axes}
+            filtered = [{**m, "in": {k: v for k, v in m["in"].items() if k not in existing}}
+                        for m in mapping]
+            result = _orig(font, filtered)
+            for a in font["fvar"].axes:
+                tag = str(a.axisTag)
+                if tag in existing or tag not in declared:
+                    continue
+                try:
+                    lo, d, hi = (float(v) for v in declared[tag])
+                except (TypeError, ValueError):
+                    continue
+                if lo <= d <= hi:
+                    a.minValue, a.defaultValue, a.maxValue = lo, d, hi
+            return result
+
+        _gen_avar2.gen_fvar_axes = _fixed_gen_fvar_axes
+        try:
+            font = _TTFont(str(out))
+            _gen_avar2.gen_avar2_mapping(font, avar2_cfg)
+            font.save(str(out)); font.close()
+        finally:
+            _gen_avar2.gen_fvar_axes = _orig
+
+    # 5. fvar instances  (gftools-gen-fvar-instances --inplace in <section>)
+    # gen_fvar_instances print()s a "missing axis, using default" line per
+    # instance per axis. The subprocess swallowed those; in-process they
+    # would flood the server log on every rebuild, so swallow them here too.
+    inst_cfg = (config.get("fvarInstances") or {}).get(name)
+    if inst_cfg:
+        import contextlib
+        import io
+        font = _TTFont(str(out))
+        with contextlib.redirect_stdout(io.StringIO()):
+            gen_fvar_instances(font, inst_cfg)
+        font.save(str(out)); font.close()
+
+    return out
 
 
 def _perform_avar2_build() -> Dict:
@@ -5724,17 +5864,33 @@ def _perform_avar2_build() -> Dict:
         if not fontc_path:
             return _record_build_failure({"success": False, "error": "fontc not found in PATH"})
 
-        builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(config_to_update.resolve())]
-        result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir), env=build_env)
-        if result.returncode != 0:
-            return _record_build_failure({
-                "success": False,
-                "error": "Font build failed",
-                # TAIL, not head: builder stderr opens with pages of
-                # glyphsLib INFO noise; the actual error is at the end.
-                "details": (result.stderr or result.stdout or "No error details")[-1000:],
-            })
+        # Same steps gftools-builder would run, in this process. The subprocess
+        # builder is kept behind AVAR2_STUDIO_GFTOOLS_BUILDER=1 as a safety valve
+        # for a build the in-process path gets wrong — set it and compare.
+        if os.environ.get("AVAR2_STUDIO_GFTOOLS_BUILDER") == "1":
+            builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(config_to_update.resolve())]
+            result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(workdir), env=build_env)
+            if result.returncode != 0:
+                return _record_build_failure({
+                    "success": False,
+                    "error": "Font build failed",
+                    # TAIL, not head: builder stderr opens with pages of
+                    # glyphsLib INFO noise; the actual error is at the end.
+                    "details": (result.stderr or result.stdout or "No error details")[-1000:],
+                })
+        else:
+            try:
+                _build_in_process(config_to_update, workdir, fontc_path)
+            except Exception as e:  # noqa: BLE001
+                return _record_build_failure({
+                    "success": False,
+                    "error": "Font build failed",
+                    "details": str(e)[-1000:],
+                })
 
+            class _R:  # the post-build code reads .stdout for its error text
+                stdout = ""
+            result = _R()
         project_fonts_dir = workdir.parent / "fonts" / "variable"
         produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not produced:
