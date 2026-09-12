@@ -57,3 +57,8 @@ frontend/dist-pages/
 # Rust/wasm build artifacts
 wasm/fontc-web/pkg/
 wasm/fontc-web/target/
+
+# Keep the (otherwise gitignored, CI-populated) static dir present in every
+# clone: hatchling force-includes it, and `pip install git+…` on a fresh
+# checkout fails metadata generation when it is missing.
+!src/avar2_studio/static/.gitkeep
