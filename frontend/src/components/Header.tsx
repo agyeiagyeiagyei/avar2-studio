@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './Header.css';
 import { api } from '../api';
-import logoGif from '../assets/logo.gif';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
 import GradeDiagnostics from './GradeDiagnostics';
 import {
@@ -326,7 +325,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     <>
     <header className="header">
       <div className="header-title">
-        <img className="header-logo" src={logoGif} alt="avar2 studio" />
+        <span className="header-logo">avar2studio</span>
         {loadingMsg && <span className="header-loading-msg">{loadingMsg}</span>}
       </div>
       <div className="header-actions">
@@ -360,7 +359,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               <button
                 className="load-font-item load-font-item-upload"
                 onClick={handleUploadClick}
-                title={staticMode ? 'Uploads trigger a build — they need the full app' : undefined}
+                title={staticMode ? 'Compiles in your browser (fontc-wasm) — nothing is sent to a server' : undefined}
               >
                 <div className="load-font-item-name">Upload .glyphs or project .zip…</div>
                 <div className="load-font-item-subtitle">
@@ -374,11 +373,11 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                   <button
                     className="load-font-item"
                     onClick={handleForgetSession}
-                    title="Clear the auto-restored session and unload this project back to the example"
+                    title="Discard this project's saved session and reload the pristine example"
                   >
                     <div className="load-font-item-name" style={{ color: '#c0392b' }}>Forget this project</div>
                     <div className="load-font-item-subtitle">
-                      Clear the saved session (auto-restored on every visit) and unload back to the example
+                      Discard the saved session (auto-restored on every visit) and reload the pristine example
                     </div>
                   </button>
                 </>

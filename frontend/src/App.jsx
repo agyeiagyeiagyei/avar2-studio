@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
 import { isStaticMode, isUploadDataset, getSampleText, setSampleText as persistSampleText } from './static-api';
-import logoGif from './assets/logo.gif';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
@@ -2143,7 +2142,7 @@ function App() {
         )}
         {building && (
           <div className="build-veil" aria-live="polite">
-            <img className="build-veil-logo" src={logoGif} alt="" />
+            <span className="build-veil-logo">avar2studio</span>
             <span className="build-veil-text">Rebuilding — hold your edits…</span>
           </div>
         )}

@@ -67,7 +67,7 @@
 }
 
 /* Build-in-flight veil: dims + freezes the workspace (the "pause your
-   edits" cue) with the animated logo until the new build lands. */
+   edits" cue) with the wordmark until the new build lands. */
 .build-scope {
   position: relative;
   display: flex;
@@ -103,7 +103,10 @@
 }
 
 .build-veil-logo {
-  height: 4rem;
+  font-weight: 700;
+  font-size: 3rem;
+  line-height: 1;
+  color: #000000;
 }
 
 .build-veil-text {
