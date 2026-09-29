@@ -1470,7 +1470,7 @@ def _outline_to_layer_data(outline) -> Optional[Dict[str, object]]:
         return None
     try:
         from glyphsLib.classes import GSAnchor, GSComponent, GSNode, GSPath
-        from glyphsLib.types import Transform
+        from glyphsLib.types import Point, Transform
 
         paths = []
         for p in outline.get("paths") or []:
@@ -1488,8 +1488,15 @@ def _outline_to_layer_data(outline) -> Optional[Dict[str, object]]:
             if c.get("transform"):
                 gc.transform = Transform(*[float(v) for v in c["transform"]])
             components.append(gc)
+        # Anchor positions must be glyphsLib Point objects: a plain tuple
+        # serializes as a quoted string ('pos = "(70, 0)"'), which
+        # glyphs-reader refuses to parse — a stored outline with anchors
+        # then breaks the fontc shadow build.
+        def whole(v):
+            f = float(v)
+            return int(f) if f == int(f) else f
         anchors = [
-            GSAnchor(a.get("name"), (float(a.get("x", 0)), float(a.get("y", 0))))
+            GSAnchor(a.get("name"), Point(whole(a.get("x", 0)), whole(a.get("y", 0))))
             for a in (outline.get("anchors") or [])
         ]
         return {

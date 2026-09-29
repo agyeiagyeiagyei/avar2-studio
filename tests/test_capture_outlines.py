@@ -132,3 +132,31 @@ def test_correction_layers_are_not_captured(crispy_source):
     _draw_into(shadow, "e", tag="lcwd")
     assert control_axes.capture_outlines(crispy_source) == 0
     assert "outline" not in control_axes.list_axes(crispy_source)[0]["layers"][0]
+
+
+def test_restored_anchors_write_unquoted(crispy_source):
+    """Regression: a stored outline's anchors must restore as glyphsLib
+    Points. Plain tuple/float positions serialize as quoted strings
+    ('pos = "(70.0, 0.0)"'), which glyphs-reader refuses to parse — the
+    fontc shadow build then fails on any stored outline with anchors."""
+    control_axes.add_axis(crispy_source, "ymod", "Horizontal correction", 0, 0, 100)
+    outline = {
+        "width": 421.0,
+        "paths": [{"closed": True,
+                   "nodes": [[0.0, 0.0, "line"], [100.0, 0.0, "line"],
+                             [100.0, 100.0, "line"], [0.0, 100.0, "line"]]}],
+        "components": [],
+        "anchors": [{"name": "bottom", "x": 70.0, "y": 0.0},
+                    {"name": "top", "x": 70.0, "y": 1200.0}],
+    }
+    control_axes.set_layers(crispy_source, "ymod", [
+        {"glyph": "e", "location": {"ymod": 100, "XOPQ": 500},
+         "outline": outline},
+    ])
+    shadow = control_axes.regenerate_shadow(crispy_source)
+    assert shadow is not None
+    assert 'pos = "' not in shadow.read_text()
+    _, layer = _brace(shadow, "e")
+    assert layer is not None
+    assert [(a.name, a.position.x, a.position.y) for a in layer.anchors] == [
+        ("bottom", 70, 0), ("top", 70, 1200)]
