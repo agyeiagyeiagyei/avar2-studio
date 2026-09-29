@@ -1,13 +1,20 @@
 name: Release
 
-# Build a wheel + sdist containing the React bundle and attach them to
-# a GitHub Release whenever a tag matching ``v*`` is pushed. Also
-# runnable manually (workflow_dispatch) — in that mode the workflow
-# uploads the artifacts to the run page so you can verify the build
-# without cutting a release.
+# Build the sdist + wheel (both carrying the React bundle), attach them
+# to a GitHub Release and publish them to PyPI whenever a tag matching
+# ``v*`` is pushed. Also runnable manually (workflow_dispatch): by
+# default that only uploads the artifacts to the run page so the build
+# can be checked without cutting a release; with ``publish_to:
+# testpypi`` it also publishes them to TestPyPI as a dry run.
+#
+# Publishing uses PyPI trusted publishing — no API token in secrets.
+# One-time setup: on pypi.org (and test.pypi.org for the dry run) add
+# this repository as a trusted publisher of the ``avar2-studio``
+# project, workflow ``release.yml``, environment ``pypi`` (``testpypi``
+# on the test index).
 #
 # Version source: hatchling reads pyproject.toml's ``project.version``.
-# Bump that version *before* you push the tag, otherwise the wheel
+# Bump that version *before* you push the tag, otherwise the artifacts
 # will not match the tag name.
 
 on:
@@ -15,12 +22,20 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      publish_to:
+        description: 'Publish the build (manual runs only)'
+        type: choice
+        options:
+          - none
+          - testpypi
+        default: none
 
 permissions:
   contents: write   # needed by softprops/action-gh-release
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -43,7 +58,7 @@ jobs:
       - name: Install Python build tooling
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install build twine
 
       - name: Build frontend
         working-directory: frontend
@@ -70,18 +85,17 @@ jobs:
           rsync -a frontend/build/ src/avar2_studio/static/
           ls -la src/avar2_studio/static/ | head -20
 
-      - name: Build wheel
-        # --wheel skips the sdist-then-wheel round-trip ``python -m build``
-        # does by default. We have to skip it because the React bundle in
-        # src/avar2_studio/static/ is gitignored, so the intermediate sdist
-        # doesn't include it, and the wheel build from the unpacked sdist
-        # then fails with "Forced include not found". Building the wheel
-        # directly from the source tree picks up the populated static dir
-        # that the previous step rsync'd in.
-        run: python -m build --wheel
+      - name: Build sdist and wheel
+        # ``python -m build`` builds the sdist, then the wheel from the
+        # unpacked sdist. The React bundle is gitignored, but
+        # pyproject.toml lists it as an sdist artifact, so the sdist
+        # carries it and the wheel built from it is the full studio.
+        run: python -m build
 
-      - name: List built artifacts
-        run: ls -la dist/
+      - name: Check the artifacts
+        run: |
+          twine check dist/*
+          ls -la dist/
 
       - name: Upload artifacts (always)
         uses: actions/upload-artifact@v4
@@ -97,3 +111,42 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/*.whl
+            dist/*.tar.gz
+
+  publish-pypi:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing
+
+    steps:
+      - name: Download the built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write   # trusted publishing
+
+    steps:
+      - name: Download the built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

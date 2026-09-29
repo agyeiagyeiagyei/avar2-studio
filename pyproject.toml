@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "avar2-studio"
-version = "0.1.0.dev8"
+version = "0.1.0"
 description = "Visual authoring and preview tool for avar2 variable fonts"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,7 +51,14 @@ avar2-studio = "avar2_studio.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/agyeiagyeiagyei/avar2-studio"
+Demo = "https://agyeiagyeiagyei.github.io/avar2-studio/"
 Issues = "https://github.com/agyeiagyeiagyei/avar2-studio/issues"
+
+[tool.hatch.build.targets.sdist]
+# The React bundle is gitignored (CI assembles it into static/). Carry it
+# in the sdist anyway: a wheel built from the sdist is then the full
+# studio rather than the headless install that answers 503.
+artifacts = ["src/avar2_studio/static/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/avar2_studio"]

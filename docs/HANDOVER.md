@@ -36,13 +36,18 @@ Everything below is tribal knowledge as of this handover.
   deleted, the fly app destroyed) — don't look for it.
 - Notable parked branch: `grade-comparison` (WIP — grade-master
   comparison sidebar using uharfbuzz advances).
-- **Releases:** pushing a `v0.1.0.devN` tag triggers
+- **Releases:** pushing a `v*` tag triggers
   `.github/workflows/release.yml`, which builds the React bundle,
-  assembles the wheel (bundle force-included at
-  `src/avar2_studio/static/`), and attaches it to a GitHub Release. The
-  latest release is **v0.1.0.dev6 (June) but `pyproject.toml` is at
-  dev8** — the released wheel predates nearly everything below; tagging
-  a fresh release is the single highest-leverage chore. Not on PyPI yet.
+  the sdist and the wheel (the bundle is gitignored but listed as an
+  sdist artifact in `pyproject.toml`, so both carry it and are
+  force-included at `src/avar2_studio/static/`), `twine check`s them,
+  attaches them to a GitHub Release and publishes them to PyPI through
+  trusted publishing (environment `pypi`; a manual run with
+  `publish_to: testpypi` is the dry run, environment `testpypi`). The
+  trusted publisher must be registered on pypi.org / test.pypi.org
+  once, by hand. `pyproject.toml` is at **0.1.0, the first PyPI
+  release**; the earlier `v0.1.0.dev2`–`dev6` tags were GitHub-only
+  wheels.
 - **The Crispy repo** (`~/Documents/Crispy`) is the parent project this
   tool was extracted from. The legacy `preview-app/` and all avar2
   tooling there are now in `archive/avar2-tooling/` (gitignored,
@@ -369,11 +374,12 @@ fontc ~0.09s, startup ~1-2s.
 
 ## 6. Suggested first week
 
-1. Tag a release (`pyproject` is at dev8; the latest release is dev6
-   and predates control axes, the Preview tab, transforms, grade, the
-   whole static app).
+1. Tag `v0.1.0`, the first PyPI release: the packaging and the publish
+   workflow are in place (see *Releases* in §1); registering the
+   trusted publisher on pypi.org is the one manual step, and a
+   `publish_to: testpypi` run is the rehearsal.
 2. Fix the server's avar2 reflection evaluator (§4.2) — or route the
    full app through the wasm/JS evaluator that already agrees with
    HarfBuzz.
-3. Then the roadmap in README (PyPI, `.designspace` authoring,
+3. Then the roadmap in README (`.designspace` authoring,
    push-to-source sync) in whatever order the designer needs.
