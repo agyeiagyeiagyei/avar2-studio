@@ -29,6 +29,7 @@ from .builtin_gftools import (
     FixUnhintedTransform,
     GenStatTransform,
 )
+from .builtin_round_corners import RoundCornersTransform
 from .builtin_spac import SpacTransform
 from .builtin_spac_widthaware import WidthAwareSpacTransform
 
@@ -62,6 +63,7 @@ def discover(force: bool = False) -> None:
     register(FixInstancesTransform())
     register(GenStatTransform())
     register(FixUnhintedTransform())
+    register(RoundCornersTransform())
 
     # User scripts.
     d = user_transforms_dir()
@@ -136,15 +138,17 @@ def available(source_path: Path) -> List[Dict]:
     return out
 
 
-def active(source_path: Path) -> List[Tuple[Transform, Dict]]:
+def active(source_path: Path, stage: str = "font") -> List[Tuple[Transform, Dict]]:
     """Build list: ordered ``(transform, params)`` for enabled entries whose
-    type is a registered transform. Preserves the sidecar's order."""
+    type is a registered transform OF THAT STAGE. Preserves the sidecar's
+    order. The default is the post-build (font) stage, which is what every
+    pre-existing caller means."""
     out: List[Tuple[Transform, Dict]] = []
     for e in _config.entries(source_path):
         if not e["enabled"]:
             continue
         t = REGISTRY.get(e["type"])
-        if t is None:
+        if t is None or getattr(t.spec, "stage", "font") != stage:
             continue
         out.append((t, t.spec.coerce_params(e["params"])))
     return out

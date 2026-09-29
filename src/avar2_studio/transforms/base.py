@@ -1,9 +1,16 @@
 """Transform interface — the contract every post-build transform implements.
 
-A **transform** is a pure VF→VF post-build step: it takes one compiled
-``.ttf`` and returns a (possibly new) ``.ttf``. It never edits the source
-``.glyphs``, the shadow, or the CSV — that keeps transforms orthogonal to
-the control-axis/shadow machinery and lets them compose by chaining.
+A **transform** runs at one of two stages:
+
+- ``stage="font"`` (the default): a pure VF→VF post-build step — one
+  compiled ``.ttf`` in, a (possibly new) ``.ttf`` out. It never edits
+  the source ``.glyphs``, the shadow, or the CSV.
+- ``stage="source"``: a pre-compile step over the COMPOSED SHADOW
+  ``.glyphs`` (never the user's original), mutating the loaded font in
+  place through :meth:`Transform.apply_to_source` — corner rounding
+  lives here. Source-stage transforms run after the control-axis and
+  grade braces are generated, so everything that interpolates goes
+  through them together.
 
 Built-in transforms live in :mod:`avar2_studio.transforms.builtin_*`.
 User transforms are ordinary ``.py`` files dropped into
@@ -76,6 +83,7 @@ class TransformSpec:
     id: str                            # stable key persisted in the sidecar
     name: str                          # header label
     description: str = ""              # one-line subtitle
+    stage: str = "font"                # "font" (post-build VF→VF) or "source" (shadow .glyphs)
     params: List[ParamSpec] = field(default_factory=list)
     default_enabled: bool = False
     # If this transform injects an fvar axis (e.g. SPAC), its tag. The registry
@@ -88,6 +96,7 @@ class TransformSpec:
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "stage": self.stage,
             "params_schema": [p.to_dict() for p in self.params],
             "default_enabled": self.default_enabled,
             "injected_axis_tag": self.injected_axis_tag,
@@ -135,4 +144,10 @@ class Transform:
         ``vf_path.parent`` (co-located with the build) so the served-font
         plumbing stays consistent.
         """
+        raise NotImplementedError
+
+    def apply_to_source(self, font, params: dict, ctx: BuildContext):
+        """Source stage only: mutate the loaded shadow ``GSFont`` in
+        place. The caller saves it and compiles from it. Never handed the
+        user's original."""
         raise NotImplementedError

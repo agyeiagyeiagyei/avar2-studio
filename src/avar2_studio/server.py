@@ -167,6 +167,12 @@ LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
 # served instead. The fallback keeps LAST_BUILD_STATUS "ok", which made
 # avar2 failures invisible — the preview silently lost its mapped axes.
 LAST_AVAR2_ERROR: Optional[str] = None
+# Set when grade is declared but its braces could not be generated — the
+# built font is then missing its GRAD axis, which must not pass as ok.
+LAST_GRADE_ERROR: Optional[str] = None
+# Set when an enabled SOURCE-stage transform (round_corners) failed: the
+# font then built from the un-transformed source, which must not pass as ok.
+LAST_SOURCE_TRANSFORM_ERROR: Optional[str] = None
 
 # Registered-axis conventions, used wherever a declared axis has no
 # explicit default: the /api/avar2/axes response AND the compiled-axis
@@ -995,9 +1001,12 @@ def _resolve_active_source() -> Optional[Path]:
     ONLY on the grade-edit path, so a plain reload silently dropped the GRAD
     axis from the built font.
     """
-    global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL
+    global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL, LAST_GRADE_ERROR
+    global LAST_SOURCE_TRANSFORM_ERROR
     if ORIGINAL_PATH is None:
         return GLYPHS_PATH
+    LAST_GRADE_ERROR = None
+    LAST_SOURCE_TRANSFORM_ERROR = None
 
     # 1) control-axis shadow (brace layers). regenerate_shadow returns None
     #    when the sidecar declares no control axes; a shadow with an axis but no
@@ -1029,9 +1038,51 @@ def _resolve_active_source() -> Optional[Path]:
                 any_grades = True
                 _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
     except Exception as exc:  # noqa: BLE001
+        LAST_GRADE_ERROR = str(exc)
         print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
 
-    GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades)) else ORIGINAL_PATH
+    # 3) source-stage transforms (round_corners), over a BUILD COPY of the
+    #    composed shadow (or the original), so the control and grade braces
+    #    generated above go through them together with the masters. Never
+    #    the canonical shadow itself: the shadow is regen's STATE, and its
+    #    preserve-what-the-designer-drew pass would capture a transformed
+    #    brace as a hand drawing and leak it into later untransformed
+    #    builds (measured: a rounded lcwd brace against sharp masters is
+    #    exactly fontc's "interpolation-incompatible paths"). A failure
+    #    keeps the un-transformed source and is surfaced — a silently
+    #    sharp font must not pass as ok.
+    any_source = False
+    src_chain = []
+    try:
+        _transforms.discover()
+        src_chain = _transforms.active(ORIGINAL_PATH, stage="source")
+    except Exception as exc:  # noqa: BLE001
+        print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
+    if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
+        current = None
+        try:
+            base = shadow if shadow is not None else ORIGINAL_PATH
+            transformed = (_control_axes.shadow_dir_for(ORIGINAL_PATH)
+                           / "transformed" / ORIGINAL_PATH.name)
+            transformed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(base, transformed)
+            from glyphsLib import GSFont as _GSFont
+            font = _GSFont(str(transformed))
+            ctx = _build_context()
+            for current, params in src_chain:
+                current.apply_to_source(font, params, ctx)
+            from .source_font import save_font_atomically as _save_atomically
+            _save_atomically(font, transformed)
+            shadow = transformed
+            any_source = True
+        except Exception as exc:  # noqa: BLE001
+            name = current.spec.id if current is not None else "source-stage transforms"
+            LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
+            print(f"Warning: source transform failed, building without it: "
+                  f"{LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+
+    GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
+        else ORIGINAL_PATH
     return GLYPHS_PATH
 
 
@@ -2042,6 +2093,8 @@ def health():
             # Non-null ⇒ the served font is the plain fallback build;
             # the avar2 build is failing for this reason.
             "avar2_error": LAST_AVAR2_ERROR,
+            "grade_error": LAST_GRADE_ERROR,
+            "source_transform_error": LAST_SOURCE_TRANSFORM_ERROR,
             # True ⇒ the mappings CSV changed after the last build —
             # the served font's avar2 table is stale. Auto-saved
             # coordinate edits set this instead of rebuilding; the
@@ -3254,12 +3307,27 @@ def update_transforms():
             # Invalid config (e.g. SPAC min >= max) — reject with feedback
             # instead of persisting an enabled-but-doomed transform.
             return jsonify({"error": str(ve)}), 400
+        # A change that involves a SOURCE-stage transform (round_corners) —
+        # enabling one, disabling one, or changing its params — changes the
+        # FILE the compiler must read, so it goes through the same
+        # regen-and-rebuild path the grade toggle uses: that re-resolves the
+        # build source AND repoints the build config at it. trigger_build
+        # alone reuses both, which is the font-stage assumption this handler
+        # was written under.
+        source_types = set()
+        try:
+            source_types = {tid for tid, t in _transforms.REGISTRY.items()
+                            if getattr(t.spec, "stage", "font") == "source"}
+        except Exception as exc:  # noqa: BLE001
+            print(f"transforms: could not read the registry stages: {exc}", file=sys.stderr)
+        touched = {e.get("type") for e in entries} | {e.get("type") for e in stored}
+        rebuild = _run_shadow_regen_and_build if touched & source_types else trigger_build
         # NB: do NOT null VARIABLE_FONT_PATH here. trigger_build() reassigns it
         # on any successful build and leaves it untouched on failure, so the
         # last-good font keeps serving if the rebuild fails.
         build_ok = False
         try:
-            build_ok = trigger_build()
+            build_ok = rebuild()
         except Exception as build_exc:
             print(f"Warning: rebuild after transforms update failed: {build_exc}", file=sys.stderr)
         # A transform can fail even when the base font compiled fine — surface
