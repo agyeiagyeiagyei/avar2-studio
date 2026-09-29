@@ -9,6 +9,10 @@ tool: drag a node, and the same movement is applied live to the same
 - Panel lists all masters with checkboxes.
 - "Sync edits" toggle turns propagation on/off.
 - Only point moves are synced; structural edits (add/delete) are not.
+- What moved is read off the active layer, node by node, so the handles
+  the Select tool takes along with an on-curve node are synced too.
+- A master whose nodes differ from the active layer's is left alone and
+  named in the panel: there the same index is a different point.
 
 Undo: one step per target layer per drag, via beginChanges/endChanges.
 """
@@ -33,6 +37,8 @@ except ImportError:
 
 DEBUG = False  # flip to True for /tmp instrumentation while developing
 _DEBUG_LOG = "/tmp/multisourceedit-debug.log"
+
+STATUS_H = 58  # four lines of small text: the masters that were not synced
 
 
 def _dbg(msg):
@@ -67,8 +73,8 @@ class MultiSourceEdit(SelectTool):
 
         # Drag state
         self._dragStart = None          # drag start location (active layer coords)
-        self._selectedNodeKeys = []     # [(pathIdx, nodeIdx), ...]
-        self._activeInitial = {}        # nodeKey -> (x, y)
+        self._activeInitial = {}        # nodeKey -> (x, y), every node of the active layer
+        self._movedKeys = set()         # nodeKeys that have left their initial position
         self._targetInitial = {}        # layerId -> {nodeKey: (x, y)}
         self._targetLayers = {}         # layerId -> layer object
         self._targetsBegun = False      # whether beginChanges was called
@@ -155,19 +161,26 @@ class MultiSourceEdit(SelectTool):
         return result
 
     # ------------------------------------------------------------------
-    # node selection helpers
+    # node helpers
     # ------------------------------------------------------------------
 
     @objc.python_method
-    def _computeSelectedNodeKeys(self, layer):
-        """[(pathIndex, nodeIndex)] for nodes currently in layer.selection."""
-        keys = []
-        selection = set(layer.selection)
+    def _nodePositions(self, layer):
+        """{(pathIndex, nodeIndex): (x, y)} for every node of the layer."""
+        positions = {}
         for pathIdx, path in enumerate(layer.paths):
             for nodeIdx, node in enumerate(path.nodes):
-                if node in selection:
-                    keys.append((pathIdx, nodeIdx))
-        return keys
+                pos = node.position
+                positions[(pathIdx, nodeIdx)] = (pos.x, pos.y)
+        return positions
+
+    @objc.python_method
+    def _structure(self, layer):
+        """Per path: closed or open, and the node types in order. Where
+        two layers differ in this, the same (path, node) index is not the
+        same point."""
+        return [(bool(path.closed), [node.type for node in path.nodes])
+                for path in layer.paths]
 
     @objc.python_method
     def _nodeAt(self, layer, key):
@@ -196,6 +209,9 @@ class MultiSourceEdit(SelectTool):
         w.mastersLabel = TextBox((12, y, 200, 20), "Masters:")
         y += 22
         self._mastersY = y
+        # Kept to the bottom edge, so it stays under the master rows
+        # however many there are.
+        w.statusLine = TextBox((12, -STATUS_H - 8, -12, STATUS_H), "", sizeStyle="small")
         self._refreshMasters()
         w.open()
         ns = self._nswindow()
@@ -236,6 +252,11 @@ class MultiSourceEdit(SelectTool):
         if self._panel is not None:
             self._panel.syncBox.set(False)
         self._hide_panel()
+
+    @objc.python_method
+    def _setStatus(self, text):
+        if self._panel is not None:
+            self._panel.statusLine.set(text)
 
     @objc.python_method
     def _syncToggled(self, sender):
@@ -280,7 +301,7 @@ class MultiSourceEdit(SelectTool):
             attr = "master_%s" % m.id.replace("-", "_")
             setattr(w, attr, cb)
             self._masterRows[m.id] = cb
-        height = self._mastersY + rows * 22 + 12
+        height = self._mastersY + rows * 22 + 12 + STATUS_H + 8
         try:
             w.resize(280, height)
         except Exception:
@@ -293,6 +314,7 @@ class MultiSourceEdit(SelectTool):
     def mouseDown_(self, theEvent):
         objc.super(MultiSourceEdit, self).mouseDown_(theEvent)
         self._cancelDrag()
+        self._setStatus("")
 
         if not self.syncActive:
             return
@@ -311,25 +333,28 @@ class MultiSourceEdit(SelectTool):
                 return
 
             self._dragStart = self.editViewController().graphicView().getActiveLocation_(theEvent)
-            self._selectedNodeKeys = self._computeSelectedNodeKeys(layer)
 
-            # Record initial positions in active layer
-            self._activeInitial = {}
-            for key in self._selectedNodeKeys:
-                node = self._nodeAt(layer, key)
-                if node is not None:
-                    self._activeInitial[key] = (node.position.x, node.position.y)
+            # Record initial positions in active layer: of every node, not
+            # of the selection. The Select tool moves nodes that are not
+            # selected (the handles next to a dragged on-curve node).
+            self._activeInitial = self._nodePositions(layer)
 
-            # Record initial positions in target layers
+            # Record initial positions in target layers. A master whose
+            # nodes differ is left out: the same index is another point
+            # there, and an index past the end wraps around.
+            structure = self._structure(layer)
+            names = dict((m.id, m.name) for m in font.masters)
+            skipped = []
             self._targetInitial = {}
             self._targetLayers = {}
             for mid, targetLayer in self._targetMasterLayers(glyph, activeMid):
+                if self._structure(targetLayer) != structure:
+                    skipped.append(names[mid])
+                    continue
                 self._targetLayers[mid] = targetLayer
-                self._targetInitial[mid] = {}
-                for key in self._selectedNodeKeys:
-                    node = self._nodeAt(targetLayer, key)
-                    if node is not None:
-                        self._targetInitial[mid][key] = (node.position.x, node.position.y)
+                self._targetInitial[mid] = self._nodePositions(targetLayer)
+            if skipped:
+                self._setStatus("Not synced — different nodes: %s" % ", ".join(skipped))
 
             # Begin undo group for target layers
             if self._targetLayers:
@@ -351,24 +376,31 @@ class MultiSourceEdit(SelectTool):
 
         try:
             layer = self.editViewController().graphicView().activeLayer()
-            if layer is None or not self._selectedNodeKeys:
+            if layer is None:
                 return
 
-            # Compute the actual delta applied to the active layer by the
-            # standard tool (captures snapping/constraints if any).
-            firstKey = self._selectedNodeKeys[0]
-            node = self._nodeAt(layer, firstKey)
-            if node is None or firstKey not in self._activeInitial:
+            # Read the actual delta of every node off the active layer
+            # (captures the handles that follow a node, snapping and
+            # constraints). The initial positions are by index, so they
+            # say nothing once the layer has other nodes.
+            current = self._nodePositions(layer)
+            # Held in locals: an attribute of the tool costs more than the
+            # rest of the loop, and the loop runs over every node.
+            initial, moved = self._activeInitial, self._movedKeys
+            if set(current) != set(initial):
                 return
-            dx = node.position.x - self._activeInitial[firstKey][0]
-            dy = node.position.y - self._activeInitial[firstKey][1]
+            deltas = {}
+            for key, (x, y) in current.items():
+                x0, y0 = initial[key]
+                if (x, y) != (x0, y0):
+                    moved.add(key)
+                if key in moved:  # moved, or moved and back again
+                    deltas[key] = (x - x0, y - y0)
 
-            # Apply same delta to all target layers
+            # Apply each node's delta to all target layers
             for mid, targetLayer in self._targetLayers.items():
-                initials = self._targetInitial.get(mid, {})
-                for key in self._selectedNodeKeys:
-                    if key not in initials:
-                        continue
+                initials = self._targetInitial[mid]
+                for key, (dx, dy) in deltas.items():
                     targetNode = self._nodeAt(targetLayer, key)
                     if targetNode is not None:
                         targetNode.position = (
@@ -399,8 +431,8 @@ class MultiSourceEdit(SelectTool):
                     _dbg("EXCEPTION")
             self._targetsBegun = False
         self._dragStart = None
-        self._selectedNodeKeys = []
         self._activeInitial = {}
+        self._movedKeys = set()
         self._targetInitial = {}
         self._targetLayers = {}
 

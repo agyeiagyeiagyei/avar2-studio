@@ -34,7 +34,7 @@ the links and the record.
   answers, or the failure, with the server's log tail in the Macro panel.
 - **Stop avar2 Studio** — ends the server this menu started (it is also
   stopped when Glyphs quits). Servers started elsewhere are left alone.
-- **Corner Radii**, **Instance Delta**, **Parametric Masters**, **Slant
+- **Corner Radii**, **Instance Delta**, **Metrics Parity**, **Slant
   Master**, **Width Matcher** — toggle the reporters; the check mark
   mirrors View → Show ….
 - **Multi-Source Edit** — selects the tool in the toolbar.
@@ -48,7 +48,13 @@ Audits and edits rounded corners. Enable via **View → Show Corner Radii**;
 a floating panel opens alongside the Edit view.
 
 Every rounded corner in the current glyph is detected and least-squares-fit
-with a circle. The overlay draws:
+with a circle. A rounded corner is a run of one or more curve segments
+between two straight segments whose extensions meet at a virtual corner;
+a round drawn in several pieces (with on-curve nodes in the arc) counts
+as one. A half-circle end between parallel straights — a pill's end, an
+arch — is not a corner: there is nothing to scale it about and its radius
+is fixed by the distance between the straights, so Apply and Sharpen
+leave it alone. The overlay draws:
 
 - **gray circle** — the current fitted radius (amber when the round is
   poorly circular: fit residual > 8% of the radius)
@@ -64,16 +70,29 @@ Panel controls:
   vs counter corners (fields, or −/+ in 0.05 steps). **Reset ×** restores
   1.00.
 - **Show** toggles — Circles, Handles, Outlines; **Flag outer/inner
-  overlaps**; **Baseline corners only** (restricts detection to corners
-  whose virtual corner sits within ±10 units of y = 0).
+  overlaps**; **Baseline corners only** (restricts Apply and Sharpen to
+  corners whose virtual corner sits within ±10 units of y = 0 in every
+  layer in scope; a round that is on the baseline in some masters only is
+  left alone in all of them and the glyph is named in the panel; the
+  overlay shows the corners of the layer on screen).
 - **Apply to** — scope: Current glyph / All glyphs / All glyphs, this
   master (the "→" hint shows which master was resolved) / Entire font,
-  plus per-master checkboxes. Font-wide scopes also transform
-  brace/bracket layers.
+  plus per-master checkboxes. Font-wide scopes also transform each
+  glyph's special layers (brace, bracket and colour layers); backup
+  layers are never touched.
 - **Apply** — rewrites node positions in place, keeping the same node
-  slots, so masters stay interpolation-compatible.
-- **Sharpen** — replaces each round with a single sharp corner node at the
-  virtual corner (batched equivalent of Glyphs' "Sharpen Corners").
+  slots, so masters stay interpolation-compatible. A glyph in which a
+  scaled round would outgrow the straight it sits on (into the next
+  round, or past the next node, leaving less than 2 units of straight)
+  is left unchanged in every layer in scope and named in the panel.
+- **Sharpen** — replaces each round with a single sharp corner node at
+  the virtual corner (batched equivalent of Glyphs' "Sharpen Corners").
+  Decided per glyph: only rounds found in every layer in scope with the
+  same node structure are removed, so the layers keep matching node
+  counts; the rest are left alone and the glyph is named.
+- Two status lines under the buttons say what Apply and Sharpen did and
+  name the glyphs they left alone (the first eight; the Macro window
+  lists them all).
 
 All edits are wrapped in one undo group per layer. The geometry core is
 `Contents/Resources/cornerfit.py`, a pure-Python module with no Glyphs API
@@ -86,16 +105,21 @@ Draws a comparison glyph — from a master or an interpolated instance —
 behind the glyph being edited, and reports the advance-width difference.
 Enable via **View → Instance Delta**.
 
-- **Compare** popup lists `Master: …` then `Instance: …` entries. A master
-  is read straight off the glyph (exact, free); an instance is
-  interpolated once via `instance.interpolatedFont` and cached —
-  re-interpolated on selection change, font change, or the **Refresh**
-  button. The Width Matcher scratch instance is excluded from the list.
+- **Compare** popup lists `Master: …` then `Instance: …` entries;
+  entries that share a name are numbered in Font Info order
+  (`Instance: Def`, `Instance: Def (2)`), and the pick follows the master
+  or instance itself, not its name or row. A master is read straight off
+  the glyph (exact, free); an instance is interpolated once via
+  `instance.interpolatedFont` and cached — re-interpolated on selection
+  change, font change, when the instance's axis values change, or the
+  **Refresh** button. Outline edits to the masters are not detected:
+  press **Refresh** to see them. The Width Matcher scratch instance is
+  excluded from the list.
 - Both outlines share x = 0, so the advance delta reads directly as the
   gap between the gray edit-advance marker and the colored
   instance-advance marker (**Advance markers** toggles them).
 - The overlay draws for every glyph in the tab; the readout tracks the
-  active glyph.
+  active glyph and names the compared row as the popup does.
 - Closing the panel with the red X turns the reporter off (panel and
   overlay) until it is re-selected in the View menu.
 
@@ -105,29 +129,33 @@ A Select-tool variant that propagates node drags across masters. Pick it
 in the toolbar; its floating panel lists a **Sync edits** toggle plus one
 checkbox per master (all checked by default).
 
-With sync on, dragging a node applies the same delta live to the node at
-the same (path, node) index in every checked master of that glyph. The
-delta is read back from the first selected node in the active layer, so
-snapping and constraints are captured; a multi-node drag syncs as a rigid
-translation. Only point moves are synced — structural edits (adding or
-deleting nodes) are not. Each drag closes as one undo step per target
-layer. Closing the panel turns sync off; selecting the tool again
-re-shows it.
+With sync on, dragging applies each moved node's delta live to the node
+at the same (path, node) index in every checked master of that glyph.
+What moved is read back from the active layer node by node, so the
+handles Glyphs takes along with an on-curve node, snapping and
+constraints are all captured. A checked master whose node structure
+differs from the active layer's (path count, open/closed, node types in
+order) is left untouched and named in the panel's status line — "Not
+synced — different nodes: …" — until the next mouse-down. Only point
+moves are synced — structural edits (adding or deleting nodes) are not,
+and a drag that changes the active layer's node count stops syncing for
+that drag. Each drag closes as one undo step per synced layer. Closing
+the panel turns sync off; selecting the tool again re-shows it.
 
 `Contents/Resources/Icon.glyphs` is the design source for the toolbar
 icon (`toolbarIconTemplate.pdf`); it is not used at runtime.
 
-## Parametric Masters (`ParametricMasters.glyphsReporter`)
+## Metrics Parity (`ParametricMasters.glyphsReporter`)
 
 Audits parametric-master consistency in real time. Enable via **View →
-Parametric Masters**; a floating panel opens alongside the Edit view.
+Metrics Parity**; a floating panel opens alongside the Edit view.
 Nothing is drawn into the Edit view.
 
 The rule: masters that share the axis values driving horizontal metrics
 should share horizontal metrics. Masters are grouped by a pair of axes —
 **XTRA + XOPQ** by default (the horizontal transparent and opaque
-factors) — and any glyph whose advance width, LSB, or RSB differs within
-a group is flagged.
+factors), found by their tags whatever the axes are named — and any
+glyph whose advance width, LSB, or RSB differs within a group is flagged.
 
 - **Group by** popup offers every pair of the font's axes, so other
   hypotheses (e.g. XTRA + YOPQ) can be checked too.
@@ -135,13 +163,20 @@ a group is flagged.
   Edit view's glyph.
 - **Live** updates while you draw (throttled to one scan per second);
   **Refresh** forces a rescan.
+- The sidebearings are measured from the outline, components drawn
+  through, along the master's italic angle — not read off Glyphs'
+  sidebearing fields, which are kept in whole units: 26 and 24.95 read a
+  unit apart there. A deviation that is not a whole number is shown to
+  two places. The summary counts the glyphs flagged, and the rows when a
+  glyph has more than one.
 - Only groups of 2+ masters are audited. Consensus is the first member's
   metrics; deviations over 1 unit are flagged. Each row names the group by
   the pair's tagged values (`XTRA 47 · XOPQ 1462`), lists the members with
   the coordinates that tell them apart (`47-1462-1 (YOPQ 1) · 47-1462-275
   (YOPQ 275)`), and reports the largest advance, LSB and RSB deviation
-  from the first member. Double-click a row to open the glyph at the
-  group's first master.
+  from the first member. Double-click a row to open the glyph in a new
+  tab at the group's first master; the line under the summary says what
+  the click did, or why it could not.
 
 ## Slant Master (`SlantMaster.glyphsReporter`)
 
@@ -235,27 +270,44 @@ Creates a new master whose advance widths match an existing reference
 master's. Enable via **View → Width Matcher**. It draws nothing into the
 Edit view; everything happens in the panel.
 
-- **Reference** popup picks the master to match.
+- **Reference** popup picks the master to match. Masters that share a
+  name are numbered (`Bold`, `Bold (2)`), so each has a row of its own.
 - **Axis sliders** (one per design axis, with numeric fields) drive a real
   GSInstance named *Width Matcher Preview* kept in `font.instances`, so
   Glyphs' own interpolation engine (brace layers included) produces the
   generated outlines. Slider range runs from the master minimum to 3× the
-  master maximum, allowing extrapolation. The instance is visible in Font
-  Info while the tool is in use.
+  master maximum, allowing extrapolation. The instance is scratch: it is
+  visible in Font Info while the tool is in use, switched off for export,
+  and taken out of the font again when the panel closes or the reporter
+  is turned off, so it is not saved with the file.
 - The **preview** draws the reference glyph (gray) and generated glyph
   (blue) ink-centered on each other, with markers at both advance boxes.
   Readouts: advance Ref vs Gen with Δ, ink width Ref vs Gen with Δ (the
   value you drive to zero by nudging sliders), and a "Saved: LSB/RSB/Adv"
-  line predicting what Save will actually write.
+  line that is what Save will write: it is worked out the same way, and
+  follows the Reference, Spacing and Adv offset as they change.
+  **Refresh** interpolates again after an edit to the masters; the
+  preview otherwise keeps what it interpolated until a slider moves.
 - **Spacing** popup picks the saved master's spacing contract: reference
   sidebearings verbatim, or reference advance (plus **Adv offset**) with
-  sidebearings redistributed proportionally / centred / keep-LSB. Empty
-  glyphs take the reference advance.
-- **Save as Master** interpolates the working instance, appends it as a
-  new master, copies every glyph's layer across, and re-spaces each layer
-  per the chosen mode. Afterwards it re-audits sidebearings (metrics keys
-  can rewrite them when the interface updates resume) and reports drift
-  in the status line.
+  sidebearings redistributed proportionally / centred / keep-LSB. In the
+  advance modes the saved advance is the reference's, exactly. Empty
+  glyphs take the reference advance. A glyph the contract leaves no room
+  for — sidebearings so far below zero that the advance would be too —
+  keeps the spacing it was interpolated with, and is named.
+- **Save as Master** interpolates the working instance and appends it as
+  a new master. Every glyph is measured and planned before any is moved,
+  from the outline itself with components drawn through; then each layer
+  moves as a whole, a component making up for the move of the glyph it
+  draws, so composites, glyphs that mix a component with paths of their
+  own, and anchors all stay together whatever the glyph order. Nodes,
+  anchors, components and advances land on the font's grid (a grid of 0
+  leaves them as interpolated). The status then says how many glyphs
+  were saved and names any that failed (traceback in the Macro panel),
+  any whose layer did not land, and any that Glyphs moved afterwards
+  through metrics keys or automatic alignment.
+- The measuring and spacing live in `width_spacing.py` beside the plugin,
+  free of Glyphs imports, covered by `tests/test_width_matcher_*.py`.
 
 ## Development notes
 

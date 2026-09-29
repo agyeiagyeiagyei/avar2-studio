@@ -14,6 +14,14 @@ intersection). Scaling every node of the round (T1, handles, any mid
 on-curve nodes, T2) about C by a factor k scales the radius while
 preserving node count/order/type — i.e. it is interpolation-safe for
 variable fonts as long as the same k-factors are applied per master.
+
+One round is ALL the curve segments between the two straights, however
+many pieces it is drawn in. A run of curves is a round only if it has a
+virtual corner: a half-circle end (a pill, an arch) sits between
+parallel straights and has none, so it is not a round — nothing could
+scale it about, and its radius is half the distance between its
+straights whatever factor is asked for. Read as two quarter rounds it
+fares no better: the node they share would have to move two ways.
 """
 
 import math
@@ -23,6 +31,16 @@ CURVE = 35
 OFFCURVE = 65
 QCURVE = 67
 QCURVE_SMOOTH = 99
+
+# Two straights closer to parallel than this (degrees) are taken not to
+# meet: grid rounding alone puts the stems of an arch a fraction of a
+# degree apart, and their "corner" thousands of units away.
+MIN_CORNER_ANGLE = 5.0
+
+# What scaling has to leave of a straight a round sits on. Less than
+# this can round to no length at all on a 1-unit grid, and a straight
+# without length no longer says where its rounds' corners are.
+MIN_STRAIGHT = 2.0
 
 # node.type is an INT in the Glyphs 3 runtime (1/35/65/67/99) but a STRING
 # under glyphsLib ('line'/'curve'/'offcurve'/'qcurve') — normalize both.
@@ -79,6 +97,32 @@ def _line_intersection(p1, p2, p3, p4):
         return None
     t = ((p3[0] - p1[0]) * d2[1] - (p3[1] - p1[1]) * d2[0]) / den
     return (p1[0] + t * d1[0], p1[1] + t * d1[1])
+
+
+def _virtual_corner(prev, t1, t2, nxt):
+    """Where the straight into T1 and the straight out of T2 meet when
+    extended: the corner the round rounds off. None when there is no
+    such corner — a straight without length, straights closer to
+    parallel than MIN_CORNER_ANGLE, or straights that meet before T1 or
+    past T2 (an S between them, not a round)."""
+    d1 = _sub(t1, prev)
+    d2 = _sub(nxt, t2)
+    l1 = math.hypot(d1[0], d1[1])
+    l2 = math.hypot(d2[0], d2[1])
+    if l1 < 1e-9 or l2 < 1e-9:
+        return None
+    sine = (d1[0] * d2[1] - d1[1] * d2[0]) / (l1 * l2)
+    if abs(sine) < math.sin(math.radians(MIN_CORNER_ANGLE)):
+        return None
+    c = _line_intersection(prev, t1, t2, nxt)
+    if c is None:
+        return None
+    # A round collapsed onto its corner (T1 == C == T2) is still one.
+    ahead = ((c[0] - t1[0]) * d1[0] + (c[1] - t1[1]) * d1[1]) / l1
+    behind = ((t2[0] - c[0]) * d2[0] + (t2[1] - c[1]) * d2[1]) / l2
+    if ahead < -1e-6 or behind < -1e-6:
+        return None
+    return c
 
 
 # --------------------------------------------------------------------------
@@ -207,6 +251,12 @@ def _path_depths(paths):
 def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
     """Detect rounded corners across ``paths``.
 
+    A round is a run of one or more curve segments with a straight
+    segment before it and after it, the two straights meeting at a
+    virtual corner (see ``_virtual_corner``). Runs without one — a
+    half-circle end, an arch, a curve that runs on into another curve
+    with no straight after it — are not rounds and are not returned.
+
     Returns a list of dicts, one per round:
 
       path_index   index into ``paths``
@@ -215,7 +265,7 @@ def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
       t1, t2       tangent-point coordinates
       handles      off-curve coordinates between T1 and T2
       mids         on-curve coordinates between T1 and T2 (multi-curve rounds)
-      corner       virtual corner C (line intersection; None when parallel)
+      corner       virtual corner C (where the two straights meet)
       center/radius/residual   from the circle fit (None when degenerate)
       segments     cubic sub-segments of the round (``{p0, handles, p1}`` indices)
       prev, next   coordinates of the round's straight-segment neighbours
@@ -256,30 +306,42 @@ def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
             if _kind(node_i) != 'line':
                 i += 1
                 continue
-            # off-curve run of >= 2 (the handles of the round)
-            run = 0
-            while (
-                i + 1 + run < len(seq)
-                and _kind(seq[i + 1 + run]) in _OFFCURVE
-            ):
-                run += 1
-            t2i = i + 1 + run
-            if run < 2 or t2i >= len(seq):
+            # The round's curve segments, one after the other: each an
+            # off-curve run of >= 2 (its handles) ending on a CURVE node.
+            # T2 is the last of those nodes — the one with no handle
+            # after it.
+            t2i = i
+            while True:
+                run = 0
+                while (
+                    t2i + 1 + run < len(seq)
+                    and _kind(seq[t2i + 1 + run]) in _OFFCURVE
+                ):
+                    run += 1
+                if run == 0:
+                    break
+                seg_end = t2i + 1 + run
+                if run < 2 or seg_end >= len(seq) or _kind(seq[seg_end]) != 'curve':
+                    t2i = i  # not a run of cubic segments
+                    break
+                t2i = seg_end
+            if t2i == i:
                 i += 1
                 continue
-            t2 = seq[t2i]
-            # T2 ends the curve segment(s): a CURVE node
-            if _kind(t2) != 'curve':
-                i += 1
-                continue
-            # outgoing segment must be straight: next node is LINE
+            # a straight on both sides: into T1 (it is a LINE node) and
+            # out of T2 (the next node is one)
             nxt_i = (t2i + 1) % n if closed else t2i + 1
-            if nxt_i < n and _kind(seq[t2i + 1]) != 'line':
+            prev_i = (i - 1) % n if closed else i - 1
+            if prev_i < 0 or nxt_i >= n or _kind(nodes[nxt_i]) != 'line':
                 i += 1
                 continue
-            prev_i = (i - 1) % n if closed else i - 1
-            if prev_i < 0:
-                prev_i = i  # open path start — no prev; corner fit degrades gracefully
+            # ... that meet at a corner for the run to round off
+            corner_c = _virtual_corner(
+                _pt(nodes[prev_i]), _pt(node_i), _pt(seq[t2i]), _pt(nodes[nxt_i])
+            )
+            if corner_c is None:
+                i += 1
+                continue
             # collect mid on-curve nodes inside the run (multi-curve rounds)
             mid_on = []
             h_end = t2i
@@ -292,14 +354,10 @@ def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
             prev_pt = _pt(nodes[prev_i])
             t1_pt = _pt(nodes[t1i])
             t2_pt = _pt(nodes[t2i_mod])
-            nxt_pt = _pt(nodes[nxt_i]) if nxt_i < n else None
+            nxt_pt = _pt(nodes[nxt_i])
 
             handle_pts = [_pt(seq[k]) for k in range(i + 1, t2i) if _kind(seq[k]) in _OFFCURVE]
             mid_pts = [_pt(seq[k]) for k in mid_on]
-
-            corner_c = None
-            if nxt_pt is not None:
-                corner_c = _line_intersection(prev_pt, t1_pt, t2_pt, nxt_pt)
 
             # Fit the circle through points ON the arc: tangent points,
             # mid on-curve nodes, and curve samples. Off-curve handles are
@@ -333,12 +391,13 @@ def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
             fit = circle_fit(fit_pts)
             center, radius, residual = (fit if fit else (None, None, None))
 
-            arc_mid = _cubic_mid(
-                t1_pt,
-                handle_pts[0] if handle_pts else t1_pt,
-                handle_pts[-1] if handle_pts else t2_pt,
-                t2_pt,
-            )
+            # the middle of the round: of its middle segment, or the
+            # node between its two middle segments
+            mid_a, mid_hs, mid_b = segments[len(segments) // 2]
+            if len(segments) % 2 == 0:
+                arc_mid = mid_a
+            else:
+                arc_mid = _cubic_mid(mid_a, mid_hs[0], mid_hs[-1], mid_b)
 
             # convexity: the virtual corner C of a convex round is the
             # OUTERMOST point — the arc sits inside it, closer to the
@@ -383,14 +442,15 @@ def find_corners(paths, baseline_y=0.0, baseline_tol=10.0):
 def transformed_positions(path, corner, factor, pivot=None):
     """Scaled coordinates for the round's nodes.
 
-    ``factor`` k scales every round node about the pivot: the virtual
-    corner C when available, else the fitted circle center, else the arc
-    midpoint. Returns ``{node_index: (x, y)}`` — applying these positions
-    to the SAME node slots changes the radius without touching topology,
-    so masters stay interpolation-compatible.
+    ``factor`` k scales every round node about the pivot, the virtual
+    corner C: T1 and T2 stay on their straights and the handles on the
+    straights' extensions. (Never the fitted circle's center — about it
+    T1 and T2 leave their straights.) Returns ``{node_index: (x, y)}`` —
+    applying these positions to the SAME node slots changes the radius
+    without touching topology, so masters stay interpolation-compatible.
     """
     if pivot is None:
-        pivot = corner.get("corner") or corner.get("center") or corner.get("label_pos")
+        pivot = corner.get("corner")
     if pivot is None:
         return {}
     nodes = list(path.nodes)
@@ -402,6 +462,84 @@ def transformed_positions(path, corner, factor, pivot=None):
             pivot[1] + factor * (pos[1] - pivot[1]),
         )
     return out
+
+
+def overruns(paths, corners, factors):
+    """The rounds among ``corners`` that outgrow a straight they sit on
+    when scaled by ``factors`` (one factor per round, same order).
+
+    A round grows along its two straights, towards whatever is at their
+    other end: a plain node, or the next round growing the other way. It
+    has outgrown a straight when scaling leaves less than MIN_STRAIGHT
+    of it — or turns it round, the outline crossing itself. Both rounds
+    on such a straight are returned. A straight that scaling does not
+    shorten never counts, however short it is.
+    """
+    moved = {}
+    for corner, factor in zip(corners, factors):
+        path = paths[corner["path_index"]]
+        for idx, pos in transformed_positions(path, corner, factor).items():
+            moved[(corner["path_index"], idx)] = pos
+    tight = []
+    for corner in corners:
+        pi = corner["path_index"]
+        nodes = list(paths[pi].nodes)
+        n = len(nodes)
+        t1, t2 = corner["t1_index"], corner["t2_index"]
+        for a, b in (((t1 - 1) % n, t1), (t2, (t2 + 1) % n)):
+            was = _sub(_pt(nodes[b]), _pt(nodes[a]))
+            now = _sub(
+                moved.get((pi, b), _pt(nodes[b])), moved.get((pi, a), _pt(nodes[a]))
+            )
+            length = math.hypot(was[0], was[1])
+            left = (now[0] * was[0] + now[1] * was[1]) / length
+            if left < MIN_STRAIGHT - 1e-9 and left < length - 1e-9:
+                tight.append(corner)
+                break
+    return tight
+
+
+# --------------------------------------------------------------------------
+# the same rounds in every layer (so that masters stay compatible)
+# --------------------------------------------------------------------------
+
+def structure(paths):
+    """What two layers must have in common to interpolate: per path,
+    whether it is closed and the kinds of its nodes, in order."""
+    return tuple(
+        (bool(getattr(p, "closed", True)), tuple(_kind(nd) for nd in p.nodes))
+        for p in paths
+    )
+
+
+def shared_corners(corner_lists, baseline_only=False):
+    """The rounds to act on in layers that have to stay compatible.
+
+    ``corner_lists`` holds what ``find_corners`` found in each layer,
+    the layers all of one ``structure`` — so the same node indices are
+    the same round. A round is kept only when EVERY layer has it (with
+    ``baseline_only``: has it on the baseline), so whatever is done to
+    it is done in all of them or in none. Decided layer by layer, a
+    round on the baseline in one master and 12 units below it in the
+    next was removed from the one and not the other.
+
+    Returns ``(lists, disputed)``: the kept rounds, per layer, and the
+    number of rounds left out though some layer has them (on the
+    baseline).
+    """
+    def key(c):
+        return (c["path_index"], c["t1_index"], c["t2_index"])
+
+    counts = {}
+    for corners in corner_lists:
+        for c in corners:
+            if c["baseline"] or not baseline_only:
+                counts[key(c)] = counts.get(key(c), 0) + 1
+    keep = set(k for k, v in counts.items() if v == len(corner_lists))
+    return (
+        [[c for c in corners if key(c) in keep] for corners in corner_lists],
+        len(counts) - len(keep),
+    )
 
 
 # --------------------------------------------------------------------------

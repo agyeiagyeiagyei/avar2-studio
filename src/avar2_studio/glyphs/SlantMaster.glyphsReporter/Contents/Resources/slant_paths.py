@@ -474,7 +474,14 @@ def round_to_grid(layer, grid):
     points += list(getattr(layer, "anchors", None) or [])
     for pt in points:
         x, y = _node_pos(pt)
-        _set_node_pos(pt, (_snap(x, grid), _snap(y, grid)))
+        target = (_snap(x, grid), _snap(y, grid))
+        _set_node_pos(pt, target)
+        if _node_pos(pt) != target:
+            # Glyphs takes a move too small to notice for no move at all,
+            # and leaves 798.99999 where 799 was asked for. Go by way of
+            # elsewhere.
+            _set_node_pos(pt, (target[0] + 1.0, target[1] + 1.0))
+            _set_node_pos(pt, target)
 
 
 def _restore_components(kept, matrix, grid=0.0):

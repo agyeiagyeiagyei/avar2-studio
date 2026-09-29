@@ -260,3 +260,23 @@ def test_a_kept_component_lands_on_the_grid():
                             keep_components=True, grid=1.0)
     x = 120.0 + math.tan(math.radians(12.0)) * 700.0  # the translation is sheared, the pivot is not in it
     assert layer.components[0].transform == (1.0, 0.0, 0.0, 1.0, math.floor(x + 0.5), 700.0)
+
+
+def test_a_node_a_hair_off_the_grid_is_rounded_too():
+    """Glyphs takes a move too small to notice for no move at all."""
+
+    class Stubborn(Node):
+        @property
+        def position(self):
+            return self._pos
+
+        @position.setter
+        def position(self, value):
+            new = value if isinstance(value, Pt) else Pt(float(value[0]), float(value[1]))
+            old = getattr(self, "_pos", None)
+            if old is None or abs(new.x - old.x) > 1e-4 or abs(new.y - old.y) > 1e-4:
+                self._pos = new
+
+    layer = FakeLayer([FakePath([Stubborn(798.9999897078045, 1200.0, "line"), Stubborn(60.4, 648.0, "line")])])
+    slant_paths.round_to_grid(layer, 1.0)
+    assert _coords(layer) == [(799.0, 1200.0), (60.0, 648.0)]

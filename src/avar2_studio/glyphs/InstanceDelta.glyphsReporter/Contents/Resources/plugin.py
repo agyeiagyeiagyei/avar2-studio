@@ -55,7 +55,7 @@ PANEL_W = 320
 # How long without a draw callback before the reporter counts as switched off.
 
 
-DEBUG = True  # flip to True for /tmp instrumentation while developing
+DEBUG = False  # flip to True for /tmp instrumentation while developing
 
 
 def _dbg(msg):
@@ -87,15 +87,16 @@ class InstanceDelta(ReporterPlugin):
     def settings(self):
         self.menuName = Glyphs.localize({"en": "Instance Delta"})
         self.keyboardShortcut = None
-        self.pickKey = None             # "master:<name>" or "instance:<name>"
+        self.pick = None                # the chosen master or instance itself
         self._panel = None
         self._panelFont = None
         self._pickerItems = []          # popup titles, index-aligned with _entries
-        self._entries = []              # [{kind, name, obj}] behind those titles
+        self._entries = []              # [{kind, name, obj, title}] behind those titles
         self._sourceCounts = (-1, -1)   # (len(masters), len(instances)) at last sync
         self._interpFont = None         # cached interpolation, INSTANCES only
         self._interpMasterId = None
         self._interpFor = None          # which instance the cache belongs to
+        self._interpAxes = None         # and at which axis values
         # Overlay and panel follow the View toggle (willActivate /
         # willDeactivate); the red X turns the toggle off through Glyphs.
         self._active = False
@@ -245,8 +246,18 @@ class InstanceDelta(ReporterPlugin):
         self._entries += [{"kind": "instance", "name": str(i.name), "obj": i}
                           for i in font.instances
                           if str(i.name) not in EXCLUDED_INSTANCE_NAMES]
-        self._pickerItems = ["%s: %s" % (e["kind"].capitalize(), e["name"])
-                             for e in self._entries]
+        # One title per entry. The popup keeps one row per title, so two
+        # entries with the same one would share a row and the rows would
+        # no longer be the entries in order.
+        self._pickerItems = []
+        for e in self._entries:
+            title = base = "%s: %s" % (e["kind"].capitalize(), e["name"])
+            n = 1
+            while title in self._pickerItems:
+                n += 1
+                title = "%s (%d)" % (base, n)
+            e["title"] = title
+            self._pickerItems.append(title)
 
         y = 12
         w.instLabel = TextBox((12, y, 62, 20), "Compare:")
@@ -300,8 +311,8 @@ class InstanceDelta(ReporterPlugin):
                 idx = 0
         if 0 <= idx < len(self._entries):
             e = self._entries[idx]
-            self.pickKey = "%s:%s" % (e["kind"], e["name"])
-            _dbg("compare -> %r" % self.pickKey)
+            self.pick = e["obj"]
+            _dbg("compare -> %r" % e["title"])
         self._invalidate()
 
     @objc.python_method
@@ -324,6 +335,7 @@ class InstanceDelta(ReporterPlugin):
         self._interpFont = None
         self._interpMasterId = None
         self._interpFor = None
+        self._interpAxes = None
 
     @objc.python_method
     def _redraw(self):
@@ -356,16 +368,16 @@ class InstanceDelta(ReporterPlugin):
 
     @objc.python_method
     def _selectedEntry(self, font):
-        """The chosen master or instance, resolved by key (not by index, which
-        shifts whenever a master or instance is added or removed)."""
+        """The chosen master or instance, resolved by the object itself: not
+        by index, which shifts whenever a master or instance is added or
+        removed, and not by name, which two of them can share."""
         if font is None or not self._entries:
             return None
-        if self.pickKey is not None:
-            for e in self._entries:
-                if "%s:%s" % (e["kind"], e["name"]) == self.pickKey:
-                    return e
+        for e in self._entries:
+            if e["obj"] is self.pick:
+                return e
         e = self._entries[0]
-        self.pickKey = "%s:%s" % (e["kind"], e["name"])
+        self.pick = e["obj"]
         return e
 
     @objc.python_method
@@ -375,10 +387,13 @@ class InstanceDelta(ReporterPlugin):
         Only instances go through here. background()/foreground() run for every
         glyph on screen at every redraw, so interpolating there would make the
         Edit view unusable — the cache is rebuilt on selection change, font
-        change, or an explicit Refresh.
+        change, an explicit Refresh, or when the instance has been moved to
+        other axis values since.
         """
-        key = "%s:%s" % (entry["kind"], entry["name"])
-        if self._interpFont is not None and self._interpFor == key:
+        obj = entry["obj"]
+        axes = tuple(float(v) for v in obj.axes)
+        if (self._interpFont is not None and self._interpFor is obj
+                and self._interpAxes == axes):
             return self._interpFont
         t0 = time.time()
         try:
@@ -392,8 +407,9 @@ class InstanceDelta(ReporterPlugin):
             return None
         self._interpFont = interp
         self._interpMasterId = interp.masters[0].id
-        self._interpFor = key
-        _dbg("interpolated %r in %.2fs" % (key, time.time() - t0))
+        self._interpFor = obj
+        self._interpAxes = axes
+        _dbg("interpolated %r at %s in %.2fs" % (entry["title"], axes, time.time() - t0))
         self._setStatus("%s — %d glyphs" % (entry["name"], len(interp.glyphs)))
         return interp
 
@@ -573,10 +589,11 @@ class InstanceDelta(ReporterPlugin):
             return
         if self._panel is None or not hasattr(self._panel, "readout"):
             return
+        entry = self._selectedEntry(font)
         delta = instAdv - editAdv
         try:
             self._panel.readout.set(
-                "%s — %s" % (glyphName, self.pickKey or "(nothing selected)"))
+                "%s — %s" % (glyphName, entry["title"] if entry else "(nothing selected)"))
             self._panel.readoutAdv.set(
                 "Adv edit %.0f - inst %.0f (delta %+.0f)" % (editAdv, instAdv, delta))
         except Exception:

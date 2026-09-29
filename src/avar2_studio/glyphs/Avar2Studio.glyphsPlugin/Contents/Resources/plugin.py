@@ -7,7 +7,7 @@ menu:
 - Open in avar2 Studio — starts the studio on the font's file (or reuses
   a studio already serving it) and opens it in the browser.
 - Stop avar2 Studio — ends the server this menu started.
-- Corner Radii / Instance Delta / Parametric Masters / Slant Master /
+- Corner Radii / Instance Delta / Metrics Parity / Slant Master /
   Width Matcher —
   toggle the reporters through Glyphs' own activate/deactivate API, so
   the check marks stay in step with View → Show ….
@@ -35,7 +35,7 @@ import studio_launcher  # noqa: E402
 REPORTERS = (
     ("Corner Radii", "CornerRadii"),
     ("Instance Delta", "InstanceDelta"),
-    ("Parametric Masters", "ParametricMasters"),
+    ("Metrics Parity", "ParametricMasters"),
     ("Slant Master", "SlantMaster"),
     ("Width Matcher", "WidthMatcher"),
 )

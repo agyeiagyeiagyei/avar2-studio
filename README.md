@@ -84,7 +84,7 @@ instead of fontc (`--no-fontc`) needs fontmake installed as well.
 **In Glyphs.** The package also carries a set of Glyphs 3 plugins: a
 **Window → avar2 Studio** menu that opens the studio on the font you are
 editing, and six parametric design tools (Corner Radii, Instance Delta,
-Multi-Source Edit, Parametric Masters, Slant Master, Width Matcher).
+Multi-Source Edit, Metrics Parity, Slant Master, Width Matcher).
 Link them into Glyphs once, from the same install:
 
 ```bash
@@ -280,7 +280,7 @@ a studio already serving it), stops it, and toggles the design tools
 that ship alongside: **Corner Radii** (rounded-corner audit and
 scaling), **Instance Delta** (a master or instance drawn behind the
 edited glyph, with the advance delta), **Multi-Source Edit** (node drags
-propagated across masters), **Parametric Masters** (masters sharing the
+propagated across masters), **Metrics Parity** (masters sharing the
 metric-driving axis values must share metrics), **Slant Master** (an
 italic master sheared from a master or instance, width-matched to a
 reference) and **Width Matcher** (a new master width-matched to a

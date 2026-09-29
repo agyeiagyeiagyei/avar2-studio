@@ -17,7 +17,13 @@ line node and every node up to and including T2 is deleted (Glyphs'
 "Sharpen Corners", batched). Scope: current glyph, all glyphs, or all
 glyphs in just the active master, across any ticked masters — or the
 entire font (all masters, ticks ignored). Font-wide scopes also
-transform each glyph's brace/bracket layers.
+transform each glyph's special layers (brace, bracket, colour) — never
+a backup layer.
+
+Apply and Sharpen decide glyph by glyph, across the layers in scope:
+a round is touched only when every one of them has it, and a glyph in
+which a scaled round would outgrow the straight it sits on is left as
+it is. The panel names the glyphs that were left alone.
 """
 
 import os
@@ -264,8 +270,12 @@ class CornerRadii(ReporterPlugin):
     @objc.python_method
     def _layersForMaster(self, glyph, mid, include_braces):
         """The glyph's layer for master ``mid`` plus — when
-        ``include_braces`` — its brace/bracket layers belonging to that
-        master (associatedMasterId == mid, own layerId)."""
+        ``include_braces`` — its special layers belonging to that master
+        (associatedMasterId == mid, own layerId, isSpecialLayer). A
+        backup layer has the first two as well, and must never be
+        rewritten: only isSpecialLayer tells it from a brace layer
+        (Glyphs 3.5.1: True for brace, bracket and colour layers, False
+        for a backup layer, whose ``attributes`` are empty)."""
         layers = []
         try:
             master = glyph.layers[mid]
@@ -303,7 +313,10 @@ class CornerRadii(ReporterPlugin):
                     amid = layer.associatedMasterId
                     if callable(amid):  # runtime-bridge differences
                         amid = amid()
-                    if layer.layerId != mid and amid == mid:
+                    special = layer.isSpecialLayer
+                    if callable(special):
+                        special = special()
+                    if layer.layerId != mid and amid == mid and special:
                         layers.append(layer)
                 except Exception as e:
                     # log the FIRST failure only — a per-layer flood would
@@ -320,8 +333,8 @@ class CornerRadii(ReporterPlugin):
         the master currently selected in the UI. Scope 'entire_font'
         ignores them too: every glyph, every master. All font-wide scopes
         ('all', 'all_this_master', 'entire_font') also include each
-        glyph's brace/bracket layers — 'current glyph' stays
-        master-layers-only."""
+        glyph's special layers (brace, bracket, colour) — 'current
+        glyph' stays master-layers-only. Backup layers are in no scope."""
         font = self._currentFont()
         if font is None:
             _dbg("_targets: no font")
@@ -420,6 +433,11 @@ class CornerRadii(ReporterPlugin):
         w.resetButton = Button((116, y, 96, 26), "Reset ×", callback=self._reset)
         w.sharpenButton = Button((220, y, 88, 26), "Sharpen", callback=self._sharpen)
         y += 34
+        # What Apply / Sharpen did, and the glyphs they left alone.
+        w.status1 = TextBox((12, y, -12, 16), "", sizeStyle="small")
+        y += 18
+        w.status2 = TextBox((12, y, -12, 58), "", sizeStyle="small")  # wraps
+        y += 62
         w.mastersLabel = TextBox((12, y, 200, 20), "Masters:")
         y += 22
         self._mastersBlockY = y
@@ -799,53 +817,161 @@ class CornerRadii(ReporterPlugin):
     # ------------------------------------------------------------------
 
     @objc.python_method
+    def _byGlyph(self, targets):
+        """``_targets()`` as [(glyph, [layers])], in the same order."""
+        groups = []
+        for glyph, layer in targets:
+            if not groups or groups[-1][0] is not glyph:
+                groups.append((glyph, []))
+            groups[-1][1].append(layer)
+        return groups
+
+    @objc.python_method
+    def _glyphCorners(self, layers):
+        """``([(layer, corners)], disputed)`` for ONE glyph's layers in
+        scope. Which rounds to act on is decided across the layers that
+        share a node structure, never layer by layer: a round is taken
+        only when every one of them has it — with 'Baseline corners
+        only': has it on the baseline — so Sharpen cannot leave masters
+        with different nodes. A layer with a structure of its own (a
+        bracket layer's other drawing) has nothing to agree with.
+        ``disputed`` counts the rounds left alone because the layers
+        disagree."""
+        found = [cornerfit.find_corners(layer.paths) for layer in layers]
+        alike = {}
+        for i, layer in enumerate(layers):
+            alike.setdefault(cornerfit.structure(layer.paths), []).append(i)
+        disputed = 0
+        for members in alike.values():
+            lists, left = cornerfit.shared_corners(
+                [found[i] for i in members], self.baselineOnly
+            )
+            disputed += left
+            for i, corners in zip(members, lists):
+                found[i] = corners
+        return list(zip(layers, found)), disputed
+
+    @objc.python_method
+    def _some(self, names, limit=8):
+        return ", ".join(names[:limit]) + ("…" if len(names) > limit else "")
+
+    @objc.python_method
+    def _setStatus(self, line1, line2=""):
+        if self._panel is None:
+            return
+        try:
+            self._panel.status1.set(line1)
+            self._panel.status2.set(line2)
+        except Exception:
+            _dbg("EXCEPTION")
+
+    @objc.python_method
+    def _report(self, verb, rounds, glyphs, left):
+        """The outcome on the panel. ``left`` is [(why, [glyph names])]:
+        the panel names the first few, the Macro window all of them."""
+        if rounds:
+            line1 = "%s %d round%s in %d glyph%s" % (
+                verb, rounds, "" if rounds == 1 else "s",
+                glyphs, "" if glyphs == 1 else "s")
+        elif any(names for _, names in left):
+            line1 = "No rounds %s" % verb.lower()
+        else:
+            line1 = "No rounds found"
+        notes = []
+        for why, names in left:
+            if names:
+                notes.append("%s: %s" % (why, self._some(names)))
+                print("Corner Radii — %s: %s" % (why, ", ".join(names)))
+        self._setStatus(line1, ". ".join(notes))
+
+    @objc.python_method
+    def _disputedWhy(self):
+        if self.baselineOnly:
+            return "Rounds left alone, on the baseline in some masters only"
+        return "Rounds left alone, not found in every master"
+
+    @objc.python_method
     def _apply(self, sender):
         self._refreshMasters()
         targets = self._targets()
         if not targets:
             _dbg("apply: no targets")
+            self._setStatus("Nothing in scope")
             return
         writes = 0
         layers_touched = 0
-        for glyph, layer in targets:
+        rounds = 0
+        glyphs_done = 0
+        tight = []     # glyphs refused: a scaled round would outgrow its straight
+        disputes = []  # glyphs with rounds the layers in scope disagree on
+        failed = []
+        for glyph, layers in self._byGlyph(targets):
+            # Everything that can refuse is checked before the first
+            # node of the glyph is written: all its layers, or none.
             try:
-                corners = self._visible_corners(layer)
+                chosen, disputed = self._glyphCorners(layers)
+                fits = True
+                for layer, corners in chosen:
+                    factors = [
+                        self.innerFactor if c["class"] == "counter" else self.outerFactor
+                        for c in corners
+                    ]
+                    if cornerfit.overruns(layer.paths, corners, factors):
+                        fits = False
+                        break
             except Exception:
                 _dbg("EXCEPTION")
+                failed.append(glyph.name)
                 continue
-            if not corners:
+            if disputed:
+                disputes.append(glyph.name)
+            if not fits:
+                tight.append(glyph.name)
                 continue
-            changed = False
-            # one undo step per layer — grouped, always closed (this is what
-            # keeps Apply working after an undo: no dangling change group)
-            try:
-                layer.beginChanges()
-            except Exception:
-                pass
-            try:
-                for corner in corners:
-                    factor = (
-                        self.innerFactor
-                        if corner["class"] == "counter"
-                        else self.outerFactor
-                    )
-                    positions = cornerfit.transformed_positions(
-                        layer.paths[corner["path_index"]], corner, factor
-                    )
-                    nodes = layer.paths[corner["path_index"]].nodes
-                    for idx, (x, y) in positions.items():
-                        nodes[idx].position = (x, y)
-                        writes += 1
-                    changed = changed or bool(positions)
-            except Exception:
-                _dbg("EXCEPTION")
-            finally:
+            before = rounds
+            for layer, corners in chosen:
+                if not corners:
+                    continue
+                changed = False
+                # one undo step per layer — grouped, always closed (this is what
+                # keeps Apply working after an undo: no dangling change group)
                 try:
-                    layer.endChanges()
+                    layer.beginChanges()
+                except Exception:
+                    pass
+                try:
+                    for corner in corners:
+                        factor = (
+                            self.innerFactor
+                            if corner["class"] == "counter"
+                            else self.outerFactor
+                        )
+                        positions = cornerfit.transformed_positions(
+                            layer.paths[corner["path_index"]], corner, factor
+                        )
+                        nodes = layer.paths[corner["path_index"]].nodes
+                        for idx, (x, y) in positions.items():
+                            nodes[idx].position = (x, y)
+                            writes += 1
+                        changed = changed or bool(positions)
+                        rounds += 1
                 except Exception:
                     _dbg("EXCEPTION")
-            layers_touched += 1 if changed else 0
+                    if glyph.name not in failed:
+                        failed.append(glyph.name)
+                finally:
+                    try:
+                        layer.endChanges()
+                    except Exception:
+                        _dbg("EXCEPTION")
+                layers_touched += 1 if changed else 0
+            glyphs_done += 1 if rounds > before else 0
         _dbg("apply: %d node writes across %d layers (targets=%d)" % (writes, layers_touched, len(targets)))
+        self._report("Scaled", rounds, glyphs_done, [
+            ("Not scaled, a round would outgrow the straight it sits on", tight),
+            (self._disputedWhy(), disputes),
+            ("Failed", failed),
+        ])
         self._redraw()
 
     @objc.python_method
@@ -854,71 +980,91 @@ class CornerRadii(ReporterPlugin):
         batched: T1 moves onto the virtual corner C as a plain line node,
         and every node after it up to and including T2 (handles, mid
         on-curves, T2 itself) is deleted — one corner node per round, no
-        coincident pairs. Same scope + ticked masters as Apply."""
+        coincident pairs. Same scope + ticked masters as Apply. Which
+        rounds go is decided per glyph (``_glyphCorners``), so the
+        layers in scope lose the same nodes."""
         self._refreshMasters()
         targets = self._targets()
         if not targets:
             _dbg("sharpen: no targets")
+            self._setStatus("Nothing in scope")
             return
         layers_touched = 0
         rounds = 0
+        glyphs_done = 0
         skipped = 0  # no virtual corner (parallel straight segments)
-        for glyph, layer in targets:
+        disputes = []  # glyphs with rounds the layers in scope disagree on
+        failed = []
+        for glyph, layers in self._byGlyph(targets):
             try:
-                corners = self._visible_corners(layer)
+                chosen, disputed = self._glyphCorners(layers)
             except Exception:
                 _dbg("EXCEPTION")
+                failed.append(glyph.name)
                 continue
-            if not corners:
-                continue
-            # Resolve node objects BEFORE any deletion — indices shift as
-            # nodes are removed, so later corners' indices would go stale.
-            ops = []
-            for corner in corners:
-                plan = cornerfit.sharpen_plan(corner)
-                if plan is None:
-                    skipped += 1
+            if disputed:
+                disputes.append(glyph.name)
+            before = rounds
+            for layer, corners in chosen:
+                if not corners:
                     continue
+                # Resolve node objects BEFORE any deletion — indices shift as
+                # nodes are removed, so later corners' indices would go stale.
+                ops = []
+                for corner in corners:
+                    plan = cornerfit.sharpen_plan(corner)
+                    if plan is None:
+                        skipped += 1
+                        continue
+                    try:
+                        path = layer.paths[corner["path_index"]]
+                        nodes = list(path.nodes)
+                        ops.append((
+                            path,
+                            nodes[plan["t1"]],
+                            plan["corner"],
+                            [nodes[i] for i in plan["delete"]],
+                        ))
+                    except Exception:
+                        _dbg("EXCEPTION")
+                        if glyph.name not in failed:
+                            failed.append(glyph.name)
+                if not ops:
+                    continue
+                # one undo step per layer, same contract as _apply
                 try:
-                    path = layer.paths[corner["path_index"]]
-                    nodes = list(path.nodes)
-                    ops.append((
-                        path,
-                        nodes[plan["t1"]],
-                        plan["corner"],
-                        [nodes[i] for i in plan["delete"]],
-                    ))
+                    layer.beginChanges()
+                except Exception:
+                    pass
+                try:
+                    for _, t1, c, _ in ops:
+                        t1.position = c
+                        # GSNode.type's setter silently ignores the int enum
+                        # (verified: getter returns ints, int assignment was a
+                        # no-op) — use the string form, verify by reading back.
+                        t1.type = "line"
+                        if cornerfit._kind(t1) != "line":
+                            _dbg("sharpen: type set did not stick (node=%r)" % t1)
+                        t1.smooth = False
+                    for path, _, _, dels in ops:
+                        for nd in dels:
+                            path.removeNode_(nd)
+                    rounds += len(ops)
+                    layers_touched += 1
                 except Exception:
                     _dbg("EXCEPTION")
-            if not ops:
-                continue
-            # one undo step per layer, same contract as _apply
-            try:
-                layer.beginChanges()
-            except Exception:
-                pass
-            try:
-                for _, t1, c, _ in ops:
-                    t1.position = c
-                    # GSNode.type's setter silently ignores the int enum
-                    # (verified: getter returns ints, int assignment was a
-                    # no-op) — use the string form, verify by reading back.
-                    t1.type = "line"
-                    if cornerfit._kind(t1) != "line":
-                        _dbg("sharpen: type set did not stick (node=%r)" % t1)
-                    t1.smooth = False
-                for path, _, _, dels in ops:
-                    for nd in dels:
-                        path.removeNode_(nd)
-                rounds += len(ops)
-                layers_touched += 1
-            except Exception:
-                _dbg("EXCEPTION")
-            finally:
-                try:
-                    layer.endChanges()
-                except Exception:
-                    _dbg("EXCEPTION")
+                    if glyph.name not in failed:
+                        failed.append(glyph.name)
+                finally:
+                    try:
+                        layer.endChanges()
+                    except Exception:
+                        _dbg("EXCEPTION")
+            glyphs_done += 1 if rounds > before else 0
         _dbg("sharpen: %d rounds across %d layers (%d skipped, targets=%d)"
              % (rounds, layers_touched, skipped, len(targets)))
+        self._report("Sharpened", rounds, glyphs_done, [
+            (self._disputedWhy(), disputes),
+            ("Failed", failed),
+        ])
         self._redraw()

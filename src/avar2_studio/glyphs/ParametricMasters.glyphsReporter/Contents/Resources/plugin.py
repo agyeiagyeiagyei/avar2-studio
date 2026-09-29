@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Parametric Masters — Glyphs 3 Reporter plugin.
+"""Metrics Parity — Glyphs 3 Reporter plugin (the bundle and its class keep
+the identifier ParametricMasters, so links and preferences stay valid).
 
 Audits parametric-master consistency: masters that share the axis values
 driving horizontal metrics should share horizontal metrics. Masters are
@@ -18,6 +19,7 @@ or RSB differs between masters of the same group is flagged.
 Draws nothing into the Edit view — the report lives in the floating panel.
 """
 
+import math
 import time
 import traceback
 
@@ -102,6 +104,100 @@ def _axis_tags(font):
     return tags
 
 
+# The metrics are measured from the outline, components drawn through,
+# not read off layer.LSB / layer.RSB: Glyphs keeps those in whole units,
+# so 26 and 24.95 read a unit apart and pass, and reading them re-aligns
+# a composite as a side effect.
+
+_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+_MAX_DEPTH = 8  # components of components; a glyph that contains itself ends here
+
+
+def _compose(outer, inner):
+    """The transform that applies ``inner`` first, then ``outer``."""
+    return (
+        outer[0] * inner[0] + outer[2] * inner[1],
+        outer[1] * inner[0] + outer[3] * inner[1],
+        outer[0] * inner[2] + outer[2] * inner[3],
+        outer[1] * inner[2] + outer[3] * inner[3],
+        outer[0] * inner[4] + outer[2] * inner[5] + outer[4],
+        outer[1] * inner[4] + outer[3] * inner[5] + outer[5],
+    )
+
+
+def _segments(path):
+    """A path's segments as point tuples: 4 points for a cubic, 2 for a
+    line (any other run counts as the line between its on-curve ends)."""
+    pts = [(float(n.position.x), float(n.position.y)) for n in path.nodes]
+    on = [i for i, n in enumerate(path.nodes) if str(n.type) != "offcurve"]
+    if len(on) < 2:
+        return [(pts[i], pts[i]) for i in on]
+    pairs = list(zip(on, on[1:]))
+    if bool(path.closed):
+        pairs.append((on[-1], on[0]))
+    out = []
+    for i, j in pairs:
+        between = pts[i + 1:j] if j > i else pts[i + 1:] + pts[:j]
+        out.append((pts[i], between[0], between[1], pts[j]) if len(between) == 2
+                   else (pts[i], pts[j]))
+    return out
+
+
+def _outline(font, layer, master_id, transform=_IDENTITY, depth=0):
+    """Every segment of a layer's drawn outline in one master."""
+    t = transform
+    segs = [tuple((t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]) for x, y in seg)
+            for path in layer.paths for seg in _segments(path)]
+    if depth >= _MAX_DEPTH:
+        return segs
+    for comp in layer.components:
+        base = font.glyphs[str(getattr(comp, "componentName", None) or comp.name)]
+        held = base.layers[master_id] if base is not None else None
+        if held is not None:
+            segs += _outline(font, held, master_id,
+                             _compose(t, tuple(float(v) for v in comp.transform)), depth + 1)
+    return segs
+
+
+def _turning_points(x0, x1, x2, x3):
+    """x where a cubic turns back between its ends (dx/dt = 0)."""
+    a = 3.0 * (x3 - 3.0 * x2 + 3.0 * x1 - x0)
+    b = 6.0 * (x0 - 2.0 * x1 + x2)
+    c = 3.0 * (x1 - x0)
+    if abs(a) < 1e-9:
+        roots = [] if abs(b) < 1e-9 else [-c / b]
+    else:
+        disc = b * b - 4.0 * a * c
+        roots = [] if disc < 0 else [(-b + math.sqrt(disc)) / (2.0 * a),
+                                     (-b - math.sqrt(disc)) / (2.0 * a)]
+    return [(1 - t) ** 3 * x0 + 3 * (1 - t) ** 2 * t * x1 + 3 * (1 - t) * t * t * x2 + t ** 3 * x3
+            for t in roots if 1e-6 < t < 1.0 - 1e-6]
+
+
+def metrics(font, layer, master):
+    """(advance, LSB, RSB) of a layer, the sidebearings from its ink:
+    along the master's italic angle, around half its x-height, which is
+    how Glyphs measures them. A layer that draws nothing has none, and
+    is compared by its advance."""
+    tan = math.tan(math.radians(float(getattr(master, "italicAngle", 0.0) or 0.0)))
+    pivot = float(getattr(master, "xHeight", 0.0) or 0.0) / 2.0
+    xs = []
+    for seg in _outline(font, layer, master.id):
+        upright = [x - tan * (y - pivot) for x, y in seg]
+        xs += [upright[0], upright[-1]]
+        if len(upright) == 4:
+            xs += _turning_points(*upright)
+    width = float(layer.width)
+    if not xs:
+        return (width, 0.0, 0.0)
+    return (width, min(xs), width - max(xs))
+
+
+def _shown(value):
+    """A deviation as the list shows it: whole when it is whole."""
+    return "%.0f" % value if abs(value - round(value)) < 0.005 else "%.2f" % value
+
+
 def _member_label(master, tags, pair_idx):
     """``name (YOPQ 275)``: the master plus its coordinates on every axis
     the group does NOT fix — the ones that tell its members apart."""
@@ -139,12 +235,7 @@ def scan(font, groups, glyph_names, tags=None, pair_idx=()):
                 layer = g.layers[m.id]
                 if layer is None:
                     continue
-                try:
-                    vals.append(
-                        (float(layer.width), float(layer.LSB), float(layer.RSB))
-                    )
-                except Exception:
-                    pass
+                vals.append(metrics(font, layer, m))
             if len(vals) < 2:
                 continue
             adv0, lsb0, rsb0 = vals[0]
@@ -156,9 +247,9 @@ def scan(font, groups, glyph_names, tags=None, pair_idx=()):
                     "glyph": name,
                     "group": group_label,
                     "masters": master_names,
-                    "dadv": "%.0f" % dadv,
-                    "dlsb": "%.0f" % dlsb,
-                    "drsb": "%.0f" % drsb,
+                    "dadv": _shown(dadv),
+                    "dlsb": _shown(dlsb),
+                    "drsb": _shown(drsb),
                     "_masterIndex": first_idx,
                 })
     return rows
@@ -168,20 +259,19 @@ class ParametricMasters(ReporterPlugin):
 
     @objc.python_method
     def settings(self):
-        self.menuName = Glyphs.localize({"en": "Parametric Masters"})
+        self.menuName = Glyphs.localize({"en": "Metrics Parity"})
         self.keyboardShortcut = None
         self._panel = None
         self._panelFont = None
         self._lastLayer = None
         self._pairs = []                 # [(idxA, idxB, nameA, nameB)]
         self._pairItems = []             # popup titles, index-aligned
-        self._pair = ("XTRA", "XOPQ")    # selected axis names
+        self._pair = ("XTRA", "XOPQ")    # selected axes, by name or by tag
         self.currentGlyphOnly = False
         self.live = True
         self._dirty = False              # edits arrived since last scan
         self._lastScanAt = 0.0
         self._currentGlyphName = None
-        self._lastRows = None            # rows currently in the list (see _showRows)
         self._active = False             # mirrors the View toggle (willActivate)
 
     @objc.python_method
@@ -204,7 +294,7 @@ class ParametricMasters(ReporterPlugin):
         try:
             self._active = True
             self._showPanel()
-            self._redraw()
+            self._scan()  # fill the list now, not on the next interface update
         except Exception:
             _dbgexc("willActivate: ")
 
@@ -212,7 +302,6 @@ class ParametricMasters(ReporterPlugin):
         try:
             self._active = False
             self._hidePanel()
-            self._redraw()
         except Exception:
             _dbgexc("willDeactivate: ")
 
@@ -296,7 +385,7 @@ class ParametricMasters(ReporterPlugin):
 
     @objc.python_method
     def _build_panel(self):
-        w = FloatingWindow((720, 420), "Parametric Masters", closable=True,
+        w = FloatingWindow((720, 420), "Metrics Parity", closable=True,
                            minSize=(560, 260))
         self._panel = w
         # The red X means "turn the reporter off", not "hide the panel" —
@@ -316,6 +405,10 @@ class ParametricMasters(ReporterPlugin):
                               callback=self._scopeChanged)
         y += 24
         w.summary = TextBox((12, y, -12, 16), "", sizeStyle="small")
+        y += 18
+        # What the last double-click did — its own line, because every
+        # scan rewrites the summary above.
+        w.note = TextBox((12, y, -12, 16), "", sizeStyle="small")
         y += 22
         cols = [
             dict(title="Glyph", key="glyph", width=100, editable=False),
@@ -376,14 +469,32 @@ class ParametricMasters(ReporterPlugin):
                 self._pairs.append((i, j, names[i], names[j]))
                 self._pairItems.append("%s + %s" % (names[i], names[j]))
         self._panel.pairPop.setItems(self._pairItems or ["(no axes)"])
-        want = tuple(sorted(self._pair))
-        for k, (_, _, na, nb) in enumerate(self._pairs):
-            if tuple(sorted((na, nb))) == want:
+        found = self._pairIndices(font)
+        for k, (i, j, na, nb) in enumerate(self._pairs):
+            if found is not None and set(found) == set((i, j)):
+                self._pair = (na, nb)
                 self._panel.pairPop.set(k)
                 return
         if self._pairs:
             self._pair = (self._pairs[0][2], self._pairs[0][3])
             self._panel.pairPop.set(0)
+
+    @objc.python_method
+    def _pairIndices(self, font):
+        """Where the selected pair sits among the font's axes, or None.
+        An axis answers to its name and to its tag: the default pair is
+        XTRA + XOPQ, which are tags — the axes are usually NAMED
+        X-Transparency and X-Opacity."""
+        names = [str(a.name) for a in font.axes]
+        tags = _axis_tags(font)
+        found = []
+        for wanted in self._pair:
+            where = names.index(wanted) if wanted in names else (
+                tags.index(wanted) if wanted in tags else None)
+            if where is None:
+                return None
+            found.append(where)
+        return tuple(found)
 
     @objc.python_method
     def _pairChanged(self, sender):
@@ -417,26 +528,63 @@ class ParametricMasters(ReporterPlugin):
         self._scan()
 
     @objc.python_method
-    def _openGlyph(self, sender):
+    def _setNote(self, text):
+        if self._panel is not None and hasattr(self._panel, "note"):
+            try:
+                self._panel.note.set(text)
+            except Exception:
+                pass
+
+    @objc.python_method
+    def _clickedIndex(self, sender):
+        """The row that was double-clicked. The table view knows it even
+        when the selection is gone (a rescan or a focus change between
+        the two clicks); the selection is the fallback."""
+        try:
+            row = int(sender.getNSTableView().clickedRow())
+            if row >= 0:
+                return row
+        except Exception:
+            pass
         sel = sender.getSelection()
-        if not sel:
+        return sel[0] if sel else None
+
+    @objc.python_method
+    def _openGlyph(self, sender):
+        """Double-click: open the glyph in a new tab at the group's first
+        master. Every outcome is written to the panel — a row that does
+        nothing when clicked, and says nothing, is the failure to avoid."""
+        idx = self._clickedIndex(sender)
+        items = sender.get()
+        if idx is None or not 0 <= idx < len(items):
+            self._setNote("double-click a row to open its glyph")
             return
-        row = sender.get()[sel[0]]
+        row = items[idx]
+        name = str(row["glyph"])
         font = self._currentFont()
         if font is None:
+            self._setNote("no font to open %s in" % name)
             return
         try:
-            # Set the master on the NEW tab: a fresh tab inherits the
-            # previous tab's master, so setting font.masterIndex before
-            # opening it never landed.
-            tab = font.newTab("/" + row["glyph"])
-            idx = int(row.get("_masterIndex", 0))
-            if tab is not None:
-                tab.masterIndex = idx
-            else:
-                font.masterIndex = idx
-        except Exception:
+            tab = font.newTab("/" + name)
+        except Exception as e:
             _dbgexc("open glyph: ")
+            self._setNote("could not open %s: %s" % (name, e))
+            return
+        master = int(row.get("_masterIndex", 0))
+        try:
+            # On the NEW tab: a fresh tab inherits the previous tab's
+            # master, so font.masterIndex set beforehand never landed.
+            if tab is not None:
+                tab.masterIndex = master
+            else:
+                font.masterIndex = master
+            shown = str(font.masters[master].name)
+        except Exception as e:
+            _dbgexc("open glyph, master: ")
+            self._setNote("opened %s, but could not switch master: %s" % (name, e))
+            return
+        self._setNote("opened %s at %s" % (name, shown))
 
     # --- scanning ----------------------------------------------------------
 
@@ -458,12 +606,12 @@ class ParametricMasters(ReporterPlugin):
         if font is None:
             self._setStatus("no font")
             return
-        names = [str(a.name) for a in font.axes]
-        try:
-            idx_a, idx_b = names.index(self._pair[0]), names.index(self._pair[1])
-        except ValueError:
+        found = self._pairIndices(font)
+        if found is None:
             self._setStatus("axes %s not in this font" % (self._pair,))
             return
+        idx_a, idx_b = found
+        names = [str(a.name) for a in font.axes]
         groups = group_masters(font, idx_a, idx_b)
         if self.currentGlyphOnly and self._currentGlyphName:
             glyph_names = [self._currentGlyphName]
@@ -477,20 +625,27 @@ class ParametricMasters(ReporterPlugin):
             return
         self._showRows(rows)
         scope = "current glyph" if self.currentGlyphOnly else "%d glyphs" % len(glyph_names)
+        # A glyph has a row for every group it disagrees in.
+        flagged = len(set(r["glyph"] for r in rows))
         self._setStatus(
-            "%s + %s — %d groups · %s · %d flagged"
-            % (self._pair[0], self._pair[1], len(groups), scope, len(rows))
+            "%s + %s — %d groups · %s · %d glyphs flagged%s"
+            % (names[idx_a], names[idx_b], len(groups), scope, flagged,
+               ", in %d rows" % len(rows) if len(rows) != flagged else "")
         )
 
     @objc.python_method
     def _showRows(self, rows):
         """Replace the list only when the rows changed, and keep the
         selected row selected: live scans run on every interface update,
-        and an unconditional set() cleared the selection under the
-        user's double-click, so navigation worked once and then never."""
-        if rows == self._lastRows:
-            return
+        and rewriting the list under the user's hands is what navigation
+        must not suffer. Compared against what the list HOLDS, not a
+        cache, so a rebuilt panel (empty list) is always filled."""
         lst = self._panel.list
+        try:
+            if list(lst.get()) == rows:
+                return
+        except Exception:
+            pass
         selected = None
         try:
             sel = lst.getSelection()
@@ -508,7 +663,6 @@ class ParametricMasters(ReporterPlugin):
                         break
         except Exception:
             _dbgexc("list: ")
-        self._lastRows = rows
 
     # --- reporter entry point (no Edit-view drawing) -----------------------
 
