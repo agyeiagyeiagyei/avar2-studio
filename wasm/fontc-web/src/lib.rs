@@ -32,6 +32,7 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod editor;
 mod extrapolate;
 mod fix;
 mod iup;
@@ -63,6 +64,23 @@ pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
         .map_err(|e| JsError::new(&e.to_string()))?;
     let options = fontc::Options::default();
     fontc::generate_font(source, options).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Extract one glyph's source data (all layers — masters + brace layers —
+/// with outlines in the studio's sidecar schema) plus the font's axes and
+/// masters, as JSON for the browser glyph editor (see editor.rs).
+#[wasm_bindgen]
+pub fn glyph_model(source: String, glyph_name: String) -> Result<String, JsError> {
+    editor::glyph_model(&source, &glyph_name)
+}
+
+/// Compile a .glyphs source with editor overlays spliced in at the Plist
+/// level: request-declared axes are appended (masters extended, Virtual
+/// Masters pinned) and each overlay replaces — or inserts — the brace
+/// layer at its location, carrying the editor's outline (see editor.rs).
+#[wasm_bindgen]
+pub fn compile_with_overlays(source: String, request_json: &str) -> Result<Vec<u8>, JsError> {
+    editor::compile_with_overlays(&source, request_json)
 }
 
 /// Apply the bundle's post-build transforms (the SPAC injectors,

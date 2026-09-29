@@ -13,6 +13,11 @@ crate-type = ["cdylib", "rlib"]
 # under wasm32 (single-threaded compile never returns). main carries
 # the in-memory/wasm fixes (PRs #1478/#1796) and the public Input API.
 fontc = { git = "https://github.com/googlefonts/fontc.git", default-features = false }
+# Source-level access for the glyph editor (editor.rs): .glyphs plist
+# parse/serialize (Plist) — the same git revision as fontc so the types
+# fontc sees through its own glyphs-reader dep match ours.
+glyphs-reader = { git = "https://github.com/googlefonts/fontc.git" }
+smol_str = "0.3"
 wasm-bindgen = "0.2"
 
 # Bundle JSON parsing for control axes / grade application (braces.rs).
