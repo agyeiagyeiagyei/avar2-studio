@@ -39,11 +39,13 @@
   border-color: var(--zinc-300, #d4d4d8);
 }
 
-/* Popover anchored under the badge */
+/* Popover anchored under the badge, opening LEFTWARDS from its right
+   edge: the badge sits at the far right of the row, and the rows list
+   clips anything that grows past it. */
 .grade-popover {
   position: absolute;
   top: calc(100% + 0.3rem);
-  left: 0;
+  right: 0;
   z-index: 10000;
   background: #fff;
   border: 1px solid var(--zinc-200);
