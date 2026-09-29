@@ -76,6 +76,15 @@ def _build(argv) -> int:
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
 
+    meta = args.source.resolve().parent / ".avar2-studio" / "axis-metadata.json"
+    if not meta.exists():
+        # The declared defaults of the traditional axes live there. Built
+        # without them, opsz (etc.) defaults to its CSV minimum and every
+        # named style lands off its mapped values — measured at 62 units
+        # on Crispy. CI checking out a clean tree is exactly this case.
+        print(f"warning: {meta} is missing — traditional axis defaults fall back "
+              f"to each CSV column's minimum, and named styles may land off "
+              f"their mapped values", file=sys.stderr)
     from . import server
     if args.csv is not None:
         server.CSV_PATH = args.csv.resolve()
@@ -93,6 +102,19 @@ def _build(argv) -> int:
         # that is a failure, not a warning — the mapped font IS the product.
         print(f"error: avar2 build failed (plain fallback built instead): "
               f"{server.LAST_AVAR2_ERROR}", file=sys.stderr)
+        return 1
+    if getattr(server, "LAST_GRADE_ERROR", None):
+        # Grade is declared in the sidecar but its braces were not
+        # generated: the font built, without its GRAD axis. Passing that
+        # off as success is how a missing axis reaches a release.
+        print(f"error: grade generation failed (the font has no GRAD axis): "
+              f"{server.LAST_GRADE_ERROR}", file=sys.stderr)
+        return 1
+    if getattr(server, "LAST_SOURCE_TRANSFORM_ERROR", None):
+        # An enabled source-stage transform (round_corners) did not run:
+        # the font built from the un-transformed source.
+        print(f"error: source transform failed (the font built without it): "
+              f"{server.LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)

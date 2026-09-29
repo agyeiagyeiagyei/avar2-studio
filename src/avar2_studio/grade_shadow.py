@@ -79,6 +79,20 @@ def apply_grades(
         return None  # source isn't the parametric family we understand
 
     origin = list(getattr(masters[0], "axes", None) or [])
+    # Only masters ON the parametric plane feed the model: an italic
+    # master (ital 1) shares its upright's parametric coordinates, so
+    # taken in it collides with it ("Locations must be unique") and grade
+    # generation used to fall over on any source with an italic axis.
+    # Grade braces land on the plane the way control braces do; the
+    # slanted plane keeps advances by construction (the italics are
+    # sheared from the uprights width for width), so grading the plane
+    # grades the family.
+    _np = [i for i in range(len(font.axes)) if i not in param_idx]
+    masters = [m for m in masters
+               if all(i >= len(list(m.axes)) or i >= len(origin)
+                      or float(list(m.axes)[i]) == float(origin[i]) for i in _np)]
+    if not masters:
+        return None
     # parametric ranges (min, default=origin, max) for the model + clamping
     triples: Dict[int, Tuple[float, float, float]] = {}
     for i in param_idx:
