@@ -25,14 +25,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Full toolchain — the snapshot boots the server, which builds the
-      # example font (fontc) before the API is captured. The mkdir:
-      # hatchling force-includes src/avar2_studio/static (gitignored),
-      # which fails metadata generation on a fresh clone.
+      # The staging script needs the package (its example registry) and
+      # the fontc binary pip installs with it. The mkdir: hatchling
+      # force-includes src/avar2_studio/static (gitignored), which fails
+      # metadata generation on a fresh clone.
       - run: mkdir -p src/avar2_studio/static && pip install -e .
 
-      # Captures /api/* responses + the built font into
-      # frontend/public/static-demo/ (gitignored build artifact).
+      # Stages each bundled example as a project zip plus a pristine
+      # fontc compile into frontend/public/static-demo/ (gitignored
+      # build artifact); the browser edits and rebuilds them itself.
       - run: python scripts/snapshot_static_demo.py
 
       - uses: actions/setup-node@v4

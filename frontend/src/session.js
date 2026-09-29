@@ -8,8 +8,9 @@
  * editing continues; a version mismatch or corrupt record wipes and
  * boots as if nothing was stored.
  *
- * Snapshots/examples are never persisted — they reload free from
- * static files, and loading one clears the stored session.
+ * The bundled examples persist too: they load as projects (see
+ * static-api.js loadExampleProject), so edits survive a reload; "Forget
+ * this project" clears the record and reloads the pristine copy.
  */
 
 const DB_NAME = 'avar2-studio';

@@ -1,27 +1,24 @@
 /**
  * Static-demo data provider — lets the built bundle run with NO backend
- * (GitHub Pages). docs/migration-github-pages.md has the plan.
+ * (GitHub Pages). docs/migration-github-pages.md has the history.
  *
  * How it works: before the app renders, selectApiMode() probes
  * /api/health. A real server answers 200 → nothing changes. On a static
- * host the probe 404s → we swap api's methods for static ones that read
- * the build-time snapshot in public/static-demo/ (captured API
- * responses — shapes match by construction).
+ * host the probe 404s → we swap api's methods for in-browser ones.
  *
- * What works statically:
- *   - Load Font: snapshotted examples, or upload a .glyphs (compiles
- *     in-browser via the fontc-wasm worker)
- *   - Transforms SPAC toggle: swaps the pre-baked spac-on/spac-off font
- *     variants (params edits and Rebuild need a real build → hidden)
- *   - Config export: a static file download
- *   - Config import onto an uploaded source: avar2 mappings, control
- *     axes, grade and SPAC transforms apply in-browser (wasm)
+ * Every project is a live, in-memory workspace — the bundled examples
+ * included. An example ships as the project zip a designer would upload
+ * (scripts/snapshot_static_demo.py stages it) plus a pristine fontc
+ * compile of the source, so it shows instantly; from then on it is an
+ * upload like any other: instance and mapping edits regenerate avar2,
+ * secondary-axis / grade / transform edits and Rebuild recompile the
+ * source in the fontc-wasm worker, the session persists in IndexedDB,
+ * and "Forget this project" reloads the pristine copy.
  *
- * Known limitations (tracked in the migration doc):
- *   - snapshot datasets: getMappedLocation returns the input
- *     coordinates (their avar2 isn't parsed); uploads with a mappings
- *     CSV get a real client-side evaluation (avar2-eval.js)
- *   - anything else that writes or builds throws "needs the full app"
+ * Not available in the browser (throws with guidance): writing back to
+ * the source file, re-seeding layers from source, the outline editor,
+ * and recompiling .designspace projects (fontc-wasm can't read UFOs off
+ * a filesystem — those load from the pristine build inside their zip).
  */
 
 import { api } from './api';
@@ -39,8 +36,8 @@ const DATA = 'static-demo'; // relative — resolves under any --base
 
 let staticMode = false;
 export const isStaticMode = () => staticMode;
-// True while the app is showing an uploaded (fontc-wasm compiled)
-// source rather than a baked snapshot — Rebuild exists for these.
+// True while a project (a bundled example or an upload) is loaded —
+// editing, Rebuild and session persistence exist for these.
 export const isUploadDataset = () => !!uploadDataset;
 
 // Sample text persistence — stored on the dataset so it survives reload.
@@ -52,11 +49,10 @@ export const setSampleText = (text) => {
   }
 };
 
-// ---- dataset (example) state ------------------------------------------------
+// ---- bundled examples index --------------------------------------------------
 
-let dataset = null;               // example id, e.g. 'crispy-mini'
-let datasetPath = DATA;           // sync mirror for URL-builder methods
 let examplesPromise = null;
+let loadError = null; // why no project is loaded (boot failure), if any
 
 const fetchJSON = async (path) => {
   const r = await fetch(path);
@@ -64,30 +60,30 @@ const fetchJSON = async (path) => {
   return r.json();
 };
 
+const fetchBytes = async (path) => {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`static demo data missing (${path})`);
+  return new Uint8Array(await r.arrayBuffer());
+};
+
 const examplesIndex = () => {
   if (!examplesPromise) examplesPromise = fetchJSON(`${DATA}/examples.json`);
   return examplesPromise;
 };
 
-const datasetDir = async () => {
-  if (!dataset) {
-    const idx = await examplesIndex();
-    dataset = (idx.examples || [])[0]?.id || 'crispy-mini';
-  }
-  datasetPath = `${DATA}/${dataset}`;
-  return dataset;
-};
+const defaultExampleId = async () =>
+  (await examplesIndex()).examples?.[0]?.id || 'crispy-mini';
 
-// ---- uploaded source state (fontc-wasm compiled in a Worker) -----------------
+// ---- project state (fontc-wasm compiled in a Worker) ------------------------
 //
-// An uploaded .glyphs compiles in-browser; everything the studio shows
+// A .glyphs project compiles in-browser; everything the studio shows
 // comes from the compiled font itself (fvar axes + named instances +
-// name table — see fvar.js). Sidecar-backed features (avar2 mappings,
-// transforms, grade, control axes) don't exist for an upload, so those
-// surfaces stay empty/unavailable, exactly like a blind-launched source
-// on the real server.
+// name table — see fvar.js) plus the sidecars that travelled with it
+// (avar2 mappings, transforms, grade, control axes). A source uploaded
+// without sidecars gets empty studio surfaces, exactly like a
+// blind-launched source on the real server.
 
-let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText}
+let uploadDataset = null; // {health, axes, instances, fontUrl, sourceText, origin, exampleId}
 
 // Axes the behavioral sweep probe may cover: only those gvar actually
 // varies. User (avar2-input) axes act entirely through the mapping —
@@ -110,6 +106,7 @@ const gvarSweepAxes = (fontBytes, axesMeta) => {
 const buildUploadDataset = async ({
   sourceName, sourceFormat, sourceText = null, fontBytes = null,
   csvText = null, metadataText = null, workspaceEntries = null, sourceDir = '',
+  origin = 'upload', exampleId = null,
 }) => {
   let bytes = fontBytes ?? await compileFont(sourceText);
   let mappingsText = csvText;
@@ -155,6 +152,8 @@ const buildUploadDataset = async ({
     stem: sourceName.replace(/\.[^.]+$/, ''),
     sourceDir,
     workspaceEntries,
+    origin,      // 'example' | 'upload'
+    exampleId,   // for 'example': the bundled project it started from
     axes: {
       axes: meta.axes.map(a => ({
         tag: a.tag, name: a.name,
@@ -163,16 +162,7 @@ const buildUploadDataset = async ({
       })),
     },
     instances: { instances: [] },
-    // Coverage audit (structural gvar regions + behavioral sweeps via
-    // the measure_at probe): missing corners, out-of-range sources,
-    // collapses and inert regions, found at load time. Sweeps cover
-    // only axes gvar actually varies: user (avar2-input) axes act
-    // entirely through the mapping, which measure_at does not evaluate
-    // — probing them reports every one as a false "inert axis".
-    coverage: [
-      ...auditCoverage(bytes).findings,
-      ...await probeSweeps(bytes, meta.axes.filter(a => !userAxisTags.has(a.tag)), (b, g, l) => measureAt(b, g, l)),
-    ],
+    coverage: [], // auditDataset below, once the axes metadata exists
     cornerPins: [],
     health: {
       static: true, demo: false, building: false,
@@ -193,7 +183,7 @@ const buildUploadDataset = async ({
     },
   };
   syncInstancesFromCsv(dataset, meta.instances.map(i => i.name));
-  dataset.coverage.push(...lintMappingsFindings(dataset));
+  dataset.coverage = await auditDataset(dataset);
   return dataset;
 };
 
@@ -210,6 +200,8 @@ const serializeDataset = (dataset) => ({
   sourceFormat: dataset.health.source_format,
   stem: dataset.stem,
   sourceDir: dataset.sourceDir,
+  origin: dataset.origin || 'upload',
+  exampleId: dataset.exampleId || null,
   sourceText: dataset.sourceText,
   fontBytes: dataset.fontBytes,
   workspaceEntries: dataset.workspaceEntries || null,
@@ -269,6 +261,8 @@ const restoreSession = async () => {
       sourceName: rec.sourceName,
       stem: rec.stem,
       sourceDir: rec.sourceDir,
+      origin: rec.origin || 'upload',
+      exampleId: rec.exampleId || null,
       workspaceEntries: rec.workspaceEntries || null,
       controlAxes: rec.controlAxes || [],
       transforms: rec.transforms || [],
@@ -278,10 +272,7 @@ const restoreSession = async () => {
       sampleText: rec.sampleText || null,
       axes: rec.axes,
       instances: { instances: [] },
-      coverage: [
-        ...auditCoverage(rec.fontBytes).findings,
-        ...await probeSweeps(rec.fontBytes, gvarSweepAxes(rec.fontBytes, rec.axes?.axes), (b, g, l) => measureAt(b, g, l)),
-      ],
+      coverage: [],
       health: {
         static: true, demo: false, building: false,
         font_built: true, font_loaded: true,
@@ -298,9 +289,7 @@ const restoreSession = async () => {
       },
     };
     syncInstancesFromCsv(uploadDataset);
-    uploadDataset.coverage.push(...lintMappingsFindings(uploadDataset));
-    transformsState = [];
-    bakedEnabledIds = [];
+    uploadDataset.coverage = await auditDataset(uploadDataset);
     return true;
   } catch (err) {
     console.warn('Stored session was unreadable — starting fresh:', err);
@@ -339,6 +328,20 @@ const lintMappingsFindings = (dataset) => {
     inputRanges: Object.keys(inputRanges).length ? inputRanges : undefined,
     metadata: dataset.axisRanges || {},
   }).findings;
+};
+
+// The coverage audit for a dataset — structural gvar corners, behavioral
+// sweeps (measure_at) and the mapping lint — over the master-covered
+// axes only, so first load, session restore and every rebuild agree no
+// matter which post-build stages (transforms, grade, control axes) the
+// bytes carry.
+const auditDataset = async (dataset) => {
+  const axes = gvarSweepAxes(dataset.fontBytes, dataset.axes?.axes);
+  return [
+    ...auditCoverage(dataset.fontBytes, { tags: axes.map(a => a.tag) }).findings,
+    ...await probeSweeps(dataset.fontBytes, axes, (b, g, l) => measureAt(b, g, l)),
+    ...lintMappingsFindings(dataset),
+  ];
 };
 
 // Instance list derives from the CSV rows (every column is a coordinate);
@@ -441,86 +444,33 @@ const refreshAfterPin = async (dataset) => {
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
   dataset.health.last_build_time = Date.now();
-  const structural = auditCoverage(dataset.fontBytes).findings;
-  const behavioral = await probeSweeps(dataset.fontBytes, gvarSweepAxes(dataset.fontBytes, dataset.axes?.axes), (b, g, l) => measureAt(b, g, l));
-  dataset.coverage = [...structural, ...behavioral, ...lintMappingsFindings(dataset)];
+  dataset.coverage = await auditDataset(dataset);
   persistSoon();
 };
 
-// ---- transforms state (toggles → pre-baked variants) ------------------------
-//
-// The snapshot bakes TWO builds of the default example: the transform set
-// as-captured, and all-transforms-off. Toggles are allowed only between
-// those two states — anything else needs a real build (full app).
-
-let transformsState = null;   // id-shaped list, mirroring GET /api/transforms
-let bakedEnabledIds = null;   // enabled ids in the snapshot ('default' files)
-
-const enabledIds = (list) => list.filter(t => t.enabled).map(t => t.id).sort();
-const sameSet = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-
-const transformsList = async () => {
-  if (!transformsState) {
-    const dir = await datasetDir();
-    transformsState = (await fetchJSON(`${DATA}/${dir}/transforms.json`)).transforms || [];
-    bakedEnabledIds = enabledIds(transformsState);
-  }
-  return transformsState;
-};
-
-// 'default' files vs the all-off 'variants/spac-off' bake.
-const activeVariant = async () => {
-  const cur = enabledIds(await transformsList());
-  return cur.length === 0 && !sameSet(cur, bakedEnabledIds) ? 'spac-off' : 'default';
-};
-
-// Files that differ between the baked variants.
-const variantFile = async (name) => {
-  const dir = await datasetDir();
-  const variant = await activeVariant();
-  return variant === 'spac-off'
-    ? `${DATA}/${dir}/variants/spac-off/${name}`
-    : `${DATA}/${dir}/${name}`;
-};
-
-// getFontUrl() must stay SYNCHRONOUS (App calls it directly). Both
-// inputs are already set synchronously by the time it can be called:
-// `dataset` by loadExample, transformsState by updateTransforms (or by
-// the first health() via activeVariant).
-const syncVariant = () => {
-  if (!transformsState) return 'default';
-  const cur = enabledIds(transformsState);
-  return cur.length === 0 && !sameSet(cur, bakedEnabledIds) ? 'spac-off' : 'default';
-};
-
-const currentFontPath = () => {
-  const dir = dataset || 'crispy-mini';
-  return syncVariant() === 'spac-off'
-    ? `${DATA}/${dir}/variants/spac-off/demo.ttf`
-    : `${DATA}/${dir}/demo.ttf`;
-};
-
-const endpoint = (name) => async () => {
-  const dir = await datasetDir();
-  return fetchJSON(`${DATA}/${dir}/${name}`);
-};
-
-let healthCache = {};
-const staticHealth = async () => {
-  const path = await variantFile('health.json');
-  if (!healthCache[path]) healthCache[path] = fetchJSON(path);
-  return healthCache[path];
-};
+// ---- guards -----------------------------------------------------------------
 
 const unavailable = (what) => async () => {
-  throw new Error(`${what} needs the full app — this static demo is read-only.`);
+  throw new Error(`${what} isn't available in the browser demo yet — use the desktop app.`);
 };
 
-const requireUpload = () => {
+const requireProject = () => {
   if (!uploadDataset) {
-    throw new Error('Editing instances needs an uploaded source — snapshots are read-only demos.');
+    throw new Error('No project is loaded — open an example or upload a source first.');
   }
 };
+
+// Health while nothing is loaded: the boot could not fetch the bundled
+// example (or a reload after "Forget this project" failed). The App
+// shows "No font loaded" and the Load Font menu still works.
+const noProjectHealth = () => ({
+  static: true, demo: false, building: false,
+  font_built: false, font_loaded: false,
+  glyphs_path: null, original_path: null, family_name: null,
+  last_build_status: loadError ? 'error' : 'ok',
+  last_build_error: loadError ? String(loadError.message || loadError) : null,
+  avar2_error: null, build_stale: false,
+});
 
 // ---- config bundle import (uploaded sources only) ---------------------------
 //
@@ -911,22 +861,80 @@ const rebuildUploadFont = async (dataset) => {
 
 // After any rebuild-from-source: swap the object URL, stamp the build
 // (the App re-reads fontUrl only when last_build_time changes) and
-// persist the session.
-const commitRebuiltFont = (dataset) => {
+// persist the session — awaited, not debounced: a rebuild already took
+// seconds, and a reload inside the debounce window would lose the edit.
+const commitRebuiltFont = async (dataset) => {
   URL.revokeObjectURL(dataset.fontUrl);
   dataset.fontUrl = URL.createObjectURL(new Blob([dataset.fontBytes], { type: 'font/ttf' }));
+  dataset.coverage = await auditDataset(dataset); // the font changed
+  await persistSession();
+  // Stamped after the write, so "the build time advanced" also means
+  // "the session holds this build".
   dataset.health.last_build_time = Date.now();
-  persistSoon();
+};
+
+// ---- projects: uploads and bundled examples ---------------------------------
+//
+// Both arrive as a workspace (zip-workspace.js): the source, its sidecars
+// and — for .designspace projects — the pristine build the browser can't
+// produce itself. An example is the same thing fetched from the static
+// site, with its pristine base.ttf passed in so the first paint skips
+// the compile. Either way the result is a live dataset that persists.
+
+const loadWorkspace = async (ws, { fontBytes = null, origin = 'upload', exampleId = null } = {}) => {
+  uploadDataset = await buildUploadDataset({
+    sourceName: ws.sourceName,
+    sourceFormat: ws.sourceExt,
+    sourceText: ws.sourceText,
+    fontBytes: fontBytes ?? ws.previewTtf,
+    csvText: ws.csvText,
+    metadataText: ws.metadataText,
+    workspaceEntries: ws.entries,
+    sourceDir: ws.sourceDir,
+    origin,
+    exampleId,
+  });
+  // Harvested control axes / transforms / grade apply through the bundle
+  // machinery (same wasm steps, same warnings); the CSV was already
+  // applied by the dataset build above. Corner pins apply after.
+  if (ws.controlText || ws.transformsText || ws.gradeText) {
+    await applyBundle({
+      format: 'avar2-studio-config', format_version: 1,
+      source: { avar2_out_columns: [...uploadDataset.parametricTags] },
+      control_axes: ws.controlText ? JSON.parse(ws.controlText) : { version: 1, axes: [] },
+      avar2_csv: '',
+      transforms: ws.transformsText ? JSON.parse(ws.transformsText) : { version: 1, transforms: [] },
+      grade: ws.gradeText
+        ? JSON.parse(ws.gradeText)
+        : { version: 1, enabled: false, default_pct: 0.25, instances: [] },
+    }, uploadDataset);
+  }
+  if (ws.cornerPinsText) {
+    uploadDataset.cornerPins = JSON.parse(ws.cornerPinsText).pins || [];
+    await applyPins(uploadDataset);
+  }
+  await persistSession();
+};
+
+const loadExampleProject = async (id) => {
+  const ex = ((await examplesIndex()).examples || []).find(e => e.id === id);
+  if (!ex) throw new Error(`Unknown example: ${id}`);
+  const [zip, base] = await Promise.all([
+    fetchBytes(`${DATA}/${id}/project.zip`),
+    ex.base_ttf ? fetchBytes(`${DATA}/${id}/${ex.base_ttf}`) : Promise.resolve(null),
+  ]);
+  await loadWorkspace(readWorkspaceZip(zip), { fontBytes: base, origin: 'example', exampleId: id });
+  loadError = null;
 };
 
 const staticOverrides = {
-  health: async () => (uploadDataset ? uploadDataset.health : staticHealth()),
+  health: async () => (uploadDataset ? uploadDataset.health : noProjectHealth()),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
-  getInstances: async () => (uploadDataset ? uploadDataset.instances : fetchJSON(await variantFile('instances.json'))),
-  getMasters: async () => (uploadDataset ? { masters: [] } : endpoint('masters.json')()),
-  getAxes: async () => (uploadDataset ? uploadDataset.axes : fetchJSON(await variantFile('axes.json'))),
+  getInstances: async () => (uploadDataset ? uploadDataset.instances : { instances: [] }),
+  getMasters: async () => ({ masters: [] }),
+  getAxes: async () => (uploadDataset ? uploadDataset.axes : { axes: [] }),
   getAvar2Instances: async () => {
-    if (!uploadDataset) return endpoint('avar2-instances.json')();
+    if (!uploadDataset) return { instances: [] };
     return {
       instances: uploadDataset.instancesCsv.rows.map(row => ({
         instance_name: row.name,
@@ -946,7 +954,7 @@ const staticOverrides = {
     };
   },
   getAvar2Axes: async () => {
-    if (!uploadDataset) return endpoint('avar2-axes.json')();
+    if (!uploadDataset) return { traditional_axes: { columns: [] }, metadata: {}, parametric_axes: [] };
     const parsed = uploadDataset.instancesCsv;
     const userCols = mappingsCsv.userColumns(parsed, [...uploadDataset.parametricTags]);
     const metadata = {};
@@ -977,7 +985,7 @@ const staticOverrides = {
       parametric_axes: [...uploadDataset.parametricTags],
     };
   },
-  getTransforms: async () => (uploadDataset ? { transforms: transformsMenu(uploadDataset) } : { transforms: await transformsList() }),
+  getTransforms: async () => ({ transforms: transformsMenu(uploadDataset || { transforms: [] }) }),
   getCoverage: async () => ({
     findings: uploadDataset ? uploadDataset.coverage || [] : [],
     // Fresh array every call: dataset.cornerPins is mutated in place
@@ -986,7 +994,7 @@ const staticOverrides = {
     pins: [...(uploadDataset ? uploadDataset.cornerPins || [] : [])],
   }),
   getGrade: async () => {
-    if (!uploadDataset) return endpoint('grade.json')();
+    if (!uploadDataset) return { enabled: false, default_pct: 0.25, instances: [], max_pct: {}, diagnostics: [] };
     const grade = uploadDataset.grade || { enabled: false, default_pct: 0.25, instances: [] };
     // Per-instance slider caps, the server's _grade_state_payload
     // semantics: bound each instance's grade% by its own parametric
@@ -1004,11 +1012,9 @@ const staticOverrides = {
     // undeliverable grade exactly as the local studio does.
     return { ...grade, max_pct, diagnostics: gradeDiagnostics(grade, coords, ranges) };
   },
-  listControlAxes: async () => (uploadDataset
-    ? { axes: uploadDataset.controlAxes || [] }
-    : endpoint('control-axes.json')()),
+  listControlAxes: async () => ({ axes: uploadDataset?.controlAxes || [] }),
   getGlyphCoverage: async () => {
-    if (!uploadDataset) return endpoint('glyph-coverage.json')();
+    if (!uploadDataset) return { axes: [], glyph_chars: {} };
     // Synthesize coverage rows for the upload's control axes so the
     // sidebar's SECONDARY PARAMETRIC AXES section shows them. Marked
     // source: 'studio' — the rows get the edit affordances (add/remove
@@ -1036,23 +1042,20 @@ const staticOverrides = {
     return { axes, glyph_chars: {} };
   },
   listExamples: examplesIndex,
-  checkSyncStatus: async () => ({ synced: true, message: 'Static demo snapshot' }),
-  getFontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
-  getAvar2FontUrl: () => (uploadDataset ? uploadDataset.fontUrl : currentFontPath()),
+  checkSyncStatus: async () => ({ synced: true, message: 'Browser workspace' }),
+  getFontUrl: () => (uploadDataset ? uploadDataset.fontUrl : null),
+  getAvar2FontUrl: () => (uploadDataset ? uploadDataset.fontUrl : null),
   exportConfigUrl: () => {
-    if (!uploadDataset) return `${datasetPath}/config-export.json`;
+    requireProject();
     const bundle = buildConfigBundle(uploadDataset);
     return URL.createObjectURL(
       new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
     );
   },
   // Whole project as one zip (sources + studio sidecars + preview build)
-  // — loads back here or in the full app. Uploads only; snapshots have
-  // no workspace to export.
+  // — loads back here or in the full app.
   exportWorkspaceUrl: () => {
-    if (!uploadDataset) {
-      throw new Error('Workspace export needs an uploaded source — snapshots are read-only demos.');
-    }
+    requireProject();
     return URL.createObjectURL(
       new Blob([buildWorkspaceZip(uploadDataset)], { type: 'application/zip' })
     );
@@ -1069,39 +1072,7 @@ const staticOverrides = {
       if (list.length > 1) {
         throw new Error('Upload the .zip on its own — it carries the whole project.');
       }
-      const ws = readWorkspaceZip(new Uint8Array(await zipFile.arrayBuffer()));
-      uploadDataset = await buildUploadDataset({
-        sourceName: ws.sourceName,
-        sourceFormat: ws.sourceExt,
-        sourceText: ws.sourceText,
-        fontBytes: ws.previewTtf,
-        csvText: ws.csvText,
-        metadataText: ws.metadataText,
-        workspaceEntries: ws.entries,
-        sourceDir: ws.sourceDir,
-      });
-      transformsState = [];
-      bakedEnabledIds = [];
-      // Harvested control axes / transforms apply through the bundle
-      // machinery (same wasm steps, same warnings); the CSV was already
-      // applied by the dataset build above. Corner pins apply after.
-      if (ws.controlText || ws.transformsText || ws.gradeText) {
-        await applyBundle({
-          format: 'avar2-studio-config', format_version: 1,
-          source: { avar2_out_columns: [...uploadDataset.parametricTags] },
-          control_axes: ws.controlText ? JSON.parse(ws.controlText) : { version: 1, axes: [] },
-          avar2_csv: '',
-          transforms: ws.transformsText ? JSON.parse(ws.transformsText) : { version: 1, transforms: [] },
-          grade: ws.gradeText
-            ? JSON.parse(ws.gradeText)
-            : { version: 1, enabled: false, default_pct: 0.25, instances: [] },
-        }, uploadDataset);
-      }
-      if (ws.cornerPinsText) {
-        uploadDataset.cornerPins = JSON.parse(ws.cornerPinsText).pins || [];
-        await applyPins(uploadDataset);
-      }
-      await persistSession();
+      await loadWorkspace(readWorkspaceZip(new Uint8Array(await zipFile.arrayBuffer())));
       return { ok: true, ignored_files: [] };
     }
     const glyphsFile = list.find(f => f.name.toLowerCase().endsWith('.glyphs'));
@@ -1118,20 +1089,15 @@ const staticOverrides = {
       csvText: csvFile ? await csvFile.text() : null,
       metadataText: metadataFile ? await metadataFile.text() : null,
     });
-    transformsState = [];
-    bakedEnabledIds = [];
     await persistSession();
     return { ok: true, ignored_files: ignored };
   },
 
-  // Rebuild only exists for uploaded .glyphs sources: the full pipeline
-  // re-runs (compile → avar2 → control axes → grade → transforms →
-  // pins → out-of-range drop) —
-  // the rebuilt fontBytes stay the dataset's truth.
+  // Rebuild: the full pipeline re-runs on the .glyphs source (compile →
+  // avar2 → control axes → grade → transforms → pins → out-of-range
+  // drop) — the rebuilt fontBytes stay the dataset's truth.
   buildFont: async () => {
-    if (!uploadDataset) {
-      throw new Error('Building needs the full app — this static demo is read-only.');
-    }
+    requireProject();
     if (uploadDataset.sourceText == null) {
       throw new Error("Rebuilding a .designspace needs the full app — the browser can't compile UFO sources yet.");
     }
@@ -1142,90 +1108,65 @@ const staticOverrides = {
       fontUrl: URL.createObjectURL(new Blob([uploadDataset.fontBytes], { type: 'font/ttf' })),
     };
     uploadDataset.health.last_build_time = Date.now();
-    persistSoon();
+    await persistSession();
     return { ok: true };
   },
 
-  // Load Font: swap the dataset; App's loadData() re-reads the new
-  // health (different glyphs_path) and treats it as a source swap.
-  // Switching to an example abandons the uploaded project — drop the
-  // stored session with it (snapshots are never persisted).
+  // Load Font → Examples: the bundled project loads as a live workspace
+  // (pristine copy, replacing whatever was loaded — the stored session
+  // follows it). App's loadData() re-reads the new health (different
+  // glyphs_path) and treats it as a source swap.
   loadExample: async (id) => {
-    const idx = await examplesIndex();
-    if (!(idx.examples || []).some(e => e.id === id)) {
-      throw new Error(`Unknown example: ${id}`);
-    }
-    dataset = id;
-    uploadDataset = null;
-    transformsState = null;
-    bakedEnabledIds = null;
-    clearSession().catch(() => {});
+    await loadExampleProject(id);
     return { ok: true };
   },
 
-  // "Forget this project": drop the stored session AND unload back to
-  // the default example — auto-restore brings nothing back after this.
+  // "Forget this project": drop the stored session and reload the
+  // pristine default example (which persists in its turn, so a reload
+  // comes back to the untouched example, never to the forgotten work).
   forgetSession: async () => {
     await clearSession().catch(() => {});
     uploadDataset = null;
-    transformsState = null;
-    bakedEnabledIds = null;
-    dataset = (await examplesIndex()).examples?.[0]?.id || 'crispy-mini';
+    await loadExampleProject(await defaultExampleId());
     return { ok: true };
   },
 
-  // Transforms toggles: on SNAPSHOT datasets, allowed only between the
-  // two baked states (the snapshot's enabled set ↔ all-off). Anything
-  // else isn't baked and throws — App reverts the toggle and shows the
-  // message. On UPLOADED .glyphs sources the set is real: applied
-  // transforms can't be un-baked, so the font rebuilds from source with
-  // the new set applied. Enabled/params merge OVER the stored list so
-  // name/description/schema metadata survives (the App renders the menu
-  // from our return value).
+  // Transforms toggles and parameter edits: applied transforms can't be
+  // un-baked, so the font rebuilds from source with the new set applied.
+  // Enabled/params merge OVER the known list so name/description/schema
+  // metadata survives (the App renders the menu from our return value).
   updateTransforms: async (entries) => {
-    if (uploadDataset) {
-      if (uploadDataset.sourceText == null) {
-        throw new Error("Transform toggles on a .designspace project need the full app — the browser can't rebuild UFO sources yet.");
-      }
-      const list = (entries || []).map(e => ({
-        type: e.type || e.id, enabled: !!e.enabled, params: e.params || {},
-      }));
-      // The registry's one-injector-per-axis rule (same as the bundle
-      // validation): two enabled SPAC transforms would produce a font
-      // with two SPAC axes.
-      const spacInjectors = list
-        .filter(t => t.enabled && KNOWN_TRANSFORMS[t.type]?.injected_axis_tag === 'SPAC')
-        .map(t => t.type);
-      if (spacInjectors.length > 1) {
-        throw new Error(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
-      }
-      uploadDataset.transforms = list;
-      await rebuildUploadFont(uploadDataset);
-      commitRebuiltFont(uploadDataset);
-      return { transforms: transformsMenu(uploadDataset) };
+    requireProject();
+    if (uploadDataset.sourceText == null) {
+      throw new Error("Transform toggles on a .designspace project need the full app — the browser can't rebuild UFO sources yet.");
     }
-    const base = await transformsList();
-    const next = base.map(t => {
-      const e = (entries || []).find(x => (x.type || x.id) === t.id);
-      return e ? { ...t, enabled: !!e.enabled, params: { ...(e.params || {}) } } : t;
-    });
-    const cur = enabledIds(next);
-    if (!sameSet(cur, bakedEnabledIds) && cur.length !== 0) {
-      throw new Error("That transform combination isn't baked into the static demo — the full app rebuilds on demand.");
+    const list = (entries || []).map(e => ({
+      type: e.type || e.id, enabled: !!e.enabled, params: e.params || {},
+    }));
+    // The registry's one-injector-per-axis rule (same as the bundle
+    // validation): two enabled SPAC transforms would produce a font
+    // with two SPAC axes.
+    const spacInjectors = list
+      .filter(t => t.enabled && KNOWN_TRANSFORMS[t.type]?.injected_axis_tag === 'SPAC')
+      .map(t => t.type);
+    if (spacInjectors.length > 1) {
+      throw new Error(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
     }
-    transformsState = next;
-    return { transforms: transformsState };
+    uploadDataset.transforms = list;
+    await rebuildUploadFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
+    return { transforms: transformsMenu(uploadDataset) };
   },
 
-  // The parametric-slider reflection falls back to input coordinates for
-  // snapshot datasets (their avar2 isn't parsed); uploads with a
-  // mappings CSV get a real client-side avar2 evaluation (avar2-eval.js).
+  // The parametric-slider reflection: a project with a mappings CSV gets
+  // a real client-side avar2 evaluation (avar2-eval.js); without one the
+  // input coordinates pass through.
   // "Add row" on an unmapped-mapping-point finding: create the missing
   // grid row, outputs pre-filled with the surface's CURRENT value at
   // that location (the built font's own avar2 evaluation) — so adding
   // it is a behavior-pinning no-op the designer then edits into shape.
   addMappingRow: async (location) => {
-    requireUpload();
+    requireProject();
     // Finding locations are keyed by CSV column name (WGHT/OPSZ…);
     // the avar2 evaluator wants the fvar tags (wght/opsz…).
     const fvarLoc = Object.fromEntries(
@@ -1267,25 +1208,24 @@ const staticOverrides = {
   registerEditingInstance: async () => ({}),
   unregisterEditingInstance: async () => ({}),
 
-  // Everything that writes is unavailable on SNAPSHOT datasets (they are
-  // read-only demos). On uploaded sources the instance lifecycle is real:
-  // the CSV is the source of truth, mutations regenerate the avar2 store.
+  // The instance lifecycle is real on every project: the CSV is the
+  // source of truth, mutations regenerate the avar2 store.
   createInstance: async (instanceName, coordinates, insertAfter = null) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates, insertAfter);
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
   },
   updateInstance: async (instanceName, coordinates) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates);
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
   },
   renameInstance: async (instanceName, newName) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.renameRow(uploadDataset.instancesCsv, instanceName, newName);
     syncInstancesFromCsv(uploadDataset);
     // Migrate grade state keyed by instance name
@@ -1305,7 +1245,7 @@ const staticOverrides = {
     return {};
   },
   deleteInstance: async (instanceName) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.deleteRow(uploadDataset.instancesCsv, instanceName);
     // A deleted instance takes its grade with it (server semantics for
     // a full delete; demote keeps the instance, so the grade stays).
@@ -1319,7 +1259,7 @@ const staticOverrides = {
   },
   addInstanceToSource: unavailable('Saving to source'),
   addAvar2Axis: async (axisData) => {
-    requireUpload();
+    requireProject();
     // AddAxisModal payload: {axis_name (uppercase CSV column),
     // display_name, registered_tag, default_value, min, max, scaffold}.
     const column = axisData.axis_name;
@@ -1362,7 +1302,7 @@ const staticOverrides = {
     return {};
   },
   updateAvar2Axis: async (axisName, axisData) => {
-    requireUpload();
+    requireProject();
     // EditAxisModal payload: {display_name, registered_tag, min,
     // default, max} — merge all of it into the axis-metadata entry
     // (name/tag edits included; earlier this dropped them silently).
@@ -1379,7 +1319,7 @@ const staticOverrides = {
     return {};
   },
   deleteAvar2Axis: async (axisName) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.removeColumn(uploadDataset.instancesCsv, axisName);
     delete uploadDataset.axisRanges[axisName];
     syncInstancesFromCsv(uploadDataset);
@@ -1387,38 +1327,38 @@ const staticOverrides = {
     return {};
   },
   updateAvar2Mapping: async (instanceName, axisName, value) => {
-    requireUpload();
+    requireProject();
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, { [axisName]: value });
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
     return {};
   },
   setGrade: async (patch) => {
-    requireUpload();
+    requireProject();
     uploadDataset.grade = { ...(uploadDataset.grade || {}), ...patch };
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return uploadDataset.grade;
   },
   setInstanceGrade: async (instanceName, pct) => {
-    requireUpload();
+    requireProject();
     const grade = uploadDataset.grade ||= { version: 1, enabled: false, default_pct: 0.25, instances: [] };
     grade.instances = (grade.instances || []).filter(e => e.name !== instanceName);
     // pct omitted → seed with the global default (the server's
     // set_instance_grade(pct=None) semantics; removal is its own call).
     grade.instances.push({ name: instanceName, pct: pct ?? grade.default_pct ?? 0.25 });
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return grade;
   },
   removeInstanceGrade: async (instanceName) => {
-    requireUpload();
+    requireProject();
     const grade = uploadDataset.grade;
     if (grade) {
       grade.instances = (grade.instances || []).filter(e => e.name !== instanceName);
     }
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return grade;
   },
   // Control axes (secondary parametric axes) on uploads: declarations
@@ -1426,7 +1366,7 @@ const staticOverrides = {
   // min, default, max, layers: [{glyph, location}]}); every mutation
   // rebuilds from source through the shared pipeline — the wasm
   // computes the brace tuples (drawn outlines stay a full-app feature).
-  createControlAxis: async (axis) => {    requireUpload();
+  createControlAxis: async (axis) => {    requireProject();
     // Modal payload: {tag, display_name, default, min, max}.
     (uploadDataset.controlAxes ||= []).push({
       tag: axis.tag,
@@ -1435,11 +1375,11 @@ const staticOverrides = {
       layers: [],
     });
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
   updateControlAxis: async (tag, updates) => {
-    requireUpload();
+    requireProject();
     const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
     if (!ax) throw new Error(`No control axis '${tag}'`);
     if (updates.display_name !== undefined) ax.name = updates.display_name;
@@ -1447,14 +1387,14 @@ const staticOverrides = {
       if (updates[k] !== undefined) ax[k] = updates[k];
     }
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
   deleteControlAxis: async (tag) => {
-    requireUpload();
+    requireProject();
     uploadDataset.controlAxes = (uploadDataset.controlAxes || []).filter(a => a.tag !== tag);
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
   // Layer locations from the UI pin every axis (including control,
@@ -1462,7 +1402,7 @@ const staticOverrides = {
   // only knows the compiled parametric axes plus CSV user columns and
   // rejects anything else — strip the rest before storing.
   controlAxisLayerDelta: async (tag, delta) => {
-    requireUpload();
+    requireProject();
     const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
     if (!ax) throw new Error(`No control axis '${tag}'`);
     ax.layers ||= [];
@@ -1493,11 +1433,11 @@ const staticOverrides = {
       if (!ax.layers.some(l => sameLayer(l, c))) ax.layers.push(c);
     }
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
   setControlAxisLayers: async (tag, layers) => {
-    requireUpload();
+    requireProject();
     const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
     if (!ax) throw new Error(`No control axis '${tag}'`);
     const allowed = new Set([...uploadDataset.parametricTags]);
@@ -1507,7 +1447,7 @@ const staticOverrides = {
       location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
     }));
     await rebuildUploadFont(uploadDataset);
-    commitRebuiltFont(uploadDataset);
+    await commitRebuiltFont(uploadDataset);
     return { ok: true };
   },
   // Re-seeding rewrites the sidecar and re-derives the shadow, which the
@@ -1516,14 +1456,7 @@ const staticOverrides = {
   openControlAxisInEditor: unavailable('The glyph editor'),
   exportFont: async (options) => {
     const { hidden_axes = [], default_location } = options || {};
-    if (!uploadDataset) {
-      if (hidden_axes.length || default_location) {
-        throw new Error('Export options need an uploaded source');
-      }
-      const r = await fetch(await variantFile('demo.ttf'));
-      if (!r.ok) throw new Error('Font download failed');
-      return r.blob();
-    }
+    requireProject();
     const { exportFontSetDefault, exportFontHiddenAxes, regenStat } = await import('./fontc-compile');
     let bytes = uploadDataset.fontBytes;
     if (default_location) {
@@ -1556,9 +1489,7 @@ const staticOverrides = {
     return new Blob([bytes], { type: 'font/ttf' });
   },
   importConfig: async (bundle, dryRun) => {
-    if (!uploadDataset) {
-      throw new Error('Import needs an uploaded source — snapshots come pre-configured.');
-    }
+    requireProject();
     const report = validateBundle(bundle, uploadDataset);
     if (dryRun) return report;
     if (!report.ok) {
@@ -1567,6 +1498,7 @@ const staticOverrides = {
       throw err;
     }
     const applied = await applyBundle(bundle, uploadDataset);
+    uploadDataset.coverage = await auditDataset(uploadDataset);
     persistSoon();
     return applied;
   },
@@ -1575,7 +1507,7 @@ const staticOverrides = {
   // the corner up (model-computed tuple), then regenerate the stack
   // (avar2 from the CSV if present, STAT always) and re-audit.
   pinCorner: async (corner) => {
-    requireUpload();
+    requireProject();
     const scaffold = await chooseScaffold(uploadDataset, corner);
     uploadDataset.fontBytes = await pinCornerWasm(uploadDataset.fontBytes, corner, scaffold);
     (uploadDataset.cornerPins ||= []).push({ corner, scaffold });
@@ -1596,7 +1528,7 @@ const staticOverrides = {
   // semantics: their gvar deltas are zeroed and HVAR rebuilt. Sticks
   // to the dataset: rebuilds re-apply it, sessions carry it.
   clampOutOfRange: async () => {
-    requireUpload();
+    requireProject();
     uploadDataset.fontBytes = await clampOutOfRangeWasm(uploadDataset.fontBytes);
     uploadDataset.clampOutOfRange = true;
     await refreshAfterPin(uploadDataset);
@@ -1622,7 +1554,15 @@ export async function selectApiMode() {
   // manual diagnosis).
   if (typeof window !== 'undefined') window.__avar2api = api;
   // Auto-restore the stored session before the app renders — health()
-  // then answers for the uploaded dataset and the app boots into it.
-  await restoreSession();
+  // then answers for that project and the app boots into it. With no
+  // session, boot into the default bundled example.
+  if (!(await restoreSession())) {
+    try {
+      await loadExampleProject(await defaultExampleId());
+    } catch (err) {
+      loadError = err;
+      console.warn('The bundled example could not be loaded:', err);
+    }
+  }
   return true;
 }

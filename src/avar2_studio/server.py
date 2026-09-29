@@ -6517,7 +6517,7 @@ def main():
         "--csv",
         type=Path,
         default=None,
-        help="Path to avar2-mappings.csv (default: same directory as Glyphs file)"
+        help="Path to the avar2 mappings CSV (default: <stem>-avar.csv beside the source)"
     )
     parser.add_argument(
         "--no-fontc",

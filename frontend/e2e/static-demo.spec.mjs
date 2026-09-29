@@ -2,8 +2,9 @@
  * End-to-end tests for the static demo (GitHub Pages bundle, no backend).
  *
  * Covers the full surface:
- *   1. static boot (banner, header actions, CrispyMini rows, no Rebuild)
- *   2. Transforms SPAC toggle (baked variant swap)
+ *   1. static boot (banner, header actions, CrispyMini rows, Rebuild —
+ *      the bundled examples load as live projects)
+ *   2. Transforms SPAC toggle (in-browser rebuild from source)
  *   3. Load Font dataset switch (Roboto Delta Mini)
  *   4. .glyphs upload compiled in-browser (fontc-wasm worker)
  *   5. Rebuild on an uploaded source
@@ -54,36 +55,76 @@ ok(!(await page.$('.static-demo-banner')), 'no demo banner');
 ok(await page.isVisible('button:has-text("Load Font")'), 'Load Font present');
 ok(await page.isVisible('button:has-text("Transforms")'), 'Transforms present');
 ok(await page.isVisible('button:has-text("Config")'), 'Config present');
-ok(!(await page.$('header .btn-3d')), 'no Rebuild for snapshot datasets');
-await page.waitForSelector('.sidebar h2', { timeout: 20000 });
-ok((await page.textContent('.sidebar h2')) === 'CrispyMini', 'CrispyMini in sidebar');
+await page.waitForSelector('.sidebar h2', { timeout: 120000 });
+ok(await page.isVisible('header .btn-3d'), 'Rebuild present (the example is a live project)');
+ok((await page.textContent('.sidebar h2')) === 'Crispy Mini', 'Crispy Mini in sidebar');
 await page.waitForSelector('.instance-row', { timeout: 20000 }).catch(() => null);
 ok((await page.$$('.instance-row')).length > 0, 'instance rows render');
+// Section 7 imports Crispy Mini's studio configuration onto a fresh
+// upload: capture it from the live project (the bundle the Config menu
+// exports) while the example is loaded.
+const CRISPY_BUNDLE = '/tmp/e2e-crispy-config.json';
+writeFileSync(CRISPY_BUNDLE, await page.evaluate(async () =>
+  (await fetch(window.__avar2api.exportConfigUrl())).text()));
+ok(JSON.parse(readFileSync(CRISPY_BUNDLE, 'utf8')).format === 'avar2-studio-config',
+  'config bundle exported from the live example');
 
 // ---- 2. SPAC toggle --------------------------------------------------------
-console.log('2. SPAC toggle (baked variant)');
+console.log('2. SPAC toggle (in-browser rebuild)');
 const spacVisible = () => page.evaluate(() =>
   [...document.querySelectorAll('.sidebar *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'SPAC'));
-ok(await spacVisible(), 'SPAC axis visible in sidebar (baked default)');
+// A toggle recompiles the example from source in the wasm worker.
+const waitForSpac = (present) => page.waitForFunction((want) =>
+  [...document.querySelectorAll('.sidebar *')].some(el =>
+    el.children.length === 0 && el.textContent.trim() === 'SPAC') === want,
+  present, { timeout: 300000 });
+ok(await spacVisible(), 'SPAC axis visible in sidebar (the example ships with width-aware SPAC on)');
 await page.click('button:has-text("Transforms")');
 await page.click('label:has-text("Spacing — width-aware") input[type=checkbox]');
 await page.keyboard.press('Escape');
-await sleep(2500);
-ok(!(await spacVisible()), 'SPAC axis gone after toggle off (variant swap)');
-ok(!(await page.$('.count-flag')), 'transforms count badge cleared');
+await waitForSpac(false);
+ok(!(await spacVisible()), 'SPAC axis gone after toggle off (rebuilt from source)');
+ok(!(await page.$('button:has-text("Transforms") .count-flag')), 'transforms count badge cleared');
 await page.click('button:has-text("Transforms")');
 await page.click('label:has-text("Spacing — width-aware") input[type=checkbox]');
 await page.keyboard.press('Escape');
-await sleep(2500);
+await waitForSpac(true);
 ok(await spacVisible(), 'SPAC axis back after toggle on');
+// The example is a persisted project: an authoring change that leaves
+// it different from the pristine copy (a second transform on → rebuild)
+// survives a reload, exactly like an upload would.
+const transformsBadge = () => page.evaluate(() =>
+  [...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Transforms'))
+    ?.querySelector('.count-flag')?.textContent ?? null);
+// The badge updates optimistically on the click; the rebuild and the
+// session write land later. The build stamp advances only once the
+// session holds the new build, so wait on that before reloading.
+const buildStamp = () => page.evaluate(async () => (await window.__avar2api.health()).last_build_time);
+const stampBefore = await buildStamp();
+await page.click('button:has-text("Transforms")');
+await page.click('label:has-text("Smooth unhinted rendering") input[type=checkbox]');
+await page.keyboard.press('Escape');
+for (const deadline = Date.now() + 300000; (await buildStamp()) === stampBefore;) {
+  if (Date.now() > deadline) throw new Error('timed out waiting for the transform rebuild');
+  await sleep(250);
+}
+ok((await transformsBadge()) === '2', 'second transform on (badge 2) after the rebuild');
+await page.reload({ waitUntil: 'load' });
+await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 120000 });
+// The header fetches the transforms after first paint — wait for it.
+await page.waitForFunction(() =>
+  [...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Transforms'))
+    ?.querySelector('.count-flag')?.textContent === '2', null, { timeout: 30000 }).catch(() => null);
+ok((await transformsBadge()) === '2', 'example project restored from the session after reload (both transforms still on)');
 
 // ---- 3. dataset switch -----------------------------------------------------
 console.log('3. Load Font dataset switch');
 await page.click('button:has-text("Load Font")');
 await page.click('text=Roboto Delta Mini');
-await sleep(4000);
-ok((await page.textContent('.sidebar h2')) === 'RobotoDeltaMini', 'Roboto family in sidebar');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Roboto Delta Roman', null, { timeout: 120000 });
+ok(true, 'Roboto family in sidebar');
 ok(await page.evaluate(() =>
   [...document.querySelectorAll('.sidebar *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'XOUC')), 'case-split axes (XOUC) present');
@@ -157,7 +198,6 @@ const specimenBefore = await page.screenshot({
 // ---- 7. config import onto an uploaded source -------------------------------
 console.log('7. config import onto an uploaded source');
 const CRISPY_GLYPHS = join(dirname(fileURLToPath(import.meta.url)), '../../examples/crispy-mini/sources/CrispyMini.glyphs');
-const CRISPY_BUNDLE = join(dirname(fileURLToPath(import.meta.url)), '../public/static-demo/crispy-mini/config-export.json');
 await page.click('button:text-is("Instances")');
 await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_GLYPHS);
@@ -288,22 +328,28 @@ const shotReset = await specimenShot();
 ok(shotDefault.equals(shotReset), 'crbr back to default restores the specimen');
 // Grade tuples are SCOPED to their instance's parametric location: at
 // the default location GRAD is inert; at the graded instance's coords
-// (test bundle grades "Narrow Heavy 12" at 222.8/279.6/250.2) it
-// applies fully.
+// (the test bundle grades "Narrow Heavy 144", whose CSV row sits at
+// XTRA 94 / XOPQ 310.2 / YOPQ 243) it applies. That instance sits on
+// the XTRA floor, so with "limit grade to counter headroom" on the
+// darkening half is capped at 0 (the grade diagnostics say so) and only
+// the lightening half moves the outline — probe GRAD −10.
 await setSlider('GRAD', 10);
 await sleep(600);
 const shotGradAtOrigin = await specimenShot();
 ok(shotDefault.equals(shotGradAtOrigin), 'GRAD +10 inert at the default location (scoped grade)');
-await setSlider('XTRA', 222.8);
-await setSlider('XOPQ', 279.6);
-await setSlider('YOPQ', 250.2);
+ok(await page.evaluate(async () =>
+  (await window.__avar2api.getGrade()).diagnostics.some(d => d.code === 'no_headroom_capped')),
+  'grade diagnostics report the capped darkening half');
+await setSlider('XTRA', 94);
+await setSlider('XOPQ', 310.2);
+await setSlider('YOPQ', 243);
 await setSlider('GRAD', 0);
 await sleep(700);
 const shotAtInstance = await specimenShot();
-await setSlider('GRAD', 10);
+await setSlider('GRAD', -10);
 await sleep(700);
 const shotGrad = await specimenShot();
-ok(!shotAtInstance.equals(shotGrad), "GRAD +10 darkens the specimen at the graded instance's location");
+ok(!shotAtInstance.equals(shotGrad), "GRAD -10 lightens the specimen at the graded instance's location");
 await setSlider('GRAD', 0);
 await page.click('button:has-text("Reset")');
 await sleep(600);
@@ -646,15 +692,15 @@ ok(await page.evaluate(() =>
   [...document.querySelectorAll('.preview-tab *')].some(el =>
     el.children.length === 0 && el.textContent.trim() === 'wght')),
   'restored session keeps the CSV-derived wght user axis');
-// Forget: unloads to the default example and stays forgotten after reload.
+// Forget: reloads the pristine default example and stays forgotten after reload.
 await page.click('button:has-text("Load Font")');
 await page.click('button:has-text("Forget this project")');
 await page.click('button:text-is("Instances")');
-await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 120000 });
 ok(true, 'forget returns to the default example');
 await page.reload({ waitUntil: 'load' });
 await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
-await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyMini');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 120000 });
 ok(true, 'forget survives reload (stored session cleared)');
 
 // ---- 17. coverage audit (missing corners on upload) -------------------------

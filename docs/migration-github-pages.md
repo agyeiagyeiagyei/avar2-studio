@@ -1,3 +1,11 @@
+> **Status (September 2026):** the snapshot scheme described below —
+> baked API responses per example, a pre-built SPAC-off variant,
+> read-only examples — has been retired. The bundled examples now stage
+> as project zips plus a pristine fontc compile
+> (`scripts/snapshot_static_demo.py`) and load through the same path as
+> an upload, so they are editable and rebuild in-browser. This document
+> is kept as the design record of the static build.
+
 # Migration plan: avar2-studio on GitHub Pages (static, server-independent)
 
 Status: planning reference — written before the `github-pages` branch work began.

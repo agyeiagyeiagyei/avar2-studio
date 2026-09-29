@@ -50,16 +50,32 @@ function tables(view) {
   return map;
 }
 
-export function auditCoverage(bytes) {
+/**
+ * @param bytes  the compiled font
+ * @param opts.tags  audit only these axes (the master-covered ones).
+ *   Tuples that vary along any other axis — transform (SPAC), grade
+ *   (GRAD) and secondary-axis tuples — are ignored, so the verdict is
+ *   the same whichever post-build stages the bytes already carry, and
+ *   user (avar2-input) axes, which never have sources, raise no false
+ *   "uncovered corner". Default: every fvar axis.
+ */
+export function auditCoverage(bytes, { tags: onlyTags = null } = {}) {
   const meta = parseFont(bytes);
   if (!meta.axes.length) return { findings: [], axes: [] };
-  const tags = meta.axes.map(a => a.tag);
+  const keep = meta.axes.map(a => !onlyTags || onlyTags.includes(a.tag));
+  const idx = keep.map((k, i) => (k ? i : -1)).filter(i => i >= 0);
+  const axes = idx.map(i => meta.axes[i]);
+  const tags = axes.map(a => a.tag);
   const n = tags.length;
+  if (!n) return { findings: [], axes: [] };
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const gvarRec = tables(view).gvar;
-  if (!gvarRec) return { findings: [], axes: meta.axes };
+  if (!gvarRec) return { findings: [], axes };
 
-  const tuples = gvarRegions(view, gvarRec, n);
+  const project = (arr) => Float64Array.from(idx, i => arr[i]);
+  const tuples = gvarRegions(view, gvarRec, meta.axes.length)
+    .filter(t => keep.every((k, i) => k || t.peaks[i] === 0))
+    .map(t => ({ ...t, mins: project(t.mins), peaks: project(t.peaks), maxs: project(t.maxs) }));
   const findings = [];
 
   // --- out-of-range sources (peaks beyond the axis box) ---
@@ -86,11 +102,11 @@ export function auditCoverage(bytes) {
   // --- uncovered corners ---
   // The default master is a source (zero delta → no gvar tuple).
   const peaksWithOrigin = [[...Array(n).fill(0)], ...tuples.map(t => t.peaks)];
-  const normDefault = meta.axes.map(a =>
+  const normDefault = axes.map(a =>
     a.default === a.min ? -1 : a.default === a.max ? 1 : 0
   );
   const userCoord = (corner, i) => {
-    const a = meta.axes[i];
+    const a = axes[i];
     return corner[i] < 0 ? a.min : corner[i] > 0 ? a.max : a.default;
   };
   const cornerCount = 1 << n;
@@ -114,7 +130,7 @@ export function auditCoverage(bytes) {
     });
   }
 
-  return { findings, axes: meta.axes };
+  return { findings, axes };
 }
 
 // ---- layer B (behavioral probe) ---------------------------------------------
