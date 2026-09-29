@@ -4,6 +4,7 @@ Dispatches between:
 
   - ``avar2-studio doctor``  → environment check (no Glyphs file required)
   - ``avar2-studio build /path/to/MyFont.glyphs --out DIR``  → headless build
+  - ``avar2-studio install-glyphs-plugins``  → link the Glyphs 3 plugins into Glyphs
   - ``avar2-studio /path/to/MyFont.glyphs [server args…]``  → run the server
 
 Everything that isn't a known subcommand is forwarded to ``server.main()``
@@ -22,8 +23,9 @@ Usage:
   avar2-studio --help
 
 Subcommands:
-  doctor   Run environment checks (fontc, gftools, frontend bundle, …)
-  build    Build the font once, headless, and copy it to --out (for CI)
+  doctor                  Run environment checks (fontc, gftools, frontend bundle, …)
+  build                   Build the font once, headless, and copy it to --out (for CI)
+  install-glyphs-plugins  Link the bundled Glyphs 3 plugins into Glyphs (--uninstall removes them)
 
 Run ``avar2-studio /path/to/MyFont.glyphs --help`` to see server options.
 """
@@ -39,6 +41,10 @@ def main() -> None:
 
     if argv and argv[0] == "build":
         sys.exit(_build(argv[1:]))
+
+    if argv and argv[0] == "install-glyphs-plugins":
+        from . import glyphs_install
+        sys.exit(glyphs_install.main(argv[1:]))
 
     if argv and argv[0] in ("-h", "--help") and len(argv) == 1:
         print(_HELP)

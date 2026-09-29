@@ -2,7 +2,10 @@
 
 Visual authoring and preview tool for avar2 variable fonts. Flask backend
 (`src/avar2_studio/server.py` + modules), React frontend (`frontend/src/`),
-bundled wheel frontend in `src/avar2_studio/static/` (gitignored, CI-assembled).
+bundled wheel frontend in `src/avar2_studio/static/` (gitignored, CI-assembled),
+Glyphs 3 plugins in `src/avar2_studio/glyphs/` (the `avar2 Studio` Window-menu
+hub plus six design tools; `avar2-studio install-glyphs-plugins` symlinks
+them into Glyphs — `src/avar2_studio/glyphs/README.md`).
 
 ## Operating standard
 
@@ -31,8 +34,8 @@ In addition to that file, these repo-specific rules apply.
 
 ## Environment (traps that bite)
 
-- **Use only the repo `.venv`.** It has avar2-studio editable + `flask-sock`
-  (hard dep, NOT in pyproject) + `fontra`/`fontra-glyphs` (from git). The
+- **Use only the repo `.venv`.** It has avar2-studio editable +
+  `fontra`/`fontra-glyphs` (from git). The
   system Framework Python has a stale released wheel — launching with the
   wrong interpreter silently runs old code. Verify with
   `python -c "import avar2_studio; print(avar2_studio.__file__)"` → must
