@@ -3,7 +3,10 @@
 > read-only examples — has been retired. The bundled examples now stage
 > as project zips plus a pristine fontc compile
 > (`scripts/snapshot_static_demo.py`) and load through the same path as
-> an upload, so they are editable and rebuild in-browser. This document
+> an upload, so they are editable and rebuild in-browser. The outline
+> editor followed: the demo embeds the separate-GPL **fontra-embed**
+> bundle over postMessage, with drawn brace layers spliced source-level
+> by the wasm `compile_with_overlays`. This document
 > is kept as the design record of the static build.
 
 # Migration plan: avar2-studio on GitHub Pages (static, server-independent)

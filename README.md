@@ -42,7 +42,10 @@ What the browser cannot do, compared with the installed app:
 - recompile a `.designspace` project: fontc-wasm cannot read UFOs from a
   filesystem, so those load from the built font inside their zip, and
   edits that need a rebuild are unavailable (Roboto Delta Mini included)
-- open the outline editor (in progress, see [Roadmap](#roadmap))
+- open the outline editor — **now available**: the demo embeds the
+  [fontra-embed](https://github.com/agyeiagyeiagyei/fontra-embed) bundle
+  (Fontra client as a separate GPL sub-project, driven over postMessage);
+  drawings stay source-level in the control-axis sidecar
 
 ![The Load Font menu: bundled examples, upload, forget](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/load-font-menu.png)
 
@@ -376,8 +379,9 @@ architecture, environment traps, and known issues.
 
 ## Roadmap
 
-- [ ] Outline editing in the browser demo (Fontra as a separate GPL
-  sub-project, embedded and driven over `postMessage`)
+- [x] Outline editing in the browser demo (Fontra as a separate GPL
+  sub-project — [fontra-embed](https://github.com/agyeiagyeiagyei/fontra-embed)
+  — embedded and driven over `postMessage`)
 - [ ] Push-to-source sync (write studio-declared axes from the sidecar
   into the `.glyphs` on request)
 - [ ] Grade-master comparison panel (parked on the `grade-comparison`

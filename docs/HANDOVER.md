@@ -198,6 +198,35 @@ treat any change here as high-risk.
   stale cache.
 - `/api/coverage` (the structural design-space audit) depends on the
   Fontra subprocess — it 500s with "Fontra subprocess is not running"
+
+### Browser editor (static demo) — fontra-embed
+- The Pages demo embeds the editor from **fontra-embed** (separate GPL
+  repo: Fontra's client built from pinned src-js with a custom
+  postMessage entry, no WebSocket). Parent side is
+  `frontend/src/editor-bridge.js` (FontHandler role: serves the editor's
+  RPC from a wasm `glyph_model` source-level model, applies `editFinal`
+  to the sidecar, coalesces rebuilds) — wire protocol `v: 0`, version
+  checked on every message.
+- **Drawn layers are source-level**: edits become `outline` entries in
+  the control-axes sidecar (cubic nodes/components/anchors, the desktop
+  schema), and builds splice them with wasm `compile_with_overlays`
+  while computed (target) layers stay on the bytes-level
+  `apply_control_axes` path (it tolerates already-declared axes and
+  skips outline-bearing layers). Same sidecar → desktop builds the same
+  outlines (verified cross-mode).
+- Write guards live in the BRIDGE (masters and target/computed layers
+  reject edits), not in the embed's hidden tools. The embed's
+  focused-ui (ported server shim: trimmed panels/tools, sources-list
+  narrowing, metrics HUD) is UI-level only.
+- Persistence: sidecar rides the IndexedDB session and the workspace
+  zip; a header-only mappings CSV means "no mappings" on load
+  (add_avar2 aborts on zero rows otherwise). Two-tab edit lock via
+  BroadcastChannel.
+- Embed URL pin: `embedEditorUrl()` — prod default the fontra-embed
+  Pages site, dev `localhost:8099`, overrides `VITE_FONTRA_EMBED_URL` /
+  `window.AVAR2_EMBED_URL`.
+- e2e: `frontend/e2e/editor-bridge.spec.mjs` (55 checks; serves
+  dist-pages + fontra-embed/dist, system Chrome).
   when Fontra isn't up, and the frontend silently shows no Coverage
   button. If the panel is "missing" in the full app, check Fontra first.
 
