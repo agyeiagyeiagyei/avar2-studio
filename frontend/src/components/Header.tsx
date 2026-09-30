@@ -36,6 +36,7 @@ interface TransformEntry {
   name: string;
   description?: string;
   enabled?: boolean;
+  stage?: string; // "font" (post-build) or "source" (pre-compile, heavy rebuild)
   injected_axis_tag?: string | null;
   params_schema?: TransformParamSpec[];
   params?: Record<string, any>; // user values keyed by ParamSpec.key
@@ -126,6 +127,7 @@ interface GradeState {
 // dropdowns still use the old manual pattern.
 function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
+                 transformsDirty = {}, onApplyTransform,
                  grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
                  coverageFindings = [], onShowCoverage, isUploadDataset = false }: HeaderProps) {
@@ -552,6 +554,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                           )}
                         </label>
                       ))}
+                      {t.stage === 'source' && (
+                        // A source-stage transform rebuilds the whole shadow —
+                        // seconds, not the ~1s a font-stage rebuild costs — so
+                        // its edits wait for a deliberate Apply instead of the
+                        // per-pause auto-commit.
+                        <button
+                          type="button"
+                          className="transform-apply"
+                          disabled={busy || !transformsDirty[t.id]}
+                          onClick={() => onApplyTransform && onApplyTransform(t.id)}
+                        >
+                          {transformsDirty[t.id] ? 'Apply' : 'Applied'}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

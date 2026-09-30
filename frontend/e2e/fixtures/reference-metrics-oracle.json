@@ -1,0 +1,21 @@
+{
+ "location": {
+  "XTRA": 1000,
+  "XOPQ": 1016,
+  "YOPQ": 462
+ },
+ "metrics": {
+  "H": {
+   "advance": 3363.0,
+   "stem": 1016.0,
+   "contrast": 2.2,
+   "bar": 462.7
+  },
+  "e": {
+   "advance": 2991.0,
+   "stem": 2702.6,
+   "contrast": 11.39,
+   "bar": 237.3
+  }
+ }
+}

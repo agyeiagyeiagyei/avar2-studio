@@ -175,6 +175,10 @@ struct MasterInfo {
     id: String,
     name: String,
     values: Vec<f64>,
+    /// Horizontal metrics for the editor's font sources (Fontra draws the
+    /// ascender/descender lines); absent keys stay None.
+    ascender: Option<f64>,
+    descender: Option<f64>,
 }
 
 fn font_axes(root: &Dict) -> Result<Vec<FontAxis>, JsError> {
@@ -205,7 +209,39 @@ fn font_axes(root: &Dict) -> Result<Vec<FontAxis>, JsError> {
         .collect()
 }
 
+/// Horizontal metrics for the editor's font sources (Fontra draws the
+/// ascender/descender lines). Glyphs 3 masters carry `metricValues`
+/// aligned with the font-level `metrics` list (each {type = name}); v2
+/// masters use plain `ascender`/`descender` keys.
+fn master_metric(d: &Dict, metric_names: &[String], metric: &str) -> Option<f64> {
+    if let Some(v) = d.get(metric).and_then(Plist::as_f64) {
+        return Some(v);
+    }
+    let idx = metric_names.iter().position(|n| n == metric)?;
+    d.get("metricValues")
+        .and_then(Plist::as_array)?
+        .get(idx)?
+        .as_dict()?
+        .get("pos")
+        .and_then(Plist::as_f64)
+}
+
 fn font_masters(root: &Dict) -> Result<Vec<MasterInfo>, JsError> {
+    let metric_names: Vec<String> = root
+        .get("metrics")
+        .and_then(Plist::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    m.as_dict()?
+                        .get("type")
+                        .or_else(|| m.as_dict()?.get("name"))
+                        .and_then(Plist::as_str)
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let masters = root
         .get("fontMaster")
         .and_then(Plist::as_array)
@@ -230,6 +266,8 @@ fn font_masters(root: &Dict) -> Result<Vec<MasterInfo>, JsError> {
                 id: id.to_string(),
                 name: name.to_string(),
                 values,
+                ascender: master_metric(d, &metric_names, "ascender"),
+                descender: master_metric(d, &metric_names, "descender"),
             })
         })
         .collect()
@@ -550,7 +588,12 @@ pub(crate) fn glyph_model(source: &str, glyph_name: &str) -> Result<String, JsEr
     }
     let masters_json: Vec<_> = masters
         .iter()
-        .map(|m| serde_json::json!({"id": m.id, "name": m.name, "axesValues": m.values}))
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id, "name": m.name, "axesValues": m.values,
+                "ascender": m.ascender, "descender": m.descender,
+            })
+        })
         .collect();
 
     let glyphs = root
@@ -562,6 +605,29 @@ pub(crate) fn glyph_model(source: &str, glyph_name: &str) -> Result<String, JsEr
         .filter_map(Plist::as_dict)
         .find(|g| g.get("glyphname").and_then(Plist::as_str) == Some(glyph_name))
         .ok_or_else(|| err(format!("glyph '{glyph_name}' not found")))?;
+    // The glyph's codepoints (the editor's text view resolves typed
+    // characters through the cmap the bridge builds from these). Raw value
+    // is a comma-separated string — or a bare number, which the plist
+    // reads as Integer; glyphs2 files are hex, glyphs3 base10
+    // (glyphs-reader `codepoint_radix`; the version key is spelled
+    // ".formatVersion" in the plist).
+    let radix: u32 = match root.get(".formatVersion").and_then(Plist::as_i64) {
+        Some(v) if v >= 3 => 10,
+        _ => 16,
+    };
+    let unicode_raw: Option<String> = match glyph.get("unicode") {
+        Some(Plist::String(s)) => Some(s.to_string()),
+        Some(Plist::Integer(i)) => Some(i.to_string()),
+        _ => None,
+    };
+    let codepoints: Vec<serde_json::Value> = unicode_raw
+        .map(|s| {
+            s.split(',')
+                .filter_map(|part| u32::from_str_radix(part.trim(), radix).ok())
+                .map(serde_json::Value::from)
+                .collect()
+        })
+        .unwrap_or_default();
     let mut layers_json = Vec::new();
     if let Some(layers) = glyph.get("layers").and_then(Plist::as_array) {
         for layer in layers {
@@ -574,7 +640,7 @@ pub(crate) fn glyph_model(source: &str, glyph_name: &str) -> Result<String, JsEr
     let model = serde_json::json!({
         "axes": axes_json,
         "masters": masters_json,
-        "glyph": {"name": glyph_name, "layers": layers_json},
+        "glyph": {"name": glyph_name, "codepoints": codepoints, "layers": layers_json},
     });
     serde_json::to_string(&model).map_err(|e| err(format!("model json: {e}")))
 }

@@ -12,10 +12,14 @@
 //   {kind: 'measure', fontBytes, request} → {ok, areas|error}
 //   {kind: 'pin', fontBytes, request}     → {ok, ttf|error}
 //   {kind: 'clamp', fontBytes}            → {ok, ttf|error}
+//   {kind: 'glyph-model', source, glyph}  → {ok, model|error} (JSON string)
+//   {kind: 'compile-overlays', source, request} → {ok, ttf|error}
 // The ttf is transferred (zero-copy) back to the caller.
 
 import init, {
   compile_glyphs,
+  compile_with_overlays,
+  glyph_model,
   add_avar2,
   apply_control_axes,
   apply_grade,
@@ -33,7 +37,13 @@ const ready = init();
 self.onmessage = async (e) => {
   try {
     await ready;
-    if (e.data && e.data.kind === 'clamp') {
+    if (e.data && e.data.kind === 'glyph-model') {
+      const model = glyph_model(e.data.source, e.data.glyph);
+      self.postMessage({ ok: true, model });
+    } else if (e.data && e.data.kind === 'compile-overlays') {
+      const ttf = compile_with_overlays(e.data.source, e.data.request);
+      self.postMessage({ ok: true, ttf }, [ttf.buffer]);
+    } else if (e.data && e.data.kind === 'clamp') {
       const ttf = clamp_out_of_range(e.data.fontBytes);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'pin') {

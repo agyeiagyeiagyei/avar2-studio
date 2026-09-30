@@ -94,6 +94,13 @@ struct ControlLayer {
     /// `apply_control_axes` for the two different delta models.
     #[serde(default)]
     target: HashMap<String, f64>,
+    /// A hand-drawn outline (sidecar schema). Drawn layers are spliced into
+    /// the SOURCE by `compile_with_overlays` (editor.rs), so their gvar
+    /// effect is already in the font by the time `apply_control_axes` runs
+    /// in the split build path — they are skipped here to avoid a second,
+    /// computed tuple at the same location. Presence is all that matters.
+    #[serde(default)]
+    outline: Option<serde::de::IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -685,41 +692,83 @@ pub(crate) fn apply_control_axes(
         .collect();
     let instancer = GlyphInstancer::new(&font)?;
     let old_axis_count = triples.len();
-    let total_axes = old_axis_count + axes.len();
     let zeroes = vec![0.0; old_axis_count];
 
-    let mut new_axes: Vec<NewFvarAxis> = Vec::with_capacity(axes.len());
-    let mut extras: HashMap<u16, Vec<NewTuple>> = HashMap::new();
+    // The split build path (compile_with_overlays splices DRAWN layers and
+    // declares their axes at source level, then this runs on the compiled
+    // font for the COMPUTED layers) presents axes that already exist in
+    // fvar. Those are tolerated: the axis is not re-declared and its tuples
+    // land at the existing index. An axis that is NOT in the font is
+    // declared as before. (A stale duplicate within the request is still
+    // an error.)
     let mut seen_tags: HashSet<Tag> = HashSet::new();
-    for (new_i, axis) in axes.iter().enumerate() {
+    for axis in &axes {
         let tag = Tag::from_str(&axis.tag)
             .map_err(|e| err(format!("bad control axis tag '{}': {e}", axis.tag)))?;
-        if existing.contains_key(&tag) || !seen_tags.insert(tag) {
-            return Err(err(format!("control axis '{tag}' already exists in fvar")));
+        if !seen_tags.insert(tag) {
+            return Err(err(format!("control axis '{tag}' listed twice")));
         }
-        if !(axis.min <= axis.default && axis.default <= axis.max) {
-            return Err(err(format!(
-                "control axis '{tag}': default {} outside [{}, {}]",
-                axis.default, axis.min, axis.max
-            )));
-        }
+    }
+    // Control-axis pins (this axis's own, or a sibling control axis's from
+    // the same request) are skipped when resolving a layer's instantiation
+    // location: the instancer must sit at the control DEFAULTS so the delta
+    // is measured against the un-braced shape.
+    let request_tags = &seen_tags;
+    let total_axes = old_axis_count
+        + axes
+            .iter()
+            .filter(|a| {
+                Tag::from_str(&a.tag)
+                    .map(|t| !existing.contains_key(&t))
+                    .unwrap_or(false)
+            })
+            .count();
+
+    let mut new_axes: Vec<NewFvarAxis> = Vec::new();
+    let mut extras: HashMap<u16, Vec<NewTuple>> = HashMap::new();
+    for axis in &axes {
+        let tag = Tag::from_str(&axis.tag)
+            .map_err(|e| err(format!("bad control axis tag '{}': {e}", axis.tag)))?;
+        // (fvar index, min, default, max) — from the font when the axis
+        // already exists (the font's range is the truth then), else from
+        // the request, validated.
+        let (control_idx, ax_min, ax_default, ax_max) = match existing.get(&tag) {
+            Some(&i) => {
+                let (_, min, default, max) = triples[i];
+                (i, min, default, max)
+            }
+            None => {
+                if !(axis.min <= axis.default && axis.default <= axis.max) {
+                    return Err(err(format!(
+                        "control axis '{tag}': default {} outside [{}, {}]",
+                        axis.default, axis.min, axis.max
+                    )));
+                }
+                (old_axis_count + new_axes.len(), axis.min, axis.default, axis.max)
+            }
+        };
         // The engaged extreme: the side of the default with travel (the
         // larger one for interior defaults).
-        let control_idx = old_axis_count + new_i;
-        let control_norm = if axis.max > axis.default
-            && (axis.max - axis.default) >= (axis.default - axis.min)
+        let control_norm = if ax_max > ax_default
+            && (ax_max - ax_default) >= (ax_default - ax_min)
         {
             1.0
-        } else if axis.min < axis.default {
+        } else if ax_min < ax_default {
             -1.0
         } else {
             return Err(err(format!(
                 "control axis '{tag}' has no travel around its default {}",
-                axis.default
+                ax_default
             )));
         };
 
         for layer in &axis.layers {
+            // Drawn layer: its outline was spliced into the source and is
+            // already in this font's gvar (see editor.rs). A computed tuple
+            // here would double the effect.
+            if layer.outline.is_some() {
+                continue;
+            }
             let gid = instancer.gid(&layer.glyph).ok_or_else(|| {
                 err(format!(
                     "control axis '{tag}': glyph '{}' not found in the font",
@@ -732,11 +781,12 @@ pub(crate) fn apply_control_axes(
             for (pin_tag, value) in &layer.location {
                 let ptag = Tag::from_str(pin_tag)
                     .map_err(|e| err(format!("bad axis tag '{pin_tag}': {e}")))?;
-                // The sidecar stores a full N-D point, so the location carries
-                // the control axis's own value. It isn't in fvar yet (we are
-                // adding it), and the engaged extreme is already implied by
-                // `control_norm` — skip it rather than rejecting the layer.
-                if ptag == tag {
+                // The sidecar stores a full N-D point, so the location can
+                // carry control-axis pins (this axis's own value, or a
+                // sibling control axis's). Control axes are not part of the
+                // instancing space — the engaged extreme is already implied
+                // by `control_norm` — so skip them rather than rejecting.
+                if request_tags.contains(&ptag) {
                     continue;
                 }
                 let &idx = existing.get(&ptag).ok_or_else(|| {
@@ -800,7 +850,12 @@ pub(crate) fn apply_control_axes(
             let negated: Vec<(i16, i16)> =
                 deltas.iter().map(|(x, y)| (-x, -y)).collect();
             for (idx, &(_, min, default, max)) in triples.iter().enumerate() {
-                if coords[idx] != 0.0 {
+                // Constrain-check the TUPLE's peak, not the instancing
+                // coords: they differ on a control axis that pre-exists in
+                // fvar (the split build path) — the pin is skipped in
+                // coords (control axes don't instance) but the tuple peaks
+                // there, so the axis is already constrained.
+                if peak[idx] != 0.0 {
                     continue; // already pinned by its own peak
                 }
                 for extreme in [1.0_f64, -1.0_f64] {
@@ -816,15 +871,22 @@ pub(crate) fn apply_control_axes(
                 }
             }
         }
-        new_axes.push(NewFvarAxis {
-            tag,
-            name: axis.name.clone().unwrap_or_else(|| axis.tag.clone()),
-            min: axis.min,
-            default: axis.default,
-            max: axis.max,
-        });
+        if !existing.contains_key(&tag) {
+            new_axes.push(NewFvarAxis {
+                tag,
+                name: axis.name.clone().unwrap_or_else(|| axis.tag.clone()),
+                min: axis.min,
+                default: axis.default,
+                max: axis.max,
+            });
+        }
     }
 
+    if new_axes.is_empty() && extras.is_empty() {
+        // Everything in the request was already compiled in (all layers
+        // drawn, all axes declared) — nothing to add at the bytes level.
+        return Ok(font_bytes);
+    }
     build_grown_font(&font_bytes, &new_axes, extras, &GrowOptions::default())
 }
 

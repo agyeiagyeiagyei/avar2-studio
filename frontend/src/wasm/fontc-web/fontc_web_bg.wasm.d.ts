@@ -7,6 +7,8 @@ export const apply_grade: (a: number, b: number, c: number, d: number, e: number
 export const apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const clamp_out_of_range: (a: number, b: number) => [number, number, number, number];
 export const compile_glyphs: (a: number, b: number) => [number, number, number, number];
+export const compile_with_overlays: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const glyph_model: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const regen_stat: (a: number, b: number) => [number, number, number, number];
 export const set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];

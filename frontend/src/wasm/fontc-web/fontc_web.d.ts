@@ -65,6 +65,21 @@ export function clamp_out_of_range(font_bytes: Uint8Array): Uint8Array;
 export function compile_glyphs(source: string): Uint8Array;
 
 /**
+ * Compile a .glyphs source with editor overlays spliced in at the Plist
+ * level: request-declared axes are appended (masters extended, Virtual
+ * Masters pinned) and each overlay replaces — or inserts — the brace
+ * layer at its location, carrying the editor's outline (see editor.rs).
+ */
+export function compile_with_overlays(source: string, request_json: string): Uint8Array;
+
+/**
+ * Extract one glyph's source data (all layers — masters + brace layers —
+ * with outlines in the studio's sidecar schema) plus the font's axes and
+ * masters, as JSON for the browser glyph editor (see editor.rs).
+ */
+export function glyph_model(source: string, glyph_name: string): string;
+
+/**
  * Sum of filled outline area (font units² at the font's upm) across
  * `glyphs`, per location (user coords, fvar tags). One entry per
  * location, in order.
@@ -114,6 +129,8 @@ export interface InitOutput {
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly clamp_out_of_range: (a: number, b: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
+    readonly compile_with_overlays: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly glyph_model: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];

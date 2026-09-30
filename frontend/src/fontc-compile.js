@@ -3,15 +3,19 @@
  * compilation and bundle application in a Web Worker (fontc → WASM;
  * see wasm/fontc-web and docs/migration-github-pages.md).
  *
- * One worker for the app's lifetime; calls serialize (each message
- * replaces the pending resolver — callers await before sending the
- * next; static demo uploads/rebuilds do exactly that).
+ * One worker for the app's lifetime; calls serialize through a queue (the
+ * worker resolves one job at a time — see send()).
  */
 
 import FontcWorker from './fontc-worker.js?worker';
 
 let worker = null;
 let pending = null;
+// Jobs serialize through this chain: the worker holds one pending resolver,
+// and callers (rebuild pipeline, editor-bridge model pulls) are NOT
+// centrally coordinated — without the queue an unlucky overlap rejected
+// with "a fontc job is already running".
+let queue = Promise.resolve();
 
 function getWorker() {
   if (!worker) {
@@ -20,7 +24,7 @@ function getWorker() {
       const p = pending;
       pending = null;
       if (!p) return;
-      if (e.data.ok) p.resolve(e.data.ttf ?? e.data.areas);
+      if (e.data.ok) p.resolve(e.data.ttf ?? e.data.areas ?? e.data.model);
       else p.reject(new Error(e.data.error || 'fontc worker failed'));
     };
     worker.onerror = (e) => {
@@ -33,18 +37,32 @@ function getWorker() {
 }
 
 function send(message) {
-  if (pending) {
-    return Promise.reject(new Error('a fontc job is already running'));
-  }
-  return new Promise((resolve, reject) => {
+  const result = queue.then(() => new Promise((resolve, reject) => {
     pending = { resolve, reject };
     getWorker().postMessage(message);
-  });
+  }));
+  // Keep the chain alive past a failed job.
+  queue = result.catch(() => {});
+  return result;
 }
 
 /** .glyphs source string → TTF bytes. */
 export function compileFont(source) {
   return send({ kind: 'compile', source });
+}
+
+/** .glyphs source + one glyph name → the source-level glyph model JSON
+ *  (axes, masters, layers with sidecar-schema outlines) for the glyph
+ *  editor bridge. Returns the parsed object. */
+export async function glyphModel(source, glyph) {
+  return JSON.parse(await send({ kind: 'glyph-model', source, glyph }));
+}
+
+/** .glyphs source + an overlay request ({axes, overlays}) → TTF bytes with
+ *  the axes declared and the drawn brace layers spliced in at the Plist
+ *  level (the desktop shadow-build path, source-side). */
+export function compileWithOverlays(source, request) {
+  return send({ kind: 'compile-overlays', source, request: JSON.stringify(request) });
 }
 
 /** TTF bytes + mappings CSV → TTF bytes with user axes + avar v2 table.

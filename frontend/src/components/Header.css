@@ -305,6 +305,26 @@
   line-height: 1.35;
 }
 
+.transform-apply {
+  align-self: flex-end;
+  margin-left: 0.25rem;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 14px;
+  border: 1px solid #111;
+  border-radius: 4px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+}
+.transform-apply:disabled {
+  background: transparent;
+  border-color: #d0d0d0;
+  color: #999;
+  cursor: default;
+}
+
 .transform-params {
   display: flex;
   gap: 0.75rem;

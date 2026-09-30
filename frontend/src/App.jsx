@@ -129,6 +129,9 @@ function App() {
   // Fontra iframe state — non-null = modal is open. The url comes
   // from POST /api/control-axes/<tag>/open-editor.
   const [fontraEditor, setFontraEditor] = useState(null);
+  // Static demo: another tab holds this workspace's session lock
+  // (BroadcastChannel; IndexedDB has no storage events).
+  const [sessionLockLost, setSessionLockLost] = useState(false);
   // Tracks the most recent ``glyphs_path`` we loaded data for. Used by
   // loadData() to detect a source swap (Load Font dropdown → new font)
   // so we can clear per-instance state. A polling-tick reload to the
@@ -219,6 +222,7 @@ function App() {
         setBuilding(health.building || false);
         setAvar2Error(health.avar2_error || null);
         setBuildStale(health.build_stale || false);
+        setSessionLockLost(!!health.session_lock_lost);
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
         setLastBuildStatus(health.last_build_status || null);
         setLastBuildError(health.last_build_error || null);
@@ -602,7 +606,9 @@ function App() {
   const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName, layerLocation) => {
     try {
       setError(null);
-      const data = await api.openControlAxisInEditor(tag, glyphName);
+      // The static provider (editor-bridge) takes the layer location and
+      // the axes list for its session; the server ignores the extras.
+      const data = await api.openControlAxisInEditor(tag, glyphName, layerLocation, axes);
       let url = data.url;
       let directUrl = data.direct_url;
       if (glyphName) {
@@ -650,7 +656,7 @@ function App() {
       const controlValue = (layerLocation && layerLocation[tag] !== undefined)
         ? Number(layerLocation[tag]) : null;
       const axisName = ((axes || []).find(a => a.tag === tag) || {}).name || tag;
-      setFontraEditor({ url, directUrl, tag, glyphName, controlValue, axisName, editingOriginal: !!data.editing_original });
+      setFontraEditor({ url, directUrl, tag, glyphName, controlValue, axisName, editingOriginal: !!data.editing_original, bridge: data.bridge || null });
     } catch (err) {
       setError(err.message || `Failed to open Fontra for "${tag}"`);
     }
@@ -660,7 +666,22 @@ function App() {
   // preview reflects whatever the designer drew. Fontra writes to
   // the shadow on save; trigger_build picks up the new outlines.
   const handleCloseFontraEditor = useCallback(async () => {
+    // Static demo: the bridge applied each edit to the sidecar as it
+    // arrived (coalesced rebuilds); closing waits out the in-flight one
+    // and reloads the preview font. The editor session is over either
+    // way — dispose the bridge.
+    const bridge = fontraEditor?.bridge || null;
     setFontraEditor(null);
+    if (bridge) {
+      bridge.dispose();
+      try {
+        await api.flushEditorRebuilds();
+        setFontUrl(api.getFontUrl());
+      } catch (err) {
+        console.warn('Final rebuild after editor close failed:', err);
+      }
+      return;
+    }
     try {
       // Rebuild from the shadow. /api/build hits trigger_build on
       // the server with the current GLYPHS_PATH (= shadow when any
@@ -671,7 +692,7 @@ function App() {
     } catch (err) {
       console.warn('Rebuild after Fontra edits failed:', err);
     }
-  }, []);
+  }, [fontraEditor]);
 
   // Axis tag → default value lookup. Used by InstanceRow's
   // preview-coordinates memo to pin disabled control axes to their
@@ -815,6 +836,11 @@ function App() {
 
   // ---- Post-build transforms (e.g. SPAC) ----
   const transformCommitTimer = useRef(null);
+  // Source-stage transforms (round_corners) rebuild the whole shadow on
+  // commit — seconds, and a full preview reload. Their param edits stay
+  // local until the flyout's Apply; this maps transform id -> unapplied
+  // edits pending.
+  const [transformsDirty, setTransformsDirty] = useState({});
 
   const _transformEntries = (list) =>
     list.map(t => ({ type: t.id, enabled: !!t.enabled, params: { ...(t.params || {}) } }));
@@ -835,10 +861,12 @@ function App() {
       // The base font can build while an enabled transform still failed
       // (bad params, missing binary). Surface it rather than silently no-op.
       if (result.transform_error) setError(`Transform: ${result.transform_error}`);
+      return true;
     } catch (err) {
       if (prev) setTransforms(prev);            // revert optimistic UI to last known-good
       setError(err.message);
       console.error('Transform update failed:', err);
+      return false;
     } finally {
       setBuilding(false);
     }
@@ -852,6 +880,7 @@ function App() {
     const prev = transforms;
     const next = transforms.map(t => (t.id === id ? { ...t, enabled } : t));
     setTransforms(next);                          // immediate checkbox feedback
+    setTransformsDirty(d => ({ ...d, [id]: false })); // the commit carries any pending edits
     commitTransforms(_transformEntries(next), prev); // toggling is deliberate — rebuild now
   };
 
@@ -861,14 +890,30 @@ function App() {
       t.id === id ? { ...t, params: { ...(t.params || {}), [key]: value } } : t
     );
     setTransforms(next);                        // immediate input feedback, no rebuild yet
-    // Debounce the rebuild — a font recompile per keystroke is the expensive,
-    // dishonest path the old SPAC code was pulled for. Commit ~0.8s after the
-    // last edit.
+    // A SOURCE-stage transform rebuilds the whole shadow on commit —
+    // seconds and a full preview reload, which yanked the flyout out from
+    // under the second field. Its edits wait for the explicit Apply.
+    const stage = (transforms.find(t => t.id === id) || {}).stage;
+    if (stage === 'source') {
+      setTransformsDirty(d => ({ ...d, [id]: true }));
+      return;
+    }
+    // Font-stage (~1s rebuild): debounce — a recompile per keystroke is the
+    // expensive, dishonest path the old SPAC code was pulled for. Commit
+    // ~0.8s after the last edit.
     if (transformCommitTimer.current) clearTimeout(transformCommitTimer.current);
     transformCommitTimer.current = setTimeout(() => {
       transformCommitTimer.current = null;
       commitTransforms(_transformEntries(next), prev);
     }, 800);
+  };
+
+  const handleApplyTransform = async (id) => {
+    setTransformsDirty(d => ({ ...d, [id]: false }));
+    // No optimistic revert target: on failure the typed values stay in the
+    // fields (still marked unapplied) instead of being thrown away.
+    const ok = await commitTransforms(_transformEntries(transforms), null);
+    if (!ok) setTransformsDirty(d => ({ ...d, [id]: true }));
   };
 
   // ---- Grade transform (source-level; toggle + default + per-instance) ----
@@ -1936,6 +1981,8 @@ function App() {
         transforms={transforms}
         onToggleTransform={handleToggleTransform}
         onTransformParam={handleTransformParam}
+        transformsDirty={transformsDirty}
+        onApplyTransform={handleApplyTransform}
         grade={grade}
         onToggleGrade={handleToggleGrade}
         onGradeDefault={handleGradeDefault}
@@ -1963,6 +2010,12 @@ function App() {
       {error && (
         <div className="error-banner">
           Error: {error}
+        </div>
+      )}
+
+      {sessionLockLost && (
+        <div className="error-banner" role="alert" style={{ background: '#e8f0fe', color: '#1a3c8f', borderColor: '#9db8e8' }}>
+          This project is open in another tab, which holds the editing session. Edits here are not protected against it — close the other tab (or reload this one after) to take over.
         </div>
       )}
 

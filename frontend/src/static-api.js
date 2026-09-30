@@ -22,7 +22,7 @@
  */
 
 import { api } from './api';
-import { compileFont, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade } from './fontc-compile';
+import { compileFont, compileWithOverlays, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -31,6 +31,7 @@ import { saveSession, loadSession, clearSession, SESSION_VERSION } from './sessi
 import { auditCoverage, probeSweeps, PROBE_GLYPHS } from './coverage.js';
 import { lintAvar2Mappings } from './avar2-lint.js';
 import { maxPctFor, gradeDiagnostics } from './grade-model.js';
+import { createEditorBridge, embedEditorUrl } from './editor-bridge.js';
 
 const DATA = 'static-demo'; // relative — resolves under any --base
 
@@ -110,6 +111,12 @@ const buildUploadDataset = async ({
 }) => {
   let bytes = fontBytes ?? await compileFont(sourceText);
   let mappingsText = csvText;
+  // A header-only CSV (a project with no instance rows — e.g. a workspace
+  // zip of a plain upload) is no mappings: add_avar2 aborts on it
+  // ("mappings CSV has no instance rows").
+  if (mappingsText && mappingsCsv.parseMappingsCsv(mappingsText).rows.length === 0) {
+    mappingsText = null;
+  }
   let userAxisTags = new Set();
   const compiledTags = new Set(parseFont(bytes).axes.map(a => a.tag));
   const axisMetadata = metadataText ? JSON.parse(metadataText) : {};
@@ -573,6 +580,7 @@ const validateBundle = (bundle, dataset) => {
     errors.push(`Unsupported bundle version ${bundle.format_version} (expected 1)`);
   }
   const controlAxes = bundle?.control_axes?.axes || [];
+  const controlTags = new Set(controlAxes.map(a => a.tag));
   const transforms = bundle?.transforms?.transforms || [];
   const grade = bundle?.grade || {};
   const avar2Csv = bundle?.avar2_csv || '';
@@ -589,7 +597,9 @@ const validateBundle = (bundle, dataset) => {
     for (const axis of controlAxes) {
       for (const layer of axis.layers || []) {
         for (const tag of Object.keys(layer.location || {})) {
-          if (!targetTags.has(tag)) {
+          // The bundle's own control tags are valid pins: a layer's
+          // location carries its control value (its identity).
+          if (!targetTags.has(tag) && !controlTags.has(tag)) {
             errors.push(`Brace layer on '${layer.glyph}' references missing axis '${tag}'`);
           }
         }
@@ -604,7 +614,14 @@ const validateBundle = (bundle, dataset) => {
       errors.push(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
     }
   }
-  if (controlAxes.length) warnings.push('Control axes: applied as computed brace tuples (drawn outlines are a full-app feature)');
+  if (controlAxes.length) {
+    const hasDrawn = controlAxes.some(a => (a.layers || []).some(isDrawnLayer));
+    if (hasDrawn && dataset.health?.source_format === 'designspace') {
+      warnings.push('Control axes: drawn outlines skipped (the browser can\'t compile UFO sources) — those layers apply as computed braces');
+    } else if (!hasDrawn) {
+      warnings.push('Control axes: applied as computed brace tuples (no drawn outlines in the bundle)');
+    }
+  }
   for (const t of transforms) {
     if (t.enabled && !KNOWN_TRANSFORMS[t.type]) {
       warnings.push(`Transform '${t.type}': unknown type — skipped by the static demo`);
@@ -683,6 +700,14 @@ const applyBundle = async (bundle, dataset) => {
   const transforms = bundle.transforms?.transforms || [];
   const grade = bundle.grade || {};
   const gradeInstances = grade.enabled ? (grade.instances || []) : [];
+  // Drawn outlines are spliced at SOURCE level (compile_with_overlays), so
+  // a bundle carrying them needs a from-source rebuild instead of the
+  // incremental bytes patches below — every section still sets dataset
+  // state, and the rebuild applies it all in one pass. Without a .glyphs
+  // source (designspace projects) drawn layers apply as computed braces,
+  // as the desktop's designspace shadow does.
+  const rebuildFromSource = dataset.sourceText != null &&
+    controlAxes.some(a => (a.layers || []).some(isDrawnLayer));
 
   // Axis metadata rides the bundle (optional section): adopt it BEFORE
   // the mappings apply so the declared defaults/ranges shape the fvar,
@@ -695,7 +720,9 @@ const applyBundle = async (bundle, dataset) => {
     const ranges = Object.keys(dataset.axisRanges || {}).length
       ? JSON.stringify(dataset.axisRanges)
       : null;
-    dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv, ranges, [...dataset.parametricTags]);
+    if (!rebuildFromSource) {
+      dataset.fontBytes = await addAvar2(dataset.fontBytes, avar2Csv, ranges, [...dataset.parametricTags]);
+    }
     dataset.mappingsCsv = avar2Csv;
     // The bundle's CSV becomes the authoring source of truth.
     dataset.instancesCsv = mappingsCsv.parseMappingsCsv(avar2Csv);
@@ -703,8 +730,22 @@ const applyBundle = async (bundle, dataset) => {
     report.applied.push('avar2 mappings');
   }
   if (controlAxes.length) {
-    dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(controlAxes));
     dataset.controlAxes = controlAxes;
+    if (!rebuildFromSource) {
+      // Pure computed sidecar: bytes-level application, as before. Drawn
+      // layers in the mix (designspace case) fall back to computed braces —
+      // the outline is stripped for the wasm so it still gets a tuple.
+      const forBytes = controlAxes.map(a => ({
+        ...a,
+        layers: (a.layers || []).map(l => {
+          if (!isDrawnLayer(l)) return l;
+          const stripped = { ...l };
+          delete stripped.outline;
+          return stripped;
+        }),
+      }));
+      dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(controlAxesForBuild(forBytes)));
+    }
     report.applied.push('control axes');
   }
   // The grade DECLARATION is retained even when it changes nothing in
@@ -712,17 +753,21 @@ const applyBundle = async (bundle, dataset) => {
   // persist across the toggle — the server's save_all semantics.
   if (bundle.grade) dataset.grade = grade;
   if (gradeInstances.length) {
-    const coords = resolveGradeCoords(dataset, avar2Csv);
-    dataset.fontBytes = await applyGrade(
-      dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
-    );
+    if (!rebuildFromSource) {
+      const coords = resolveGradeCoords(dataset, avar2Csv);
+      dataset.fontBytes = await applyGrade(
+        dataset.fontBytes, JSON.stringify(grade), JSON.stringify(coords)
+      );
+    }
     report.applied.push('grade');
   }
   // SPAC transforms apply last (they rebuild HVAR from the gvar the
   // earlier sections produced). Disabled and unknown-type entries never
   // reach the font — the wasm side applies only enabled known ones.
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
-    dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
+    if (!rebuildFromSource) {
+      dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
+    }
     report.applied.push('transforms (SPAC)');
   }
   // Corner pins: replace the set and re-apply onto the font the
@@ -730,7 +775,7 @@ const applyBundle = async (bundle, dataset) => {
   const cornerPins = bundle.corner_pins?.pins || [];
   if (cornerPins.length) {
     dataset.cornerPins = cornerPins;
-    await applyPins(dataset);
+    if (!rebuildFromSource) await applyPins(dataset);
     report.applied.push('corner pins');
   }
   // The Transforms menu reflects the bundle's set from now on: enabled
@@ -740,6 +785,9 @@ const applyBundle = async (bundle, dataset) => {
     enabled: !!t.enabled,
     params: t.params || {},
   }));
+  if (rebuildFromSource) {
+    await rebuildUploadFont(dataset);
+  }
   if (!report.applied.length) return report;
 
   URL.revokeObjectURL(dataset.fontUrl);
@@ -813,6 +861,70 @@ const transformsMenu = (dataset) => {
   return [...known, ...unknown];
 };
 
+// ---- control axes: split build (drawn at source level, computed on bytes) --
+//
+// DESIGN DECISION (Phase 3): a control-axis layer can be COMPUTED (plain:
+// seeded from the masters at its location; or a correction: seeded from its
+// `target`) or DRAWN (a hand-edited outline stored on the sidecar entry).
+// Computed outlines are instancer math on font bytes (braces.rs); drawn
+// outlines are source-level cubic nodes that only the compiler can turn into
+// gvar (the font's quadratic point numbering doesn't line up with them).
+//
+// So the build SPLITS the sidecar:
+//   - axes with ≥1 drawn layer go through compile_with_overlays (editor.rs):
+//     ALL sidecar control axes are declared on the source (axis entries,
+//     masters extended, Virtual Master pins — the same shapes the desktop's
+//     regenerate_shadow writes) and each drawn layer is spliced as a real
+//     brace layer carrying its stored outline. fontc then emits desktop-
+//     identical gvar for them (the Phase 0 oracle proves the splice).
+//   - apply_control_axes (braces.rs) then tolerates the already-declared
+//     axes and adds computed tuples for the remaining layers only —
+//     outline-bearing layers are skipped, so an axis is never
+//     double-declared and a drawn layer never gets a second tuple.
+// Declaring all axes at compile time whenever any drawn overlay exists also
+// lets a drawn overlay's location pin a SIBLING control axis (the braces
+// land in the same N-D space the desktop writes).
+//
+// For correction layers the two paths agree by construction (braces.rs
+// pins the parametric peak, like varLib on the shadow); for plain layers
+// the bytes-level tent peaks only at the control extreme where the desktop
+// peaks at the full N-D location — a pre-existing static-demo
+// approximation, unchanged by this split.
+
+// A stored outline is drawn only when the layer is not a correction:
+// regenerate_shadow ignores the outline of target-bearing layers.
+const isDrawnLayer = (l) => !!l.outline && !(l.target && Object.keys(l.target).length);
+
+// The control-axes JSON for the wasm: corrections never carry their
+// (ignored) stored outline, so braces.rs's drawn-skip test (outline
+// present) lines up exactly with the source-level drawn set.
+const controlAxesForBuild = (axes) =>
+  (axes || []).map(a => ({
+    ...a,
+    layers: (a.layers || []).map(l => {
+      if (l.outline && l.target && Object.keys(l.target).length) {
+        const stripped = { ...l };
+        delete stripped.outline;
+        return stripped;
+      }
+      return l;
+    }),
+  }));
+
+const compileUploadSource = (dataset) => {
+  const drawnAxes = (dataset.controlAxes || [])
+    .map(a => ({ ...a, drawn: (a.layers || []).filter(isDrawnLayer) }))
+    .filter(a => a.drawn.length);
+  if (!drawnAxes.length) return compileFont(dataset.sourceText);
+  return compileWithOverlays(dataset.sourceText, {
+    axes: (dataset.controlAxes || []).map(a => ({
+      tag: a.tag, name: a.name, min: a.min, default: a.default, max: a.max,
+    })),
+    overlays: drawnAxes.flatMap(a =>
+      a.drawn.map(l => ({ glyph: l.glyph, location: l.location, outline: l.outline }))),
+  });
+};
+
 // The full rebuild pipeline for an uploaded .glyphs source: compile,
 // then re-apply the studio state in bundle-import order — avar2
 // mappings, control axes, grade, SPAC transforms, corner pins — and
@@ -824,8 +936,14 @@ const rebuildUploadFont = async (dataset) => {
   if (dataset.sourceText == null) {
     throw new Error("This needs the full app — the browser can't compile UFO sources yet.");
   }
-  let ttf = await compileFont(dataset.sourceText);
-  if (dataset.mappingsCsv) {
+  let ttf = await compileUploadSource(dataset);
+  // avar2 regen needs authored rows AND a user (non-parametric) column —
+  // a restored CSV-less project carries a synthesized header-only CSV
+  // (add_avar2 rejects it), and a parametric-only CSV is an identity
+  // mapping (regenerateFont skips those for the same reason).
+  if (dataset.mappingsCsv
+      && dataset.instancesCsv?.rows?.length
+      && mappingsCsv.userColumns(dataset.instancesCsv, [...dataset.parametricTags]).length) {
     const ranges = Object.keys(dataset.axisRanges || {}).length
       ? JSON.stringify(dataset.axisRanges)
       : null;
@@ -833,7 +951,7 @@ const rebuildUploadFont = async (dataset) => {
   }
   dataset.fontBytes = ttf;
   if ((dataset.controlAxes || []).length) {
-    dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(dataset.controlAxes));
+    dataset.fontBytes = await applyControlAxes(dataset.fontBytes, JSON.stringify(controlAxesForBuild(dataset.controlAxes)));
   }
   const grade = dataset.grade || {};
   // The GRAD axis materialises only when enabled AND ≥1 instance is
@@ -871,6 +989,116 @@ const commitRebuiltFont = async (dataset) => {
   // Stamped after the write, so "the build time advanced" also means
   // "the session holds this build".
   dataset.health.last_build_time = Date.now();
+};
+
+// ---- glyph editor (fontra-embed bridge) -----------------------------------
+//
+// The studio-side half of the embedded editor (see editor-bridge.js for the
+// message layer). openControlAxisInEditor creates a bridge for the session
+// and returns the embed URL; the FontraEditorModal iframes it and attaches
+// the bridge. Edits flow back per editFinal: the bridge guards and applies
+// them to its model, hands the edited layer's outline here for the sidecar,
+// and a coalesced rebuild (one in flight, one pending — trigger_build's
+// spirit) recompiles the font so the preview follows.
+
+let currentEditorBridge = null;
+let editorRebuildRunning = false;
+let editorRebuildPending = false;
+let editorRebuildPromise = null;
+
+const scheduleEditorRebuild = () => {
+  if (!uploadDataset) return Promise.resolve();
+  if (editorRebuildRunning) {
+    editorRebuildPending = true;
+    return editorRebuildPromise;
+  }
+  editorRebuildRunning = true;
+  editorRebuildPromise = (async () => {
+    try {
+      do {
+        editorRebuildPending = false;
+        await rebuildUploadFont(uploadDataset);
+        await commitRebuiltFont(uploadDataset);
+      } while (editorRebuildPending);
+    } catch (err) {
+      currentEditorBridge?.onError?.(
+        `The edit was saved to the layer, but the font rebuild failed: ${err.message || err}`);
+    } finally {
+      editorRebuildRunning = false;
+    }
+  })();
+  return editorRebuildPromise;
+};
+
+const storeEditedOutline = (tag, glyph, entryLocation, outline) => {
+  const ax = (uploadDataset?.controlAxes || []).find(a => a.tag === tag);
+  if (!ax) return;
+  // Re-find the entry in the CURRENT sidecar state — the sidebar's layer
+  // edits replace ax.layers, so the session's held reference can be stale.
+  const keyOf = (loc) => JSON.stringify(
+    Object.entries(loc || {}).map(([k, v]) => [k, Number(v)]).sort());
+  const entry = (ax.layers || []).find(l =>
+    l.glyph === glyph && keyOf(l.location) === keyOf(entryLocation));
+  if (!entry) return; // the layer was removed mid-session: the edit has no home
+  entry.outline = outline;
+  scheduleEditorRebuild();
+};
+
+// ---- two-tab session guard --------------------------------------------------
+//
+// The workspace persists to one IndexedDB record per origin, but storage
+// events don't fire for IndexedDB writes — so two tabs on the same static
+// deployment would silently clobber each other's session. A BroadcastChannel
+// claim/heartbeat lock instead: the first tab holds the lock; another tab
+// opening the studio is told it's the loser (the App shows a banner) until
+// the holder's heartbeats stop (tab closed), at which point it takes over.
+// Advisory only — the losing tab is not blocked from editing.
+
+let sessionLockLost = false;
+const sessionLockTabId = (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`);
+
+const startSessionLock = () => {
+  if (typeof BroadcastChannel === 'undefined') return;
+  const channel = new BroadcastChannel('avar2-studio-session-lock');
+  let holderAlive = false;
+  let lastHolderBeat = 0;
+  let claiming = false;
+
+  const claim = () => {
+    claiming = true;
+    holderAlive = false;
+    channel.postMessage({ kind: 'claim', tabId: sessionLockTabId });
+    setTimeout(() => {
+      claiming = false;
+      if (!holderAlive) sessionLockLost = false; // no holder answered: take it
+    }, 300);
+  };
+  channel.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.tabId === sessionLockTabId) return;
+    if (m.kind === 'claim') {
+      if (sessionLockLost || claiming) return; // losers and rival claimants stay out
+      channel.postMessage({ kind: 'held', tabId: sessionLockTabId });
+    } else if (m.kind === 'held' || m.kind === 'heartbeat') {
+      holderAlive = true;
+      lastHolderBeat = Date.now();
+      if (claiming) {
+        sessionLockLost = true; // a holder answered our claim: we lose
+      } else if (!sessionLockLost && m.tabId < sessionLockTabId) {
+        // Two holders (simultaneous open): the higher tabId yields.
+        sessionLockLost = true;
+      }
+    }
+  };
+  claim();
+  setInterval(() => {
+    if (sessionLockLost) {
+      // Holder gone for a while? Re-claim (takeover after its tab closed).
+      if (Date.now() - lastHolderBeat > 6000) claim();
+    } else {
+      channel.postMessage({ kind: 'heartbeat', tabId: sessionLockTabId });
+    }
+  }, 2000);
 };
 
 // ---- projects: uploads and bundled examples ---------------------------------
@@ -928,7 +1156,9 @@ const loadExampleProject = async (id) => {
 };
 
 const staticOverrides = {
-  health: async () => (uploadDataset ? uploadDataset.health : noProjectHealth()),
+  health: async () => (uploadDataset
+    ? { ...uploadDataset.health, session_lock_lost: sessionLockLost }
+    : { ...noProjectHealth(), session_lock_lost: sessionLockLost }),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
   getInstances: async () => (uploadDataset ? uploadDataset.instances : { instances: [] }),
   getMasters: async () => ({ masters: [] }),
@@ -1036,6 +1266,8 @@ const staticOverrides = {
           location: l.location || {},
           location_user: l.location || {},
           ...(l.target && Object.keys(l.target).length ? { target: l.target } : {}),
+          // The drawn badge (and the reseed flow's confirm) read this.
+          ...(isDrawnLayer(l) ? { has_outline: true } : {}),
         })),
       };
     });
@@ -1398,9 +1630,11 @@ const staticOverrides = {
     return { ok: true };
   },
   // Layer locations from the UI pin every axis (including control,
-  // grade and transform-injected ones at their defaults); the wasm
-  // only knows the compiled parametric axes plus CSV user columns and
-  // rejects anything else — strip the rest before storing.
+  // grade and transform-injected ones at their defaults). Keep
+  // parametric axes, CSV user columns and CONTROL-axis pins (the layer's
+  // own control value is its identity — the wasm skips control pins when
+  // instancing, and the source-level splice needs them); drop the rest
+  // (GRAD/SPAC), which the wasm would reject.
   controlAxisLayerDelta: async (tag, delta) => {
     requireProject();
     const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
@@ -1408,6 +1642,7 @@ const staticOverrides = {
     ax.layers ||= [];
     const allowed = new Set([...uploadDataset.parametricTags]);
     for (const t of csvHeaderTags(uploadDataset.mappingsCsv || '')) allowed.add(t);
+    for (const a of uploadDataset.controlAxes || []) allowed.add(a.tag);
     const clean = (l) => {
       const out = {
         glyph: l.glyph,
@@ -1419,6 +1654,12 @@ const staticOverrides = {
       // deltas from the default master).
       const target = Object.fromEntries(Object.entries(l.target || {}).filter(([k]) => allowed.has(k)));
       if (Object.keys(target).length) out.target = target;
+      // A stored drawing (from the editor bridge or an imported
+      // bundle) round-trips untouched.
+      if (l.outline && typeof l.outline === 'object') {
+        out.outline = l.outline;
+        if (l.source_sig) out.source_sig = l.source_sig;
+      }
       return out;
     };
     const sameLayer = (a, b) =>
@@ -1442,10 +1683,33 @@ const staticOverrides = {
     if (!ax) throw new Error(`No control axis '${tag}'`);
     const allowed = new Set([...uploadDataset.parametricTags]);
     for (const t of csvHeaderTags(uploadDataset.mappingsCsv || '')) allowed.add(t);
-    ax.layers = (layers || []).map(l => ({
-      glyph: l.glyph,
-      location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
-    }));
+    for (const a of uploadDataset.controlAxes || []) allowed.add(a.tag);
+    const sameLayer = (a, b) =>
+      a.glyph === b.glyph &&
+      JSON.stringify(Object.entries(a.location || {}).sort()) ===
+        JSON.stringify(Object.entries(b.location || {}).sort());
+    ax.layers = (layers || []).map(l => {
+      const out = {
+        glyph: l.glyph,
+        location: Object.fromEntries(Object.entries(l.location || {}).filter(([k]) => allowed.has(k))),
+      };
+      const target = Object.fromEntries(Object.entries(l.target || {}).filter(([k]) => allowed.has(k)));
+      if (Object.keys(target).length) out.target = target;
+      // The UI's layer rows don't carry drawings: keep the existing
+      // entry's outline when the row still identifies it (a whole-list
+      // replace must not wipe drawings the caller never saw).
+      if (l.outline && typeof l.outline === 'object') {
+        out.outline = l.outline;
+        if (l.source_sig) out.source_sig = l.source_sig;
+      } else {
+        const prev = (ax.layers || []).find(p => sameLayer(p, out));
+        if (prev?.outline) {
+          out.outline = prev.outline;
+          if (prev.source_sig) out.source_sig = prev.source_sig;
+        }
+      }
+      return out;
+    });
     await rebuildUploadFont(uploadDataset);
     await commitRebuiltFont(uploadDataset);
     return { ok: true };
@@ -1453,7 +1717,52 @@ const staticOverrides = {
   // Re-seeding rewrites the sidecar and re-derives the shadow, which the
   // static demo has no writable source for.
   reseedControlAxisLayers: unavailable('Re-seeding a layer from source'),
-  openControlAxisInEditor: unavailable('The glyph editor'),
+  // The glyph editor: the fontra-embed bundle (a static build of Fontra
+  // with the font backend proxied over postMessage) iframed in the same
+  // drawer the desktop uses. The bridge (editor-bridge.js) serves the
+  // editor's RPC from the in-memory source model and writes accepted
+  // edits back into the control-axis sidecar, then a coalesced rebuild
+  // recompiles the font.
+  openControlAxisInEditor: async (tag, glyphName, layerLocation, studioAxes) => {
+    requireProject();
+    if (uploadDataset.sourceText == null) {
+      throw new Error("The glyph editor needs the project's .glyphs source — .designspace projects are read-only in the browser.");
+    }
+    const ax = (uploadDataset.controlAxes || []).find(a => a.tag === tag);
+    if (!ax) throw new Error(`No control axis '${tag}'`);
+    if (!glyphName) throw new Error('Pick a brace layer to edit first (the ↗ button on a layer row).');
+    const url = embedEditorUrl();
+    try {
+      // Fast, honest failure when nothing serves the bundle (no-cors: an
+      // opaque answer still means a server is there).
+      await fetch(url, { mode: 'no-cors', signal: AbortSignal.timeout(3000) });
+    } catch {
+      throw new Error(
+        `The glyph editor isn't reachable at ${url} — if you're developing, serve the fontra-embed bundle ` +
+        `(in the fontra-embed checkout: npm run build, then npx serve dist -l 8099); ` +
+        `the production demo expects it at agyeiagyeiagyei.github.io/fontra-embed/.`);
+    }
+    currentEditorBridge?.dispose();
+    currentEditorBridge = await createEditorBridge({
+      dataset: uploadDataset,
+      tag,
+      glyphName,
+      layerLocation: layerLocation || null,
+      studioAxes: studioAxes || uploadDataset.axes.axes,
+      onOutlineEdited: (entry, outline) =>
+        storeEditedOutline(tag, entry.glyph, entry.location, outline),
+    });
+    // Debug/e2e introspection, same spirit as window.__avar2api.
+    if (typeof window !== 'undefined') window.__avar2EditorBridge = currentEditorBridge;
+    return { url, direct_url: url, editing_original: false, bridge: currentEditorBridge };
+  },
+  // Drawer close: wait out the coalesced rebuild so the preview the user
+  // returns to already shows the last edit.
+  flushEditorRebuilds: async () => {
+    if (editorRebuildPromise) await editorRebuildPromise.catch(() => {});
+    currentEditorBridge = null;
+    if (typeof window !== 'undefined') window.__avar2EditorBridge = null;
+  },
   exportFont: async (options) => {
     const { hidden_axes = [], default_location } = options || {};
     requireProject();
@@ -1550,6 +1859,7 @@ export async function selectApiMode() {
   }
   staticMode = true;
   Object.assign(api, staticOverrides);
+  startSessionLock();
   // Debug/introspection hook for the static provider (used by e2e and
   // manual diagnosis).
   if (typeof window !== 'undefined') window.__avar2api = api;

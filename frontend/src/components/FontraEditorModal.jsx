@@ -11,7 +11,11 @@ import './FontraEditorModal.css';
  * persists in localStorage across sessions.
  *
  * Props:
- *   editor    — { url, tag } or null. When null, drawer is hidden.
+ *   editor    — { url, tag, bridge? } or null. When null, drawer is
+ *               hidden. `bridge` is the static demo's editor-bridge
+ *               session (editor-bridge.js): it is attached to the
+ *               iframe's window, and its errors/dirty state render in
+ *               the drawer header. Server-mode sessions have no bridge.
  *   onClose   — called when the user dismisses. Parent should also
  *               trigger a font rebuild so the preview catches up.
  */
@@ -26,6 +30,29 @@ function FontraEditorModal({ editor, onClose }) {
   });
   const dragStateRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const iframeRef = useRef(null);
+  // Static-demo bridge session state: a guard/editing error from the
+  // bridge (rejected edit, unreachable embed), and whether the editor
+  // has applied-but-not-yet-rebuilt edits.
+  const [bridgeError, setBridgeError] = useState(null);
+  const [bridgeDirty, setBridgeDirty] = useState(false);
+
+  // Attach the bridge to the iframe as soon as both exist; detach on
+  // close. The embed reposts its ready announcement until answered, so
+  // a slow iframe load can't race past the attach.
+  useEffect(() => {
+    const bridge = editor?.bridge || null;
+    if (!bridge) return undefined;
+    setBridgeError(null);
+    setBridgeDirty(false);
+    bridge.onError = setBridgeError;
+    bridge.on('dirty', setBridgeDirty);
+    if (iframeRef.current) bridge.attach(iframeRef.current.contentWindow);
+    return () => {
+      bridge.onError = null;
+      bridge.detach();
+    };
+  }, [editor]);
 
   // Escape closes the drawer. Bound at the document level so it
   // works even when the iframe has focus.
@@ -100,6 +127,11 @@ function FontraEditorModal({ editor, onClose }) {
           </span>
           <span className="fontra-editor-subtitle">
             Draw the {editor.axisName || editor.tag} change here. Close to update the preview.
+            {bridgeDirty && (
+              <span title="Edits applied — the preview catches up while a rebuild runs.">
+                {' '}●
+              </span>
+            )}
             {editor.editingOriginal && (
               <span
                 className="fontra-editor-original-note"
@@ -129,8 +161,17 @@ function FontraEditorModal({ editor, onClose }) {
           /api routes match. Same-origin lets us inject the
           focused-UI stylesheet that hides irrelevant Fontra
           panels and tools. editor.directUrl is exposed as the
-          "Open in new tab" escape, bypassing the focused overlay. */}
+          "Open in new tab" escape, bypassing the focused overlay.
+          In the static demo the iframe instead points at the
+          fontra-embed bundle (cross-origin; the bridge talks to it
+          over postMessage, so no DOM access is needed). */}
+      {bridgeError && (
+        <div className="error-banner fontra-editor-bridge-error" role="alert">
+          {bridgeError}
+        </div>
+      )}
       <iframe
+        ref={iframeRef}
         className="fontra-editor-iframe"
         src={editor.url}
         title="Fontra editor"

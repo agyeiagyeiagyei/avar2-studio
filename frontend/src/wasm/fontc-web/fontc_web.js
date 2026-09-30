@@ -162,6 +162,60 @@ export function compile_glyphs(source) {
 }
 
 /**
+ * Compile a .glyphs source with editor overlays spliced in at the Plist
+ * level: request-declared axes are appended (masters extended, Virtual
+ * Masters pinned) and each overlay replaces — or inserts — the brace
+ * layer at its location, carrying the editor's outline (see editor.rs).
+ * @param {string} source
+ * @param {string} request_json
+ * @returns {Uint8Array}
+ */
+export function compile_with_overlays(source, request_json) {
+    const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_with_overlays(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Extract one glyph's source data (all layers — masters + brace layers —
+ * with outlines in the studio's sidecar schema) plus the font's axes and
+ * masters, as JSON for the browser glyph editor (see editor.rs).
+ * @param {string} source
+ * @param {string} glyph_name
+ * @returns {string}
+ */
+export function glyph_model(source, glyph_name) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(glyph_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.glyph_model(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Sum of filled outline area (font units² at the font's upm) across
  * `glyphs`, per location (user coords, fvar tags). One entry per
  * location, in order.
