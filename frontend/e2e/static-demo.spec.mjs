@@ -1399,6 +1399,45 @@ const revertReport = fontReport(await downloadFont());
 ok(revertReport.split('|').pop() === unhintedReport.split('|').pop(),
   `toggling off restores the pre-fix instances ('${revertReport.split('|').pop()}')`);
 
+// ---- 27. round corners runs in-browser (wasm source-stage) ------------------
+console.log('27. round corners on an upload (wasm engine)');
+// Continues on section 26's Crispy Mini upload. The engine mutates the
+// SOURCE before fontc compiles it — the oracle test (cargo) proves it
+// node-identical to the desktop engine; here we prove the demo wires it.
+const glyphPoints = (p) => execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+f = TTFont(sys.argv[1])
+g = f['glyf']['n']
+g.expand(f['glyf'])
+print(len(getattr(g, 'coordinates', [])), ','.join(a.axisTag for a in f['fvar'].axes))
+`, p]
+).toString().trim();
+const sharpReport = glyphPoints(await downloadFont());
+await toggleTransform('Round corners');
+const roundedReport = glyphPoints(await downloadFont());
+const sharpPts = parseInt(sharpReport.split(' ')[0], 10);
+const roundedPts = parseInt(roundedReport.split(' ')[0], 10);
+ok(roundedPts > sharpPts,
+  `round corners added corner quads to 'n' (${sharpPts} -> ${roundedPts} points)`);
+// Axis mode: tick "Expose as ROND axis" in the row's params, Apply
+// (source-stage transforms commit on the explicit Apply), and the
+// exported font carries the ROND fvar axis.
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+await page.click('.transform-row:has-text("Round corners") .transform-param:has-text("Expose as ROND axis") input[type=checkbox]');
+await page.click('.transform-row:has-text("Round corners") .transform-apply');
+await page.keyboard.press('Escape');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 240000 });
+const rondReport = glyphPoints(await downloadFont());
+ok(rondReport.split(' ')[1].includes('ROND'),
+  `ROND axis in the exported font (${rondReport.split(' ')[1]})`);
+await toggleTransform('Round corners'); // back off for anything after
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

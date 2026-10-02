@@ -3321,7 +3321,15 @@ def update_transforms():
         except Exception as exc:  # noqa: BLE001
             print(f"transforms: could not read the registry stages: {exc}", file=sys.stderr)
         touched = {e.get("type") for e in entries} | {e.get("type") for e in stored}
-        rebuild = _run_shadow_regen_and_build if touched & source_types else trigger_build
+
+        def _resolve_then_build():
+            # Synchronous twin of the debounced regen job: same steps, none
+            # of its timer bookkeeping (calling the job directly unbalances
+            # BACKGROUND_WORK and with it /api/health's ``building``).
+            _resolve_active_source()
+            return trigger_build()
+
+        rebuild = _resolve_then_build if touched & source_types else trigger_build
         # NB: do NOT null VARIABLE_FONT_PATH here. trigger_build() reassigns it
         # on any successful build and leaves it untouched on failure, so the
         # last-good font keeps serving if the rebuild fails.

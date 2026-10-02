@@ -63,6 +63,10 @@ class ParamSpec:
         if self.type == "select":
             allowed = [o["value"] for o in (self.options or [])]
             return value if value in allowed else self.default
+        if self.type == "table":
+            # A structured value (dict), round-tripped as-is; the
+            # transform's validate() is its real gatekeeper.
+            return dict(value) if isinstance(value, dict) else dict(self.default or {})
         try:
             num = int(value) if self.type == "int" else float(value)
         except (TypeError, ValueError):

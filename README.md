@@ -246,15 +246,26 @@ you grade a few anchors, not every style.
 
 ![A style's grade popover: the percentage, its headroom, remove and save](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/grade-badge-popover.png)
 
-### Post-build transforms
+### Build transforms
 
-Optional VF→VF steps that run after every build, saved to
-`MyFont-transforms.json`:
+Optional steps that run on every build, saved to
+`MyFont-transforms.json`. Most are VF→VF, applied to the compiled font:
 
 - **Spacing — uniform (gftools)** / **Spacing — width-aware** — a
   `SPAC` axis; sidebearings and advances only, outlines never change.
 - **Clean fvar instances**, **Rebuild STAT table**, **Smooth unhinted
   rendering** (`gftools`).
+
+**Round corners** runs earlier, on the shadow source just before the
+compile (your source file stays sharp): every line-line corner of every
+master and brace gains a round whose radius blends the layer's stroke
+(XOPQ) with its width (XTRA), outer corners and counters separately,
+with per-master overrides in units when the formula isn't enough.
+Flip **Expose as ROND axis** and, instead of baking, the font gains a
+`ROND` axis (0 to a maximum you set, default 0 = sharp) that rounds
+live — advances never move along it. The browser demo runs the same
+engine, ported to the wasm crate and held node-identical to the desktop
+by an oracle test.
 
 Write your own: drop a `.py` subclassing `Transform` into
 `~/.avar2-studio/transforms/` and it appears in the menu on the next

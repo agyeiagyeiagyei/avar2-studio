@@ -513,9 +513,9 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     <span className="transform-name">{t.name}</span>
                   </label>
                   {t.description && <div className="transform-desc">{t.description}</div>}
-                  {t.enabled && (t.params_schema || []).length > 0 && (
+                  {t.enabled && (t.params_schema || []).filter(p => p.type !== 'table').length > 0 && (
                     <div className="transform-params">
-                      {(t.params_schema || []).map(p => (
+                      {(t.params_schema || []).filter(p => p.type !== 'table').map(p => (
                         <label key={p.key} className="transform-param">
                           <span className="transform-param-label">{p.label}</span>
                           {p.type === 'select' ? (

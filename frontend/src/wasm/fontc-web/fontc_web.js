@@ -283,6 +283,42 @@ export function regen_stat(font_bytes) {
 }
 
 /**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ * @param {string} source
+ * @param {string} params_json
+ * @param {string | null} [control_json]
+ * @returns {string}
+ */
+export function round_corners_source(source, params_json, control_json) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(control_json) ? 0 : passStringToWasm0(control_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.round_corners_source(ptr0, len0, ptr1, len1, ptr2, len2);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
  * parametric values, resolved JS-side) and the avar2 table regenerates

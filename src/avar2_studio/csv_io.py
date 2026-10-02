@@ -283,9 +283,26 @@ def update_csv_from_glyphs(
             # appended columns too.
             for col in sorted(new_axes):
                 csv_axes_ci[col.upper()] = col
+            # Backfill EVERY row with the axis's source default, never a
+            # blank: a parametric column with blank cells aborts the whole
+            # avar2 build ("parametric axis 'ital' is blank"), and only the
+            # rows the sync happens to touch would ever be filled. The
+            # default is also the truthful value — an instance authored
+            # before the axis existed sits at its default — and as an
+            # avar2 out-value it is a zero delta, so it changes nothing.
+            defaults = {}
+            try:
+                from . import source_font as _source_font
+                font, _fmt = _source_font.load_source(source_path)
+                for ax in _source_font.get_axes(font):
+                    tag = str(ax.get("tag") or "")
+                    defaults[tag.upper()] = ax.get("default", 0)
+            except Exception as e:  # noqa: BLE001
+                print(f"Warning: could not read axis defaults for backfill: {e}",
+                      file=sys.stderr)
             for row in csv_rows:
                 for axis in new_axes:
-                    row[axis] = ""
+                    row[axis] = str(defaults.get(axis.upper(), 0))
 
         # All axes that resolve to a CSV column (any case) — used for the
         # write loop below so we update WGHT-column for an axis tagged

@@ -33,6 +33,7 @@ use write_fonts::FontBuilder;
 
 mod braces;
 mod editor;
+mod round_corners;
 mod extrapolate;
 mod fix;
 mod iup;
@@ -54,6 +55,22 @@ pub use measure::measure_at;
 #[wasm_bindgen]
 pub fn pin_corner(font_bytes: Vec<u8>, request_json: &str) -> Result<Vec<u8>, JsError> {
     braces::pin_corner(font_bytes, request_json)
+}
+
+/// Round every corner of a .glyphs source (the round_corners
+/// transform, source-stage): the same engine the desktop studio runs,
+/// ported — returns the transformed source text for `compile_glyphs` /
+/// `compile_with_overlays`. `control_json` is the `-control.json`
+/// sidecar (correction targets), when the project has one.
+#[wasm_bindgen]
+pub fn round_corners_source(
+    source: String,
+    params_json: &str,
+    control_json: Option<String>,
+) -> Result<String, JsError> {
+    let (out, _summary) = round_corners::round_source(&source, params_json, control_json.as_deref())
+        .map_err(|e| err(e))?;
+    Ok(out)
 }
 
 #[wasm_bindgen]

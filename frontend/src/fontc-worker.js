@@ -19,6 +19,7 @@
 import init, {
   compile_glyphs,
   compile_with_overlays,
+  round_corners_source,
   glyph_model,
   add_avar2,
   apply_control_axes,
@@ -41,7 +42,9 @@ self.onmessage = async (e) => {
       const model = glyph_model(e.data.source, e.data.glyph);
       self.postMessage({ ok: true, model });
     } else if (e.data && e.data.kind === 'compile-overlays') {
-      const ttf = compile_with_overlays(e.data.source, e.data.request);
+      let src = e.data.source;
+      if (e.data.round) src = round_corners_source(src, e.data.round, e.data.control ?? undefined);
+      const ttf = compile_with_overlays(src, e.data.request);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else if (e.data && e.data.kind === 'clamp') {
       const ttf = clamp_out_of_range(e.data.fontBytes);
@@ -78,7 +81,9 @@ self.onmessage = async (e) => {
       const ttf = regen_stat(e.data.fontBytes);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else {
-      const ttf = compile_glyphs(e.data.source ?? e.data);
+      let src = e.data.source ?? e.data;
+      if (e.data && e.data.round) src = round_corners_source(src, e.data.round, e.data.control ?? undefined);
+      const ttf = compile_glyphs(src);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     }
   } catch (err) {

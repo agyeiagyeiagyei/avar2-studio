@@ -286,7 +286,7 @@ docs/migration-github-pages.md.
   — fontBytes plus all authoring state; restores skip the recompile.
   When testing, remember a prior session auto-restores (a "first visit"
   may not be one).
-- **e2e** (`frontend/e2e/static-demo.spec.mjs`, 23 sections):
+- **e2e** (`frontend/e2e/static-demo.spec.mjs`, 27 sections):
   `python3 -m http.server 8123 -d frontend/dist-pages` after
   `npx vite build --base=./ --outDir dist-pages`, then
   `node e2e/static-demo.spec.mjs`. Uses system Chrome via
@@ -314,6 +314,65 @@ docs/migration-github-pages.md.
   the mapped-location reflection one step behind (the request fires
   with pre-change state); real `page.mouse` drags don't. Not a product
   bug — a harness trap that cost a false bug report.
+
+### Corner rounding (source-stage transform, October 2026)
+
+`transforms/corner_rounding.py` is the engine, `builtin_round_corners.py`
+the registry wrapper, `tests/test_round_corners_transform.py` (30+ tests)
+the spec. It runs on the composed shadow's **build copy**
+(`.avar2-studio/shadow/transformed/<stem>.glyphs`) — never the canonical
+shadow, whose preserve-drawn-outlines pass would capture rounded braces
+as hand drawings. Four rules stack:
+
+- **Radius blend**: outer = `outer_pct`%·XOPQ + `outer_xtra_pct`%·XTRA,
+  counters likewise with the inner dials; floors; tangent capped at 2r
+  (`T_CAP`) on shallow bends; clamped to 48% of the shorter adjacent
+  segment (`ROOM`); under 1 unit the quad collapses onto the corner —
+  the same four nodes, coincident, which keeps every layer compatible.
+- **Concentric thin walls**: an ink-concave corner within an outer
+  round's radius, reached through ink, is that corner's wall partner and
+  takes (outer radius − wall) instead of the counter share — otherwise
+  the outer arc everts a hairline wall.
+- **Buried corners**: a corner inside the glyph's other contours by
+  signed winding (both sides ink) is overlap construction (R's leg over
+  its stem) and holds its exact point per layer.
+- **Per-master overrides** (`master_overrides`, {name: {outer, inner}}
+  in units): pinned deltas on the parametric plane (XOPQ/XTRA/YOPQ) via
+  a fontTools VariationModel — exact at named masters, exactly zero at
+  unnamed ones, blended between; italic twins share their upright's
+  value (conflicts error). Unknown master names fail the build loudly.
+
+**ROND axis mode** (`rounding_axis` + `axis_max`): instead of baking,
+every master gains a twin at ROND=max carrying the rounded geometry;
+originals keep sharp geometry with the quads collapsed in place, so both
+ends interpolate by construction. Every glyph twins its master layers
+(a master needs a layer everywhere); braces/instances/coordinates gain
+the axis at default 0 = sharp. Advances never move along the axis.
+Trap found here: a layer copy that still shares its parent glyph
+registers itself with the glyph the moment you assign `layerId` — copy
+detached, append later.
+
+**Static demo**: the engine is PORTED to the wasm crate
+(`wasm/fontc-web/src/round_corners.rs`, `round_corners_source`): it
+mutates the .glyphs Plist before fontc-wasm compiles, exactly like the
+desktop mutates its shadow, including overrides (fontdrasil's
+VariationModel) and ROND-axis mode (deterministic twin ids, so rebuilds
+are byte-stable). The cargo oracle
+(`tests/round_corners_oracle.rs` + `spike/compare_round_corners.py`)
+runs the Python engine on CrispyMini with identical params and compares
+node-for-node — green at delta 0.000000 over ~77k nodes, both modes.
+`static-api.js` wires it through `roundOption(dataset)` into
+`compileUploadSource` (and `rebuildFromSource` for bundle imports);
+glyphs 2 sources are refused with a clear message. One parity gap, by
+design: computed control/grade braces are bytes-level tuples derived
+from the already-rounded masters, so a correction layer's radius is the
+interpolated one, not the desktop's own-target radius — same class of
+approximation as drawn-vs-computed braces.
+
+Known limits (a few units, in ink, at extremes): where the source itself
+everts (counters filling past wght 900), a rounded tip can cross the
+already-crossing contour; at high width shares an arm-end arc can graze
+the far edge of a tapering wedge.
 
 ## 4. Known issues / sharp edges (ranked)
 

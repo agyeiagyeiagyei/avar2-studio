@@ -105,6 +105,15 @@ export function pin_corner(font_bytes: Uint8Array, request_json: string): Uint8A
 export function regen_stat(font_bytes: Uint8Array): Uint8Array;
 
 /**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ */
+export function round_corners_source(source: string, params_json: string, control_json?: string | null): string;
+
+/**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
  * parametric values, resolved JS-side) and the avar2 table regenerates
@@ -133,6 +142,7 @@ export interface InitOutput {
     readonly glyph_model: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
+    readonly round_corners_source: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly measure_at: (a: number, b: number, c: number, d: number) => [number, number, number, number];

@@ -486,7 +486,9 @@ const noProjectHealth = () => ({
 // avar2 CSV maps onto, and the source axes brace-layer locations
 // reference. Apply is per-section: avar2 mappings, control axes, grade
 // and the SPAC transforms are real (wasm add_avar2 /
-// apply_control_axes / apply_grade / apply_transforms). Enabled
+// apply_control_axes / apply_grade / apply_transforms), and
+// round_corners runs at SOURCE level (round_corners_source before the
+// compile — see compileUploadSource / rebuildFromSource). Enabled
 // transforms of a type the wasm port doesn't know are skipped with a
 // warning, never silently dropped.
 
@@ -495,6 +497,23 @@ const noProjectHealth = () => ({
 // only {type, enabled, params}; the Transforms menu also renders
 // name/description/params_schema).
 const KNOWN_TRANSFORMS = {
+  round_corners: {
+    id: 'round_corners',
+    name: 'Round corners',
+    description: 'Round every corner before the compile; the radius blends each layer\'s stroke weight (XOPQ) with its width (XTRA), outer corners and counters separately.',
+    stage: 'source',
+    params_schema: [
+      { key: 'outer_pct', label: 'Outer, % of stroke', type: 'float', default: 15.0, min: 0.0, max: 60.0 },
+      { key: 'inner_pct', label: 'Counters, % of stroke', type: 'float', default: 5.0, min: 0.0, max: 60.0 },
+      { key: 'outer_xtra_pct', label: 'Outer, % of width', type: 'float', default: 3.0, min: 0.0, max: 60.0 },
+      { key: 'inner_xtra_pct', label: 'Counters, % of width', type: 'float', default: 1.0, min: 0.0, max: 60.0 },
+      { key: 'outer_min', label: 'Outer floor (units)', type: 'float', default: 2.0, min: 0.0, max: 100.0 },
+      { key: 'inner_min', label: 'Counter floor (units)', type: 'float', default: 1.0, min: 0.0, max: 100.0 },
+      { key: 'master_overrides', label: 'Per-master overrides', type: 'table', default: {} },
+      { key: 'rounding_axis', label: 'Expose as ROND axis', type: 'bool', default: false },
+      { key: 'axis_max', label: 'Axis maximum', type: 'float', default: 100.0, min: 1.0, max: 1000.0 },
+    ],
+  },
   spac: {
     id: 'spac',
     name: 'Spacing — uniform (gftools)',
@@ -707,7 +726,10 @@ const applyBundle = async (bundle, dataset) => {
   // source (designspace projects) drawn layers apply as computed braces,
   // as the desktop's designspace shadow does.
   const rebuildFromSource = dataset.sourceText != null &&
-    controlAxes.some(a => (a.layers || []).some(isDrawnLayer));
+    (controlAxes.some(a => (a.layers || []).some(isDrawnLayer))
+      // round_corners runs on the SOURCE: a bundle enabling it needs the
+      // full source rebuild, not the incremental bytes stages.
+      || transforms.some(t => t.enabled && (t.type || t.id) === 'round_corners'));
 
   // Axis metadata rides the bundle (optional section): adopt it BEFORE
   // the mappings apply so the declared defaults/ranges shape the fvar,
@@ -857,7 +879,7 @@ const transformsMenu = (dataset) => {
   const knownIds = new Set(Object.keys(KNOWN_TRANSFORMS));
   const unknown = (dataset.transforms || [])
     .filter(t => !knownIds.has(t.type || t.id))
-    .map(t => ({ id: t.type || t.id, name: t.name || t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
+    .map(t => ({ id: t.type || t.id, name: t.name || t.type || t.id, enabled: !!t.enabled, params: { ...(t.params || {}) } }));
   return [...known, ...unknown];
 };
 
@@ -911,18 +933,34 @@ const controlAxesForBuild = (axes) =>
     }),
   }));
 
+// The round_corners request for a dataset: the enabled transform's
+// params plus the control sidecar (correction targets), or null. The
+// wasm engine runs it on the source before the compile — the oracle
+// test proves it node-identical to the desktop engine.
+const roundOption = (dataset) => {
+  const t = (dataset.transforms || []).find(x => (x.type || x.id) === 'round_corners');
+  if (!t || !t.enabled) return null;
+  return {
+    params: JSON.stringify(t.params || {}),
+    control: (dataset.controlAxes || []).length
+      ? JSON.stringify({ axes: dataset.controlAxes })
+      : null,
+  };
+};
+
 const compileUploadSource = (dataset) => {
+  const round = roundOption(dataset);
   const drawnAxes = (dataset.controlAxes || [])
     .map(a => ({ ...a, drawn: (a.layers || []).filter(isDrawnLayer) }))
     .filter(a => a.drawn.length);
-  if (!drawnAxes.length) return compileFont(dataset.sourceText);
+  if (!drawnAxes.length) return compileFont(dataset.sourceText, round);
   return compileWithOverlays(dataset.sourceText, {
     axes: (dataset.controlAxes || []).map(a => ({
       tag: a.tag, name: a.name, min: a.min, default: a.default, max: a.max,
     })),
     overlays: drawnAxes.flatMap(a =>
       a.drawn.map(l => ({ glyph: l.glyph, location: l.location, outline: l.outline }))),
-  });
+  }, round);
 };
 
 // The full rebuild pipeline for an uploaded .glyphs source: compile,
