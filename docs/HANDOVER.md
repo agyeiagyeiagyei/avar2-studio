@@ -342,15 +342,20 @@ as hand drawings. Four rules stack:
   unnamed ones, blended between; italic twins share their upright's
   value (conflicts error). Unknown master names fail the build loudly.
 
-**ROND axis mode** (`rounding_axis` + `axis_max`): instead of baking,
-every master gains a twin at ROND=max carrying the rounded geometry;
-originals keep sharp geometry with the quads collapsed in place, so both
-ends interpolate by construction. Every glyph twins its master layers
-(a master needs a layer everywhere); braces/instances/coordinates gain
-the axis at default 0 = sharp. Advances never move along the axis.
-Trap found here: a layer copy that still shares its parent glyph
-registers itself with the glyph the moment you assign `layerId` — copy
-detached, append later.
+**Rounding IS the ROND axis** (grade-style, October 2026): enabling the
+transform always builds sharp/rounded twins on ROND 0-100, default 0 =
+sharp. Per-style rounding is a percent per named instance — `default_pct`
+broadly, `style_pcts` per style (the instance rows' R badge) — stamped as
+each fvar instance's ROND coordinate in the FONT-stage apply(). Styles
+explore live on the axis; percent edits take the fast rebuild path
+(`font_stage_param_keys` on the spec — the server skips the shadow
+re-round when only those changed). Two ordering rules the chain enforces:
+the ROND stamp runs AFTER fix_instances (which regenerates the instance
+list), and the chain's injected-axis strip covers FONT-stage injectors
+only (stripping ROND would tear the axis out of the compile). Twinning
+trap: a layer copy that still shares its parent glyph registers itself
+with the glyph the moment you assign `layerId` — copy detached, append
+later.
 
 **Static demo**: the engine is PORTED to the wasm crate
 (`wasm/fontc-web/src/round_corners.rs`, `round_corners_source`): it
@@ -375,6 +380,17 @@ already-crossing contour; at high width shares an arm-end arc can graze
 the far edge of a tapering wedge.
 
 ## 4. Known issues / sharp edges (ranked)
+
+0. **A `glyph_model` call perturbs later `measure_at` results in the
+   static demo's shared wasm instance.** Found while implementing a
+   static `getMasters` via glyph_model: with the call present (its result
+   DISCARDED), the Space tab's pin-synthesis sweep at a collapsed corner
+   returned varying areas instead of flat ones, so pins stopped
+   synthesizing (e2e "synthesis notice"). Native (rlib) runs of the same
+   sequence are clean — wasm-instance state/memory effect suspected, not
+   crate logic. getMasters is stubbed in static for now; the browser
+   glyph EDITOR uses glyph_model routinely and may share the hazard —
+   investigate before relying on measure_at after editor use.
 
 1. **Chrome doesn't apply avar2 in its text pipeline** (verified on
    Chrome 151, Aug 2026): the in-browser preview specimen follows the

@@ -132,3 +132,48 @@ pub(crate) fn fix_fvar_instances(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError
     replacements.insert(TAG_NAME, crate::dump_replacement(&name, "name")?);
     Ok(repack(&font, replacements))
 }
+
+/// Per-style rounding (round_corners): stamp each named instance's ROND
+/// coordinate — the style's percent when `style_pcts` names it, the
+/// broad `default_pct` otherwise. Mirrors the desktop studio's
+/// RoundCornersTransform.apply().
+pub(crate) fn stamp_rond_instances(
+    font_bytes: Vec<u8>,
+    default_pct: f64,
+    style_pcts: &HashMap<String, f64>,
+) -> Result<Vec<u8>, JsError> {
+    let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
+    let Ok(fvar) = font.fvar() else {
+        return Ok(font_bytes);
+    };
+    let arrays = fvar
+        .axis_instance_arrays()
+        .map_err(|e| err(format!("invalid fvar: {e}")))?;
+    let Some(rond_idx) = arrays
+        .axes()
+        .iter()
+        .position(|a| a.axis_tag() == Tag::new(b"ROND"))
+    else {
+        return Ok(font_bytes);
+    };
+    let name: w_name::Name = font
+        .name()
+        .map_err(|e| err(format!("missing/invalid name table: {e}")))?
+        .to_owned_table();
+    let mut fvar_owned: w_fvar::Fvar = fvar.to_owned_table();
+    for inst in &mut fvar_owned.axis_instance_arrays.instances {
+        let sub = crate::stat::first_debug_name(&name.name_record, &[inst.subfamily_name_id.to_u16()])
+            .unwrap_or_default();
+        let pct = style_pcts
+            .get(&sub)
+            .copied()
+            .unwrap_or(default_pct)
+            .clamp(0.0, 100.0);
+        if let Some(c) = inst.coordinates.get_mut(rond_idx) {
+            *c = Fixed::from_f64(pct);
+        }
+    }
+    let mut replacements = HashMap::new();
+    replacements.insert(TAG_FVAR, crate::dump_replacement(&fvar_owned, "fvar")?);
+    Ok(repack(&font, replacements))
+}

@@ -89,9 +89,9 @@ def main(source, bake_rs, bake_params, axis_rs, axis_params):
     for label, rs_path, params_path in (("bake", bake_rs, bake_params),
                                         ("axis", axis_rs, axis_params)):
         params = json.load(open(params_path))
-        axis_max = params.get("axis_max") if params.get("rounding_axis") else None
+        # Rounding is always the ROND axis (0-100) now.
         py_font = glyphsLib.GSFont(source)
-        stats = corner_rounding.round_font(py_font, params, axis_max=axis_max)
+        stats = corner_rounding.round_font(py_font, params, axis_max=100.0)
         rs_font = glyphsLib.GSFont(rs_path)
         compare(label, py_font, rs_font)
         print("%s: python stats: %d corners / %d layers / %d hidden / %d concentric" % (

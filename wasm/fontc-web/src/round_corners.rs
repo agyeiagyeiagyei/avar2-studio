@@ -49,7 +49,6 @@ fn d_outer_xtra() -> f64 { 3.0 }
 fn d_inner_xtra() -> f64 { 1.0 }
 fn d_outer_min() -> f64 { 2.0 }
 fn d_inner_min() -> f64 { 1.0 }
-fn d_axis_max() -> f64 { 100.0 }
 
 #[derive(Deserialize)]
 pub(crate) struct Params {
@@ -67,10 +66,6 @@ pub(crate) struct Params {
     inner_min: f64,
     #[serde(default)]
     master_overrides: BTreeMap<String, OverrideEntry>,
-    #[serde(default)]
-    rounding_axis: bool,
-    #[serde(default = "d_axis_max")]
-    axis_max: f64,
 }
 
 #[derive(Deserialize)]
@@ -683,14 +678,10 @@ pub(crate) fn round_source(
         skipped_layers: Vec::new(),
     };
 
-    let axis_max = if params.rounding_axis {
-        if params.axis_max <= 0.0 {
-            return Err("round_corners: the ROND axis maximum must be positive".into());
-        }
-        Some(params.axis_max)
-    } else {
-        None
-    };
+    // Rounding IS the axis: sharp/rounded twins on ROND 0-100, default
+    // 0 = sharp. Styles take their position via the instance stamp
+    // (apply_transforms), grade-style.
+    let axis_max = Some(100.0);
 
     // Axis mode: grow the font by the ROND axis before touching glyphs.
     let mut twin_master_id: HashMap<String, String> = HashMap::new();

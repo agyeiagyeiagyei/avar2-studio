@@ -257,15 +257,17 @@ Optional steps that run on every build, saved to
   rendering** (`gftools`).
 
 **Round corners** runs earlier, on the shadow source just before the
-compile (your source file stays sharp): every line-line corner of every
-master and brace gains a round whose radius blends the layer's stroke
-(XOPQ) with its width (XTRA), outer corners and counters separately,
-with per-master overrides in units when the formula isn't enough.
-Flip **Expose as ROND axis** and, instead of baking, the font gains a
-`ROND` axis (0 to a maximum you set, default 0 = sharp) that rounds
-live — advances never move along it. The browser demo runs the same
-engine, ported to the wasm crate and held node-identical to the desktop
-by an oracle test.
+compile (your source file is never edited): every line-line corner of
+every master and brace gains a round whose radius blends the layer's
+stroke (XOPQ) with its width (XTRA), outer corners and counters
+separately, with per-master unit overrides in the sidecar when the
+formula isn't enough. Enabling it adds a `ROND` axis (0-100, default
+0 = sharp) that rounds live — advances never move along it — and each
+named style takes its own rounding as a percent, grade-style: a broad
+**Default rounding %** in the menu, and an **R badge** on any instance
+row for that style's own percent. The browser demo runs the same engine,
+ported to the wasm crate and held node-identical to the desktop by an
+oracle test.
 
 Write your own: drop a `.py` subclassing `Transform` into
 `~/.avar2-studio/transforms/` and it appears in the menu on the next

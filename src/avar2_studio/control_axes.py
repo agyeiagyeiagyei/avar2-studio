@@ -641,6 +641,11 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     from glyphsLib.classes import GSAxis, GSLayer
 
     font = GSFont(str(shadow_path))
+    # Studio-side instance renames survive regeneration: the shadow is
+    # re-derived from the original (which keeps its own names), so the
+    # alias map re-applies the user's renames on every rebuild.
+    from . import instance_aliases
+    instance_aliases.apply_to_font(font, instance_aliases.load(original_path))
     existing_tags = {str(getattr(ax, "axisTag", "")).lower() for ax in font.axes}
 
     # Each control axis's index in the eventual axis list (so we can

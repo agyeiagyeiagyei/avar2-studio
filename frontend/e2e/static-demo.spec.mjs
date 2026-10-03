@@ -266,6 +266,11 @@ await page.waitForFunction(
   { timeout: 90000 }
 );
 ok(true, 'CrispyMini.glyphs compiles on upload (section 8)');
+// The Config button is disabled while the upload's rebuild settles.
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 120000 }).catch(() => null);
+await page.waitForTimeout(1000);
 await page.click('button:has-text("Config")');
 await page.click('text=Import configuration…');
 await page.setInputFiles('.config-dropdown input[type=file]', TEST_BUNDLE);
@@ -275,13 +280,17 @@ await page.click('.import-config-confirm');
 await page.waitForFunction(() => !document.querySelector('.import-config-confirm'), { timeout: 90000 });
 ok(true, 'control+grade bundle applied');
 // The sidebar's SECONDARY PARAMETRIC AXES section lists the applied axis.
-ok(await page.evaluate(() =>
+// WAITS, not instant evaluates: the modal closes when the import promise
+// resolves, which can land a beat before React commits the sidebar.
+ok(await page.waitForFunction(() =>
   [...document.querySelectorAll('.sidebar *')].some(el =>
-    el.children.length === 0 && el.textContent.trim() === 'SECONDARY PARAMETRIC AXES')),
+    el.children.length === 0 && el.textContent.trim() === 'SECONDARY PARAMETRIC AXES'),
+  { timeout: 20000 }).then(() => true).catch(() => false),
   'SECONDARY PARAMETRIC AXES section shows in sidebar');
-ok(await page.evaluate(() =>
+ok(await page.waitForFunction(() =>
   [...document.querySelectorAll('.control-axes *')].some(el =>
-    el.children.length === 0 && el.textContent.trim() === 'crbr')),
+    el.children.length === 0 && el.textContent.trim() === 'crbr'),
+  { timeout: 20000 }).then(() => true).catch(() => false),
   'crbr row in SECONDARY PARAMETRIC AXES');
 // The Preview tab gets sliders for both new axes, in their own groups.
 await page.click('button:text-is("Preview")');
@@ -863,6 +872,12 @@ ok((await page.textContent('.space-side-label')).includes('XTRA'), 'probe shows 
 // Pin a ghost from its chip → the chip turns into a red "pinned" chip.
 // The first ghost in DOM order is (47,700,1): its sweep collapses on a
 // fresh font, so this pin takes the extrapolated-synthesis path.
+// Arm the notice watcher BEFORE the pin: the notice is transient (the
+// post-pin refresh can wipe it), so waiting after the pinned chip
+// appears races it.
+const noticeSeen = page.waitForFunction(() =>
+  document.querySelector('.space-pin-notice')?.textContent.includes('synthesized'),
+  { timeout: 90000 }).then(() => true).catch(() => false);
 await page.evaluate(() => {
   const chips = [...document.querySelectorAll('.space-chip.ghost')];
   chips[0].querySelector('.space-chip-pin').click();
@@ -870,9 +885,7 @@ await page.evaluate(() => {
 await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned').length > 0, { timeout: 90000 });
 ok(true, 'pin from a ghost chip completes');
 ok((await page.textContent('.space-chip.pinned')).includes('pinned'), 'pinned chip shows the red pinned label');
-ok(await page.evaluate(() =>
-  document.querySelector('.space-pin-notice')?.textContent.includes('synthesized')),
-  'synthesis notice shows for the extrapolated corner');
+ok(await noticeSeen, 'synthesis notice shows for the extrapolated corner');
 
 // ---- 21. drop out-of-range sources ----------------------------------------
 console.log('21. drop out-of-range sources');
@@ -1401,10 +1414,11 @@ ok(revertReport.split('|').pop() === unhintedReport.split('|').pop(),
 
 // ---- 27. round corners runs in-browser (wasm source-stage) ------------------
 console.log('27. round corners on an upload (wasm engine)');
-// Continues on section 26's Crispy Mini upload. The engine mutates the
-// SOURCE before fontc compiles it — the oracle test (cargo) proves it
-// node-identical to the desktop engine; here we prove the demo wires it.
-const glyphPoints = (p) => execFileSync(
+// Continues on section 26's Crispy Mini upload. Rounding is ALWAYS the
+// ROND axis (default 0 = sharp) with per-style percents stamped as
+// instance coordinates — the oracle test (cargo) proves the engine
+// node-identical to the desktop; here we prove the demo wires it.
+const glyphReport = (p) => execFileSync(
   '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
   ['-c', `
 import sys
@@ -1412,31 +1426,39 @@ from fontTools.ttLib import TTFont
 f = TTFont(sys.argv[1])
 g = f['glyf']['n']
 g.expand(f['glyf'])
-print(len(getattr(g, 'coordinates', [])), ','.join(a.axisTag for a in f['fvar'].axes))
+axes = ','.join(a.axisTag for a in f['fvar'].axes)
+name = f['name']
+insts = ';'.join('%s=%s' % (name.getDebugName(i.subfamilyNameID), i.coordinates.get('ROND')) for i in f['fvar'].instances[:3])
+print(len(getattr(g, 'coordinates', [])), axes, insts or '-')
 `, p]
 ).toString().trim();
-const sharpReport = glyphPoints(await downloadFont());
+const sharpReport = glyphReport(await downloadFont());
 await toggleTransform('Round corners');
-const roundedReport = glyphPoints(await downloadFont());
+const rondReport = glyphReport(await downloadFont());
 const sharpPts = parseInt(sharpReport.split(' ')[0], 10);
-const roundedPts = parseInt(roundedReport.split(' ')[0], 10);
-ok(roundedPts > sharpPts,
-  `round corners added corner quads to 'n' (${sharpPts} -> ${roundedPts} points)`);
-// Axis mode: tick "Expose as ROND axis" in the row's params, Apply
-// (source-stage transforms commit on the explicit Apply), and the
-// exported font carries the ROND fvar axis.
+const rondPts = parseInt(rondReport.split(' ')[0], 10);
+ok(rondPts > sharpPts,
+  `rounding added corner quads to 'n' (${sharpPts} -> ${rondPts} points)`);
+ok(rondReport.split(' ')[1].includes('ROND'),
+  `enabling rounding adds the ROND axis (${rondReport.split(' ')[1]})`);
+// Per-style stamping: generate GF named instances, give the font a broad
+// default rounding of 30%, and every instance takes ROND 30 as its
+// coordinate (grade-style default; style percents come from the R badge).
+await toggleTransform('Clean fvar instances');
 await page.click('button:has-text("Transforms")');
 await page.waitForSelector('.transform-row', { timeout: 15000 });
-await page.click('.transform-row:has-text("Round corners") .transform-param:has-text("Expose as ROND axis") input[type=checkbox]');
+await page.fill('.transform-row:has-text("Round corners") .transform-param:has-text("Default rounding %") input', '30');
 await page.click('.transform-row:has-text("Round corners") .transform-apply');
 await page.keyboard.press('Escape');
 await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 240000 });
-const rondReport = glyphPoints(await downloadFont());
-ok(rondReport.split(' ')[1].includes('ROND'),
-  `ROND axis in the exported font (${rondReport.split(' ')[1]})`);
-await toggleTransform('Round corners'); // back off for anything after
+const stampReport = glyphReport(await downloadFont());
+const stamped = stampReport.split(' ')[2];
+ok(stamped !== '-' && stamped.split(';').every(kv => kv.endsWith('=30.0')),
+  `named instances carry the default rounding, ROND 30 (${stamped})`);
+await toggleTransform('Clean fvar instances'); // back off
+await toggleTransform('Round corners');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

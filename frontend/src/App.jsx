@@ -916,6 +916,37 @@ function App() {
     if (!ok) setTransformsDirty(d => ({ ...d, [id]: true }));
   };
 
+  // ---- Per-style rounding (round_corners: default % + style percents) ----
+  const roundingEntry = (transforms || []).find(x => x.id === 'round_corners');
+  const rounding = roundingEntry ? {
+    enabled: !!roundingEntry.enabled,
+    default_pct: parseFloat(roundingEntry.params?.default_pct) || 0,
+    style_pcts: (roundingEntry.params?.style_pcts && typeof roundingEntry.params.style_pcts === 'object')
+      ? roundingEntry.params.style_pcts : {},
+  } : null;
+
+  const commitStylePcts = (nextPcts) => {
+    const prev = transforms;
+    const next = transforms.map(x =>
+      x.id === 'round_corners'
+        ? { ...x, params: { ...(x.params || {}), style_pcts: nextPcts } }
+        : x
+    );
+    setTransforms(next);
+    // A style's percent is its ROND coordinate — a font-stage stamp, so
+    // the server takes the fast rebuild path (no source re-round).
+    return commitTransforms(_transformEntries(next), prev);
+  };
+
+  const handleSaveInstanceRounding = (instanceName, pct) =>
+    commitStylePcts({ ...(rounding?.style_pcts || {}), [instanceName]: pct });
+
+  const handleRemoveInstanceRounding = (instanceName) => {
+    const nextPcts = { ...(rounding?.style_pcts || {}) };
+    delete nextPcts[instanceName];
+    return commitStylePcts(nextPcts);
+  };
+
   // ---- Grade transform (source-level; toggle + default + per-instance) ----
   const gradeCommitTimer = useRef(null);
 
@@ -2104,7 +2135,7 @@ function App() {
             } : undefined}
             onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
           />
-        ) : mainTab === 'instances' ? (
+                ) : mainTab === 'instances' ? (
         <div className="content-area">
           <Sidebar
             axes={axes}
@@ -2174,6 +2205,9 @@ function App() {
             grade={grade}
             onSaveInstanceGrade={handleSaveInstanceGrade}
             onRemoveInstanceGrade={handleRemoveInstanceGrade}
+            rounding={rounding}
+            onSaveInstanceRounding={handleSaveInstanceRounding}
+            onRemoveInstanceRounding={handleRemoveInstanceRounding}
             axes={axes}
           />
         </div>

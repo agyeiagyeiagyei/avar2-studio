@@ -545,7 +545,15 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                                 step={sliderStep}
                                 value={shown}
                                 onChange={(e) => scheduleMappingCommit(selectedInstance.name, axisColumn, parseFloat(e.target.value))}
-                                onPointerUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
+                                onPointerUp={() => {
+                                  // An UNSET cell whose wanted value IS the
+                                  // resting position never fires a change
+                                  // event (wght default = its min here), so
+                                  // releasing the slider commits the value
+                                  // it rests at.
+                                  if (unset) scheduleMappingCommit(selectedInstance.name, axisColumn, shown, 0);
+                                  flushMappingCommit(selectedInstance.name, axisColumn);
+                                }}
                                 onKeyUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
                               />
                               <div className="axis-values">

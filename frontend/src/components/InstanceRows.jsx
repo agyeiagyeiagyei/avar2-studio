@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, axes }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, axes }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -151,6 +151,11 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             parametricTags={new Set((axes || []).filter(a => a.has_master_coverage !== false).map(a => a.tag))}
             transformTags={new Set((axes || []).filter(a => a.transform_injected).map(a => a.tag))}
             gradeTag="GRAD"
+            roundingEnabled={!!rounding?.enabled}
+            roundingPct={rounding?.style_pcts?.[instance.name] ?? null}
+            roundingDefaultPct={rounding?.default_pct ?? 0}
+            onSaveInstanceRounding={onSaveInstanceRounding}
+            onRemoveInstanceRounding={onRemoveInstanceRounding}
           />
         </div>
       ))}

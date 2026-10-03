@@ -58,6 +58,7 @@ from . import source_font as _source_font
 from . import csv_io as _csv_io
 from . import glyph_coverage as _glyph_coverage
 from . import control_axes as _control_axes
+from . import instance_aliases as _instance_aliases
 from . import config_port as _config_port
 from . import transforms as _transforms
 from . import grade as _grade
@@ -835,6 +836,26 @@ def get_axes():
             except Exception as grade_exc:
                 print(f"Warning: grade overlay on /api/axes failed: {grade_exc}", file=sys.stderr)
 
+        # TRANSFORM-AXES overlay. Transforms can add whole axes WITH twin
+        # masters (round_corners' ROND), which reach this list through the
+        # TRANSFORMED source and so carry real master coverage — but like
+        # SPAC and GRAD they are build products, not per-instance data.
+        # Mark every enabled transform's declared axis so the frontend
+        # keeps it out of instance saves and CSV sync.
+        if ORIGINAL_PATH is not None:
+            try:
+                injected_tags = set()
+                for stage in ("font", "source"):
+                    for t, _params in _transforms.registry.active(ORIGINAL_PATH, stage=stage):
+                        tag = getattr(t.spec, "injected_axis_tag", None)
+                        if tag:
+                            injected_tags.add(tag.lower())
+                for a in axes:
+                    if str(a.get("tag", "")).lower() in injected_tags:
+                        a["transform_injected"] = True
+            except Exception as inj_exc:
+                print(f"Warning: transform-axes overlay on /api/axes failed: {inj_exc}", file=sys.stderr)
+
         # BUILT-FONT overlay. Post-build transforms (e.g. SPAC) inject fvar
         # axes that have no source master, so get_axes_from_glyphs can't see
         # them. Read the built font's fvar and surface any tag not already
@@ -958,14 +979,23 @@ def _apply_transform_chain(vf_path):
     # builds could pile up several SPAC axes (observed: four, which makes an
     # invalid font). Pin any previously-injected axis out first, so applying
     # the chain twice lands in the same place as applying it once.
+    # Only FONT-stage injectors (SPAC) — a source-stage transform's axis
+    # (round_corners' ROND) is built into the compile itself; stripping
+    # it here would tear the axis out of every build.
     injected_tags = {
-        t.spec.injected_axis_tag for t, _ in chain if getattr(t.spec, "injected_axis_tag", None)
+        t.spec.injected_axis_tag for t, _ in chain
+        if getattr(t.spec, "injected_axis_tag", None)
+        and getattr(t.spec, "stage", "font") == "font"
     }
     if injected_tags:
         try:
             out = Path(_strip_injected_axes(out, injected_tags))
         except Exception as e:  # noqa: BLE001
             print(f"transforms: could not strip prior injected axes: {e}", file=sys.stderr)
+    # Source-stage transforms' font-stage apply() (round_corners' ROND
+    # instance stamp) runs LAST: fix_instances regenerates the instance
+    # list, and a stamp applied before it would be thrown away.
+    chain = sorted(chain, key=lambda tp: getattr(tp[0].spec, "stage", "font") == "source")
     for transform, params in chain:
         try:
             result = transform.apply(out, params, _build_context())
@@ -1806,6 +1836,15 @@ def rename_instance(instance_name: str):
 
         if is_source_instance:
             success = rename_instance_in_glyphs(GLYPHS_PATH, instance_name, new_name)
+            if success and ORIGINAL_PATH is not None:
+                # The rename just edited the SHADOW, which is re-derived
+                # from the original on every regeneration — record it so
+                # regenerate_shadow re-applies it and the old name never
+                # resurrects.
+                try:
+                    _instance_aliases.record(ORIGINAL_PATH, instance_name, new_name)
+                except Exception as alias_exc:  # noqa: BLE001
+                    print(f"Warning: could not persist instance rename: {alias_exc}", file=sys.stderr)
         else:
             # Studio-only: rename happens in CSV only, below.
             success = True
@@ -2748,19 +2787,64 @@ def get_avar2_instances():
         # Get matches
         matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
         
-        # Add missing instances to CSV
+        # Add missing instances to CSV — unless an existing row already
+        # sits at the instance's exact parametric location. A RENAMED row
+        # keeps its coordinates, and the source still carries the old
+        # name (the studio never writes the original): re-adding by name
+        # would resurrect the old instance as a coordinate duplicate on
+        # every refresh after a rename.
+        rows, _fns, _in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        existing_locs = []
+        for row in rows:
+            loc = {}
+            for col in out_cols:
+                v = (row.get(col) or "").strip()
+                if v:
+                    try:
+                        loc[col.upper()] = float(v)
+                    except ValueError:
+                        pass
+            if loc:
+                existing_locs.append(loc)
+
+        out_upper = {str(c).upper() for c in out_cols}
+
+        def _row_already_at(coords):
+            # Compare only over the CSV's parametric columns: a source
+            # instance also reports control axes (lcwd/ymod at 0) that
+            # rows never carry.
+            cu = {str(k).upper(): float(v) for k, v in (coords or {}).items()
+                  if str(k).upper() in out_upper}
+            if not cu:
+                return False
+            return any(
+                all(abs(loc.get(k, 1e9) - v) <= 0.05 for k, v in cu.items())
+                for loc in existing_locs
+            )
+
         added_count = 0
         for match in matches:
             if match.get("match_status") == "missing_in_csv":
                 instance_name = match["instance_name"]
                 glyphs_coords = match.get("glyphs_coordinates", {})
+                if _row_already_at(glyphs_coords):
+                    continue
                 if _add_missing_instance_to_csv(instance_name, glyphs_coords, csv_path):
                     added_count += 1
         
         # If we added instances, reload matches
         if added_count > 0:
             matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
-        
+
+        # And keep renamed instances out of the LISTING too: a source
+        # instance whose location an existing row holds is that row, not
+        # a second instance to display.
+        matches = [m for m in matches
+                   if not (m.get("match_status") in ("missing_in_csv", "mismatch")
+                           and not any(r.get("Instance Name", "").strip() == m.get("instance_name")
+                                       for r in rows)
+                           and _row_already_at(m.get("glyphs_coordinates", {})))]
+
         return jsonify({
             "instances": matches,
             "csv_path": str(csv_path),
@@ -3301,6 +3385,11 @@ def update_transforms():
         return jsonify({"error": "Body must include 'transforms' as a list."}), 400
     try:
         _transforms.discover()
+        previous = {}
+        try:
+            previous = {t.get("id"): t for t in _transforms.available(ORIGINAL_PATH)}
+        except Exception as prev_exc:  # noqa: BLE001
+            print(f"transforms: could not read previous state: {prev_exc}", file=sys.stderr)
         try:
             stored = _transforms.set_active(ORIGINAL_PATH, entries)
         except ValueError as ve:
@@ -3308,19 +3397,30 @@ def update_transforms():
             # instead of persisting an enabled-but-doomed transform.
             return jsonify({"error": str(ve)}), 400
         # A change that involves a SOURCE-stage transform (round_corners) —
-        # enabling one, disabling one, or changing its params — changes the
-        # FILE the compiler must read, so it goes through the same
-        # regen-and-rebuild path the grade toggle uses: that re-resolves the
-        # build source AND repoints the build config at it. trigger_build
-        # alone reuses both, which is the font-stage assumption this handler
-        # was written under.
-        source_types = set()
-        try:
-            source_types = {tid for tid, t in _transforms.REGISTRY.items()
-                            if getattr(t.spec, "stage", "font") == "source"}
-        except Exception as exc:  # noqa: BLE001
-            print(f"transforms: could not read the registry stages: {exc}", file=sys.stderr)
-        touched = {e.get("type") for e in entries} | {e.get("type") for e in stored}
+        # enabling one, disabling one, or changing its SOURCE params —
+        # changes the FILE the compiler must read, so it goes through the
+        # same regen-and-rebuild path the grade toggle uses. Edits limited
+        # to a transform's declared font_stage_param_keys (round_corners'
+        # per-style percents) only change its VF->VF apply, so they take
+        # the fast trigger_build path instead of re-rounding the shadow.
+        def _source_touched():
+            for e in stored:
+                tid = e.get("type")
+                t = _transforms.REGISTRY.get(tid)
+                if t is None or getattr(t.spec, "stage", "font") != "source":
+                    continue
+                prev = previous.get(tid) or {}
+                if bool(e.get("enabled")) != bool(prev.get("enabled")):
+                    return True
+                if not e.get("enabled"):
+                    continue
+                fast = set(getattr(t.spec, "font_stage_param_keys", ()) or ())
+                new_p = e.get("params") or {}
+                old_p = prev.get("params") or {}
+                for k in set(new_p) | set(old_p):
+                    if k not in fast and new_p.get(k) != old_p.get(k):
+                        return True
+            return False
 
         def _resolve_then_build():
             # Synchronous twin of the debounced regen job: same steps, none
@@ -3329,7 +3429,7 @@ def update_transforms():
             _resolve_active_source()
             return trigger_build()
 
-        rebuild = _resolve_then_build if touched & source_types else trigger_build
+        rebuild = _resolve_then_build if _source_touched() else trigger_build
         # NB: do NOT null VARIABLE_FONT_PATH here. trigger_build() reassigns it
         # on any successful build and leaves it untouched on failure, so the
         # last-good font keeps serving if the rebuild fails.
@@ -5167,12 +5267,16 @@ def get_avar2_axes():
                 }
                 metadata_updated = True
             else:
-                # Ensure is_parametric flag exists for existing entries
-                if "is_parametric" not in metadata[col]:
-                    # Check if it's actually parametric (exists in Glyphs)
-                    normalized_tag = _csv_io.normalize_in_axis_name(col)
-                    glyphs_axis_tags = _get_glyphs_axis_tags()
-                    metadata[col]["is_parametric"] = normalized_tag in glyphs_axis_tags
+                # The flag is DERIVED from the source's real axes, never
+                # trusted from the file: a stale is_parametric=true (from
+                # an era when the tag WAS a source axis) otherwise locks
+                # the mapping slider and the edit/delete modal read-only
+                # forever.
+                normalized_tag = _csv_io.normalize_in_axis_name(col)
+                glyphs_axis_tags = _get_glyphs_axis_tags()
+                desired_flag = normalized_tag in glyphs_axis_tags
+                if metadata[col].get("is_parametric") != desired_flag:
+                    metadata[col]["is_parametric"] = desired_flag
                     metadata_updated = True
                 
                 # Update display_name if it's still the column name (tag) - migrate to proper display name
@@ -5910,7 +6014,7 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
 
         def _fixed_gen_fvar_axes(font, mapping):
             existing = {str(a.axisTag) for a in font["fvar"].axes}
-            filtered = [{**m, "in": {k: v for k, v in m["in"].items() if k not in existing}}
+            filtered = [{**m, "in": {k: v for k, v in (m.get("in") or {}).items() if k not in existing}}
                         for m in mapping]
             result = _orig(font, filtered)
             for a in font["fvar"].axes:

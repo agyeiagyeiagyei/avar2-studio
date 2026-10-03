@@ -94,6 +94,9 @@ class TransformSpec:
     # enforces at most one enabled transform per injected tag, so two SPAC
     # transforms can't both add a SPAC axis (which would corrupt the font).
     injected_axis_tag: Optional[str] = None
+    # For a SOURCE-stage transform: params that only affect its FONT-stage
+    # apply(). Edits limited to these skip the full shadow rebuild.
+    font_stage_param_keys: tuple = ()
 
     def to_dict(self) -> dict:
         return {

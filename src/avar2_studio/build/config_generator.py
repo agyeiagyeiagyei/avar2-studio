@@ -642,6 +642,18 @@ def generate_avar2_yaml_string(
     have the same opsz value.
     """
     mappings = _drop_identical_duplicates(mappings)
+    # A row with no user-axis values (none at all, or only an opsz that
+    # gets skipped below) is not a mapping: emitting it writes "in:"
+    # with nothing under it, which parses back as null and crashes the
+    # font build — and two such rows would trip the duplicate-in check.
+    _opsz_vals = {m.in_axes.get("opsz") for m in mappings if "opsz" in m.in_axes}
+    _skip_opsz_early = skip_opsz_if_no_variation and len(_opsz_vals) <= 1
+    mappings = [m for m in mappings
+                if any(not (_skip_opsz_early and k == "opsz") for k in m.in_axes)]
+    if not mappings:
+        # Identity: nothing to map. The EMPTY list still replaces any
+        # stale section from an earlier CSV.
+        return f"avar2:\n  {font_key}: []\n"
     _dedupe_check(mappings)
     
     # Check for opsz variation if requested
@@ -1563,11 +1575,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             include_group_headers=True,
             skip_opsz_if_no_variation=not has_opsz_variation_after
         )
-        validate_avar2_yaml(avar2_yaml, font_key)
         # Count entries
         avar2_parsed = yaml.safe_load(avar2_yaml)
-        entry_count = len(avar2_parsed["avar2"][font_key])
-        print(f"  ✓ avar2 section generated ({entry_count} entries)", file=sys.stderr)
+        entry_count = len(avar2_parsed["avar2"][font_key] or [])
+        if entry_count:
+            validate_avar2_yaml(avar2_yaml, font_key)
+            print(f"  ✓ avar2 section generated ({entry_count} entries)", file=sys.stderr)
+        else:
+            print("  ℹ No mapping rows carry user-axis values — avar2 section emptied (identity)", file=sys.stderr)
 
         # Step 7: Merge into config
         print("Step 7: Merging sections into config...", file=sys.stderr)

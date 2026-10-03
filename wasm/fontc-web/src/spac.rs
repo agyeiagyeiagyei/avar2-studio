@@ -71,10 +71,16 @@ fn int_param(params: &HashMap<String, serde_json::Value>, key: &str, default: i3
 /// `float(params.get(key, default))` with the reference's try/except
 /// fallback to the default, then the ParamSpec clamp (bias [1.0, 4.0],
 /// scale [0.1, 10.0]).
+/// A numeric value, or a numeric STRING — the flyout passes raw strings
+/// (the desktop server coerces them; the static demo stores them as-is).
+fn json_f64(v: &serde_json::Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+}
+
 fn float_param(params: &HashMap<String, serde_json::Value>, key: &str, default: f64, clamp: (f64, f64)) -> f64 {
     params
         .get(key)
-        .and_then(|v| v.as_f64())
+        .and_then(json_f64)
         .unwrap_or(default)
         .clamp(clamp.0, clamp.1)
 }
@@ -512,6 +518,26 @@ pub(crate) fn apply_transforms(
             "fix_unhinted" => crate::fix::fix_unhinted(font_bytes)?,
             _ => font_bytes,
         };
+    }
+    // Per-style rounding LAST: fix_instances regenerates the instance
+    // list, so the ROND stamp (grade-style default + per-style percents)
+    // must land on whatever instances survive the fixers.
+    for e in &entries {
+        if !e.enabled || e.kind != "round_corners" {
+            continue;
+        }
+        let default_pct = float_param(&e.params, "default_pct", 0.0, (0.0, 100.0));
+        let style_pcts: HashMap<String, f64> = e
+            .params
+            .get("style_pcts")
+            .and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| json_f64(v).map(|f| (k.clone(), f)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        font_bytes = crate::fix::stamp_rond_instances(font_bytes, default_pct, &style_pcts)?;
     }
     Ok(font_bytes)
 }

@@ -2,9 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
+import RoundingBadge from './RoundingBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag }) {
+function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
+  roundingEnabled, roundingPct, roundingDefaultPct,
+  onSaveInstanceRounding, onRemoveInstanceRounding,
+}) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -63,6 +67,11 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   const pinnedAxes = { ...(axisDefaults || {}) };
   for (const [tag, value] of Object.entries(previewCoordinates)) {
     if (tag in pinnedAxes) pinnedAxes[tag] = value;
+  }
+  // Per-style rounding renders in the row: the style's own percent, or
+  // the broad default — its ROND coordinate in the built font.
+  if (roundingEnabled && 'ROND' in pinnedAxes) {
+    pinnedAxes.ROND = roundingPct != null ? roundingPct : (roundingDefaultPct || 0);
   }
   const axesForRender = Object.keys(pinnedAxes).length > 0 ? pinnedAxes : previewCoordinates;
   let fontVariationSettings = Object.entries(axesForRender)
@@ -199,6 +208,15 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               diagnostics={gradeDiagnostics}
               onSave={onSaveInstanceGrade}
               onRemove={onRemoveInstanceGrade}
+            />
+          )}
+          {roundingEnabled && (
+            <RoundingBadge
+              instanceName={instance.name}
+              pct={roundingPct}
+              defaultPct={roundingDefaultPct}
+              onSave={onSaveInstanceRounding}
+              onRemove={onRemoveInstanceRounding}
             />
           )}
           {/* Coordinates moved below the sample text — see render-end. */}

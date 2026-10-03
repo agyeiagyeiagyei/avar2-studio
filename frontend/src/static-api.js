@@ -502,16 +502,17 @@ const KNOWN_TRANSFORMS = {
     name: 'Round corners',
     description: 'Round every corner before the compile; the radius blends each layer\'s stroke weight (XOPQ) with its width (XTRA), outer corners and counters separately.',
     stage: 'source',
+    injected_axis_tag: 'ROND',
     params_schema: [
+      { key: 'default_pct', label: 'Default rounding %', type: 'float', default: 0.0, min: 0.0, max: 100.0 },
       { key: 'outer_pct', label: 'Outer, % of stroke', type: 'float', default: 15.0, min: 0.0, max: 60.0 },
       { key: 'inner_pct', label: 'Counters, % of stroke', type: 'float', default: 5.0, min: 0.0, max: 60.0 },
       { key: 'outer_xtra_pct', label: 'Outer, % of width', type: 'float', default: 3.0, min: 0.0, max: 60.0 },
       { key: 'inner_xtra_pct', label: 'Counters, % of width', type: 'float', default: 1.0, min: 0.0, max: 60.0 },
       { key: 'outer_min', label: 'Outer floor (units)', type: 'float', default: 2.0, min: 0.0, max: 100.0 },
       { key: 'inner_min', label: 'Counter floor (units)', type: 'float', default: 1.0, min: 0.0, max: 100.0 },
+      { key: 'style_pcts', label: 'Per-style rounding', type: 'table', default: {} },
       { key: 'master_overrides', label: 'Per-master overrides', type: 'table', default: {} },
-      { key: 'rounding_axis', label: 'Expose as ROND axis', type: 'bool', default: false },
-      { key: 'axis_max', label: 'Axis maximum', type: 'float', default: 100.0, min: 1.0, max: 1000.0 },
     ],
   },
   spac: {
@@ -1199,6 +1200,10 @@ const staticOverrides = {
     : { ...noProjectHealth(), session_lock_lost: sessionLockLost }),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
   getInstances: async () => (uploadDataset ? uploadDataset.instances : { instances: [] }),
+  // STUB on purpose: the one consumer (the removed Rounding tab) is
+  // gone, and implementing this via glyph_model turned out to PERTURB
+  // later measure_at results in the shared wasm instance (pin synthesis
+  // stopped triggering) — see HANDOVER §4 before resurrecting it.
   getMasters: async () => ({ masters: [] }),
   getAxes: async () => (uploadDataset ? uploadDataset.axes : { axes: [] }),
   getAvar2Instances: async () => {
