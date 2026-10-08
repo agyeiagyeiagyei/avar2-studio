@@ -310,7 +310,11 @@ def test_endpoint_retags_shadow_derived_axis_as_studio(coverage_client, crispy_s
     assert flipped["kind"] == "scoped"  # 1 of 63 glyphs
     # Sidecar range overlays the shadow's master-derived [0, 100].
     assert (flipped["min"], flipped["default"], flipped["max"]) == (-100.0, 0.0, 100.0)
-    assert flipped["layers"] == [{"glyph": "e", "location": {"crbr": 100.0}}]
+    # The layer sits at the default master's parametric location — the
+    # corner name resolves to that master.
+    assert flipped["layers"] == [
+        {"glyph": "e", "location": {"crbr": 100.0}, "corner": "XTRA94-XOPQ2-YOPQ2"}
+    ]
     # The real parametric axes are untouched by the overlay.
     assert by_tag["XOPQ"]["source"] == "source"
     assert by_tag["XOPQ"]["kind"] == "universal"

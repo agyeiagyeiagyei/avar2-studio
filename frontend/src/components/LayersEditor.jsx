@@ -331,6 +331,14 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             )}
                           </div>
                           <div className="layer-coords-context">
+                            {entry.corner && (
+                              <span
+                                className="layer-coords-corner"
+                                title="The master corner or named instance this layer sits at"
+                              >
+                                {entry.corner}
+                              </span>
+                            )}
                             <span className="layer-coords-context-prefix">at</span>
                             {fullLoc.filter(a => !a.isControl).map(a => (
                               <span key={a.tag} className="layer-coords-axis-pair">

@@ -2965,7 +2965,24 @@ def glyph_coverage():
             total = next(iter(coverage.values()), {}).get("total_glyphs", 0) if coverage else 0
             sidecar_path = ORIGINAL_PATH if ORIGINAL_PATH is not None else GLYPHS_PATH
             by_tag = {str(a["tag"]).lower(): a for a in out}
-            for ax in _control_axes.list_axes(sidecar_path):
+            sidecar_axes = list(_control_axes.list_axes(sidecar_path))
+            # Resolve each studio layer's parametric location to its master
+            # corner / instance name, so the layers panel can show it — the
+            # same names the shadow's Fontra source labels carry.
+            corner_of = None
+            if isinstance(font, GSFont) and sidecar_axes:
+                try:
+                    sidecar_tags = {str(a.get("tag") or "").lower() for a in sidecar_axes}
+                    control_idx = {
+                        i for i, fax in enumerate(getattr(font, "axes", None) or [])
+                        if str(getattr(fax, "axisTag", "")).lower() in sidecar_tags
+                    }
+                    corner_of = _control_axes.corner_name_resolver(
+                        font, control_idx, ORIGINAL_PATH
+                    )
+                except Exception as corner_exc:  # noqa: BLE001
+                    print(f"Warning: corner-name resolution unavailable: {corner_exc}", file=sys.stderr)
+            for ax in sidecar_axes:
                 tag_lower = (ax.get("tag") or "").lower()
                 if not tag_lower:
                     continue
@@ -2973,6 +2990,11 @@ def glyph_coverage():
                 # v2.7 unified schema: ``layers`` is the canonical
                 # array. Coverage is derived from unique glyph names.
                 layers = list(ax.get("layers") or [])
+                if corner_of is not None:
+                    for entry in layers:
+                        corner = corner_of(entry.get("location"))
+                        if corner:
+                            entry["corner"] = corner
                 derived_coverage: List[str] = []
                 seen_glyphs: set = set()
                 for entry in layers:
@@ -4109,15 +4131,21 @@ def _fontra_focus_css() -> str:
 #   1. opens the designspace-navigation sidebar tab,
 #   2. trims the panel to the glyph-sources accordion (no font axes,
 #      no layers list, no add/remove source buttons),
-#   3. hides every sources-list row that is not a STUDIO layer of the
+#   3. sorts the sources list by source name (Fontra's own
+#      "by-source-name" option), so the master/instance-labelled studio
+#      layers read A→Z by style,
+#   4. hides every sources-list row that is not a STUDIO layer of the
 #      session's axis (masters, font sources, other axes' layers),
-#   4. enables Fontra's multi-source editing on the studio rows once
-#      per layer (the designer can still toggle any row off).
+#   5. keeps multi-source editing OFF — the designer toggles rows on
+#      deliberately; an opened layer edits alone by default. Masters and
+#      source layers are never editing targets (Fontra's own init can put
+#      the selected source there, so that strip keeps re-applying).
 # A row is a studio layer when its dense location sits OFF the
 # session axis's default — only sidecar seeding creates such layers
 # in the shadow. Fallback: match the seed-time source-name label
-# ("<corner> · <tag> <value>"). If no row matches, the list is left
-# untrimmed (fail open) and nothing is auto-enabled (fail closed).
+# ("<name>" or, for unnamed locations, "<tag> <value>" coordinates).
+# If no row matches, the list is left untrimmed (fail open) and
+# nothing is auto-enabled (fail closed).
 _FONTRA_STUDIO_SHIM_JS = """
 <script id="avar2-studio-fontra-shim">
 (function () {
@@ -4134,13 +4162,28 @@ _FONTRA_STUDIO_SHIM_JS = """
       }
       return labelRe.test(String(item.name || ''));
     };
-    let tabOpened = false, panelTrimmed = false;
-    const autoEnabled = new Set();
+    let tabOpened = false, panelTrimmed = false, sortSet = false;
     const sweep = () => {
       const host = document.querySelector(
         '.sidebar-content[data-sidebar-name="designspace-navigation"]');
       const panel = host && host.children[0];
       if (!panel || !panel.sourcesList) return;
+      if (!sortSet) {
+        // Alphabetical by source name — studio layers are labelled by
+        // master/instance name, so the list reads A→Z by style. Retry
+        // until the editor's settings object exists: the panel's DOM can
+        // be queryable before start.js finishes wiring the controller.
+        const settings = window.editorController
+          && window.editorController.sceneController
+          && window.editorController.sceneController.applicationSettings;
+        if (settings) {
+          if (settings.glyphSourcesSortOptions !== 'by-source-name') {
+            settings.glyphSourcesSortOptions = 'by-source-name';
+          }
+          if (typeof panel._updateSources === 'function') panel._updateSources();
+          sortSet = true;
+        }
+      }
       if (!tabOpened) {
         const tab = document.querySelector(
           '.sidebar-tab[data-sidebar-name="designspace-navigation"]');
@@ -4181,12 +4224,7 @@ _FONTRA_STUDIO_SHIM_JS = """
         const studio = isStudioItem(item);
         row.style.display = (anyStudio && !studio) ? 'none' : '';
         if (!anyStudio) return;
-        if (studio) {
-          if (!autoEnabled.has(item.layerName)) {
-            autoEnabled.add(item.layerName);
-            if (!item.editing) item.editing = true;
-          }
-        } else if (item.editing) {
+        if (!studio && item.editing) {
           // Hard rule: masters and source layers are never batch-edit
           // targets — Fontra's own init can put the selected source
           // here, so keep stripping it, not just once.

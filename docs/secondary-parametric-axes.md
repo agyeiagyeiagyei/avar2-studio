@@ -133,7 +133,8 @@ of them, not just the glyph you happen to be looking at. Two ways:
 
 - **+ Add layer for all N glyphs** at the bottom of the axis row opens
   the add modal targeting the whole coverage set. Set the axis value and
-  the corners as usual; one layer is created per covered glyph. Name
+  tick the corners — masters or named instances — as usual; one layer is
+  created per covered glyph. Name
   extra glyphs in the field to widen coverage in the same step.
 - **Add to all applicable glyphs** — the same toggle inside any add or
   duplicate modal, including the per-glyph *+ Add layer for `<glyph>`*.

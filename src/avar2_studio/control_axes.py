@@ -43,6 +43,7 @@ config bundle. See docs/secondary-parametric-axes.md.
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import shutil
 from pathlib import Path
@@ -590,6 +591,96 @@ def shadow_exists(original_path: Path) -> bool:
     return shadow_path_for(original_path).exists()
 
 
+def corner_name_maps(font, control_axis_indices, original_path=None):
+    """Master-corner and instance names keyed by parametric coordinate tuple.
+
+    The key is the location across the font's axes minus the control axes,
+    rounded to 0.1 — the add modal's pin granularity. Masters come from the
+    font itself; instances from the font's own list plus the studio-only
+    rows in the sibling ``-avar.csv`` (when ``original_path`` is given).
+    Shared by the shadow labeler and the layers panel so both name a layer
+    the same way.
+    """
+    param_indices = [
+        i for i in range(len(getattr(font, "axes", None) or []))
+        if i not in control_axis_indices
+    ]
+
+    def _key(values):
+        return tuple(round(float(v), 1) for v in values)
+
+    masters: Dict[tuple, str] = {}
+    for master in getattr(font, "masters", None) or []:
+        maxes = list(getattr(master, "axes", None) or [])
+        if param_indices and len(maxes) <= max(param_indices):
+            continue
+        masters[_key(maxes[i] for i in param_indices)] = master.name
+
+    instances: Dict[tuple, str] = {}
+    for inst in getattr(font, "instances", None) or []:
+        iaxes = list(getattr(inst, "axes", None) or [])
+        if param_indices and len(iaxes) <= max(param_indices):
+            continue
+        instances.setdefault(_key(iaxes[i] for i in param_indices), inst.name)
+
+    param_tags = [str(getattr(font.axes[i], "axisTag", "")) for i in param_indices]
+    avar_csv = None
+    if original_path is not None:
+        avar_csv = Path(original_path).parent / f"{Path(original_path).stem}-avar.csv"
+    if param_tags and avar_csv is not None and avar_csv.exists():
+        try:
+            with avar_csv.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in csv.DictReader(f):
+                    name = (row.get("Instance Name") or "").strip()
+                    if not name:
+                        continue
+                    rowvals = {str(k).strip().lower(): v for k, v in row.items() if k}
+                    try:
+                        values = [float(rowvals[tag.lower()]) for tag in param_tags]
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    instances.setdefault(_key(values), name)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not read instance corners from {avar_csv}: {exc}",
+                  file=sys.stderr)
+
+    return masters, instances
+
+
+def corner_name_resolver(font, control_axis_indices, original_path=None):
+    """Resolve a sparse tag-keyed location (the sidecar's ``location``
+    shape) to a master-corner or instance name — None when neither matches.
+    Unpinned parametric axes take the default master's value, mirroring how
+    regenerate_shadow expands the same sparse dict into a full vector."""
+    masters, instances = corner_name_maps(font, control_axis_indices, original_path)
+    axes = list(getattr(font, "axes", None) or [])
+    param = [
+        (i, str(getattr(ax, "axisTag", "")).lower())
+        for i, ax in enumerate(axes)
+        if i not in control_axis_indices
+    ]
+    master_list = list(getattr(font, "masters", None) or [])
+    default_vec = list(getattr(master_list[0], "axes", None) or []) if master_list else []
+
+    def resolve(location):
+        loc = {str(k).lower(): v for k, v in (location or {}).items()}
+        values = []
+        for i, tag in param:
+            v = loc.get(tag)
+            if v is None:
+                if i >= len(default_vec):
+                    return None
+                v = default_vec[i]
+            try:
+                values.append(round(float(v), 1))
+            except (TypeError, ValueError):
+                return None
+        key = tuple(values)
+        return masters.get(key) or instances.get(key)
+
+    return resolve
+
+
 def regenerate_shadow(original_path: Path) -> Optional[Path]:
     """Derive the shadow from ``original + sidecar``:
 
@@ -756,36 +847,38 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
         full_axis_index_by_tag[str(getattr(ax, "axisTag", "")).lower()] = i
     tag_by_index = {i: t for t, i in full_axis_index_by_tag.items()}
 
-    # A brace layer is a full point: a parametric master corner × the
-    # control-axis value. Label it by that corner + value, so Fontra
-    # reads "XTRA3330-XOPQ2-YOPQ2 · crbr 20" — the corner design at
-    # crbr=20 — not a generic "crbr = 20".
+    # A brace layer is a full point: a parametric location × the
+    # control-axis value. Label it by the master corner or named instance
+    # at that location ("XTRA3330-XOPQ2-YOPQ2", "Narrow 900 MaxOpsz"); a
+    # location matching neither keeps the control-axis coordinates so the
+    # row stays identifiable.
     control_axis_indices = set()
     for spec in axes_to_add:
         t = str(spec.get("tag") or "").strip().lower()
         if t in full_axis_index_by_tag:
             control_axis_indices.add(full_axis_index_by_tag[t])
-    corner_name_by_parametric: Dict[tuple, str] = {}
-    for master in font.masters:
-        maxes = list(getattr(master, "axes", None) or [])
+    corner_name_by_parametric, instance_name_by_parametric = corner_name_maps(
+        font, control_axis_indices, original_path
+    )
+
+    def _corner_name(loc):
         param_key = tuple(
-            maxes[i] for i in range(len(maxes)) if i not in control_axis_indices
+            round(float(loc[i]), 1)
+            for i in range(len(loc))
+            if i not in control_axis_indices
         )
-        corner_name_by_parametric[param_key] = master.name
+        return (corner_name_by_parametric.get(param_key)
+                or instance_name_by_parametric.get(param_key))
 
     def _brace_source_label(loc):
-        param_key = tuple(
-            loc[i] for i in range(len(loc)) if i not in control_axis_indices
-        )
-        corner = corner_name_by_parametric.get(param_key)
-        ctrl = ", ".join(
+        corner = _corner_name(loc)
+        if corner:
+            return corner
+        return ", ".join(
             f"{tag_by_index.get(i, i)} {_fmt_coord(loc[i])}"
             for i in sorted(control_axis_indices)
             if i < len(loc)
         )
-        if corner and ctrl:
-            return f"{corner} · {ctrl}"
-        return ctrl or (corner or "")
 
     # Parametric interpolation model. A seeded brace should start as the
     # glyph's NATURAL shape at its parametric location — not a copy of
@@ -930,6 +1023,15 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                 seed_jobs.append((glyph_name, location, dict(pinned), seed_location,
                                   entry.get("outline")))
 
+        # Order each glyph's brace layers alphabetically by their Fontra
+        # source label, named (master/instance) locations first — the
+        # editor's sources list follows file order.
+        seed_jobs.sort(key=lambda job: (
+            job[0],
+            _corner_name(job[1]) is None,
+            (_brace_source_label(job[1]) or "").casefold(),
+        ))
+
         # De-duplicate seed jobs — same (glyph, location) added by
         # multiple paths only needs writing once.
         seen_jobs: set = set()
@@ -1029,9 +1131,8 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             brace.width = layer_width
             brace.name = "{" + ", ".join(_fmt_coord(v) for v in location) + "}"
 
-            # Fontra sidebar label: the parametric corner this view
-            # edits + the control-axis value ("XTRA3330-XOPQ2-YOPQ2 ·
-            # crbr 20"). fontra-glyphs prefers
+            # Fontra sidebar label: the master corner or named instance
+            # this view sits at. fontra-glyphs prefers
             # userData["xyz.fontra.source-name"] over the positional
             # "{...}" name; the "{...}" name stays for glyphsLib brace
             # recognition.
@@ -1052,7 +1153,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             source_label = _brace_source_label(location)
             if source_label and seed_location is not None:
                 # Name the correction so the Fontra source list says what
-                # this computed view is: "… · crbr 100 → as if XOPQ 1100".
+                # this computed view is: "… → as if XOPQ 1100".
                 as_if = ", ".join(
                     f"{font.axes[i].axisTag}{_fmt_coord(v)}"
                     for i, v in enumerate(seed_location)

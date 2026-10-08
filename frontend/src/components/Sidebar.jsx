@@ -322,6 +322,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         glyphChars={glyphChars}
         allAxes={axes}
         allMasters={masters}
+        allInstances={instances}
         vfFamilyId={vfFamilyId}
         fontLoaded={fontLoaded}
         building={building}
