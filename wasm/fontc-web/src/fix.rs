@@ -39,11 +39,14 @@ pub(crate) fn fix_unhinted(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
     Ok(repack(&font, replacements))
 }
 
-/// gftools `fix_fvar_instances` (non-italic path): replace the fvar
-/// instance list with one instance per in-range wght registry fallback
-/// (Thin…Black), each at the axis defaults + its wght value. No-ops on
-/// fonts without an fvar or without a wght axis, and on italic families
-/// (the italic-doubling path is not ported).
+/// gftools `fix_fvar_instances`: replace the fvar instance list with
+/// one instance per in-range wght registry fallback (Thin…Black), each
+/// at the axis defaults + its wght value. A font with a `slnt`/`ital`
+/// axis gets the gftools doubling: the Roman set plus an Italic set
+/// ("Thin Italic"…, "Regular Italic" → "Italic") pinned at that axis's
+/// minValue; a family whose style name says Italic (and has no such
+/// axis) gets the Italic names only. No-ops on fonts without an fvar
+/// or without a wght axis.
 pub(crate) fn fix_fvar_instances(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
     let Ok(fvar) = font.fvar() else {
@@ -61,16 +64,14 @@ pub(crate) fn fix_fvar_instances(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError
         .name()
         .map_err(|e| err(format!("missing/invalid name table: {e}")))?
         .to_owned_table();
-    // Italic families double the instance list in gftools — not ported;
-    // leave those fonts untouched.
     let subfamily = crate::stat::first_debug_name(&name.name_record, &[22, 17, 2]).unwrap_or_default();
-    if subfamily.contains("Italic")
-        || axes
-            .iter()
-            .any(|a| a.axis_tag() == Tag::new(b"ital") || a.axis_tag() == Tag::new(b"slnt"))
-    {
-        return Ok(font_bytes);
-    }
+    let is_italic = subfamily.contains("Italic");
+    // An ital/slnt axis doubles the instance list (axisregistry's
+    // build_fvar_instances): the Roman set plus an Italic set pinned at
+    // the axis minimum.
+    let ital_idx = axes.iter().position(|a| a.axis_tag() == Tag::new(b"ital"));
+    let slnt_idx = axes.iter().position(|a| a.axis_tag() == Tag::new(b"slnt"));
+    let is_roman_and_italic = ital_idx.is_some() || slnt_idx.is_some();
 
     let wght = &axes[wght_idx];
     let (wmin, wmax) = (wght.min_value().to_f64(), wght.max_value().to_f64());
@@ -114,16 +115,41 @@ pub(crate) fn fix_fvar_instances(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError
     }
 
     let defaults: Vec<f64> = axes.iter().map(|a| a.default_value().to_f64()).collect();
-    let mut instances = Vec::with_capacity(fallbacks.len());
-    for fb in fallbacks {
-        let mut coords = defaults.clone();
-        coords[wght_idx] = fb.value;
-        instances.push(w_fvar::InstanceRecord {
-            subfamily_name_id: crate::stat::find_or_add_name(&mut name.name_record, fb.name, 0),
-            flags: 0,
-            coordinates: coords.iter().map(|v| Fixed::from_f64(*v)).collect(),
-            post_script_name_id: None,
-        });
+    // Which sets to emit, mirroring axisregistry's branching: an
+    // ital/slnt axis means Roman + Italic; an Italic style name alone
+    // means Italic names only; otherwise Roman only.
+    let sets: &[bool] = if is_roman_and_italic {
+        &[false, true]
+    } else if is_italic {
+        &[true]
+    } else {
+        &[false]
+    };
+    let italic_pin = ital_idx.or(slnt_idx).map(|i| (i, axes[i].min_value().to_f64()));
+    let mut instances = Vec::with_capacity(fallbacks.len() * sets.len());
+    for &italic in sets {
+        for fb in &fallbacks {
+            let mut coords = defaults.clone();
+            coords[wght_idx] = fb.value;
+            let inst_name = if italic {
+                if let Some((i, min)) = italic_pin {
+                    coords[i] = min;
+                }
+                if fb.name == "Regular" {
+                    "Italic".to_string()
+                } else {
+                    format!("{} Italic", fb.name)
+                }
+            } else {
+                fb.name.to_string()
+            };
+            instances.push(w_fvar::InstanceRecord {
+                subfamily_name_id: crate::stat::find_or_add_name(&mut name.name_record, &inst_name, 0),
+                flags: 0,
+                coordinates: coords.iter().map(|v| Fixed::from_f64(*v)).collect(),
+                post_script_name_id: None,
+            });
+        }
     }
     fvar_owned.axis_instance_arrays.instances = instances;
 
@@ -142,6 +168,40 @@ pub(crate) fn stamp_rond_instances(
     default_pct: f64,
     style_pcts: &HashMap<String, f64>,
 ) -> Result<Vec<u8>, JsError> {
+    // ROND runs 0-100, so the coordinate IS the percent.
+    stamp_pct_instances(font_bytes, Tag::new(b"ROND"), default_pct, style_pcts, false)
+}
+
+pub(crate) fn stamp_slnt_instances(
+    font_bytes: Vec<u8>,
+    default_pct: f64,
+    style_pcts: &HashMap<String, f64>,
+) -> Result<Vec<u8>, JsError> {
+    // slnt runs 0 to -maxAngle: the coordinate is min * pct / 100.
+    stamp_pct_instances(font_bytes, Tag::new(b"slnt"), default_pct, style_pcts, true)
+}
+
+/// A style named "… Italic"/"… Slanted" is italic BY NAME: the percent
+/// model never stamps it — it keeps its own slnt coordinate (gftools'
+/// doubled Italic set sits at the axis minimum, i.e. fully slanted).
+/// Mirrors the desktop SlantTransform.apply().
+pub(crate) fn is_slant_exempt(subfamily: &str) -> bool {
+    let lower = subfamily.to_lowercase();
+    lower.contains("italic") || lower.contains("slanted")
+}
+
+/// Re-stamp one axis coordinate on every fvar named instance from a
+/// per-style percent map (grade-style: style_pcts overrides, else the
+/// default). `scale_by_min`: coordinate = axis minValue * pct/100
+/// (slnt); otherwise the coordinate is the percent itself (ROND). For
+/// slnt, styles named Italic/Slanted are exempt (is_slant_exempt).
+fn stamp_pct_instances(
+    font_bytes: Vec<u8>,
+    tag: Tag,
+    default_pct: f64,
+    style_pcts: &HashMap<String, f64>,
+    scale_by_min: bool,
+) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
     let Ok(fvar) = font.fvar() else {
         return Ok(font_bytes);
@@ -149,13 +209,14 @@ pub(crate) fn stamp_rond_instances(
     let arrays = fvar
         .axis_instance_arrays()
         .map_err(|e| err(format!("invalid fvar: {e}")))?;
-    let Some(rond_idx) = arrays
+    let Some(axis_idx) = arrays
         .axes()
         .iter()
-        .position(|a| a.axis_tag() == Tag::new(b"ROND"))
+        .position(|a| a.axis_tag() == tag)
     else {
         return Ok(font_bytes);
     };
+    let min_value = arrays.axes()[axis_idx].min_value().to_f64();
     let name: w_name::Name = font
         .name()
         .map_err(|e| err(format!("missing/invalid name table: {e}")))?
@@ -164,13 +225,17 @@ pub(crate) fn stamp_rond_instances(
     for inst in &mut fvar_owned.axis_instance_arrays.instances {
         let sub = crate::stat::first_debug_name(&name.name_record, &[inst.subfamily_name_id.to_u16()])
             .unwrap_or_default();
+        if scale_by_min && is_slant_exempt(&sub) {
+            continue;
+        }
         let pct = style_pcts
             .get(&sub)
             .copied()
             .unwrap_or(default_pct)
             .clamp(0.0, 100.0);
-        if let Some(c) = inst.coordinates.get_mut(rond_idx) {
-            *c = Fixed::from_f64(pct);
+        let value = if scale_by_min { min_value * pct / 100.0 } else { pct };
+        if let Some(c) = inst.coordinates.get_mut(axis_idx) {
+            *c = Fixed::from_f64(value);
         }
     }
     let mut replacements = HashMap::new();

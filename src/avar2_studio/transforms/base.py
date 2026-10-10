@@ -97,6 +97,16 @@ class TransformSpec:
     # For a SOURCE-stage transform: params that only affect its FONT-stage
     # apply(). Edits limited to these skip the full shadow rebuild.
     font_stage_param_keys: tuple = ()
+    # SOURCE-stage application order (ascending). Slant runs before
+    # rounding so rounds are applied to the slanted drawings (round arcs
+    # stay round instead of being sheared) — the order XCrispy proved.
+    source_priority: int = 100
+    # Axis tags the SOURCE must declare for this transform to work at
+    # all (round_corners' radius formula reads XOPQ/XTRA). The
+    # transforms PUT refuses to enable it on a source without them, with
+    # a message naming the missing tags, instead of building an
+    # enabled-but-inert transform.
+    requires_axis_tags: tuple = ()
 
     def to_dict(self) -> dict:
         return {

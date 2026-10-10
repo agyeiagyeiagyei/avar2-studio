@@ -1,0 +1,216 @@
+/* NOTE: no ancestor of the editable may scroll (overflow-y: auto on an
+   editable's ancestor breaks Chrome's line-granularity caret moves —
+   End/Home no-op). The document scrolls inside the editable itself;
+   .tester-tab clips the rest. */
+
+.tester-tab {
+  flex: 1;
+  overflow: hidden;
+}
+
+.tester-tab-panel {
+  max-width: 960px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 1.25rem 2rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ---- toolbar ---- */
+
+.tester-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  background: var(--zinc-50);
+}
+
+.tester-font-select,
+.tester-lh {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--zinc-700);
+  max-width: 12rem;
+}
+
+.tester-tool {
+  border: 1px solid var(--zinc-300);
+  background: #ffffff;
+  color: var(--zinc-700);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tester-tool:hover {
+  border-color: var(--zinc-400);
+}
+
+.tester-tool.on {
+  background: var(--zinc-200);
+  border-color: var(--zinc-400);
+  color: var(--zinc-900);
+}
+
+.tester-align {
+  display: flex;
+  gap: 2px;
+}
+
+.tester-tracking {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--zinc-500);
+}
+
+.tester-tracking input {
+  width: 4.5rem;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+}
+
+/* ---- the document ---- */
+
+.tester-editable {
+  min-height: 40vh;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: #ffffff;
+  color: var(--zinc-900);
+  outline: none;
+  cursor: text;
+}
+
+.tester-block {
+  margin: 0 0 0.45em;
+}
+
+.tester-block:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- axis sliders ---- */
+
+.tester-axes {
+  border-top: 1px solid var(--zinc-200);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ---- system font batch management ---- */
+
+.tester-fonts-manage {
+  font-size: 0.8125rem;
+  color: var(--zinc-500);
+}
+
+.tester-fonts-manage summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tester-sysfonts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+
+.tester-sysfont {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--zinc-200);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem 0.25rem 0.55rem;
+  background: #ffffff;
+}
+
+.tester-sysfont-name {
+  font-size: 0.875rem;
+  color: var(--zinc-800, #27272a);
+}
+
+.tester-installed {
+  font-size: 0.66rem;
+  color: #15803d;
+}
+
+.tester-not-installed {
+  font-size: 0.66rem;
+  color: var(--zinc-400);
+  font-style: italic;
+}
+
+.tester-icon-btn {
+  border: none;
+  background: none;
+  color: var(--zinc-400);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+}
+
+.tester-icon-btn:hover {
+  color: #dc2626;
+  background: var(--zinc-100, #f4f4f5);
+}
+
+.tester-sysfont-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tester-sysfont-add input {
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  min-width: 14rem;
+}
+
+.tester-add-btn {
+  align-self: flex-start;
+  border: 1px solid var(--zinc-300);
+  background: #ffffff;
+  color: var(--zinc-700);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tester-add-btn:hover:not(:disabled) {
+  background: var(--zinc-50);
+  border-color: var(--zinc-400);
+}
+
+.tester-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

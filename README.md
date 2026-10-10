@@ -269,6 +269,19 @@ row for that style's own percent. The browser demo runs the same engine,
 ported to the wasm crate and held node-identical to the desktop by an
 oracle test.
 
+**Slant** works the same way, one step earlier still (so rounds land on
+the slanted drawings): build-time italics on a `slnt` axis. Every master
+is sheared at its own angle — steeper for narrow masters, shallower for
+wide, between the two dials in the menu, overridable per master in the
+sidecar — about half the x-height, with sidebearings and advances
+preserved. Each named style takes its slant as a percent (**Default
+slant %**, or the **S badge** per row) — except styles whose name
+contains *Italic* or *Slanted*: those are italic by name, are never
+stamped, and keep their own `slnt` (with **Clean fvar instances** on, a
+slanted font gets the Google-Fonts doubling — "Bold" plus "Bold Italic"
+at full slant). Also ported to the wasm crate under the same oracle
+discipline.
+
 Write your own: drop a `.py` subclassing `Transform` into
 `~/.avar2-studio/transforms/` and it appears in the menu on the next
 launch.

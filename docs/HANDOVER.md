@@ -286,7 +286,7 @@ docs/migration-github-pages.md.
   — fontBytes plus all authoring state; restores skip the recompile.
   When testing, remember a prior session auto-restores (a "first visit"
   may not be one).
-- **e2e** (`frontend/e2e/static-demo.spec.mjs`, 27 sections):
+- **e2e** (`frontend/e2e/static-demo.spec.mjs`, 28 sections):
   `python3 -m http.server 8123 -d frontend/dist-pages` after
   `npx vite build --base=./ --outDir dist-pages`, then
   `node e2e/static-demo.spec.mjs`. Uses system Chrome via
@@ -314,6 +314,19 @@ docs/migration-github-pages.md.
   the mapped-location reflection one step behind (the request fires
   with pre-change state); real `page.mouse` drags don't. Not a product
   bug — a harness trap that cost a false bug report.
+- **Tester tab** (`TesterTab.jsx`): paragraphs + system-font pairing +
+  weight-match ramp, all CSS/DOM against the App's registered FontFace —
+  no backend anywhere. State (`testerState`) persists only in static
+  mode (rides the session record; server mode is in-memory, same
+  asymmetry as sampleText). Two traps: preview-side paragraphs render at
+  axis defaults (PreviewTab's slider state is component-local), and the
+  tab does NOT self-register the FontFace — a rebuild with Tester open
+  shows the previous build until another tab re-registers.
+- e2e trap that cost a real debugging session: after the download-font
+  check the app sits on the **Preview tab, which has no `.sidebar`** —
+  `sidebar h2 === 'Crispy Mini'` then never matches and every later
+  wait reads as a hung example load. Normalize to the Instances tab
+  before asserting.
 
 ### Corner rounding (source-stage transform, October 2026)
 
@@ -379,6 +392,73 @@ everts (counters filling past wght 900), a rounded tip can cross the
 already-crossing contour; at high width shares an arm-end arc can graze
 the far edge of a tapering wedge.
 
+### Slanting (source-stage transform, October 2026)
+
+`transforms/slanting.py` is the engine, `builtin_slant.py` the wrapper,
+`tests/test_slant_transform.py` the spec — build-time italics on a
+`slnt` axis, mirroring the Slant Master plugin's settled choices: shear
+about y = x-height/2, LSB (node bounds) and advance preserved, no
+extrema correction, x grid-snapped `floor(x+0.5)`. Per-master angles are
+linear in mean advance between the `narrow_angle`/`wide_angle` dials
+(11°/6° defaults — the rule that made XCrispy's italics), overridable
+per master in degrees (`master_angles`, sidecar-only); brace layers
+interpolate their angle on the parametric plane (same VariationModel
+normalization as the radius overrides). Components take the translation
+compensation dx += dy·tan (their 2×2 stays as drawn — the Glyphs
+component model has no shear term); anchors shear about y0. Enabling
+always extends the font grade-style: every master gains a SLANTED twin
+at its own angle, the shared axis end (slnt = −steepest angle) means
+"each master fully slanted", and styles take their slant as a percent of
+the axis minimum — `default_pct`/`style_pcts` stamped as fvar instance
+coordinates in the font-stage apply() (the instance rows' S badge).
+Slant runs BEFORE rounding (`source_priority` 10 vs 50) so rounds land
+on the slanted drawings and arcs stay round.
+
+**Static demo**: ported to the wasm crate
+(`wasm/fontc-web/src/slanting.rs`, `slant_source`), sharing
+round_corners' plist helpers and the generalized `extend_axis`; the slnt
+stamp shares `stamp_pct_instances` in fix.rs with ROND (slnt scales by
+the axis minimum). The cargo oracle (`tests/slant_oracle.rs` +
+`spike/compare_slant.py`) compares node-for-node including components
+and anchors — delta 0.000000 over ~37k points, both param sets.
+`static-api.js` wires it via `slantOption(dataset)`; the worker applies
+slant before round on both compile paths.
+
+**Italic doubling + the naming exemption** (October 2026): the wasm
+`fix_instances` port now does gftools' doubling — a font with a
+`slnt`/`ital` axis gets the Roman weight set plus an Italic set
+("Thin Italic"…, "Regular Italic" → "Italic") pinned at that axis's
+minValue, oracle-compared against real gftools on a slanted WasmTest
+build (`tests/fix_oracle.rs`). To keep the doubling and the percent
+model coherent, **a style whose name contains "Italic" or "Slanted"
+(case-insensitive) is NEVER stamped** — it keeps its own slnt
+coordinate (the doubled Italic set thus stays at full slant, while the
+Roman set follows `default_pct`/`style_pcts`). The rule lives in
+`is_slant_exempt` on both sides (fix.rs and builtin_slant.py), the
+desktop `validate()` rejects a `style_pcts` entry naming an exempt
+style, and the instance rows hide the S badge for them. Without the
+exemption the stamp would overwrite gftools' Italic instances back to
+the default percent — upright "Thin Italic"s — which is exactly what
+the desktop did before this rule.
+
+**Two traps both engines hit, fixed October 2026** (regression checks:
+e2e 27's "ROND 100 moves points" and all of e2e 28):
+
+- **A twin master layer must NOT carry `associatedMasterId`** — fontc's
+  glyphs-reader classifies ANY layer with the key (even equal to its own
+  layerId) as a non-master and silently drops its geometry: the axis
+  appears in fvar, gvar gets nothing, the axis is inert. glyphsLib omits
+  the key when it equals layerId on save, which is why the desktop never
+  hit it; the wasm engines now remove it on master twins. (The ROND wasm
+  port shipped with this — rounding in the static demo was inert until
+  the slant e2e exposed it.)
+- **glyphsLib positions must be written as `Point`, not tuples** — a
+  tuple assigned to `comp.position`/`anchor.position` SERIALIZES as a
+  quoted string (`pos = "(88, 0.0)";`) that fontc rejects, so the
+  desktop build fails only at save+compile time, which the in-memory
+  pytest suite never does. If a transform writes positions, round-trip
+  one save through fontc in its test.
+
 ## 4. Known issues / sharp edges (ranked)
 
 0. **A `glyph_model` call perturbs later `measure_at` results in the
@@ -400,12 +480,45 @@ the far edge of a tapering wedge.
    mapped corner; WebKit/CoreText also implement avar2). Nothing to
    fix in-repo — watch Chrome's support before claiming "what you see
    is what ships" again.
-2. **The server's avar2 reflection evaluator understates the table.**
-   `/api/mapped-location` at a mapped corner returns too little (XTRA
-   unchanged, XOPQ/YOPQ ~90% of the CSV row's values) while HarfBuzz on
-   the same font produces the full effect — the Python evaluator is the
-   outlier, not the table. Users see the understatement as sliders not
-   going all the way.
+2. ~~The server's avar2 reflection evaluator understates the table~~
+   **Superseded (Oct 4) — misdiagnosed; fixed for the desktop build.**
+   The TABLE was wrong, not the evaluator: a mapping row whose `in:`
+   sits at the user-axis defaults cannot be expressed by avar2 (the
+   default location maps to itself), and fontTools' `_add_avar`
+   silently used such a row as the model BASE — its out dropped and
+   SUBTRACTED from every other row's deltas (reproduced to the F2Dot14
+   unit: XOPQ 0.2158−0.1283=0.0875, XTRA's impossible negative delta,
+   all of it). Every consumer — fontTools, HarfBuzz, exports — was
+   equally under-driven. Fix: `_build_in_process` step 3.5 detects the
+   default-located row and relocates the parametric fvar defaults to
+   its `out` (fontTools instancer, ranges kept) before gen-avar2, so
+   the row compiles as a true identity and the rest anchor exactly
+   (`tests/test_avar2_default_relocation.py` proves exactness at every
+   row on a real fontc compile). **Parity gap: the static demo's wasm
+   `add_avar2` still has the subtract-base behavior** — port the
+   relocation (the wasm already has `set_default_location`) before
+   trusting default-located rows there.
+   **Method note (Oct 4, final):** relocating the default to an
+   interior point while preserving rendering EVERYWHERE intrinsically
+   costs the gvar region-splitting (~7x tuples, 495KB vs 57KB on
+   Crispy) — it is not an inefficiency to optimize away. Two "insert
+   one interpolated master and recompile" routes (designspace +
+   Instantiator; native .glyphs insertion) were built and MEASURED:
+   exact at master corners (0.0u) but the re-solved model pins the
+   field through the new center and deviates BETWEEN masters (468u at
+   an interior corner, 223u at an authored style row, frozen
+   YOPQ-only movement at the origin) — a subtly different font that
+   silently shifts calibrated styles. The "frozen YOPQ deltas" first
+   blamed on glyphsLib conversion infidelity was this same math;
+   glyphsLib was innocent of that one. What WAS real: export=0 glyphs
+   break every designspace compile ("interpolation-incompatible
+   paths") because the export-flag lib key lands on only some
+   masters' glifs — `_build_export_source` now strips non-exporting
+   glyphs (plus their kerning/groups). **The export-at-default
+   feature uses the inserted-master formulation and therefore carries
+   the same between-masters deviation** — by design ("the designer's
+   formulation"), but know that preview and such an export are not
+   point-identical between masters.
 3. ~~`avar2-eval.js` (static) parses only wasm-written avar2 tables~~
    **Superseded (Aug 18):** the parser was rewritten to the spec layout
    (offset fields, entryFormat-aware DSIM, OT tent semantics) after it

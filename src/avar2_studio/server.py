@@ -174,6 +174,11 @@ LAST_GRADE_ERROR: Optional[str] = None
 # Set when an enabled SOURCE-stage transform (round_corners) failed: the
 # font then built from the un-transformed source, which must not pass as ok.
 LAST_SOURCE_TRANSFORM_ERROR: Optional[str] = None
+# Non-null ⇒ the mappings define styles but NO row sits at the axis
+# defaults: the font rests at the compiled origin rather than any
+# authored style (the "resting dip" — e.g. opsz default 48 with rows
+# only at 14 and 144). Surfaced as a banner; the build itself is fine.
+LAST_ORIGIN_WARNING: Optional[str] = None
 
 # Registered-axis conventions, used wherever a declared axis has no
 # explicit default: the /api/avar2/axes response AND the compiled-axis
@@ -645,6 +650,23 @@ def delete_instance_in_glyphs(glyphs_path: Path, instance_name: str) -> bool:
         return False
 
 
+def _source_instance_name(display_name: str) -> str:
+    """The name an instance carries INSIDE the original source file.
+
+    Renames are studio-level (the alias sidecar, applied to every
+    regenerated shadow) and never rewrite the original — so a source
+    writeback for a renamed instance must address the ORIGINAL name or
+    it silently finds nothing."""
+    try:
+        aliases = _instance_aliases.load(ORIGINAL_PATH) if ORIGINAL_PATH else {}
+    except Exception:  # noqa: BLE001
+        return display_name
+    for old, new in aliases.items():
+        if new == display_name:
+            return old
+    return display_name
+
+
 def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates: Dict[str, float]) -> bool:
     """
     Update instance coordinates in Glyphs file.
@@ -705,11 +727,20 @@ def get_instances():
         source_names = {entry["name"] for entry in instances}
 
         # Pull studio-only rows: any CSV row whose Instance Name isn't in
-        # the source file. For SOURCE rows, merge the CSV's SPAC cell into
-        # the coordinates — SPAC is a per-instance render coordinate that
-        # lives only in the CSV (it's transform-injected, not a source
-        # axis), so without this merge a saved SPAC value never comes back.
+        # the source file. For SOURCE rows, merge the CSV's cells over the
+        # source coordinates: the CSV is the STUDIO layer, and an edit
+        # saved there (the flyout's "Save to studio") must come back after
+        # a reload — the pristine source values ride along as
+        # ``source_coordinates`` so the sync dot can still show the
+        # source mismatch (orange). Covers every column matching a source
+        # axis tag, plus SPAC (transform-injected, never a source axis).
+        try:
+            source_axis_tags = {str(ax.get("tag", ""))
+                                for ax in get_axes_from_glyphs(GLYPHS_PATH)}
+        except Exception:  # noqa: BLE001
+            source_axis_tags = set()
         csv_path = _get_preview_csv_path()
+        csv_order: Dict[str, int] = {}
         if csv_path and csv_path.exists():
             try:
                 with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -718,14 +749,25 @@ def get_instances():
                         name = (row.get("Instance Name") or "").strip()
                         if not name:
                             continue
+                        if name not in csv_order:
+                            csv_order[name] = len(csv_order)
                         if name in source_names:
-                            spac = (row.get("SPAC") or "").strip()
-                            if spac:
+                            inst = next((i for i in instances if i["name"] == name), None)
+                            if inst is None:
+                                continue
+                            inst.setdefault("source_coordinates",
+                                            dict(inst["coordinates"]))
+                            for key, value in row.items():
+                                if not key or key == "Instance Name":
+                                    continue
+                                if key != "SPAC" and key not in source_axis_tags:
+                                    continue  # mapping column (WGHT/OPSZ…), not a coordinate
+                                cell = (str(value) if value is not None else "").strip()
+                                if not cell:
+                                    continue  # blank cell → the source value stands
                                 try:
-                                    next(
-                                        inst for inst in instances if inst["name"] == name
-                                    )["coordinates"]["SPAC"] = float(spac)
-                                except (StopIteration, TypeError, ValueError):
+                                    inst["coordinates"][key] = float(cell)
+                                except (TypeError, ValueError):
                                     pass
                             continue
                         coordinates = {}
@@ -744,8 +786,55 @@ def get_instances():
             except Exception as e:
                 print(f"Warning: Could not read studio-only rows from CSV: {e}", file=sys.stderr)
 
+        # The CSV row order is the user's authored row order (the drag
+        # reorder persists it there). Instances without a CSV row keep
+        # their current (source) order, ahead of ordered rows — stable
+        # sort, so a CSV-less project is untouched.
+        instances.sort(key=lambda i: csv_order.get(i.get("name"), -1))
+
         return jsonify({"instances": instances})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/instances/order', methods=['PUT'])
+def reorder_instances():
+    """Persist the instance row order by reordering the CSV rows.
+
+    Body: {"names": ["Instance A", "Instance B", ...]} — the full
+    desired order. Rows named here are arranged in this order; rows not
+    named keep their relative order after them. Order is display state
+    only (the mapping model is order-independent), so no rebuild."""
+    data = request.get_json(silent=True) or {}
+    names = data.get("names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return jsonify({"error": "Body must include 'names' as a list of strings."}), 400
+    csv_path = _get_preview_csv_path()
+    if not csv_path or not csv_path.exists():
+        return jsonify({"error": "Preview CSV not available"}), 500
+    if _check_csv_external_edit(csv_path):
+        return jsonify({
+            "error": "The studio's saved data changed outside this window. Please reload.",
+            "reload_required": True
+        }), 409
+    try:
+        import csv
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames) if reader.fieldnames else []
+            rows = list(reader)
+        rank = {n: i for i, n in enumerate(names)}
+        rows.sort(key=lambda r: rank.get((r.get("Instance Name") or "").strip(),
+                                         len(rank)))
+        _csv_io.backup_sidecar(csv_path)
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        _update_csv_modification_time(csv_path)
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"Error reordering instances: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 
@@ -880,7 +969,22 @@ def get_axes():
                     except Exception:
                         user_axis_tags = set()
                 have = {str(a.get("tag", "")).lower() for a in axes}
-                for b in get_axes_from_built_font(VARIABLE_FONT_PATH):
+                built_axes = list(get_axes_from_built_font(VARIABLE_FONT_PATH))
+                # DEFAULT overlay for axes the source already lists: the
+                # build relocates the parametric defaults to the ORIGIN
+                # row's location (the default-origin master), so the
+                # BUILT font's defaults are where the sliders must rest
+                # — the source still carries the raw compile origin
+                # (e.g. the hairline corner). Identity when no
+                # relocation happened. Ranges stay source-derived.
+                built_default_by_tag = {
+                    str(b.get("tag", "")).lower(): b.get("default") for b in built_axes
+                }
+                for a in axes:
+                    bd = built_default_by_tag.get(str(a.get("tag", "")).lower())
+                    if bd is not None:
+                        a["default"] = bd
+                for b in built_axes:
                     tag_lower = str(b.get("tag", "")).lower()
                     if tag_lower in have:
                         continue
@@ -1086,6 +1190,9 @@ def _resolve_active_source() -> Optional[Path]:
     try:
         _transforms.discover()
         src_chain = _transforms.active(ORIGINAL_PATH, stage="source")
+        # Deterministic order regardless of sidecar entry order: slant
+        # (10) before rounding (50), so rounds land on slanted drawings.
+        src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
     except Exception as exc:  # noqa: BLE001
         print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
     if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
@@ -1567,7 +1674,11 @@ def create_instance():
         # supply a value, NOT to 0. wght=0 is outside the [100, 900] axis
         # range and would silently corrupt the row; defaulting to the
         # source's own declared default value keeps the row valid.
-        source_axes = _source_font.get_axes(font)
+        # ``font`` is the TRANSFORMED SHADOW: subtract the injected and
+        # control axes or they become CSV mapping columns here.
+        _excluded = _non_mapping_axis_tags()
+        source_axes = [a for a in _source_font.get_axes(font)
+                       if str(a.get("tag", "")).upper() not in _excluded]
         axis_defaults = {axis["tag"].upper(): axis["default"] for axis in source_axes}
 
         # Evolve the CSV schema: if the source declares an axis the CSV
@@ -1674,7 +1785,13 @@ def update_instance(instance_name: str):
     font, _fmt = _source_font.load_source(GLYPHS_PATH)
     source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
     is_source_instance = instance_name in source_instance_names
-    source_axis_tags = {axis["tag"] for axis in _source_font.get_axes(font)}
+    # GLYPHS_PATH is the TRANSFORMED SHADOW — its axis list includes the
+    # injected (slnt/ROND/SPAC) and control (lcwd/ymod) axes, which are
+    # never per-instance mapping data. Without this subtraction their
+    # values leak into the CSV row and the .glyphs writeback.
+    _excluded = _non_mapping_axis_tags()
+    source_axis_tags = {axis["tag"] for axis in _source_font.get_axes(font)
+                        if str(axis.get("tag", "")).upper() not in _excluded}
 
     glyphs_coordinates = {
         tag: value for tag, value in coordinates.items()
@@ -1692,11 +1809,21 @@ def update_instance(instance_name: str):
     EDITING_INSTANCES.discard(instance_name)
 
     # Source writeback is skipped if the caller asked for CSV-only.
+    # It targets the ORIGINAL — the user's file, the one explicit write
+    # the flyout's "Save to source file" promises. (It used to target
+    # GLYPHS_PATH, the TRANSFORMED SHADOW: a build artifact regenerated
+    # from the original, so the "source save" evaporated on the next
+    # regen and the user's file never changed.)
     glyphs_updated = False
     if not csv_only_flag and is_source_instance and glyphs_coordinates:
-        glyphs_updated = update_instance_in_glyphs(GLYPHS_PATH, instance_name, glyphs_coordinates)
+        glyphs_updated = update_instance_in_glyphs(
+            ORIGINAL_PATH, _source_instance_name(instance_name), glyphs_coordinates)
         if not glyphs_updated:
             return jsonify({"error": f"Failed to update instance '{instance_name}' in source file"}), 500
+        # The shadow now trails the original — regenerate it BEFORE the
+        # CSV sync below reads it, or the sync copies the stale values
+        # straight back over the save.
+        _resolve_active_source()
 
     # CSV writeback fires whenever there are coords to record. For
     # studio-only instances this is the only persistence path; for
@@ -1772,7 +1899,7 @@ def update_instance(instance_name: str):
         if csv_path and csv_path.exists():
             try:
                 if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name},
-                                                  exclude_axes=_secondary_axis_tags()):
+                                                  exclude_axes=_non_mapping_axis_tags()):
                     _update_csv_modification_time(csv_path)   # ours, not external
                     print("CSV synced after instance update", file=sys.stderr)
             except Exception as e:
@@ -1922,7 +2049,10 @@ def add_instance_to_source(instance_name: str):
     ``origin: source`` and the UI's studio-only badge disappears.
     """
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        # Promotion writes the ORIGINAL (the user's file) — loading and
+        # saving the shadow here would both lose the write on the next
+        # regen AND risk leaking shadow artifacts if saved elsewhere.
+        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
         source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         if instance_name in source_instance_names:
             return jsonify({"error": f"Instance '{instance_name}' is already in the source file"}), 400
@@ -1959,13 +2089,19 @@ def add_instance_to_source(instance_name: str):
         if not found:
             return jsonify({"error": f"Instance '{instance_name}' not found in the studio"}), 404
 
-        ok = _source_font.add_instance_to_source(font, GLYPHS_PATH, instance_name, coords)
+        ok = _source_font.add_instance_to_source(font, ORIGINAL_PATH, instance_name, coords)
         if not ok:
             return jsonify({"error": f"Failed to add '{instance_name}' to source file"}), 500
 
         # For .glyphs sources, also poke Glyphs.app to reload the document.
-        if _source_is_glyphs(GLYPHS_PATH):
-            _force_reload_glyphs_document(GLYPHS_PATH, font_object=font)
+        if _source_is_glyphs(ORIGINAL_PATH):
+            _force_reload_glyphs_document(ORIGINAL_PATH, font_object=font)
+
+        # The shadow (and with it the instances listing) trails the
+        # original until regenerated — resolve now so the origin flip
+        # is visible immediately; rebuild in the background.
+        _resolve_active_source()
+        threading.Thread(target=lambda: trigger_build(), daemon=True).start()
 
         return jsonify({
             "success": True,
@@ -2134,6 +2270,7 @@ def health():
             "avar2_error": LAST_AVAR2_ERROR,
             "grade_error": LAST_GRADE_ERROR,
             "source_transform_error": LAST_SOURCE_TRANSFORM_ERROR,
+            "origin_warning": LAST_ORIGIN_WARNING,
             # True ⇒ the mappings CSV changed after the last build —
             # the served font's avar2 table is stale. Auto-saved
             # coordinate edits set this instead of rebuilding; the
@@ -2665,6 +2802,27 @@ def _secondary_axis_tags() -> set:
         return set()
 
 
+def _non_mapping_axis_tags() -> set:
+    """UPPERCASE tags that must never become CSV mapping columns: the
+    studio-injected control axes plus every transform-injectable axis
+    (SPAC/ROND/slnt) and GRAD. Instance flows load ``GLYPHS_PATH`` — the
+    TRANSFORMED SHADOW, whose axis list includes all of these — so any
+    CSV schema or row derivation from that font's axes must subtract
+    this set, or the CSV mints bogus uppercase user axes that then
+    compile as real fvar axes (the LCWD/SLNT/YMOD/ROND column bug)."""
+    tags = set(_secondary_axis_tags())
+    tags.add("GRAD")
+    try:
+        _transforms.discover()
+        for t in _transforms.REGISTRY.values():
+            tag = getattr(t.spec, "injected_axis_tag", None)
+            if tag:
+                tags.add(str(tag).upper())
+    except Exception:  # noqa: BLE001 — a broken user transform must not block saves
+        pass
+    return tags
+
+
 def _check_csv_external_edit(csv_path: Path) -> bool:
     """Check if CSV was modified externally. Returns True if modified externally."""
     csv_str = str(csv_path)
@@ -3140,7 +3298,8 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
 
 
-def _build_export_source(parametric_location: Dict[str, float], export_dir: Path) -> Path:
+def _build_export_source(parametric_location: Dict[str, float], export_dir: Path,
+                         source_path: Optional[Path] = None) -> Path:
     """Materialize the export source: the loaded font as a designspace
     with ONE ADDED MASTER — a fully interpolated instance (outlines,
     metrics, kerning) at the mapped parametric location — set as the
@@ -3158,17 +3317,72 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
     src_dir = export_dir / "sources"
     src_dir.mkdir(parents=True, exist_ok=True)
 
-    if str(GLYPHS_PATH).lower().endswith(".glyphs"):
-        gsfont = glyphsLib.GSFont(str(GLYPHS_PATH))
+    source_path = Path(source_path) if source_path is not None else GLYPHS_PATH
+    if str(source_path).lower().endswith(".glyphs"):
+        gsfont = glyphsLib.GSFont(str(source_path))
+        nonexport = {str(g.name) for g in gsfont.glyphs
+                     if not getattr(g, "export", True)}
         ds = glyphsLib.to_designspace(gsfont, ufo_module=ufoLib2)
+    else:
+        from fontTools.designspaceLib import DesignSpaceDocument
+        ds = DesignSpaceDocument.fromfile(str(source_path))
+        ds.loadSourceFonts(ufoLib2.Font.open)
+        _EXPORT_KEY = "com.schriftgestaltung.Glyphs.Export"
+        nonexport = set()
+        for s in ds.sources:
+            for layer in s.font.layers:
+                for g in layer:
+                    if g.lib.get(_EXPORT_KEY) is False:
+                        nonexport.add(g.name)
+
+    # Non-exporting glyphs: fontc's native .glyphs reader drops them,
+    # but glyphsLib's designspace conversion KEEPS them, writing an
+    # export lib key that lands on only some masters' glifs — fontc
+    # then sees the glyph in some masters and not others and dies with
+    # "interpolation-incompatible paths" (Crispy's braceleft, flagged
+    # export=0, broke every designspace build this way). Strip them
+    # from every source so this build matches the .glyphs build.
+    if nonexport:
+        kept = set()
+        for s in ds.sources:
+            for layer in s.font.layers:
+                for name in list(layer.keys()):
+                    if name in nonexport:
+                        del layer[name]
+                    else:
+                        kept.add(name)
+        # An EXPORTING glyph referencing a stripped one would now have a
+        # dangling component — fail loudly rather than compile garbage
+        # (Glyphs decomposes these at export; wire that up if a source
+        # ever legitimately needs it).
+        dangling = set()
+        for s in ds.sources:
+            for layer in s.font.layers:
+                for g in layer:
+                    for comp in g.components:
+                        if comp.baseGlyph in nonexport:
+                            dangling.add(f"{g.name} → {comp.baseGlyph}")
+        if dangling:
+            raise RuntimeError(
+                "exporting glyph(s) reference non-exporting component(s): "
+                + ", ".join(sorted(dangling)))
+        for s in ds.sources:
+            font = s.font
+            order = font.lib.get("public.glyphOrder")
+            if order:
+                font.lib["public.glyphOrder"] = [n for n in order if n not in nonexport]
+            if font.kerning:
+                font.kerning = {pair: v for pair, v in font.kerning.items()
+                                if pair[0] not in nonexport and pair[1] not in nonexport}
+            if font.groups:
+                font.groups = {k: [n for n in v if n not in nonexport]
+                               for k, v in font.groups.items()}
+
+    if str(source_path).lower().endswith(".glyphs"):
         for i, s in enumerate(ds.sources):
             fname = Path(s.filename or f"master{i}.ufo").name
             s.font.save(str(src_dir / fname), overwrite=True)
             s.path = str(src_dir / fname)
-    else:
-        from fontTools.designspaceLib import DesignSpaceDocument
-        ds = DesignSpaceDocument.fromfile(str(GLYPHS_PATH))
-        ds.loadSourceFonts(ufoLib2.Font.open)
 
     name_by_tag = {a.tag: a.name for a in ds.axes}
     design_loc = {
@@ -3208,7 +3422,7 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
     # SAME stem as the original: the gftools builder derives output
     # names from the source filename, and the config's stat/avar2
     # sections are keyed by that name — a suffix here breaks the keys.
-    out = export_dir / f"{Path(str(GLYPHS_PATH)).stem}.designspace"
+    out = export_dir / f"{Path(str(source_path)).stem}.designspace"
     ds.write(str(out))
     return out
 
@@ -3412,6 +3626,23 @@ def update_transforms():
             previous = {t.get("id"): t for t in _transforms.available(ORIGINAL_PATH)}
         except Exception as prev_exc:  # noqa: BLE001
             print(f"transforms: could not read previous state: {prev_exc}", file=sys.stderr)
+        # Guardrail: a transform whose engine reads specific axes
+        # (round_corners' XOPQ/XTRA radius formula) is refused on a
+        # source that doesn't declare them — enabling it would build an
+        # inert transform (a silently sharp font must not pass as ok).
+        src_tags = _get_glyphs_axis_tags()
+        if src_tags:  # unreadable source → the engine's own raise surfaces instead
+            for e in entries:
+                if not isinstance(e, dict) or not e.get("enabled"):
+                    continue
+                t = _transforms.REGISTRY.get(str(e.get("type", "")))
+                req = getattr(getattr(t, "spec", None), "requires_axis_tags", ()) if t else ()
+                missing = [tag for tag in req if tag.lower() not in src_tags]
+                if missing:
+                    return jsonify({"error": (
+                        f"{t.spec.name} needs the parametric ax{'es' if len(missing) > 1 else 'is'} "
+                        f"{', '.join(missing)} — this source doesn't declare "
+                        f"{'them' if len(missing) > 1 else 'it'}.")}), 400
         try:
             stored = _transforms.set_active(ORIGINAL_PATH, entries)
         except ValueError as ve:
@@ -3427,7 +3658,9 @@ def update_transforms():
         # the fast trigger_build path instead of re-rounding the shadow.
         def _source_touched():
             for e in stored:
-                tid = e.get("type")
+                # ``stored`` is set_active's return: the UI list, whose
+                # entries carry "id" (sidecar entries carry "type").
+                tid = e.get("type") or e.get("id")
                 t = _transforms.REGISTRY.get(tid)
                 if t is None or getattr(t.spec, "stage", "font") != "source":
                     continue
@@ -4243,9 +4476,10 @@ _FONTRA_STUDIO_SHIM_JS = """
     // supplies those numbers: every figure is measured on the built font at
     // THIS layer's exact coordinates.
     //
-    // Deliberately a plain DOM panel rather than a canvas visualization layer:
-    // it needs none of Fontra's internals, so a Fontra upgrade cannot silently
-    // break it. The edited glyph's own row is its PRE-EDIT state — the server
+    // The numbers live in a plain DOM panel (no Fontra internals to break);
+    // the comparison overlay rides Fontra's visualization-layer registry so it
+    // draws in the drawing editor itself, and degrades to nothing if that API
+    // ever moves. The edited glyph's own row is its PRE-EDIT state — the server
     // measures the last build, not what is on the canvas right now.
     if (!cfg.glyph) return;
 
@@ -4268,18 +4502,31 @@ _FONTRA_STUDIO_SHIM_JS = """
         }
         vals.sort((x, y) => x - y);
         const out = [];
-        for (let i = 0; i + 1 < vals.length; i += 2) out.push(vals[i + 1] - vals[i]);
-        return out.filter(v => v > 5);
+        for (let i = 0; i + 1 < vals.length; i += 2) {
+          const w = vals[i + 1] - vals[i];
+          if (w > 5) out.push([w, vals[i], vals[i + 1]]);
+        }
+        return out;
       };
       const ys = [];
       for (const c of contours) for (const pt of c) ys.push(pt[1]);
       if (!ys.length) return {};
       const yMin = Math.min(...ys), yMax = Math.max(...ys);
-      const stems = runs(yMin + (yMax - yMin) * 0.25, false);
-      const bars = runs(advance * 0.5, true);
-      const r = {};
-      if (stems.length) r.stem = Math.min(...stems);
-      if (bars.length) r.bar = Math.min(...bars);
+      // Scan coordinates + the winning (thinnest) run extents ride along so
+      // the overlay can draw EXACTLY what produced each number.
+      const scanY = yMin + (yMax - yMin) * 0.25;
+      const scanX = advance * 0.5;
+      const stems = runs(scanY, false);
+      const bars = runs(scanX, true);
+      const r = { scanY: scanY, scanX: scanX };
+      if (stems.length) {
+        const m = stems.reduce((a, b) => (b[0] < a[0] ? b : a));
+        r.stem = m[0]; r.stemRun = [m[1], m[2]];
+      }
+      if (bars.length) {
+        const m = bars.reduce((a, b) => (b[0] < a[0] ? b : a));
+        r.bar = m[0]; r.barRun = [m[1], m[2]];
+      }
       if (r.stem && r.bar) r.contrast = r.stem / r.bar;
       return r;
     };
@@ -4307,8 +4554,28 @@ _FONTRA_STUDIO_SHIM_JS = """
       return { name: pg.glyph.name, contours, advance: pg.glyph.xAdvance };
     };
 
-    const num = (v) => (v === undefined || v === null) ? '–' : (Math.round(v * 10) / 10).toFixed(1);
-    let refData = null, refGlyph = 'H', xh = 1000, ch = 1400;
+    // The location being edited RIGHT NOW: Fontra's scene follows the
+    // selected source/layer (axis-NAME-keyed, source space). This is what
+    // the reference must be measured at — a glyph can carry several layers
+    // on the axis, and the sidecar's first one is not necessarily the one
+    // on the canvas.
+    const editLocation = () => {
+      const ec = window.editorController;
+      const ss = ec && ec.sceneController
+        && ((ec.sceneController.sceneModel && ec.sceneController.sceneModel.sceneSettings)
+            || ec.sceneController.sceneSettings);
+      const loc = ss && ss.fontLocationSourceMapped;
+      if (!loc || typeof loc !== 'object') return null;
+      const out = {};
+      for (const k of Object.keys(loc)) {
+        const v = Number(loc[k]);
+        if (isFinite(v)) out[k] = v;
+      }
+      return Object.keys(out).length ? out : null;
+    };
+
+    const num = (v) => (v === undefined || v === null) ? '\u2013' : (Math.round(v * 10) / 10).toFixed(1);
+    let refData = null, refGlyph = '', lastLive = null;
 
     const box = document.createElement('div');
     box.id = 'avar2-studio-metrics';
@@ -4316,10 +4583,11 @@ _FONTRA_STUDIO_SHIM_JS = """
       '<div class="hd"></div>'
       + '<table><tr><th></th><th>bar</th><th>stem</th><th>s/b</th></tr>'
       + '<tr class="live"><td class="g"></td><td class="b"></td><td class="s"></td><td class="c"></td></tr>'
-      + '<tr class="ref"><td class="g"><input id="avar2-ref-glyph" value="H" maxlength="12" spellcheck="false"></td>'
+      + '<tr class="ref"><td class="g"><input id="avar2-ref-glyph" value="" placeholder="H" maxlength="12" spellcheck="false"></td>'
       + '<td class="b"></td><td class="s"></td><td class="c"></td></tr></table>'
       + '<div class="ft">live vs reference, measured at this location. '
-      + 'Type any glyph name to compare against.</div>';
+      + 'Type a glyph name to compare \u2014 its outline is drawn in the editor '
+      + 'under the glyph (scan cuts marked). Clear the field to hide it.</div>';
     const st = document.createElement('style');
     st.textContent =
       '#avar2-studio-metrics{position:fixed;right:12px;bottom:12px;z-index:99999;'
@@ -4340,42 +4608,167 @@ _FONTRA_STUDIO_SHIM_JS = """
     document.body.appendChild(box);
 
     const cell = (sel, v) => { const e = box.querySelector(sel); if (e) e.textContent = v; };
+    // CANVAS OVERLAY. The reference outline is drawn in the drawing editor
+    // itself, under the glyph being edited: editorController
+    // .visualizationLayers.definitions IS Fontra's live registry array, so a
+    // definition spliced in at runtime (zIndex-ordered, exactly what
+    // registerVisualizationLayerDefinition does) paints on every frame and
+    // pans/zooms with the canvas. Scan cuts are marked on both shapes \u2014
+    // gray for the reference, amber for the live glyph \u2014 so the table's
+    // numbers are visible as geometry, in place, at drawing scale.
+    const LAYER_ID = 'avar2.studio.reference';
+    const overlay = { contours: null, bbox: null, refCuts: null, liveCuts: null, sig: null };
+    let layerInstalled = false;
+    const repaint = () => {
+      const ec = window.editorController;
+      if (ec && ec.canvasController) ec.canvasController.requestUpdate();
+    };
+    const drawOverlay = (context, positionedGlyph, parameters) => {
+      const contours = overlay.contours;
+      if (!contours) return;
+      const path = new Path2D();
+      for (const c of contours) {
+        path.moveTo(c[0][0], c[0][1]);
+        for (let i = 1; i < c.length; i++) path.lineTo(c[i][0], c[i][1]);
+        path.closePath();
+      }
+      context.fillStyle = parameters.fillColor;
+      context.fill(path, 'nonzero');
+      const line = (x1, y1, x2, y2, color, width, dashed) => {
+        context.strokeStyle = color;
+        context.lineWidth = width;
+        context.setLineDash(dashed ? [parameters.dash * 2, parameters.dash] : []);
+        context.beginPath();
+        context.moveTo(x1, y1);
+        context.lineTo(x2, y2);
+        context.stroke();
+      };
+      const bb = overlay.bbox;
+      const cuts = (m, color) => {
+        if (!m || !bb) return;
+        if (m.scanY !== undefined) line(bb.x0, m.scanY, bb.x1, m.scanY, color, parameters.hair, true);
+        if (m.scanX !== undefined) line(m.scanX, bb.y0, m.scanX, bb.y1, color, parameters.hair, true);
+        if (m.stemRun) line(m.stemRun[0], m.scanY, m.stemRun[1], m.scanY, color, parameters.bold, false);
+        if (m.barRun) line(m.scanX, m.barRun[0], m.scanX, m.barRun[1], color, parameters.bold, false);
+      };
+      cuts(overlay.refCuts, parameters.refColor);
+      cuts(overlay.liveCuts, parameters.liveColor);
+    };
+    const installLayer = () => {
+      if (layerInstalled) return true;
+      const ec = window.editorController;
+      const vl = ec && ec.visualizationLayers;
+      if (!vl || !Array.isArray(vl.definitions)) return false;
+      const def = {
+        identifier: LAYER_ID,
+        name: 'avar2 reference overlay',
+        selectionFunc: (visContext) => {
+          if (!overlay.contours) return [];
+          const pg = visContext.model.getSelectedPositionedGlyph
+            && visContext.model.getSelectedPositionedGlyph();
+          return pg ? [pg] : [];
+        },
+        zIndex: 100,
+        // screenParameters are divided by the magnification before draw, so
+        // these are screen pixels: constant weight at any zoom.
+        screenParameters: { hair: 1, bold: 4, dash: 7 },
+        colors: { fillColor: 'rgba(128,128,136,0.30)', refColor: 'rgba(96,96,104,0.85)',
+                  liveColor: 'rgba(200,128,0,0.9)' },
+        colorsDarkMode: { fillColor: 'rgba(170,170,180,0.28)', refColor: 'rgba(190,190,200,0.85)',
+                          liveColor: 'rgba(255,212,121,0.9)' },
+        draw: drawOverlay,
+      };
+      let idx = 0;
+      while (idx < vl.definitions.length && vl.definitions[idx].zIndex <= def.zIndex) idx++;
+      vl.definitions.splice(idx, 0, def);
+      vl.toggle(LAYER_ID, true);
+      layerInstalled = true;
+      return true;
+    };
+    const syncOverlay = () => {
+      installLayer();
+      const refM = refGlyph && refData && refData.metrics && refData.metrics[refGlyph];
+      if (!refM || !refM.contours || !refM.contours.length) {
+        if (overlay.contours) { overlay.contours = null; overlay.sig = null; repaint(); }
+        return;
+      }
+      const pts = [];
+      for (const c of refM.contours) for (const pt of c) pts.push(pt);
+      if (lastLive) for (const c of lastLive.contours) for (const pt of c) pts.push(pt);
+      const xs = pts.map((pt) => pt[0]), ysv = pts.map((pt) => pt[1]);
+      const bb = { x0: Math.min(...xs), x1: Math.max(...xs),
+                   y0: Math.min(...ysv), y1: Math.max(...ysv) };
+      const refCuts = measure(refM.contours, refM.advance || 0);
+      const liveCuts = lastLive ? measure(lastLive.contours, lastLive.advance) : null;
+      const sig = JSON.stringify([refGlyph, bb, refCuts, liveCuts]);
+      if (sig !== overlay.sig) {
+        overlay.bbox = bb; overlay.refCuts = refCuts; overlay.liveCuts = liveCuts;
+        overlay.contours = refM.contours; overlay.sig = sig;
+        repaint();
+      }
+    };
     const paintRef = () => {
       const m = refData && refData.metrics && refData.metrics[refGlyph];
-      cell('tr.ref td.b', m ? num(m.bar) : '–');
-      cell('tr.ref td.s', m ? num(m.stem) : '–');
-      cell('tr.ref td.c', m && m.contrast ? m.contrast.toFixed(2) : '–');
+      cell('tr.ref td.b', m ? num(m.bar) : '\u2013');
+      cell('tr.ref td.s', m ? num(m.stem) : '\u2013');
+      cell('tr.ref td.c', m && m.contrast ? m.contrast.toFixed(2) : '\u2013');
     };
+    let fetchedLocKey = null;
     const loadRef = (g) => {
       refGlyph = g;
+      if (!g) {
+        // Blank is the OFF state: no reference row, no overlay.
+        refData = null;
+        fetchedLocKey = null;
+        cell('.hd', '');
+        paintRef();
+        syncOverlay();
+        return;
+      }
+      const loc = editLocation();
+      fetchedLocKey = loc ? JSON.stringify(loc) : null;
       fetch('/api/control-axes/' + encodeURIComponent(cfg.tag)
             + '/reference-metrics?glyph=' + encodeURIComponent(cfg.glyph)
-            + '&refs=' + encodeURIComponent(g))
+            + '&refs=' + encodeURIComponent(g)
+            + (loc ? '&location=' + encodeURIComponent(JSON.stringify(loc)) : ''))
         .then(r => r.ok ? r.json() : null)
         .then((m) => {
           if (!m) return;
           refData = m;
-          xh = m.x_height || xh; ch = m.cap_height || ch;
           const loc = Object.entries(m.location || {})
             .filter(([k]) => k.toLowerCase() !== 'lcwd')
-            .map(([k, v]) => k + ' ' + v).join(' · ');
+            .map(([k, v]) => k + ' ' + v).join(' \u00b7 ');
           cell('.hd', 'at ' + loc);
           paintRef();
+          syncOverlay();
         }).catch(() => {});
     };
     const input = box.querySelector('#avar2-ref-glyph');
-    input.addEventListener('change', () => loadRef(input.value.trim() || 'H'));
-    input.addEventListener('keydown', (e) => e.stopPropagation());
-    loadRef('H');
+    input.addEventListener('change', () => loadRef(input.value.trim()));
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+    });
+    paintRef();
 
     setInterval(() => {
+      // Reference follows the canvas: switching layers (or nudging the
+      // location) re-measures at the NEW location.
+      if (refGlyph) {
+        const loc = editLocation();
+        const key = loc ? JSON.stringify(loc) : null;
+        if (key && key !== fetchedLocKey) loadRef(refGlyph);
+      }
       const lp = livePath();
-      if (!lp) return;
-      const m = measure(lp.contours, lp.advance);
-      cell('tr.live td.g', lp.name);
-      cell('tr.live td.b', num(m.bar));
-      cell('tr.live td.s', num(m.stem));
-      cell('tr.live td.c', m.contrast ? m.contrast.toFixed(2) : '–');
+      if (lp) {
+        lastLive = lp;
+        const m = measure(lp.contours, lp.advance);
+        cell('tr.live td.g', lp.name);
+        cell('tr.live td.b', num(m.bar));
+        cell('tr.live td.s', num(m.stem));
+        cell('tr.live td.c', m.contrast ? m.contrast.toFixed(2) : '\u2013');
+      }
+      syncOverlay();
     }, 400);
 
   }).catch((e) => console.warn('avar2-studio shim:', e));
@@ -4869,6 +5262,11 @@ def _measure_strokes(glyph_set, hmtx, name):
         out["bar"] = round(float(min(bars)), 1)
     if stems and bars:
         out["contrast"] = round(float(min(stems)) / float(min(bars)), 2)
+    # The measured polygon itself, for the HUD's overlay preview: what the
+    # scanlines actually cut (off-curves as vertices), so the drawing and
+    # the numbers can never disagree.
+    out["contours"] = [[[round(float(x), 1), round(float(y), 1)] for x, y in c]
+                       for c in contours]
     return out
 
 
@@ -4946,14 +5344,30 @@ def control_axis_reference_metrics(tag: str):
     except ValueError:
         index = 0
     refs = [g.strip() for g in (request.args.get("refs") or "H,N,O").split(",") if g.strip()]
+    # The EDITED layer's location, sent live by the Fontra shim (scene
+    # fontLocationSourceMapped — keyed by axis NAME or tag). Without it
+    # the lookup below falls back to the glyph's FIRST sidecar layer,
+    # which is simply the wrong location whenever a glyph carries
+    # several layers on the axis (e's six ymod layers): the HUD then
+    # shows a self-consistent guide and overlay that are both measured
+    # somewhere else.
+    explicit_location = None
+    loc_param = request.args.get("location")
+    if loc_param:
+        try:
+            parsed = json.loads(loc_param)
+            if isinstance(parsed, dict):
+                explicit_location = {str(k): float(v) for k, v in parsed.items()}
+        except (ValueError, TypeError):
+            return jsonify({"error": "location must be a JSON object of axis: value"}), 400
 
     axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
     if axis is None:
         return jsonify({"error": f"No secondary axis '{tag}'"}), 404
     layers = [l for l in (axis.get("layers") or []) if l.get("glyph") == glyph]
-    if not layers:
+    if not layers and explicit_location is None:
         return jsonify({"error": f"'{glyph}' has no layers on '{tag}'"}), 404
-    layer = layers[min(index, len(layers) - 1)]
+    layer = layers[min(index, len(layers) - 1)] if layers else {}
 
     from fontTools.ttLib import TTFont
     from fontTools.varLib.instancer import instantiateVariableFont
@@ -4961,7 +5375,26 @@ def control_axis_reference_metrics(tag: str):
     try:
         font = TTFont(str(VARIABLE_FONT_PATH))
         fvar_axes = {a.axisTag: a for a in font["fvar"].axes}
-        stored = {str(k).lower(): v for k, v in (layer.get("location") or {}).items()}
+        if explicit_location is not None:
+            # Normalize keys: the scene speaks axis NAMES (source space);
+            # the sidecar and fvar speak tags. Accept both.
+            name_to_tag = {}
+            try:
+                src_font, _fmt = _source_font.load_source(GLYPHS_PATH)
+                for ax in _source_font.get_axes(src_font):
+                    name_to_tag[str(ax.get("name") or "").lower()] = str(ax.get("tag") or "")
+                    name_to_tag[str(ax.get("tag") or "").lower()] = str(ax.get("tag") or "")
+            except Exception:  # noqa: BLE001
+                pass
+            for a_tag in fvar_axes:
+                name_to_tag.setdefault(a_tag.lower(), a_tag)
+            stored = {}
+            for k, v in explicit_location.items():
+                mapped = name_to_tag.get(str(k).lower())
+                if mapped:
+                    stored[mapped.lower()] = v
+        else:
+            stored = {str(k).lower(): v for k, v in (layer.get("location") or {}).items()}
         location = {}
         for a_tag, a in fvar_axes.items():
             if a_tag.lower() == tag.lower():
@@ -5445,9 +5878,13 @@ def delete_instance(instance_name: str):
         # Source-file delete fires for default + source_only. CSV-only
         # skips it (the row was never in the source).
         if touches_source:
-            glyphs_deleted = delete_instance_in_glyphs(GLYPHS_PATH, instance_name)
+            glyphs_deleted = delete_instance_in_glyphs(
+                ORIGINAL_PATH, _source_instance_name(instance_name))
             if not glyphs_deleted:
                 return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
+            # Regenerate the shadow from the now-updated original so the
+            # listing stops serving the deleted instance.
+            _resolve_active_source()
 
         # CSV delete fires for default + csv_only. source_only PRESERVES
         # the CSV row — that's the "demote to studio-only" semantic.
@@ -5527,7 +5964,7 @@ def sync_csv():
             GLYPHS_PATH,
             csv_path,
             skip_instances=set(EDITING_INSTANCES),
-            exclude_axes=_secondary_axis_tags(),
+            exclude_axes=_non_mapping_axis_tags(),
         )
         if not ok:
             return jsonify({"error": "Failed to sync CSV"}), 500
@@ -5812,6 +6249,72 @@ def update_avar2_axis(axis_name: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/avar2/axis/<axis_name>', methods=['DELETE'])
+def delete_avar2_axis(axis_name: str):
+    """Delete a mapping axis: drop its CSV column and its metadata
+    entry, then rebuild (the axis leaves the compiled fvar). Parametric
+    (out) columns are refused — they're managed in the source file.
+
+    The static demo has had this since the mapping-axis arc (e2e §25);
+    the desktop server simply never grew the endpoint, so the delete
+    affordance was dead here."""
+    try:
+        csv_path = _get_avar2_csv_path()
+        if not csv_path or not csv_path.exists():
+            return jsonify({"error": "avar2-mappings.csv not found"}), 404
+        if _check_csv_external_edit(csv_path):
+            return jsonify({
+                "error": "The studio's saved data changed outside this window. Please reload.",
+                "reload_required": True
+            }), 409
+
+        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        axis_name_normalized = axis_name.upper()
+        if axis_name_normalized in out_cols:
+            return jsonify({
+                "error": f"Cannot delete axis '{axis_name}' - it exists in the Glyphs "
+                         "file as a parametric axis. Parametric axes are managed in "
+                         "the Glyphs file, not in avar2 mappings."
+            }), 403
+
+        import csv
+        rows = []
+        fieldnames = []
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames) if reader.fieldnames else []
+            rows = list(reader)
+        matches = [c for c in fieldnames if c.upper() == axis_name_normalized]
+        if not matches:
+            return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
+
+        kept = [c for c in fieldnames if c.upper() != axis_name_normalized]
+        _csv_io.backup_sidecar(csv_path)
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=kept)
+            writer.writeheader()
+            writer.writerows([{k: v for k, v in row.items() if k in kept} for row in rows])
+        _update_csv_modification_time(csv_path)
+
+        metadata = _load_axis_metadata()
+        if axis_name_normalized in metadata:
+            del metadata[axis_name_normalized]
+            _save_axis_metadata(metadata)
+
+        # The axis set changed — the compiled fvar must follow.
+        build_ok = False
+        try:
+            build_ok = trigger_build()
+        except Exception as build_exc:  # noqa: BLE001
+            print(f"Warning: rebuild after axis delete failed: {build_exc}", file=sys.stderr)
+        return jsonify({"success": True, "deleted": axis_name_normalized,
+                        "build_ok": bool(build_ok)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/avar2/mapping/<instance_name>/<axis_name>', methods=['PUT'])
 def update_avar2_mapping(instance_name: str, axis_name: str):
     """Update a single cell value in the CSV."""
@@ -6025,8 +6528,86 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / name
 
+    # 0.5. Default-origin master. A mapping row whose in: sits entirely
+    # at the user-axis defaults declares the intended DEFAULT appearance
+    # — and avar2 cannot remap the default location (fontTools'
+    # _add_avar silently used such a row as the model BASE, subtracting
+    # its out from every other row: the long-misdiagnosed understated-
+    # table bug). The fix is at the COMPILE level: interpolate a real
+    # master at that row's out location (the export path's machinery),
+    # stage a designspace resting on it, and compile THAT — the default
+    # row then lands as a true identity and gvar stays natural-size (an
+    # earlier binary instancer rebase was exact too, but split every
+    # region around the new origin: measured 57KB → 495KB on Crispy).
+    avar2_cfg_early = (config.get("avar2") or {}).get(name)
+    compile_source = source
+    default_rows = []
+    if avar2_cfg_early:
+        declared_for_defaults = _declared_axis_ranges(default_overrides)
+
+        def _is_default_row(m):
+            ins = m.get("in") or {}
+            if not ins:
+                return False
+            for tag, v in ins.items():
+                trip = declared_for_defaults.get(tag)
+                if not trip:
+                    return False
+                try:
+                    if abs(float(v) - float(trip[1])) > 1e-6:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            return True
+
+        default_rows = [m for m in avar2_cfg_early if _is_default_row(m)]
+        # Loud warning for the "resting dip": rows map user-axis styles
+        # but none sits at the axis defaults, so nothing anchors the
+        # resting state — the font rests at the compiled origin, and the
+        # default location pops toward the nearest mapped stop the
+        # moment a slider moves. Only meaningful when declared defaults
+        # exist and at least one row maps a declared axis.
+        global LAST_ORIGIN_WARNING
+        LAST_ORIGIN_WARNING = None
+        maps_declared_axis = any(
+            any(tag in declared_for_defaults for tag in (m.get("in") or {}))
+            for m in avar2_cfg_early)
+        if declared_for_defaults and maps_declared_axis and not default_rows:
+            defaults_desc = ", ".join(
+                f"{tag} {trip[1]:g}" for tag, trip in sorted(declared_for_defaults.items()))
+            LAST_ORIGIN_WARNING = (
+                f"No instance row sits at the axis defaults ({defaults_desc}) — the "
+                "font rests at the compiled origin, not at any authored style. Add a "
+                "row at the defaults (it becomes the ORIGIN row), or move an axis "
+                "default onto a mapped stop.")
+        if len(default_rows) > 1:
+            # The config generator's effective-location dedupe normally
+            # collapses these (keeping the first, warning by instance
+            # name); this belt covers hand-edited configs — two rows
+            # both claiming the resting state must fail loudly, not
+            # silently pick one.
+            raise RuntimeError(
+                "multiple mapping rows sit at the axis defaults — only one may "
+                "define the resting state; their out locations: "
+                + "; ".join(str(m.get("out")) for m in default_rows))
+        # METHOD NOTE — why the instancer rebase (step 3.5) and not an
+        # inserted master: relocating the default to an interior point
+        # while preserving the font's rendering EVERYWHERE requires
+        # splitting the corner-anchored gvar regions around the new
+        # origin — that ~7x tuple growth (495KB vs 57KB on Crispy) is
+        # the intrinsic cost, not an inefficiency. Both "insert one
+        # interpolated master and recompile" routes were built and
+        # MEASURED: exact at master corners (0.0 units) but the
+        # re-solved model pins the field through the new center and
+        # deviates by hundreds of units BETWEEN masters (468u at an
+        # interior corner, 223u at an authored style row on the
+        # CrispyMini fixture) — it is a subtly different font, which
+        # would silently shift every calibrated style. The earlier
+        # designspace attempt's "lost YOPQ deltas" was this same math,
+        # not a glyphsLib conversion bug.
+
     # 1. compile — the only step that was ever fast
-    cmd = [fontc_path, "-o", str(out), str(source),
+    cmd = [fontc_path, "-o", str(out), str(compile_source),
            "--flatten-components", "--decompose-transformed-components"]
     res = subprocess.run(cmd, capture_output=True, text=True, cwd=str(workdir))
     if res.returncode != 0 or not out.exists():
@@ -6044,8 +6625,36 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         gen_stat_tables_from_config(stat_cfg, [font])
         font.save(str(out)); font.close()
 
+    # 3.5. Default relocation (see the method NOTE in step 0.5): move
+    # the parametric fvar defaults to the default row's out location on
+    # the avar-free font — the row then compiles as a true identity in
+    # step 4 and every other row anchors to the real resting state.
+    if avar2_cfg_early and default_rows:
+        from fontTools.varLib import instancer as _instancer
+        font = _TTFont(str(out))
+        fvar_by_tag = {a.axisTag: a for a in font["fvar"].axes}
+        limits = {}
+        for tag, v in (default_rows[0].get("out") or {}).items():
+            ax = fvar_by_tag.get(tag)
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if ax is None or abs(v - ax.defaultValue) < 1e-6:
+                continue
+            if not (ax.minValue <= v <= ax.maxValue):
+                raise RuntimeError(
+                    f"default-location mapping row puts {tag} at {v}, outside "
+                    f"its range [{ax.minValue}, {ax.maxValue}]")
+            limits[tag] = (ax.minValue, v, ax.maxValue)
+        if limits:
+            _instancer.instantiateVariableFont(font, limits, inplace=True,
+                                               updateFontNames=False)
+            font.save(str(out))
+        font.close()
+
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
-    avar2_cfg = (config.get("avar2") or {}).get(name)
+    avar2_cfg = avar2_cfg_early
     if avar2_cfg:
         declared = _declared_axis_ranges(default_overrides)
         _orig = _gen_avar2.gen_fvar_axes
@@ -6822,7 +7431,7 @@ def main():
                 GLYPHS_PATH,
                 csv_path,
                 skip_instances=set(EDITING_INSTANCES),
-                exclude_axes=_secondary_axis_tags(),
+                exclude_axes=_non_mapping_axis_tags(),
             )
             if ok:
                 # OUR write, not an external one. Without this the

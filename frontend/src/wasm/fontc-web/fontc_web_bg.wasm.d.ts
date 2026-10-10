@@ -14,6 +14,7 @@ export const regen_stat: (a: number, b: number) => [number, number, number, numb
 export const round_corners_source: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
 export const set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const slant_source: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const measure_at: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;

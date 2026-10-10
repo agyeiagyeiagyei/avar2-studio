@@ -50,6 +50,15 @@ export const setSampleText = (text) => {
   }
 };
 
+// Tester tab state — same ride as the sample text.
+export const getTesterState = () => uploadDataset?.testerState || null;
+export const setTesterState = (state) => {
+  if (uploadDataset) {
+    uploadDataset.testerState = state;
+    persistSoon();
+  }
+};
+
 // ---- bundled examples index --------------------------------------------------
 
 let examplesPromise = null;
@@ -224,6 +233,7 @@ const serializeDataset = (dataset) => ({
   familyName: dataset.health.family_name,
   upm: dataset.health.upm,
   sampleText: dataset.sampleText || null,
+  testerState: dataset.testerState || null,
 });
 
 let persistWarned = false;
@@ -277,6 +287,8 @@ const restoreSession = async () => {
       cornerPins: rec.cornerPins || [],
       clampOutOfRange: rec.clampOutOfRange || false,
       sampleText: rec.sampleText || null,
+      // Older records predate the Tester tab — the field is simply absent.
+      testerState: rec.testerState || null,
       axes: rec.axes,
       instances: { instances: [] },
       coverage: [],
@@ -503,6 +515,10 @@ const KNOWN_TRANSFORMS = {
     description: 'Round every corner before the compile; the radius blends each layer\'s stroke weight (XOPQ) with its width (XTRA), outer corners and counters separately.',
     stage: 'source',
     injected_axis_tag: 'ROND',
+    // The radius formula's backbone — enabling the transform on a
+    // source without it is refused with a clear message (XTRA is
+    // optional: its share of the blend is zero without the axis).
+    requires_axis_tags: ['XOPQ'],
     params_schema: [
       { key: 'default_pct', label: 'Default rounding %', type: 'float', default: 0.0, min: 0.0, max: 100.0 },
       { key: 'outer_pct', label: 'Outer, % of stroke', type: 'float', default: 15.0, min: 0.0, max: 60.0 },
@@ -513,6 +529,20 @@ const KNOWN_TRANSFORMS = {
       { key: 'inner_min', label: 'Counter floor (units)', type: 'float', default: 1.0, min: 0.0, max: 100.0 },
       { key: 'style_pcts', label: 'Per-style rounding', type: 'table', default: {} },
       { key: 'master_overrides', label: 'Per-master overrides', type: 'table', default: {} },
+    ],
+  },
+  slant: {
+    id: 'slant',
+    name: 'Slant',
+    description: 'Slant every master at build time on a slnt axis (0 = upright); angles follow each master\'s width between the two dials, and each style takes its slant as a percent.',
+    stage: 'source',
+    injected_axis_tag: 'slnt',
+    params_schema: [
+      { key: 'default_pct', label: 'Default slant %', type: 'float', default: 0.0, min: 0.0, max: 100.0 },
+      { key: 'narrow_angle', label: 'Narrowest angle (deg)', type: 'float', default: 11.0, min: 0.0, max: 45.0 },
+      { key: 'wide_angle', label: 'Widest angle (deg)', type: 'float', default: 6.0, min: 0.0, max: 45.0 },
+      { key: 'style_pcts', label: 'Per-style slant', type: 'table', default: {} },
+      { key: 'master_angles', label: 'Per-master angles', type: 'table', default: {} },
     ],
   },
   spac: {
@@ -633,6 +663,17 @@ const validateBundle = (bundle, dataset) => {
     if (spacInjectors.length > 1) {
       errors.push(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
     }
+    // Axis-dependent transforms: the bundle may enable one on a font
+    // that lacks the axes its engine reads (round_corners' XOPQ/XTRA).
+    for (const t of transforms) {
+      if (!t.enabled) continue;
+      const req = KNOWN_TRANSFORMS[t.type]?.requires_axis_tags || [];
+      const haveTags = new Set([...targetTags].map(x => x.toUpperCase()));
+      const missing = req.filter(tag => !haveTags.has(tag.toUpperCase()));
+      if (missing.length) {
+        errors.push(`${KNOWN_TRANSFORMS[t.type].name} needs the parametric ax${missing.length > 1 ? 'es' : 'is'} ${missing.join(', ')} — the loaded font doesn't have ${missing.length > 1 ? 'them' : 'it'}`);
+      }
+    }
   }
   if (controlAxes.length) {
     const hasDrawn = controlAxes.some(a => (a.layers || []).some(isDrawnLayer));
@@ -728,9 +769,11 @@ const applyBundle = async (bundle, dataset) => {
   // as the desktop's designspace shadow does.
   const rebuildFromSource = dataset.sourceText != null &&
     (controlAxes.some(a => (a.layers || []).some(isDrawnLayer))
-      // round_corners runs on the SOURCE: a bundle enabling it needs the
-      // full source rebuild, not the incremental bytes stages.
-      || transforms.some(t => t.enabled && (t.type || t.id) === 'round_corners'));
+      // round_corners and slant run on the SOURCE: a bundle enabling
+      // either needs the full source rebuild, not the incremental
+      // bytes stages.
+      || transforms.some(t => t.enabled
+        && ['round_corners', 'slant'].includes(t.type || t.id)));
 
   // Axis metadata rides the bundle (optional section): adopt it BEFORE
   // the mappings apply so the declared defaults/ranges shape the fvar,
@@ -949,19 +992,30 @@ const roundOption = (dataset) => {
   };
 };
 
+// The slant request: the enabled transform's params (JSON string), or
+// null. Runs on the source BEFORE round_corners — the desktop
+// source_priority order — and the oracle test proves it node-identical
+// to the desktop engine.
+const slantOption = (dataset) => {
+  const t = (dataset.transforms || []).find(x => (x.type || x.id) === 'slant');
+  if (!t || !t.enabled) return null;
+  return JSON.stringify(t.params || {});
+};
+
 const compileUploadSource = (dataset) => {
   const round = roundOption(dataset);
+  const slant = slantOption(dataset);
   const drawnAxes = (dataset.controlAxes || [])
     .map(a => ({ ...a, drawn: (a.layers || []).filter(isDrawnLayer) }))
     .filter(a => a.drawn.length);
-  if (!drawnAxes.length) return compileFont(dataset.sourceText, round);
+  if (!drawnAxes.length) return compileFont(dataset.sourceText, round, slant);
   return compileWithOverlays(dataset.sourceText, {
     axes: (dataset.controlAxes || []).map(a => ({
       tag: a.tag, name: a.name, min: a.min, default: a.default, max: a.max,
     })),
     overlays: drawnAxes.flatMap(a =>
       a.drawn.map(l => ({ glyph: l.glyph, location: l.location, outline: l.outline }))),
-  }, round);
+  }, round, slant);
 };
 
 // The full rebuild pipeline for an uploaded .glyphs source: compile,
@@ -1200,6 +1254,15 @@ const staticOverrides = {
     : { ...noProjectHealth(), session_lock_lost: sessionLockLost }),
   glyphsFileStatus: async () => ({ has_unsaved_changes: false }),
   getInstances: async () => (uploadDataset ? uploadDataset.instances : { instances: [] }),
+  reorderInstances: async (names) => {
+    requireProject();
+    const rank = new Map(names.map((n, i) => [n, i]));
+    const rows = uploadDataset.instancesCsv.rows;
+    rows.sort((a, b) => (rank.get(a.name) ?? rank.size) - (rank.get(b.name) ?? rank.size));
+    syncInstancesFromCsv(uploadDataset);
+    await persistSession();
+    return {};
+  },
   // STUB on purpose: the one consumer (the removed Rounding tab) is
   // gone, and implementing this via glyph_model turned out to PERTURB
   // later measure_at results in the shared wasm instance (pin synthesis
@@ -1426,6 +1489,18 @@ const staticOverrides = {
       .map(t => t.type);
     if (spacInjectors.length > 1) {
       throw new Error(`Only one transform can add the SPAC axis at a time ('${spacInjectors.join("' and '")}' both do)`);
+    }
+    // Guardrail (mirrors the desktop PUT): a transform whose engine
+    // reads specific axes is refused on a source without them, instead
+    // of building an enabled-but-inert transform.
+    for (const t of list) {
+      if (!t.enabled) continue;
+      const req = KNOWN_TRANSFORMS[t.type]?.requires_axis_tags || [];
+      const have = new Set([...uploadDataset.parametricTags].map(x => x.toUpperCase()));
+      const missing = req.filter(tag => !have.has(tag.toUpperCase()));
+      if (missing.length) {
+        throw new Error(`${KNOWN_TRANSFORMS[t.type].name} needs the parametric ax${missing.length > 1 ? 'es' : 'is'} ${missing.join(', ')} — this source doesn't declare ${missing.length > 1 ? 'them' : 'it'}.`);
+      }
     }
     uploadDataset.transforms = list;
     await rebuildUploadFont(uploadDataset);

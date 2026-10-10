@@ -46,6 +46,16 @@ page.on('pageerror', e => console.error('[pageerror]', e.message));
 page.on('crash', () => console.error('[PAGE CRASHED]'));
 
 const sleep = (ms) => page.waitForTimeout(ms);
+// HARD RULE: waitForFunction does NOT await async predicates in this
+// playwright-core (a returned Promise is truthy → instant false pass) —
+// poll page-side async conditions with an explicit Node loop instead.
+const waitForAsync = async (fn, { timeout = 120000, every = 250 } = {}) => {
+  for (const deadline = Date.now() + timeout; ;) {
+    if (await fn()) return;
+    if (Date.now() > deadline) throw new Error('waitForAsync timed out');
+    await sleep(every);
+  }
+};
 
 // ---- 1. static boot -------------------------------------------------------
 console.log('1. static boot');
@@ -1441,6 +1451,32 @@ ok(rondPts > sharpPts,
   `rounding added corner quads to 'n' (${sharpPts} -> ${rondPts} points)`);
 ok(rondReport.split(' ')[1].includes('ROND'),
   `enabling rounding adds the ROND axis (${rondReport.split(' ')[1]})`);
+// The axis must actually bend the outline: at ROND 100 the twin
+// masters' rounds apply. Regression check — a twin master layer
+// carrying associatedMasterId (even equal to its own layerId) is
+// silently dropped by fontc's glyphs-reader, leaving the axis inert.
+// Measured at XOPQ max — at the hairline default (XOPQ 2) the rounds
+// legitimately collapse (no room on a 2-unit stroke), so pure ROND
+// does nothing there.
+const rondMoved = execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
+f = TTFont(sys.argv[1])
+if 'avar' in f:
+    del f['avar']  # ROND is not mapped; instancer predates avar2
+xopq = next(a.maxValue for a in f['fvar'].axes if a.axisTag == 'XOPQ')
+sharp = instantiateVariableFont(f, {'XOPQ': xopq}, inplace=False)
+round_ = instantiateVariableFont(f, {'XOPQ': xopq, 'ROND': 100}, inplace=False)
+sc, _, _ = sharp['glyf']['n'].getCoordinates(sharp['glyf'])
+rc, _, _ = round_['glyf']['n'].getCoordinates(round_['glyf'])
+print(sum(1 for a, b in zip(sc, rc) if tuple(a) != tuple(b)))
+`, await downloadFont()]
+).toString().trim();
+ok(parseInt(rondMoved, 10) > 0,
+  `ROND 100 moves points of 'n' at XOPQ max (${rondMoved} moved)`);
 // Per-style stamping: generate GF named instances, give the font a broad
 // default rounding of 30%, and every instance takes ROND 30 as its
 // coordinate (grade-style default; style percents come from the R badge).
@@ -1459,6 +1495,283 @@ ok(stamped !== '-' && stamped.split(';').every(kv => kv.endsWith('=30.0')),
   `named instances carry the default rounding, ROND 30 (${stamped})`);
 await toggleTransform('Clean fvar instances'); // back off
 await toggleTransform('Round corners');
+
+// ---- 28. slant on an upload (wasm engine) -----------------------------------
+console.log('28. slant on an upload (wasm engine)');
+// Continues on the same Crispy Mini upload (transforms all off again).
+// Slanting is the slnt axis (default 0 = upright): every master gains a
+// SLANTED twin at slnt = -maxAngle, sheared about y = x-height/2 with
+// LSB and advance preserved — the oracle test (cargo) proves the engine
+// node-identical to the desktop; here we prove the demo wires it.
+const slantReport = (p) => execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+f = TTFont(sys.argv[1])
+axes = {a.axisTag: a for a in f['fvar'].axes}
+glyf = f['glyf']
+coords, _, _ = f['glyf']['n'].getCoordinates(glyf)
+xmax0 = max(x for x, y in coords)
+adv = f['hmtx']['n'][0]
+if 'slnt' not in axes:
+    print('noslnt', adv, xmax0)
+    raise SystemExit
+from fontTools.varLib.instancer import instantiateVariableFont
+mn = axes['slnt'].minValue
+if 'avar' in f:
+    del f['avar']  # slnt is not mapped; instancer predates avar2
+inst = instantiateVariableFont(f, {'slnt': mn}, inplace=False)
+icoords, _, _ = inst['glyf']['n'].getCoordinates(inst['glyf'])
+xmax1 = max(x for x, y in icoords)
+name = f['name']
+insts = ';'.join('%s=%s' % (name.getDebugName(i.subfamilyNameID), i.coordinates.get('slnt')) for i in f['fvar'].instances[:3])
+print(mn, adv, inst['hmtx']['n'][0], xmax0, xmax1, insts or '-')
+`, p]
+).toString().trim();
+const upright = slantReport(await downloadFont()).split(' ');
+ok(upright[0] === 'noslnt', `no slnt axis before enabling (${upright[0]})`);
+await toggleTransform('Slant');
+const leaned = slantReport(await downloadFont()).split(' ');
+ok(leaned[0] !== 'noslnt' && parseFloat(leaned[0]) < 0,
+  `enabling slant adds the slnt axis, 0 to ${leaned[0]}`);
+ok(parseInt(leaned[1], 10) === parseInt(upright[1], 10)
+  && parseInt(leaned[2], 10) === parseInt(upright[1], 10),
+  `advance of 'n' preserved under slant (${upright[1]} units)`);
+ok(parseInt(leaned[3], 10) === parseInt(upright[2], 10),
+  `default outline stays upright (xMax ${leaned[3]})`);
+ok(parseInt(leaned[4], 10) > parseInt(leaned[3], 10),
+  `full slant leans 'n' (xMax ${leaned[3]} -> ${leaned[4]})`);
+// Per-style stamping needs SOURCE named instances: the wasm
+// fix-instances port deliberately skips fonts with a slnt/ital axis
+// (gftools doubles the list with Italic pairs there — not ported), so
+// upload a CrispyMini variant that declares two instances, give it a
+// broad default slant of 50%, and both take slnt = min/2 as their
+// coordinate (grade-style default; style percents come from the S badge).
+const INSTANCED = '/tmp/e2e-crispymini-instances.glyphs';
+writeFileSync(INSTANCED, readFileSync(CRISPY_GLYPHS, 'utf8').replace(
+  'instances = (\n);',
+  `instances = (
+{
+axesValues = (
+94,
+2,
+2
+);
+name = Thin;
+},
+{
+axesValues = (
+3330,
+1016,
+462
+);
+name = Black;
+}
+);`));
+await page.click('button:text-is("Instances")'); // downloadFont left us on Preview
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', INSTANCED);
+// The sidebar title stays 'Crispy Mini' across this upload — the
+// fresh dataset announces itself by its source instance rows.
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.instance-row .instance-name')]
+    .map(el => el.textContent.trim()).includes('Black'),
+  null, { timeout: 90000 });
+await toggleTransform('Slant');
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+await page.fill('.transform-row:has-text("Slant") .transform-param:has-text("Default slant %") input', '50');
+await page.click('.transform-row:has-text("Slant") .transform-apply');
+await page.keyboard.press('Escape');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 240000 });
+const banner28 = await page.$eval('.error-banner', el => el.textContent).catch(() => null);
+const stamped28 = slantReport(await downloadFont()).split(' ');
+const expectSlnt = parseFloat(stamped28[0]) / 2;
+ok(stamped28[5] !== '-'
+  && stamped28[5].split(';').length === 2
+  && stamped28[5].split(';').every(kv => parseFloat(kv.split('=')[1]) === expectSlnt),
+  `source instances carry the default slant, slnt ${expectSlnt} (${stamped28[5]}${banner28 ? '; banner: ' + banner28 : ''})`);
+// gftools' Italic doubling, ported: on a slnt font with a real wght
+// axis, Clean fvar instances emits the Roman set plus an Italic set
+// pinned at the axis minimum. The stamp never touches a style named
+// Italic/Slanted — Romans take the default percent, Italics stay at
+// full slant.
+await page.click('button:text-is("Instances")');
+await page.click('button:has-text("Load Font")');
+await page.setInputFiles('.load-font-dropdown input[type=file]', FIXTURE);
+await page.waitForFunction(
+  () => document.querySelector('.sidebar h2')?.textContent === 'WasmTest',
+  null, { timeout: 90000 });
+await toggleTransform('Slant');
+await toggleTransform('Clean fvar instances');
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+await page.fill('.transform-row:has-text("Slant") .transform-param:has-text("Default slant %") input', '50');
+await page.click('.transform-row:has-text("Slant") .transform-apply');
+await page.keyboard.press('Escape');
+await page.waitForFunction(() =>
+  !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
+  { timeout: 240000 });
+const doubled = execFileSync(
+  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  ['-c', `
+import sys
+from fontTools.ttLib import TTFont
+f = TTFont(sys.argv[1])
+name = f['name']
+mn = next(a.minValue for a in f['fvar'].axes if a.axisTag == 'slnt')
+print(mn)
+print(';'.join('%s=%s' % (name.getDebugName(i.subfamilyNameID), i.coordinates.get('slnt'))
+               for i in f['fvar'].instances))
+`, await downloadFont()]
+).toString().trim().split('\n');
+const dblMin = parseFloat(doubled[0]);
+const dblInsts = doubled[1].split(';').map(kv => {
+  const [n, v] = kv.split('=');
+  return { name: n, slnt: parseFloat(v), italic: /italic|slanted/i.test(n) };
+});
+ok(dblInsts.some(i => i.italic) && dblInsts.some(i => !i.italic),
+  `fix-instances doubled the set on a slnt font (${dblInsts.map(i => i.name).join(', ')})`);
+ok(dblInsts.filter(i => !i.italic).every(i => i.slnt === dblMin / 2),
+  `Roman set stamped at the default percent, slnt ${dblMin / 2}`);
+ok(dblInsts.filter(i => i.italic).every(i => i.slnt === dblMin),
+  `Italic set keeps full slant, slnt ${dblMin} — never stamped`);
+
+// ---- 29. axis guardrails ------------------------------------------------------
+console.log('29. axis guardrails (round corners needs XOPQ/XTRA)');
+// Still on the WasmTest upload: a wght-only source. Round corners'
+// radius formula reads XOPQ/XTRA — enabling it here must be refused
+// with a message naming the missing axes, and the toggle must revert
+// (no enabled-but-inert transform).
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.transform-row')]
+    .find(r => r.querySelector('.transform-name')?.textContent.trim() === 'Round corners');
+  row?.querySelector('input[type=checkbox]')?.click();
+});
+await page.keyboard.press('Escape');
+await page.waitForFunction(() =>
+  document.querySelector('.error-banner')?.textContent.includes('XOPQ'),
+  null, { timeout: 60000 });
+ok(true, 'enabling round corners on a wght-only source is refused, naming XOPQ/XTRA');
+await page.click('button:has-text("Transforms")');
+await page.waitForSelector('.transform-row', { timeout: 15000 });
+const rcChecked = await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.transform-row')]
+    .find(r => r.querySelector('.transform-name')?.textContent.trim() === 'Round corners');
+  return row ? !!row.querySelector('input[type=checkbox]')?.checked : null;
+});
+ok(rcChecked === false, 'the Round corners toggle reverted');
+await page.keyboard.press('Escape');
+
+// ---- 30. Tester tab (rich-text document) ------------------------------------
+console.log('30. Tester tab');
+// The axis sliders need a wght axis — back on the bundled Crispy Mini
+// (its mappings CSV declares WGHT → wght, 100..900).
+// The Load Font button TOGGLES its menu, and earlier upload flows can
+// leave it open (setInputFiles never clicks an item): open the menu
+// deterministically, and only then click the example.
+await page.keyboard.press('Escape');
+await page.click('button:has-text("Load Font")');
+if (!(await page.waitForSelector('.load-font-menu', { timeout: 5000 }).catch(() => null))) {
+  // That click closed a leftover-open menu instead of opening it.
+  await page.click('button:has-text("Load Font")');
+  await page.waitForSelector('.load-font-menu', { timeout: 15000 });
+}
+await page.click('.load-font-menu button:has-text("Crispy Mini")');
+// Earlier sections leave any main tab active (the font downloads land on
+// Preview) — the sidebar only exists on Instances, so normalize first.
+await page.click('button:text-is("Instances")');
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 120000 });
+await page.click('button:text-is("Tester")');
+await page.waitForSelector('.tester-editable', { timeout: 20000 });
+ok(true, 'Tester tab renders');
+// Two runs in different fonts, through real page interactions: type
+// "HelloWorld", select "Hello" and give it a system font, select "World"
+// and bold it (the preview run).
+await page.click('.tester-editable');
+await page.keyboard.press('ControlOrMeta+A');
+await page.keyboard.press('Backspace');
+await page.keyboard.type('HelloWorld');
+await page.keyboard.press('Home');
+for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowRight');
+await page.selectOption('.tester-font-select', 'Georgia');
+await page.keyboard.press('End');
+for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowLeft');
+await page.click('.tester-bold');
+ok(await page.evaluate(() => {
+  const sys = document.querySelector('.tester-editable span[data-kind="system"]');
+  const prev = document.querySelector('.tester-editable span[data-kind="preview"]');
+  return !!sys && !!prev && sys.textContent === 'Hello' && prev.textContent === 'World';
+}), 'two runs: system-font "Hello" + preview-font "World"');
+ok(await page.evaluate(() =>
+  getComputedStyle(document.querySelector('.tester-editable span[data-kind="system"]'))
+    .fontFamily.includes('Georgia')),
+  'system run renders in Georgia');
+ok(await page.evaluate(() =>
+  getComputedStyle(document.querySelector('.tester-editable span[data-kind="preview"]'))
+    .fontWeight === '700'),
+  'preview run bold');
+// The wght slider drives ONLY preview runs: DOM-measure both spans across
+// a slider move (same native-setter drag pattern as section 7, scoped to
+// the Tester tab's axis group).
+const runWidths = () => page.evaluate(() => ({
+  sys: document.querySelector('.tester-editable span[data-kind="system"]').getBoundingClientRect().width,
+  prev: document.querySelector('.tester-editable span[data-kind="preview"]').getBoundingClientRect().width,
+}));
+const widthsBefore = await runWidths();
+await page.evaluate(() => {
+  const groups = [...document.querySelectorAll('.tester-tab .axis-control')];
+  const g = groups.find(el => [...el.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'wght'));
+  const input = g && g.querySelector('input[type=range]');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, 900);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
+// The fvs re-render + re-shaping settle asynchronously — poll Node-side.
+await waitForAsync(async () => {
+  const w = await runWidths();
+  return Math.abs(w.prev - widthsBefore.prev) > 0.5;
+}, { timeout: 15000 });
+ok(true, 'preview run width follows the wght slider');
+const widthsAfter = await runWidths();
+ok(Math.abs(widthsAfter.sys - widthsBefore.sys) < 0.01,
+  'system run width untouched by the wght slider');
+// The document rides the session record (testerState.doc): poll IndexedDB
+// until the debounced write lands, then reload to prove the restore.
+await waitForAsync(async () => page.evaluate(async () => {
+  const rec = await new Promise((resolve) => {
+    const req = indexedDB.open('avar2-studio', 1);
+    req.onsuccess = () => {
+      const db = req.result;
+      const g = db.transaction('session', 'readonly').objectStore('session').get('current');
+      g.onsuccess = () => { db.close(); resolve(g.result); };
+      g.onerror = () => { db.close(); resolve(null); };
+    };
+    req.onerror = () => resolve(null);
+  });
+  const blocks = (rec && rec.testerState && rec.testerState.doc && rec.testerState.doc.blocks) || [];
+  return blocks.some(b => b.runs.map(r => r.text).join('') === 'HelloWorld'
+    && b.runs.some(r => r.font && r.font.name === 'Georgia')
+    && b.runs.some(r => r.bold));
+}), { timeout: 15000 });
+ok(true, 'testerState document persisted to the session record');
+await page.reload({ waitUntil: 'load' });
+await page.waitForSelector('button:has-text("Load Font")', { timeout: 20000 });
+await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy Mini', null, { timeout: 120000 });
+await page.click('button:text-is("Tester")');
+await page.waitForSelector('.tester-editable', { timeout: 20000 });
+ok(await page.evaluate(() => {
+  const sys = document.querySelector('.tester-editable span[data-kind="system"]');
+  const prev = document.querySelector('.tester-editable span[data-kind="preview"]');
+  return !!sys && !!prev && sys.textContent === 'Hello' && prev.textContent === 'World'
+    && getComputedStyle(sys).fontFamily.includes('Georgia')
+    && getComputedStyle(prev).fontWeight === '700';
+}), 'document + formatting restored after reload');
 
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

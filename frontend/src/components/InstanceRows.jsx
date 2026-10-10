@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, axes }) {
+function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -10,29 +10,45 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
   // Load font when available. The family id comes from /api/health so the
   // tool works on any .glyphs file, not just Crispy.
   useEffect(() => {
-    if (fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId) {
+    if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) {
+      setFontReady(false);
+      return undefined;
+    }
+    // A transient fetch failure (server busy, tab refreshed mid-request)
+    // used to leave the preview in the fallback font forever — retry a
+    // couple of times before giving up.
+    let cancelled = false;
+    let retryTimer = null;
+    const attempt = (triesLeft) => {
       // Remove old font if it exists to force reload
       const oldFont = Array.from(document.fonts).find(f => f.family === vfFamilyId);
       if (oldFont) {
         document.fonts.delete(oldFont);
       }
-
       const fontFace = new FontFace(vfFamilyId, `url(${fontUrl})`);
       fontFace.load()
         .then((loadedFont) => {
+          if (cancelled) return undefined;
           document.fonts.add(loadedFont);
           // Wait for font to be ready
           return document.fonts.ready.then(() => {
-            setFontReady(true);
+            if (!cancelled) setFontReady(true);
           });
         })
         .catch(err => {
           console.error('Failed to load font:', err);
+          if (cancelled) return;
           setFontReady(false);
+          if (triesLeft > 0) {
+            retryTimer = setTimeout(() => attempt(triesLeft - 1), 2000);
+          }
         });
-    } else {
-      setFontReady(false);
-    }
+    };
+    attempt(2);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [fontUrl, fontLoaded, vfFamilyId]);
 
   // Handle wheel scrolling during drag
@@ -156,6 +172,13 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
             roundingDefaultPct={rounding?.default_pct ?? 0}
             onSaveInstanceRounding={onSaveInstanceRounding}
             onRemoveInstanceRounding={onRemoveInstanceRounding}
+            slantEnabled={!!slant?.enabled}
+            slantPct={slant?.style_pcts?.[instance.name] ?? null}
+            slantDefaultPct={slant?.default_pct ?? 0}
+            slantAxisMin={(axes || []).find(a => a.tag === 'slnt')?.min ?? null}
+            onSaveInstanceSlant={onSaveInstanceSlant}
+            onRemoveInstanceSlant={onRemoveInstanceSlant}
+            isDefaultOrigin={!!defaultOriginNames?.has(instance.name)}
           />
         </div>
       ))}

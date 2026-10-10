@@ -187,14 +187,15 @@ def test_a_brace_with_its_own_structure_is_left_alone_and_named():
     assert structure(glyph.layers[bold.id])[0][1] == "offcurve", "the masters still round"
 
 
-def test_without_an_xopq_axis_nothing_happens():
+def test_without_an_xopq_axis_the_build_fails_loudly():
+    # Guardrail: an enabled-but-inert transform (sharp font, no ROND,
+    # no message) must not pass as ok — the engine raises instead.
     font, glyph, thin, bold, wide, brace, backup = mini_font()
     font.axes[1].axisTag = "wght"
-    logs = []
-    stats = corner_rounding.round_font(font, PARAMS, log=logs.append)
-    assert stats["corners"] == 0
+    with pytest.raises(ValueError) as exc:
+        corner_rounding.round_font(font, PARAMS)
+    assert "XOPQ" in str(exc.value)
     assert structure(glyph.layers[bold.id]) == [("line",) * 4, ("line",) * 4]
-    assert any("no XOPQ axis" in m for m in logs)
 
 
 # --- the registry stage split -------------------------------------------------

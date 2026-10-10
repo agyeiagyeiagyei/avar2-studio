@@ -20,6 +20,7 @@ import init, {
   compile_glyphs,
   compile_with_overlays,
   round_corners_source,
+  slant_source,
   glyph_model,
   add_avar2,
   apply_control_axes,
@@ -43,6 +44,9 @@ self.onmessage = async (e) => {
       self.postMessage({ ok: true, model });
     } else if (e.data && e.data.kind === 'compile-overlays') {
       let src = e.data.source;
+      // Slant before round, like the desktop chain (source_priority):
+      // rounds land on the slanted drawings and stay round.
+      if (e.data.slant) src = slant_source(src, e.data.slant);
       if (e.data.round) src = round_corners_source(src, e.data.round, e.data.control ?? undefined);
       const ttf = compile_with_overlays(src, e.data.request);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
@@ -82,6 +86,7 @@ self.onmessage = async (e) => {
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);
     } else {
       let src = e.data.source ?? e.data;
+      if (e.data && e.data.slant) src = slant_source(src, e.data.slant);
       if (e.data && e.data.round) src = round_corners_source(src, e.data.round, e.data.control ?? undefined);
       const ttf = compile_glyphs(src);
       self.postMessage({ ok: true, ttf }, [ttf.buffer]);

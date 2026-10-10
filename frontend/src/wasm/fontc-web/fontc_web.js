@@ -283,11 +283,6 @@ export function regen_stat(font_bytes) {
 }
 
 /**
- * Round every corner of a .glyphs source (the round_corners
- * transform, source-stage): the same engine the desktop studio runs,
- * ported — returns the transformed source text for `compile_glyphs` /
- * `compile_with_overlays`. `control_json` is the `-control.json`
- * sidecar (correction targets), when the project has one.
  * @param {string} source
  * @param {string} params_json
  * @param {string | null} [control_json]
@@ -370,6 +365,43 @@ export function set_hidden_axes(font_bytes, hidden_tags_json) {
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
+}
+
+/**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ * Slant a .glyphs source (the slant transform, source-stage): the
+ * same engine the desktop studio runs, ported — returns the
+ * transformed source text. Runs BEFORE round_corners_source, so
+ * rounds land on the slanted drawings.
+ * @param {string} source
+ * @param {string} params_json
+ * @returns {string}
+ */
+export function slant_source(source, params_json) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.slant_source(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
 }
 function __wbg_get_imports() {
     const import0 = {

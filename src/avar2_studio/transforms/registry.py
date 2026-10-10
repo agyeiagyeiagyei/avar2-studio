@@ -30,6 +30,7 @@ from .builtin_gftools import (
     GenStatTransform,
 )
 from .builtin_round_corners import RoundCornersTransform
+from .builtin_slant import SlantTransform
 from .builtin_spac import SpacTransform
 from .builtin_spac_widthaware import WidthAwareSpacTransform
 
@@ -64,6 +65,7 @@ def discover(force: bool = False) -> None:
     register(GenStatTransform())
     register(FixUnhintedTransform())
     register(RoundCornersTransform())
+    register(SlantTransform())
 
     # User scripts.
     d = user_transforms_dir()

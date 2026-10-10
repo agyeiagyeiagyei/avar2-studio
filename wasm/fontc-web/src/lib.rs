@@ -34,6 +34,7 @@ use write_fonts::FontBuilder;
 mod braces;
 mod editor;
 mod round_corners;
+mod slanting;
 mod extrapolate;
 mod fix;
 mod iup;
@@ -62,6 +63,27 @@ pub fn pin_corner(font_bytes: Vec<u8>, request_json: &str) -> Result<Vec<u8>, Js
 /// ported — returns the transformed source text for `compile_glyphs` /
 /// `compile_with_overlays`. `control_json` is the `-control.json`
 /// sidecar (correction targets), when the project has one.
+/// Slant a .glyphs source (the slant transform, source-stage): the
+/// same engine the desktop studio runs, ported — returns the
+/// transformed source text. Runs BEFORE round_corners_source, so
+/// rounds land on the slanted drawings.
+#[wasm_bindgen]
+pub fn slant_source(source: String, params_json: &str) -> Result<String, JsError> {
+    let (out, _summary) = slanting::slant_source(&source, params_json).map_err(|e| err(e))?;
+    Ok(out)
+}
+
+/// Native test hook: the wasm entries wrap errors in JsError, whose
+/// construction panics off-wasm — error-path tests assert on the
+/// String error through this instead.
+pub fn round_corners_source_result(
+    source: &str,
+    params_json: &str,
+    control_json: Option<&str>,
+) -> Result<String, String> {
+    round_corners::round_source(source, params_json, control_json).map(|(out, _summary)| out)
+}
+
 #[wasm_bindgen]
 pub fn round_corners_source(
     source: String,

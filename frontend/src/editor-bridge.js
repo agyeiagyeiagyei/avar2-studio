@@ -576,10 +576,28 @@ export async function createEditorBridge({ dataset, tag, glyphName, layerLocatio
   // server's "pinned to default". The edited glyph's own figures are its
   // pre-edit state, same as the desktop.
   const metricsModelCache = new Map([[glyphName, model]]);
-  async function referenceMetrics(refsParam) {
+  async function referenceMetrics(refsParam, locationParam) {
     const refs = String(refsParam || 'H,N,O').split(',')
       .map(g => g.trim()).filter(Boolean);
-    const location = { ...fullSession };
+    // The HUD sends the location being edited RIGHT NOW (scene
+    // fontLocationSourceMapped, axis-NAME-keyed) — without it the
+    // reference would be pinned to the session's OPENING layer even
+    // after the designer switches layers in the designspace panel.
+    let location;
+    if (locationParam && typeof locationParam === 'object') {
+      const tagByKey = new Map();
+      for (const a of fontAxes) {
+        tagByKey.set(String(a.name).toLowerCase(), a.tag);
+        tagByKey.set(String(a.tag).toLowerCase(), a.tag);
+      }
+      location = { ...fullSession };
+      for (const [k, v] of Object.entries(locationParam)) {
+        const t = tagByKey.get(String(k).toLowerCase());
+        if (t && Number.isFinite(Number(v))) location[t] = Number(v);
+      }
+    } else {
+      location = { ...fullSession };
+    }
     delete location[tag];
     const metrics = {};
     for (const name of [glyphName, ...refs.filter(g => g !== glyphName)]) {
@@ -597,7 +615,13 @@ export async function createEditorBridge({ dataset, tag, glyphName, layerLocatio
         .map(p => (p.nodes || []).map(n => [n[0], n[1]]))
         .filter(c => c.length > 2);
       const measured = measureStrokes(contours, outline.width ?? 0);
-      if (measured) metrics[name] = measured;
+      if (measured) {
+        // The measured polygon rides along for the HUD's overlay preview
+        // (desktop parity: _measure_strokes returns the same shape).
+        measured.contours = contours.map(
+          c => c.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]));
+        metrics[name] = measured;
+      }
     }
     return { tag, glyph: glyphName, location, metrics };
   }
@@ -625,7 +649,7 @@ export async function createEditorBridge({ dataset, tag, glyphName, layerLocatio
     findGlyphsThatUseGlyph: () => [],
     // Studio extra (no Fontra-backend counterpart): the metrics HUD's
     // reference figures. The embed bundle only calls it in studio sessions.
-    getReferenceMetrics: (refs) => referenceMetrics(refs),
+    getReferenceMetrics: (refs, location) => referenceMetrics(refs, location),
   };
 
   // ---- edit guards + application ------------------------------------------

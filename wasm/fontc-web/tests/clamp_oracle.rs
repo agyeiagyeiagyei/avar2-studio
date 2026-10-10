@@ -1,11 +1,17 @@
-//! Oracle for `clamp_out_of_range`: dropping the braced Crispy's
-//! stranded (out-of-range) sources must (a) leave the default instance
+//! Oracle for `clamp_out_of_range`: dropping StrandedMini's stranded
+//! (out-of-range) sources must (a) leave the default instance
 //! untouched, (b) zero the stranded tuples' packed deltas so they can
 //! no longer contribute, and (c) bring outlines roughly in line with
 //! the fontmake (varLib) build — which drops the same sources upstream.
 //! Exact fontc↔fontmake equality is NOT provable (fontdrasil and
 //! fontTools VariationModels differ on tent shapes), so the cross-check
 //! is an anti-mangling bound, not a tolerance match.
+//!
+//! StrandedMini (tests/fixtures/, regenerate with
+//! spike/make_stranded_fixture.py) is CrispyMini plus two deliberately
+//! out-of-range braces. The oracle used to read the live Crispy.glyphs,
+//! whose stranded sources disappeared as the design evolved — a frozen
+//! fixture keeps the vacuity guard satisfiable.
 
 use std::path::Path;
 use std::process::Command;
@@ -160,8 +166,8 @@ fn clamp_drops_stranded_sources() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var("AVAR2_PYTHON")
         .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
-    let source_path = manifest.join("../../../Crispy/sources/Crispy.glyphs");
-    let source = std::fs::read_to_string(&source_path).expect("read Crispy.glyphs");
+    let source_path = manifest.join("tests/fixtures/StrandedMini.glyphs");
+    let source = std::fs::read_to_string(&source_path).expect("read StrandedMini.glyphs");
     let before = fontc_web::compile_glyphs(source).expect("fontc compile");
     let after = fontc_web::clamp_out_of_range(before.clone()).expect("clamp");
 
@@ -172,7 +178,7 @@ fn clamp_drops_stranded_sources() {
     let (stranded_before, live_before) = stranded_tuple_counts(gvar_before);
     assert!(
         stranded_before > 0 && live_before > 0,
-        "oracle vacuous: Crispy.glyphs must contain live stranded sources"
+        "oracle vacuous: StrandedMini.glyphs must contain live stranded sources"
     );
     let (stranded_after, live_after) = stranded_tuple_counts(gvar_after);
     assert_eq!(

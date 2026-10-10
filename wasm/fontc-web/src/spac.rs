@@ -519,11 +519,12 @@ pub(crate) fn apply_transforms(
             _ => font_bytes,
         };
     }
-    // Per-style rounding LAST: fix_instances regenerates the instance
-    // list, so the ROND stamp (grade-style default + per-style percents)
-    // must land on whatever instances survive the fixers.
+    // Per-style axis stamps LAST: fix_instances regenerates the
+    // instance list, so the ROND/slnt stamps (grade-style default +
+    // per-style percents) must land on whatever instances survive the
+    // fixers.
     for e in &entries {
-        if !e.enabled || e.kind != "round_corners" {
+        if !e.enabled || !matches!(e.kind.as_str(), "round_corners" | "slant") {
             continue;
         }
         let default_pct = float_param(&e.params, "default_pct", 0.0, (0.0, 100.0));
@@ -537,7 +538,11 @@ pub(crate) fn apply_transforms(
                     .collect()
             })
             .unwrap_or_default();
-        font_bytes = crate::fix::stamp_rond_instances(font_bytes, default_pct, &style_pcts)?;
+        font_bytes = match e.kind.as_str() {
+            "round_corners" => crate::fix::stamp_rond_instances(font_bytes, default_pct, &style_pcts)?,
+            "slant" => crate::fix::stamp_slnt_instances(font_bytes, default_pct, &style_pcts)?,
+            _ => font_bytes,
+        };
     }
     Ok(font_bytes)
 }

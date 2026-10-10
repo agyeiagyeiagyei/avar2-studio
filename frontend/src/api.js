@@ -237,6 +237,30 @@ export const api = {
     return parseJSON(response);
   },
 
+  async reorderInstances(names) {
+    const response = await fetch(`${API_BASE}/instances/order`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names }),
+    });
+    if (!response.ok) {
+      const error = await parseJSON(response).catch(() => ({ error: `Failed to reorder: ${response.status}` }));
+      throw new Error(error.error || `Failed to reorder: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
+  async deleteAvar2Axis(axisName) {
+    const response = await fetch(`${API_BASE}/avar2/axis/${encodeURIComponent(axisName)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await parseJSON(response).catch(() => ({ error: `Failed to delete axis: ${response.status}` }));
+      throw new Error(error.error || `Failed to delete axis: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
   async updateAvar2Axis(axisName, axisData) {
     const response = await fetch(`${API_BASE}/avar2/axis/${encodeURIComponent(axisName)}`, {
       method: 'PUT',

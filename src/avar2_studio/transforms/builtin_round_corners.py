@@ -63,6 +63,12 @@ class RoundCornersTransform(Transform):
         # Percent edits only re-stamp instance coordinates (apply, the
         # font stage): the server can skip the full shadow re-round.
         font_stage_param_keys=("default_pct", "style_pcts"),
+        source_priority=50,
+        # The radius formula's backbone is the stroke axis: without
+        # XOPQ the transform is inert, so enabling it on such a source
+        # is refused with a clear message. XTRA is optional (its share
+        # of the blend is zero without the axis).
+        requires_axis_tags=("XOPQ",),
     )
 
     def validate(self, params: dict) -> None:

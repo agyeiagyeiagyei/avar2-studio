@@ -3,11 +3,15 @@ import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
 import RoundingBadge from './RoundingBadge';
+import SlantBadge from './SlantBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
 function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
   roundingEnabled, roundingPct, roundingDefaultPct,
   onSaveInstanceRounding, onRemoveInstanceRounding,
+  slantEnabled, slantPct, slantDefaultPct, slantAxisMin,
+  onSaveInstanceSlant, onRemoveInstanceSlant,
+  isDefaultOrigin = false,
 }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
@@ -72,6 +76,15 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   // the broad default — its ROND coordinate in the built font.
   if (roundingEnabled && 'ROND' in pinnedAxes) {
     pinnedAxes.ROND = roundingPct != null ? roundingPct : (roundingDefaultPct || 0);
+  }
+  // Per-style slant likewise: the percent of the axis minimum the
+  // built font stamps as the style's slnt coordinate. Styles named
+  // Italic/Slanted are never stamped (they keep their own slnt), so
+  // they get no overlay and no S badge.
+  const slantExempt = /italic|slanted/i.test(instance.name);
+  if (slantEnabled && !slantExempt && 'slnt' in pinnedAxes && slantAxisMin != null) {
+    const slantRowPct = slantPct != null ? slantPct : (slantDefaultPct || 0);
+    pinnedAxes.slnt = slantAxisMin * slantRowPct / 100;
   }
   const axesForRender = Object.keys(pinnedAxes).length > 0 ? pinnedAxes : previewCoordinates;
   let fontVariationSettings = Object.entries(axesForRender)
@@ -190,6 +203,15 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               read both the persistence-location and the
               edited/saved status as a single visual block. Studio-only
               rows get no badge (absence == studio). */}
+          {isDefaultOrigin && (
+            <span
+              className="origin-badge origin-badge-default"
+              title="This instance's mapping inputs all sit at the axis defaults, so its parametric values define the font's RESTING state: the build interpolates a real master here and compiles with it as the origin (avar2 cannot remap the default location). Move an axis default, or this row's inputs, to hand the origin to another instance."
+              aria-label="default origin instance"
+            >
+              ORIGIN
+            </span>
+          )}
           {!isStudioOnly && (
             <span
               className="origin-badge origin-badge-source"
@@ -217,6 +239,15 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               defaultPct={roundingDefaultPct}
               onSave={onSaveInstanceRounding}
               onRemove={onRemoveInstanceRounding}
+            />
+          )}
+          {slantEnabled && !slantExempt && (
+            <SlantBadge
+              instanceName={instance.name}
+              pct={slantPct}
+              defaultPct={slantDefaultPct}
+              onSave={onSaveInstanceSlant}
+              onRemove={onRemoveInstanceSlant}
             />
           )}
           {/* Coordinates moved below the sample text — see render-end. */}

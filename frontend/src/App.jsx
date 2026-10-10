@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
-import { isStaticMode, isUploadDataset, getSampleText, setSampleText as persistSampleText } from './static-api';
+import { isStaticMode, isUploadDataset, getSampleText, setSampleText as persistSampleText, getTesterState, setTesterState as persistTesterState } from './static-api';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
 import PreviewTab from './components/PreviewTab';
 import SpaceTab from './components/SpaceTab';
+import TesterTab from './components/TesterTab';
 import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
 import DemoLanding from './components/DemoLanding';
@@ -69,6 +70,14 @@ function App() {
   // plain fallback (no avar2 table / mapped axes). Surfaced on the
   // Preview tab so the fallback is never silent.
   const [avar2Error, setAvar2Error] = useState(null);
+  // Non-null ⇒ a source-stage transform (round corners / slant) failed
+  // and the font was built WITHOUT it — surfaced as a banner so an
+  // enabled-but-inert transform never passes silently.
+  const [sourceTransformError, setSourceTransformError] = useState(null);
+  // Non-null ⇒ the mappings define styles but no row sits at the axis
+  // defaults: the font rests at the compiled origin, not at any
+  // authored style (the "resting dip").
+  const [originWarning, setOriginWarning] = useState(null);
   // True ⇒ the CSV changed after the last build (auto-saved edits no
   // longer rebuild per save). The Preview tab rebuilds once on open.
   const [buildStale, setBuildStale] = useState(false);
@@ -78,6 +87,14 @@ function App() {
     setSampleTextState(text);
     if (isStaticMode() && isUploadDataset()) {
       persistSampleText(text);
+    }
+  }, []);
+  const [testerState, setTesterStateState] = useState(null);
+  // Wrap setTesterState to also persist to the session when in static mode
+  const setTesterState = useCallback((state) => {
+    setTesterStateState(state);
+    if (isStaticMode() && isUploadDataset()) {
+      persistTesterState(state);
     }
   }, []);
   const [fontSize, setFontSize] = useState(2); // Default 2rem
@@ -96,6 +113,19 @@ function App() {
     }
   }, [mainTab, buildStale, building]);
   const [familyName, setFamilyName] = useState(null);
+  // Render-fresh mirror for the poll closure (its deps don't include
+  // familyName) + an in-flight latch: a tab opened while the server was
+  // down/restarting fails its initial loadData and would otherwise show
+  // "No font loaded" forever — the poll re-runs the full load once
+  // health shows a loaded source again.
+  const familyNameRef = useRef(null);
+  familyNameRef.current = familyName;
+  const blindRecoverRef = useRef(false);
+  // True while any loadData runs: the self-heal below must never start
+  // a SECOND concurrent loadData during the initial one (familyName
+  // stays null until its tail, so the poll would otherwise double-load
+  // on every normal page open).
+  const loadDataInFlightRef = useRef(false);
   // "glyphs" | "designspace" | null — from /api/health. Gates
   // control-axis authoring, which is .glyphs-only for now.
   const [sourceFormat, setSourceFormat] = useState(null);
@@ -108,7 +138,15 @@ function App() {
   const demoInitRef = useRef(false);
   // Built avar2 font filename (used for the download button); from /api/health.
   const [builtFontFilename, setBuiltFontFilename] = useState(null);
-  const [lastBuildTime, setLastBuildTime] = useState(null);
+  // A ref, deliberately not state: the poll compares against it to
+  // decide "the font was rebuilt — reload". As state, the comparison
+  // read a render-closure value that lags the setter by however long
+  // React takes to commit — and a big font's FontFace re-parse can
+  // starve the main thread past the next poll tick, so every tick saw
+  // the stale value and reloaded again: a self-sustaining reload spiral
+  // for the first ~40s after load (shipped once, with the slnt-doubled
+  // Crispy). A ref updates synchronously; duplicate reloads can't fire.
+  const lastBuildTimeRef = useRef(null);
   // Outcome of the most recent build attempt. "failed" => the preview is stale
   // (we're still showing the last-good font); "ok" => preview reflects fresh
   // source state. Null until the first build completes.
@@ -221,19 +259,31 @@ function App() {
 
         setBuilding(health.building || false);
         setAvar2Error(health.avar2_error || null);
+        setSourceTransformError(health.source_transform_error || null);
+        setOriginWarning(health.origin_warning || null);
         setBuildStale(health.build_stale || false);
         setSessionLockLost(!!health.session_lock_lost);
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
         setLastBuildStatus(health.last_build_status || null);
         setLastBuildError(health.last_build_error || null);
 
+        // Self-heal the blind empty state: the initial loadData failed
+        // (server down or mid-restart when the tab loaded), but health
+        // now shows a loaded source — run the full load.
+        if (!familyNameRef.current && health.family_name
+            && !blindRecoverRef.current && !loadDataInFlightRef.current) {
+          blindRecoverRef.current = true;
+          loadData().finally(() => { blindRecoverRef.current = false; });
+          return;
+        }
+
         // If font was rebuilt (new build time), reload
-        if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
+        if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTimeRef.current) {
           // Store scroll position before reloading
           const scrollY = window.scrollY;
           const selectedInstanceName = selectedInstance?.name;
-          
-          setLastBuildTime(health.last_build_time);
+
+          lastBuildTimeRef.current = health.last_build_time;
           // Force font reload by generating new URL with timestamp
           setFontLoaded(false); // Reset first to trigger reload
           setTimeout(() => {
@@ -269,10 +319,11 @@ function App() {
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(interval);
-  }, [lastBuildTime, selectedInstance?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedInstance?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = async () => {
     try {
+      loadDataInFlightRef.current = true;
       setLoading(true);
       setError(null);
 
@@ -330,7 +381,7 @@ function App() {
           // Reload health to get updated status
           const updatedHealth = await api.health();
           setFontLoaded(updatedHealth.font_built);
-          setLastBuildTime(updatedHealth.last_build_time || null);
+          lastBuildTimeRef.current = updatedHealth.last_build_time || null;
         } catch (err) {
           console.error('Auto-build on load failed:', err);
           // Continue loading even if build fails
@@ -366,15 +417,20 @@ function App() {
       setSourceFormat(health.source_format || null);
       setVfFamilyId(health.vf_family_id || (health.family_name ? `${health.family_name}-VF` : null));
       setBuiltFontFilename(health.built_font_filename || null);
-      setLastBuildTime(health.last_build_time || null);
+      const prevBuildTime = lastBuildTimeRef.current;
+      lastBuildTimeRef.current = health.last_build_time || null;
       setBuilding(health.building || false);
       setAvar2Error(health.avar2_error || null);
+      setSourceTransformError(health.source_transform_error || null);
+      setOriginWarning(health.origin_warning || null);
       setBuildStale(health.build_stale || false);
 
       // Restore persisted sample text (static mode with upload only)
       if (isStaticMode() && isUploadDataset()) {
         const savedSample = getSampleText();
         if (savedSample) setSampleTextState(savedSample);
+        const savedTesterState = getTesterState();
+        if (savedTesterState) setTesterStateState(savedTesterState);
       }
 
       // avar2 mappings are per-dataset: refetch on every loadData to get
@@ -383,7 +439,7 @@ function App() {
       loadAvar2Data().catch(() => {});
 
       // If font was rebuilt (new build time), reload the font
-      if (health.font_built && health.last_build_time && health.last_build_time !== lastBuildTime) {
+      if (health.font_built && health.last_build_time && health.last_build_time !== prevBuildTime) {
         setFontUrl(api.getFontUrl()); // This is synchronous, returns string
         // Force font reload by updating fontLoaded state
         setFontLoaded(true);
@@ -400,6 +456,7 @@ function App() {
       setError(err.message);
       console.error('Failed to load data:', err);
     } finally {
+      loadDataInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -947,6 +1004,85 @@ function App() {
     return commitStylePcts(nextPcts);
   };
 
+  // ---- Per-style slant (slant: default % + style percents) ----
+  const slantEntry = (transforms || []).find(x => x.id === 'slant');
+  const slant = slantEntry ? {
+    enabled: !!slantEntry.enabled,
+    default_pct: parseFloat(slantEntry.params?.default_pct) || 0,
+    style_pcts: (slantEntry.params?.style_pcts && typeof slantEntry.params.style_pcts === 'object')
+      ? slantEntry.params.style_pcts : {},
+  } : null;
+
+  const commitSlantStylePcts = (nextPcts) => {
+    const prev = transforms;
+    const next = transforms.map(x =>
+      x.id === 'slant'
+        ? { ...x, params: { ...(x.params || {}), style_pcts: nextPcts } }
+        : x
+    );
+    setTransforms(next);
+    // A style's percent is its slnt coordinate — a font-stage stamp, so
+    // the server takes the fast rebuild path (no source re-slant).
+    return commitTransforms(_transformEntries(next), prev);
+  };
+
+  const handleSaveInstanceSlant = (instanceName, pct) =>
+    commitSlantStylePcts({ ...(slant?.style_pcts || {}), [instanceName]: pct });
+
+  const handleRemoveInstanceSlant = (instanceName) => {
+    const nextPcts = { ...(slant?.style_pcts || {}) };
+    delete nextPcts[instanceName];
+    return commitSlantStylePcts(nextPcts);
+  };
+
+  // The DEFAULT-ORIGIN row(s): instances whose mapping inputs all sit
+  // at the user-axis defaults. That row's parametric values define the
+  // font's resting state — the build interpolates a real master there
+  // and compiles with it as the origin (avar2 cannot remap the default
+  // location, so this is the one row that works by being the origin
+  // rather than by a mapping). Mirrors the server's _is_default_row:
+  // every authored in-cell equals its axis's declared default; a blank
+  // cell sits at the default by definition.
+  const defaultOriginNames = React.useMemo(() => {
+    const meta = avar2Axes?.metadata || {};
+    const defs = {};
+    for (const m of Object.values(meta)) {
+      if (!m || m.is_parametric || m.default == null) continue;
+      const tag = (m.registered_tag || '').toLowerCase();
+      if (tag) defs[tag] = Number(m.default);
+    }
+    const out = new Set();
+    if (!Object.keys(defs).length) return out;
+    for (const inst of avar2Instances || []) {
+      const ins = inst?.avar2_mapping?.in || {};
+      const entries = Object.entries(ins);
+      if (!entries.length) continue;
+      const allDefault = entries.every(([t, v]) =>
+        defs[t] != null && Math.abs(Number(v) - defs[t]) < 1e-6);
+      if (allDefault) out.add(inst.instance_name);
+    }
+    return out;
+  }, [avar2Instances, avar2Axes]);
+
+  // Axes whose per-style value comes from a row badge (ROND/slnt via
+  // their transforms' style_pcts, GRAD via grade): in the Instances
+  // view their sidebar sliders are inert — a drag there LOOKS like a
+  // per-instance edit but the row renders the badge's value, and the
+  // axis never persists with the instance. The Preview tab's sliders
+  // stay live for exploring them. SPAC is deliberately NOT in this set:
+  // its per-instance CSV cell is real per-instance state.
+  const badgeGovernedTags = React.useMemo(() => {
+    const tags = new Set();
+    for (const t of transforms || []) {
+      if (!t.enabled || !t.injected_axis_tag) continue;
+      if ((t.params_schema || []).some(p => p.key === 'style_pcts')) {
+        tags.add(t.injected_axis_tag);
+      }
+    }
+    if (grade?.enabled) tags.add('GRAD');
+    return tags;
+  }, [transforms, grade?.enabled]);
+
   // ---- Grade transform (source-level; toggle + default + per-instance) ----
   const gradeCommitTimer = useRef(null);
 
@@ -1091,7 +1227,11 @@ function App() {
     const mapping = avar2Instances.find(m => m.instance_name === instance.name);
     const csvOut = (mapping && mapping.avar2_mapping && mapping.avar2_mapping.out) || {};
     const csvIn = (mapping && mapping.avar2_mapping && mapping.avar2_mapping.in) || {};
-    const sourceCoords = instance.coordinates || {};
+    // instance.coordinates now carries the CSV (studio) values merged
+    // over the source's for display; the pristine source set rides in
+    // source_coordinates so the CSV-vs-source divergence (orange) still
+    // reads against the real source file.
+    const sourceCoords = instance.source_coordinates || instance.coordinates || {};
     const persisted = { ...sourceCoords, ...csvIn, ...csvOut };
     const csvCoords = Object.keys(csvOut).length > 0 ? csvOut : null;
 
@@ -1157,6 +1297,10 @@ function App() {
   }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, instanceOriginalCoordinates, originalCoordinates]);
 
   const handleAxisChange = useCallback((tag, value) => {
+    // Badge-governed axes never take per-instance slider edits — the
+    // sidebar renders them inert, and this guard holds for any other
+    // edit path that might route a value at them.
+    if (badgeGovernedTags.has(tag)) return;
     // Register instance as editing when first axis change happens
     if (selectedInstance && Object.keys(editingCoordinates).length === 0) {
       api.registerEditingInstance(selectedInstance.name).catch(() => {});
@@ -1177,7 +1321,7 @@ function App() {
       }
       return updated;
     });
-  }, [selectedInstance, editingCoordinates]);
+  }, [selectedInstance, editingCoordinates, badgeGovernedTags]);
 
   // AUTO-PERSIST studio-instance coordinate edits (debounced,
   // serialized). The old contract — slider edits live in page state
@@ -1977,9 +2121,23 @@ function App() {
     const newInstances = [...instances];
     const [movedItem] = newInstances.splice(currentIndex, 1);
     newInstances.splice(newIndex, 0, movedItem);
-    
+
     setInstances(newInstances);
+    // Persist: the CSV row order is the instance order's home — without
+    // this, the next refetch (any rebuild) snaps the list back.
+    if (api.reorderInstances) {
+      api.reorderInstances(newInstances.map(i => i.name)).catch(err =>
+        console.error('Failed to persist instance order:', err));
+    }
   }, [instances]);
+
+  const handleReorderInstances = useCallback((newInstances) => {
+    setInstances(newInstances);
+    if (api.reorderInstances) {
+      api.reorderInstances(newInstances.map(i => i.name)).catch(err =>
+        console.error('Failed to persist instance order:', err));
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -2065,6 +2223,16 @@ function App() {
           </div>
         </div>
       )}
+      {lastBuildStatus !== 'failed' && originWarning && (
+        <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
+          {originWarning}
+        </div>
+      )}
+      {lastBuildStatus !== 'failed' && sourceTransformError && (
+        <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
+          A build transform failed and the font was built without it. {sourceTransformError}
+        </div>
+      )}
       {lastBuildStatus !== 'failed' && avar2Error && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
           The mapped font failed to build; the preview is showing the plain fallback without your mappings. {avar2Error}
@@ -2108,6 +2276,13 @@ function App() {
           >
             Space
           </button>
+          <button
+            type="button"
+            className={`main-tab${mainTab === 'tester' ? ' active' : ''}`}
+            onClick={() => setMainTab('tester')}
+          >
+            Tester
+          </button>
         </div>
         <div className={`build-scope${building ? ' is-building' : ''}`}>
         {mainTab === 'space' ? (
@@ -2135,12 +2310,23 @@ function App() {
             } : undefined}
             onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
           />
+                ) : mainTab === 'tester' ? (
+          <TesterTab
+            axes={axes}
+            vfFamilyId={vfFamilyId}
+            fontLoaded={fontLoaded}
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
+            testerState={testerState}
+            onTesterStateChange={setTesterState}
+          />
                 ) : mainTab === 'instances' ? (
         <div className="content-area">
           <Sidebar
             axes={axes}
             coordinates={editingCoordinates}
             onAxisChange={handleAxisChange}
+            badgeGovernedTags={badgeGovernedTags}
             disabled={(staticMode && !isUploadDataset()) || !selectedInstance}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}
@@ -2191,7 +2377,7 @@ function App() {
             fontUrl={fontUrl}
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
-            onReorderInstances={setInstances}
+            onReorderInstances={handleReorderInstances}
             fontSize={fontSize}
             onDeleteInstance={handleDeleteInstance}
             getInstanceSyncStatus={getInstanceSyncStatus}
@@ -2208,6 +2394,10 @@ function App() {
             rounding={rounding}
             onSaveInstanceRounding={handleSaveInstanceRounding}
             onRemoveInstanceRounding={handleRemoveInstanceRounding}
+            slant={slant}
+            onSaveInstanceSlant={handleSaveInstanceSlant}
+            onRemoveInstanceSlant={handleRemoveInstanceSlant}
+            defaultOriginNames={defaultOriginNames}
             axes={axes}
           />
         </div>

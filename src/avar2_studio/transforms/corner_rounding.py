@@ -288,17 +288,18 @@ def _copy_layer(layer):
     return copy.deepcopy(layer, memo)
 
 
-def _extend_for_axis(font, axis_max):
-    """Grow the font by a ROND axis (default 0 = sharp): every master,
+def extend_for_axis(font, tag, name, end_value, twin_suffix):
+    """Grow the font by one studio axis (default 0): every master,
     instance and coordinate layer gains a trailing 0, and every master
-    gets a twin at ``axis_max`` to hold the rounded geometry. Returns
-    {original master id: twin master id}."""
+    gets a twin at ``end_value`` to hold that axis's end geometry
+    (rounding's ROND, slanting's slnt). Returns
+    {original master id: twin master}."""
     import copy
     import uuid
     from glyphsLib.classes import GSAxis
 
     ax = GSAxis()
-    ax.name, ax.axisTag = "Rounding", "ROND"
+    ax.name, ax.axisTag = name, tag
     font.axes.append(ax)
     originals = list(font.masters)
     for m in originals:
@@ -322,11 +323,17 @@ def _extend_for_axis(font, axis_max):
         memo = {id(parent): parent} if parent is not None else {}
         tm = copy.deepcopy(m, memo)
         tm.id = str(uuid.uuid4()).upper()
-        tm.name = "%s Rounded" % m.name
-        tm.axes = list(m.axes)[:-1] + [float(axis_max)]
+        tm.name = "%s %s" % (m.name, twin_suffix)
+        tm.axes = list(m.axes)[:-1] + [float(end_value)]
         twin_of[str(m.id)] = tm
         font.masters.append(tm)
     return twin_of
+
+
+def _extend_for_axis(font, axis_max):
+    """Rounding's ROND axis (default 0 = sharp). Returns
+    {original master id: twin master}."""
+    return extend_for_axis(font, "ROND", "Rounding", axis_max, "Rounded")
 
 
 def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dict:
@@ -351,10 +358,18 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
     stats = {"corners": 0, "layers": 0, "collapsed": 0, "clamped": 0, "hidden": 0,
              "concentric": 0, "overrides": 0, "twins": 0, "skipped_layers": []}
 
+    # Guardrail, not a silent no-op: without a stroke axis the radius
+    # formula has nothing to follow, and "enabled but sharp" is exactly
+    # the state that must not pass as ok. The raise surfaces as the
+    # transforms PUT rejection (requires_axis_tags) or, on paths that
+    # bypass it, as health.source_transform_error. XTRA is optional —
+    # its share of the blend is simply zero without the axis.
     xopq_idx = xopq_index(font)
     if xopq_idx is None:
-        log("round_corners: no XOPQ axis — the stroke rule has nothing to follow; nothing rounded")
-        return stats
+        tags = ", ".join(str(getattr(ax, "axisTag", "?")) for ax in font.axes) or "none"
+        raise ValueError(
+            "round corners needs the parametric stroke axis XOPQ (the radius "
+            f"formula blends it with XTRA) — this source declares: {tags}")
     xtra_idx = _axis_index(font, "XTRA")
     masters = list(font.masters)
     master_by_id = {str(m.id): m for m in masters}

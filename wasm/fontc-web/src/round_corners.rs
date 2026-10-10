@@ -130,7 +130,7 @@ fn control_targets(control_json: Option<&str>) -> Result<Targets, String> {
 // Plist helpers
 // ---------------------------------------------------------------------------
 
-fn num_plist(v: f64) -> Plist {
+pub(crate) fn num_plist(v: f64) -> Plist {
     if v == v.trunc() && v.abs() < 9.0e15 {
         Plist::Integer(v as i64)
     } else {
@@ -138,14 +138,14 @@ fn num_plist(v: f64) -> Plist {
     }
 }
 
-fn as_dict_mut<'a>(p: &'a mut Plist, context: &str) -> Result<&'a mut Dict, String> {
+pub(crate) fn as_dict_mut<'a>(p: &'a mut Plist, context: &str) -> Result<&'a mut Dict, String> {
     match p {
         Plist::Dictionary(d) => Ok(d),
         _ => Err(format!("{context}: expected a dictionary")),
     }
 }
 
-fn layer_coordinates(layer: &Dict) -> Option<Vec<f64>> {
+pub(crate) fn layer_coordinates(layer: &Dict) -> Option<Vec<f64>> {
     let attr = layer.get("attr").or_else(|| layer.get("attributes"))?;
     let coords = attr.as_dict()?.get("coordinates")?.as_array()?;
     coords.iter().map(Plist::as_f64).collect()
@@ -162,7 +162,7 @@ fn fnv1a(seed: u64, bytes: &[u8]) -> u64 {
 
 /// Deterministic UUID from content, like editor.rs `brace_layer_id`:
 /// identical inputs give identical ids, so rebuilds are byte-stable.
-fn det_uuid(buf: &[u8]) -> String {
+pub(crate) fn det_uuid(buf: &[u8]) -> String {
     let h1 = fnv1a(0xcbf29ce484222325, buf);
     let h2 = fnv1a(0x84222325cbf29ce4, buf);
     let mut b = [0u8; 16];
@@ -349,21 +349,21 @@ fn fit(r: f64, phi: f64, l1: f64, l2: f64, stats: &mut Stats) -> (f64, f64, f64)
 // Font-level context
 // ---------------------------------------------------------------------------
 
-struct Master {
-    id: String,
-    name: String,
-    values: Vec<f64>,
+pub(crate) struct Master {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) values: Vec<f64>,
 }
 
-struct FontCtx {
-    axis_tags: Vec<String>,
-    masters: Vec<Master>,
-    xopq_idx: usize,
-    xtra_idx: Option<usize>,
-    plane: Vec<(usize, String)>,
+pub(crate) struct FontCtx {
+    pub(crate) axis_tags: Vec<String>,
+    pub(crate) masters: Vec<Master>,
+    pub(crate) xopq_idx: usize,
+    pub(crate) xtra_idx: Option<usize>,
+    pub(crate) plane: Vec<(usize, String)>,
 }
 
-fn font_ctx(root: &Dict) -> Result<Option<FontCtx>, String> {
+pub(crate) fn font_ctx(root: &Dict) -> Result<Option<FontCtx>, String> {
     let mut axis_tags = Vec::new();
     if let Some(Plist::Array(axes)) = root.get("axes") {
         for a in axes {
@@ -662,8 +662,32 @@ pub(crate) fn round_source(
     let mut plist = Plist::parse(source).map_err(|e| format!("could not parse .glyphs: {e}"))?;
     let root = as_dict_mut(&mut plist, ".glyphs root")?;
 
+    // Guardrail, not a silent no-op — mirrors the desktop engine: an
+    // enabled transform that rounds nothing must fail loudly.
+    let declared: Vec<String> = root
+        .get("axes")
+        .and_then(Plist::as_array)
+        .map(|axes| {
+            axes.iter()
+                .filter_map(|a| {
+                    a.as_dict()
+                        .and_then(|d| d.get("tag"))
+                        .and_then(Plist::as_str)
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // XTRA is optional — its share of the blend is zero without the axis.
+    if !declared.iter().any(|d| d.eq_ignore_ascii_case("XOPQ")) {
+        let tags = if declared.is_empty() { "none".to_string() } else { declared.join(", ") };
+        return Err(format!(
+            "round corners needs the parametric stroke axis XOPQ (the radius \
+             formula blends it with XTRA) — this source declares: {tags}"
+        ));
+    }
     let Some(ctx) = font_ctx(root)? else {
-        return Ok((source.to_string(), "round_corners: no XOPQ axis — nothing rounded".into()));
+        return Err("round corners: no XOPQ axis — nothing to follow".into());
     };
     let over_model = override_model(&ctx, &params)?;
 
@@ -686,7 +710,7 @@ pub(crate) fn round_source(
     // Axis mode: grow the font by the ROND axis before touching glyphs.
     let mut twin_master_id: HashMap<String, String> = HashMap::new();
     if let Some(max) = axis_max {
-        extend_for_axis(root, max, &ctx, &mut twin_master_id)?;
+        extend_axis(root, "ROND", "Rounding", max, "Rounded", &mut twin_master_id)?;
     }
 
     let master_ids: HashSet<String> = ctx.masters.iter().map(|m| m.id.clone()).collect();
@@ -724,23 +748,26 @@ pub(crate) fn round_source(
     Ok((plist.to_string(), summary))
 }
 
-/// Grow the font by a ROND axis: axis entry, every master/instance and
-/// coordinate layer gains a trailing 0, every master gets a twin at
-/// `axis_max` (deterministic id) to hold the rounded geometry.
-fn extend_for_axis(
+/// Grow the font by one studio axis: axis entry, every master/instance
+/// and coordinate layer gains a trailing 0, every master gets a twin at
+/// `end_value` (deterministic id) to hold that axis's end geometry —
+/// rounding's ROND, slanting's slnt.
+pub(crate) fn extend_axis(
     root: &mut Dict,
-    axis_max: f64,
-    ctx: &FontCtx,
+    tag: &str,
+    name: &str,
+    end_value: f64,
+    twin_suffix: &str,
     twin_master_id: &mut HashMap<String, String>,
 ) -> Result<(), String> {
     match root.get_mut("axes") {
         Some(Plist::Array(axes)) => {
             let mut d = Dict::new();
-            d.insert(SmolStr::from("name"), Plist::String("Rounding".into()));
-            d.insert(SmolStr::from("tag"), Plist::String("ROND".into()));
+            d.insert(SmolStr::from("name"), Plist::String(name.into()));
+            d.insert(SmolStr::from("tag"), Plist::String(tag.into()));
             axes.push(Plist::Dictionary(d));
         }
-        _ => return Err("no axes array — the ROND axis needs Glyphs 3 axes".into()),
+        _ => return Err(format!("no axes array — the {tag} axis needs Glyphs 3 axes")),
     }
     // Masters: extend, then append twins (clones carry metrics etc.).
     let mut twins: Vec<Plist> = Vec::new();
@@ -758,16 +785,16 @@ fn extend_for_axis(
                 let Some(md) = m.as_dict() else { continue };
                 let mut td = md.clone();
                 let id = md.get("id").and_then(Plist::as_str).unwrap_or("").to_string();
-                let name = md.get("name").and_then(Plist::as_str).unwrap_or(&id).to_string();
-                let tid = det_uuid(format!("{id}:ROND").as_bytes());
+                let mname = md.get("name").and_then(Plist::as_str).unwrap_or(&id).to_string();
+                let tid = det_uuid(format!("{id}:{tag}").as_bytes());
                 td.insert(SmolStr::from("id"), Plist::String(tid.clone().into()));
                 td.insert(
                     SmolStr::from("name"),
-                    Plist::String(format!("{name} Rounded").into()),
+                    Plist::String(format!("{mname} {twin_suffix}").into()),
                 );
                 if let Some(Plist::Array(vals)) = td.get_mut("axesValues") {
                     if let Some(last) = vals.last_mut() {
-                        *last = num_plist(axis_max);
+                        *last = num_plist(end_value);
                     }
                 }
                 twin_master_id.insert(id, tid);
@@ -777,7 +804,6 @@ fn extend_for_axis(
         }
         _ => return Err("no fontMaster array".into()),
     }
-    let _ = ctx;
     if let Some(Plist::Array(instances)) = root.get_mut("instances") {
         for inst in instances.iter_mut() {
             if let Plist::Dictionary(idict) = inst {
@@ -1004,8 +1030,13 @@ fn round_glyph(
                     .get(&l.layer_id)
                     .ok_or("twin master missing")?
                     .clone();
-                td.insert(SmolStr::from("layerId"), Plist::String(tid.clone().into()));
-                td.insert(SmolStr::from("associatedMasterId"), Plist::String(tid.into()));
+                td.insert(SmolStr::from("layerId"), Plist::String(tid.into()));
+                // No associatedMasterId: glyphs-reader treats ANY layer
+                // carrying one — even equal to its own layerId — as a
+                // non-master (backup) layer and drops its geometry.
+                // glyphsLib omits the key when equal on save, which is
+                // why the desktop pipeline never hit this.
+                td.remove("associatedMasterId");
             } else {
                 let tid = det_uuid(format!("{gname}:{}:ROND-twin", l.layer_id).as_bytes());
                 td.insert(SmolStr::from("layerId"), Plist::String(tid.into()));

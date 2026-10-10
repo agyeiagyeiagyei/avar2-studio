@@ -104,13 +104,6 @@ export function pin_corner(font_bytes: Uint8Array, request_json: string): Uint8A
  */
 export function regen_stat(font_bytes: Uint8Array): Uint8Array;
 
-/**
- * Round every corner of a .glyphs source (the round_corners
- * transform, source-stage): the same engine the desktop studio runs,
- * ported — returns the transformed source text for `compile_glyphs` /
- * `compile_with_overlays`. `control_json` is the `-control.json`
- * sidecar (correction targets), when the project has one.
- */
 export function round_corners_source(source: string, params_json: string, control_json?: string | null): string;
 
 /**
@@ -127,6 +120,19 @@ export function set_default_location(font_bytes: Uint8Array, default_location_js
  * appear in font pickers or design apps.
  */
 export function set_hidden_axes(font_bytes: Uint8Array, hidden_tags_json: string): Uint8Array;
+
+/**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ * Slant a .glyphs source (the slant transform, source-stage): the
+ * same engine the desktop studio runs, ported — returns the
+ * transformed source text. Runs BEFORE round_corners_source, so
+ * rounds land on the slanted drawings.
+ */
+export function slant_source(source: string, params_json: string): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -145,6 +151,7 @@ export interface InitOutput {
     readonly round_corners_source: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly slant_source: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly measure_at: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

@@ -21,7 +21,7 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
+function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
   onControlAxisReseed, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
@@ -243,15 +243,38 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           // Every axis renders as a plain AxisControl. SPAC support is
           // deferred; if a source happens to declare a SPAC axis it just
           // renders as a normal parametric/avar2 axis with no special UX.
-          const renderAxis = (axis) => (
-            <AxisControl
-              key={axis.tag}
-              axis={axis}
-              value={coordinates[axis.tag] ?? axis.default}
-              onChange={(value) => onAxisChange(axis.tag, value)}
-              disabled={disabled}
-            />
-          );
+          const renderAxis = (axis) => {
+            // Badge-governed transform axes (ROND/slnt/GRAD): the row's
+            // badge sets the per-style value, so the slider here would
+            // be a lie — it renders inert with a pointer to the badge
+            // and the Preview tab (where the axis stays fully live).
+            const badgeGoverned = !!(badgeGovernedTags && badgeGovernedTags.has(axis.tag));
+            if (badgeGoverned) {
+              return (
+                <div
+                  key={axis.tag}
+                  className="axis-secondary-off"
+                  title={`${axis.tag} is set per style from the badge on each instance row — explore the axis on the Preview tab.`}
+                >
+                  <AxisControl
+                    axis={axis}
+                    value={coordinates[axis.tag] ?? axis.default}
+                    onChange={() => {}}
+                    disabled
+                  />
+                </div>
+              );
+            }
+            return (
+              <AxisControl
+                key={axis.tag}
+                axis={axis}
+                value={coordinates[axis.tag] ?? axis.default}
+                onChange={(value) => onAxisChange(axis.tag, value)}
+                disabled={disabled}
+              />
+            );
+          };
 
           // Sidebar only renders the axes that actively deform the font
           // (has_master_coverage=true) plus the GRAD axis when grade is

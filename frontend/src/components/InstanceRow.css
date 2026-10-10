@@ -348,6 +348,14 @@
   border-color: var(--primary-border);
 }
 
+/* Default origin — this row's inputs sit at the axis defaults; its
+   parametric values are the compiled font's resting state. */
+.origin-badge-default {
+  background: #fff4e0;
+  color: #8a4b00;
+  border-color: #f1c277;
+}
+
 /* Grade indicator — this style carries a grade (darkening at fixed advance). */
 .origin-badge-grade {
   background: var(--zinc-800);

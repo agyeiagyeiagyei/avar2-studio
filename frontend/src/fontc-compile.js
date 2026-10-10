@@ -48,9 +48,11 @@ function send(message) {
 
 /** .glyphs source string → TTF bytes. `round` ({params, control}, JSON
  *  strings) runs the round_corners engine over the source first — the
- *  same source-stage transform the desktop studio applies to its shadow. */
-export function compileFont(source, round = null) {
-  return send({ kind: 'compile', source, round: round?.params ?? null, control: round?.control ?? null });
+ *  same source-stage transform the desktop studio applies to its shadow.
+ *  `slant` (params JSON string) runs the slant engine before it, the
+ *  desktop source_priority order. */
+export function compileFont(source, round = null, slant = null) {
+  return send({ kind: 'compile', source, round: round?.params ?? null, control: round?.control ?? null, slant });
 }
 
 /** .glyphs source + one glyph name → the source-level glyph model JSON
@@ -63,10 +65,10 @@ export async function glyphModel(source, glyph) {
 /** .glyphs source + an overlay request ({axes, overlays}) → TTF bytes with
  *  the axes declared and the drawn brace layers spliced in at the Plist
  *  level (the desktop shadow-build path, source-side). */
-export function compileWithOverlays(source, request, round = null) {
+export function compileWithOverlays(source, request, round = null, slant = null) {
   return send({
     kind: 'compile-overlays', source, request: JSON.stringify(request),
-    round: round?.params ?? null, control: round?.control ?? null,
+    round: round?.params ?? null, control: round?.control ?? null, slant,
   });
 }
 

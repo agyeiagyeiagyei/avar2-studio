@@ -45,3 +45,15 @@ fn round_corners_matches_the_desktop_engine() {
         .expect("run comparator");
     assert!(status.success(), "oracle comparison failed");
 }
+
+/// Guardrail: a source without XOPQ/XTRA must be refused with a clear
+/// message, not silently left sharp (the inert-transform bug class).
+#[test]
+fn round_corners_refuses_a_source_without_parametric_axes() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(manifest.join("../../frontend/e2e/fixtures/WasmTest.glyphs"))
+        .expect("read WasmTest.glyphs");
+    let msg = fontc_web::round_corners_source_result(&source, PARAMS_PLAIN, None)
+        .expect_err("wght-only source must be refused");
+    assert!(msg.contains("XOPQ"), "unhelpful message: {msg}");
+}
