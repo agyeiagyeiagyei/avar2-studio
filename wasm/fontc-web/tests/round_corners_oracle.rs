@@ -57,3 +57,40 @@ fn round_corners_refuses_a_source_without_parametric_axes() {
         .expect_err("wght-only source must be refused");
     assert!(msg.contains("XOPQ"), "unhelpful message: {msg}");
 }
+
+/// Overlap-formed counters (Crispy's b/n/q pattern: a single
+/// self-crossing contour, a folded counter path): classification follows
+/// the rendered fill, not contour identity. CrispyMini has no such
+/// glyph, so the main oracle cannot catch drift here — this one can.
+const PARAMS_OVERRIDE_MINI: &str = r#"{"outer_pct":20.0,"inner_pct":5.0,"outer_xtra_pct":3.0,"inner_xtra_pct":1.0,"outer_min":2.0,"inner_min":1.0,"master_overrides":{"Bold":{"outer":150.0}}}"#;
+
+#[test]
+fn round_corners_matches_the_desktop_engine_on_folded_counters() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source_path = manifest.join("tests/fixtures/FoldedMini.glyphs");
+    let python = std::env::var("AVAR2_PYTHON")
+        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+
+    let source = std::fs::read_to_string(&source_path).expect("read FoldedMini");
+
+    let bake = fontc_web::round_corners_source(source.clone(), PARAMS_OVERRIDE_MINI, None)
+        .expect("rust override round");
+    let axis = fontc_web::round_corners_source(source, PARAMS_PLAIN, None)
+        .expect("rust plain round");
+    std::fs::write("/tmp/round-fold-bake-rs.glyphs", &bake).expect("write bake output");
+    std::fs::write("/tmp/round-fold-axis-rs.glyphs", &axis).expect("write axis output");
+    std::fs::write("/tmp/round-fold-bake-params.json", PARAMS_OVERRIDE_MINI).expect("write params");
+    std::fs::write("/tmp/round-fold-axis-params.json", PARAMS_PLAIN).expect("write params");
+
+    let comparator = manifest.join("spike/compare_round_corners.py");
+    let status = Command::new(&python)
+        .arg(comparator)
+        .arg(&source_path)
+        .arg("/tmp/round-fold-bake-rs.glyphs")
+        .arg("/tmp/round-fold-bake-params.json")
+        .arg("/tmp/round-fold-axis-rs.glyphs")
+        .arg("/tmp/round-fold-axis-params.json")
+        .status()
+        .expect("run comparator");
+    assert!(status.success(), "folded-counter oracle comparison failed");
+}

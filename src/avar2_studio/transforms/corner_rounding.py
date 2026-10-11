@@ -16,9 +16,13 @@ XOPQ reads fully sharp exactly where its letterforms are largest:
 with floors for the light end, clamped to the room the corner's shorter
 segment leaves, collapsing to the corner point where a hairline leaves
 none. Corners are classified per layer, because counters can evert
-between masters. A correction layer draws the outline "as if at"
-another parametric point, so its radius follows its TARGET's XOPQ and
-XTRA where the control sidecar declares them.
+between masters — and classified by the RENDERED fill (nonzero winding)
+probed around each corner, not by contour identity or direction, because
+counters formed by overlap (a self-crossing contour, a shell pair, a
+folded counter path) render differently than they are drawn. A
+correction layer draws the outline "as if at" another parametric point,
+so its radius follows its TARGET's XOPQ and XTRA where the control
+sidecar declares them.
 
 Proven on XCrispy (18 masters) before it became a transform: identical
 node structure everywhere, advances untouched, fontc accepts the
@@ -46,23 +50,28 @@ MIN_TURN_DEG = 1.0
 #: round instead: past ~127° of turn the effective radius eases off.
 T_CAP = 2.0
 
+#: Corner classification probes the rendered fill on a circle around the
+#: corner whose radius scales to the feature: a quarter of the gap to the
+#: nearest non-incident segment, never wider than this — Crispy's hairline
+#: masters are shells two units apart, and a fixed probe would jump them.
+PROBE_MAX = 4.0
+
+#: Below this probe radius the nearest feature is sub-grid: nothing to
+#: classify safely, so the corner collapses.
+PROBE_MIN = 0.25
+
 
 def _pts(path) -> List[Tuple[float, float]]:
     return [(float(n.position.x), float(n.position.y)) for n in path.nodes]
 
-def _area(p) -> float:
-    return sum(p[i][0] * p[(i + 1) % len(p)][1] - p[(i + 1) % len(p)][0] * p[i][1]
-               for i in range(len(p))) / 2.0
-
-def _inside(pt, poly) -> bool:
-    x, y = pt
-    c = False
-    for i in range(len(poly)):
-        x1, y1 = poly[i]
-        x2, y2 = poly[(i + 1) % len(poly)]
-        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
-            c = not c
-    return c
+def _seg_dist(pt, a, b) -> float:
+    """Distance from ``pt`` to the segment a-b (control-polygon distance —
+    the same approximation the winding probes make)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if dx == 0 and dy == 0:
+        return math.hypot(pt[0] - a[0], pt[1] - a[1])
+    t = max(0.0, min(1.0, ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(pt[0] - (a[0] + t * dx), pt[1] - (a[1] + t * dy))
 
 def _fit(r, phi, l1, l2, stats):
     """(t, k, effective radius) for a round of radius ``r`` on a corner
@@ -94,6 +103,36 @@ def _winding(pt, poly) -> int:
         elif y2 <= y < y1 and (x2 - x1) * (y - y1) - (x - x1) * (y2 - y1) < 0:
             w -= 1
     return w
+
+
+def _filled(pt, polys) -> bool:
+    """What the renderer draws at ``pt``: nonzero winding over ALL the
+    layer's contours. Overlap constructions — a self-crossing contour
+    folding a counter, a shell pair, a folded counter path — all answer
+    correctly, where contour identity or direction cannot."""
+    return sum(_winding(pt, q) for q in polys) != 0
+
+
+def _white_span(b, u1, u2, eps, polys):
+    """Classify a corner by the rendered fill around it. Within ``eps`` of
+    the corner only its two incident edges exist, so the neighborhood is
+    exactly two sectors and two probes decide it. Returns "hidden" (all
+    ink — construction, not a visible corner), "ambiguous" (all white or
+    no room to probe — nothing to round safely), or "outer"/"inner" by
+    the white sector's span (>180° = ink-convex, <180° = ink-concave)."""
+    th1 = math.atan2(-u1[1], -u1[0])
+    th2 = math.atan2(u2[1], u2[0])
+    span_a = (th2 - th1) % (2.0 * math.pi)
+    mid_a = th1 + span_a / 2.0
+    mid_b = th2 + (2.0 * math.pi - span_a) / 2.0
+    ink_a = _filled((b[0] + eps * math.cos(mid_a), b[1] + eps * math.sin(mid_a)), polys)
+    ink_b = _filled((b[0] + eps * math.cos(mid_b), b[1] + eps * math.sin(mid_b)), polys)
+    if ink_a and ink_b:
+        return "hidden"
+    if not ink_a and not ink_b:
+        return "ambiguous"
+    white = span_a if not ink_a else 2.0 * math.pi - span_a
+    return "outer" if white > math.pi else "inner"
 
 
 def _snap(v: float) -> float:
@@ -372,7 +411,8 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
     out_min = float(params.get("outer_min", 2.0))
     in_min = float(params.get("inner_min", 1.0))
     stats = {"corners": 0, "layers": 0, "collapsed": 0, "clamped": 0, "hidden": 0,
-             "concentric": 0, "overrides": 0, "twins": 0, "skipped_layers": []}
+             "ambiguous": 0, "concentric": 0, "overrides": 0, "twins": 0,
+             "skipped_layers": []}
 
     # Guardrail, not a silent no-op: without a stroke axis the radius
     # formula has nothing to follow, and "enabled but sharp" is exactly
@@ -507,27 +547,8 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
             for pi, corners in path_corners.items():
                 P = polys[pi]
                 n = len(P)
-                s = 1 if _area(P) > 0 else -1
-                is_counter = sum(1 for qi, q in enumerate(polys)
-                                 if qi != pi and _inside(P[0], q)) % 2 == 1
                 for i in corners:
                     a, b, c = P[(i - 1) % n], P[i], P[(i + 1) % n]
-                    # A corner buried in ink is construction, not a visible
-                    # corner: Crispy overlaps pieces (R's leg over its
-                    # stem), and rounding a buried corner pulls the piece
-                    # back from the junction, letting the counter show
-                    # through as a white wedge. Buried means both sides of
-                    # the corner render as ink: the other contours' winding
-                    # is nonzero and stays nonzero with this contour's own
-                    # winding added — a counter corner (other −1, own +1)
-                    # passes, an overlap corner (−1 −1) does not. Collapse
-                    # it in this layer; where another master pulls the
-                    # pieces apart, the same corner rounds there.
-                    w_other = sum(_winding(b, q) for qi, q in enumerate(polys) if qi != pi)
-                    if w_other != 0 and w_other + s != 0:
-                        plans.setdefault((id(L), pi), {})[i] = (0.0, 0.0)
-                        stats["hidden"] += 1
-                        continue
                     v1 = (b[0] - a[0], b[1] - a[1])
                     v2 = (c[0] - b[0], c[1] - b[1])
                     l1 = math.hypot(*v1)
@@ -538,7 +559,31 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
                     if phi < MIN_TURN_DEG or l1 < 1e-9 or l2 < 1e-9:
                         plans.setdefault((id(L), pi), {})[i] = (0.0, 0.0)
                         continue
-                    if ((cross > 0) == (s > 0)) != is_counter:
+                    # What renders around the corner decides, not contour
+                    # identity: Crispy forms counters by overlap (a single
+                    # self-crossing contour, a shell pair, a folded counter
+                    # path), and there contour direction or the winding of
+                    # OTHER contours says nothing reliable. A corner whose
+                    # neighborhood renders as all ink is construction, not a
+                    # visible corner (R's leg in its stem, a fold flap):
+                    # rounding it pulls the outline back and lets white show
+                    # through — or bites the counter. Where another master
+                    # pulls the pieces apart, the same corner rounds there.
+                    gap = min(_seg_dist(b, q[j], q[(j + 1) % len(q)])
+                              for qi, q in enumerate(polys) for j in range(len(q))
+                              if not (qi == pi and (j == i or j == (i - 1) % n)))
+                    eps = min(PROBE_MAX, 0.25 * gap)
+                    if eps < PROBE_MIN:
+                        plans.setdefault((id(L), pi), {})[i] = (0.0, 0.0)
+                        stats["ambiguous"] += 1
+                        continue
+                    cls = _white_span(b, (v1[0] / l1, v1[1] / l1),
+                                      (v2[0] / l2, v2[1] / l2), eps, polys)
+                    if cls in ("hidden", "ambiguous"):
+                        plans.setdefault((id(L), pi), {})[i] = (0.0, 0.0)
+                        stats[cls] += 1
+                        continue
+                    if cls == "outer":
                         r = max(max(out_pct * w + out_xtra * xt, out_min) + d_out, 0.0)
                         t, k, r_eff = _fit(r, phi, l1, l2, stats)
                         plans.setdefault((id(L), pi), {})[i] = (t, k)

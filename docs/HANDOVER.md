@@ -346,9 +346,20 @@ as hand drawings. Four rules stack:
   round's radius, reached through ink, is that corner's wall partner and
   takes (outer radius − wall) instead of the counter share — otherwise
   the outer arc everts a hairline wall.
-- **Buried corners**: a corner inside the glyph's other contours by
-  signed winding (both sides ink) is overlap construction (R's leg over
-  its stem) and holds its exact point per layer.
+- **Classification follows the rendered fill**, never contour identity
+  (October 2026, reworked for overlap-formed counters): Crispy builds
+  counters as overlap — b/n/q are single self-crossing contours, some
+  masters fold the counter path over itself — so direction sign,
+  even-odd containment, and other-contour winding all misread them
+  (fold corners took the outer radius and bit the white: "counters
+  rounded in on themselves"). Each corner now probes the nonzero
+  winding — the renderer's own rule — at the two sector midpoints on a
+  circle around it, radius a quarter of the gap to the nearest
+  non-incident segment (clamped to 0.25..4 units, so hairline shells
+  two units apart still resolve). Both probes ink → buried construction
+  (R's leg in its stem, a fold flap), collapses; both white or no room
+  to probe → ambiguous, collapses; otherwise the white sector's span
+  picks ink-convex (outer) vs ink-concave (inner).
 - **Per-master overrides** (`master_overrides`, {name: {outer, inner}}
   in units): pinned deltas on the parametric plane (XOPQ/XTRA/YOPQ) via
   a fontTools VariationModel — exact at named masters, exactly zero at
@@ -378,7 +389,10 @@ VariationModel) and ROND-axis mode (deterministic twin ids, so rebuilds
 are byte-stable). The cargo oracle
 (`tests/round_corners_oracle.rs` + `spike/compare_round_corners.py`)
 runs the Python engine on CrispyMini with identical params and compares
-node-for-node — green at delta 0.000000 over ~77k nodes, both modes.
+node-for-node — green at delta 0.000000 over ~77k nodes, both modes —
+plus `tests/fixtures/FoldedMini.glyphs` (real folded-counter geometry:
+Crispy's n and d), which is what catches classification drift on
+overlap-built counters.
 `static-api.js` wires it through `roundOption(dataset)` into
 `compileUploadSource` (and `rebuildFromSource` for bundle imports);
 glyphs 2 sources are refused with a clear message. One parity gap, by

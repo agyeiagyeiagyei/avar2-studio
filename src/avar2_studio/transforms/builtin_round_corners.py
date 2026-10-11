@@ -150,9 +150,9 @@ class RoundCornersTransform(Transform):
         stats = corner_rounding.round_font(font, params, targets=targets, log=ctx.log,
                                            axis_max=100.0)
         ctx.log("round_corners: %d corners over %d layers; %d clamped, %d collapsed, "
-                "%d buried in overlaps, %d concentric at thin walls%s%s"
+                "%d buried in ink, %d ambiguous, %d concentric at thin walls%s%s"
                 % (stats["corners"], stats["layers"], stats["clamped"], stats["collapsed"],
-                   stats["hidden"], stats["concentric"],
+                   stats["hidden"], stats["ambiguous"], stats["concentric"],
                    ", %d master override(s)" % stats["overrides"] if stats.get("overrides") else "",
                    "; ROND axis 0-100 (default 0 = sharp), %d twin layers" % stats["twins"]))
         return stats

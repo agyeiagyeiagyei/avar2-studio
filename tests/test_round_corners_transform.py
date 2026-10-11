@@ -407,6 +407,129 @@ def test_concentric_reverts_where_the_wall_is_thick():
     assert (250.0, 200.0) in pts and (200.0, 250.0) in pts, "5% share of 1000 = 50"
 
 
+# --- overlap-formed counters -------------------------------------------------
+#
+# Crispy draws many counters as overlap, not as a nested contour: b/n/q are
+# single self-overlapping contours, and some masters fold the counter contour
+# over itself. Classification must follow the RENDERED fill (nonzero winding),
+# not contour identity — otherwise fold corners round while buried in ink, or
+# take the outer radius, and the white counter gets bitten (the "counters
+# rounded in on themselves" defect).
+
+# The real 'n' layer of Crispy.glyphs, master "47-1462-1": one contour whose
+# fold forms the counter slot; nodes 2 and 3 sit exactly ON the long top-edge
+# segment, so the rendered silhouette there is straight.
+N_FOLDED = [(2974.0, 0.0), (2974.0, 720.0), (3870.0, 1200.0), (3048.0, 1200.0),
+            (3048.0, 0.0), (5972.0, 0.0), (5972.0, 1200.0), (878.0, 1200.0),
+            (50.0, 759.0), (50.0, 0.0)]
+
+# The real 'd' layer of Crispy.glyphs, master "47-1462-275": the counter path
+# folds over itself (edge 0->1 crosses edge 2->3); the rendered white is a
+# diagonal sliver and four of the six counter corners sit inside ink.
+D_BODY = [(5216.0, 0.0), (5992.0, 625.0), (5992.0, 1600.0), (3068.0, 1600.0),
+          (3068.0, 1200.0), (639.0, 1200.0), (50.0, 723.0), (50.0, 0.0)]
+D_COUNTER = [(2974.0, 645.0), (3103.0, 738.0), (3068.0, 738.0),
+             (3068.0, 629.0), (2876.0, 472.0), (2974.0, 472.0)]
+
+
+def quads(layer, path_index=0):
+    """Each corner became (T1 line, H1, H2, T2 curve): groups of 4."""
+    nodes = layer.paths[path_index].nodes
+    return [[(float(nodes[j].position.x), float(nodes[j].position.y))
+             for j in range(i, i + 4)] for i in range(0, len(nodes), 4)]
+
+
+def rendered_fill(pt, layer):
+    """Nonzero winding at pt over the layer's paths with cubics flattened —
+    the renderer's ground truth for what is ink."""
+    polys = []
+    for path in layer.paths:
+        pts = []
+        cur = None
+        i = 0
+        nodes = path.nodes
+        while i < len(nodes):
+            nd = nodes[i]
+            pos = (float(nd.position.x), float(nd.position.y))
+            kind = str(nd.type)
+            if kind == "curve":
+                p1 = (float(nodes[i - 2].position.x), float(nodes[i - 2].position.y))
+                p2 = (float(nodes[i - 1].position.x), float(nodes[i - 1].position.y))
+                for t in (0.25, 0.5, 0.75, 1.0):
+                    mt = 1.0 - t
+                    pts.append((mt ** 3 * cur[0] + 3 * mt * mt * t * p1[0]
+                                + 3 * mt * t * t * p2[0] + t ** 3 * pos[0],
+                                mt ** 3 * cur[1] + 3 * mt * mt * t * p1[1]
+                                + 3 * mt * t * t * p2[1] + t ** 3 * pos[1]))
+            elif kind != "offcurve":
+                pts.append(pos)
+            cur = pos
+            i += 1
+        polys.append(pts)
+    return sum(corner_rounding._winding(pt, q) for q in polys) != 0
+
+
+def test_a_fold_corner_on_a_straight_rendered_edge_stays_put():
+    """Nodes 2 and 3 of the folded n lie on the rendered top edge — no
+    corner exists there, so nothing may round (the old rule gave them the
+    outer radius; the fold overlap refills the bite at THIS master, but
+    the arcs surface where interpolating masters unfold differently)."""
+    font, L = xopq_font(path_of(*N_FOLDED))
+    stats = corner_rounding.round_font(font, PARAMS)
+    q = quads(L)
+    assert stats["ambiguous"] == 2
+    assert q[2] == [(3870.0, 1200.0)] * 4, "on the top edge: collapsed"
+    assert q[3] == [(3048.0, 1200.0)] * 4, "on the top edge: collapsed"
+    # the slot's real corners still round: node 1 inner (5% of 1000 = 50,
+    # t = 50*tan(30.9)), node 0 outer (t = 150 at 90 degrees)
+    assert q[1][0] == pytest.approx((2974.0, 690.0), abs=1), "inner round at the slot"
+    assert q[0][0] == pytest.approx((2824.0, 0.0), abs=1), "outer round at the baseline"
+    assert rendered_fill((3010.0, 400.0), L) is False, "the counter slot stays white"
+
+
+def test_a_self_folding_counter_rounds_only_its_live_white_corners():
+    """The d counter path folds over itself: four of its six corners render
+    inside ink and must collapse; the two live ones take the inner share —
+    never the outer radius that pinches the white. (The white probes pass
+    before and after: at this master the fold refills the wrong arcs —
+    they pin the render while the quad assertions pin the mechanism.)"""
+    font, L = xopq_font(path_of(*D_BODY), path_of(*D_COUNTER))
+    stats = corner_rounding.round_font(font, PARAMS)
+    q = quads(L, 1)
+    for i in (1, 2, 4, 5):
+        assert q[i] == [D_COUNTER[i]] * 4, f"corner {i} renders buried"
+    assert stats["hidden"] == 4
+    # the live white corners: inner r = 50, t = 50*tan(turn/2)
+    assert q[0][0] == pytest.approx((2974.0, 619.0), abs=1)
+    assert q[3][0] == pytest.approx((3068.0, 653.0), abs=1)
+    assert rendered_fill((3000.0, 645.0), L) is False, "the white sliver survives"
+    assert rendered_fill((3055.0, 695.0), L) is False
+
+
+def test_a_hairline_shell_rounds_both_sides():
+    """Crispy's hairline masters are two contours 2 units apart: probes
+    must scale to the feature, not across it — outer corners round outer,
+    the shell's inner side pairs concentrically. (Passes before and after:
+    pins the thin-feature behavior.)"""
+    font, L = xopq_font(box(0, 400, 0, 400), rbox(2, 398, 2, 398))
+    corner_rounding.round_font(font, PARAMS)
+    assert (0.0, 150.0) in nodes_of(L, 0), "outer r = 150"
+    # concentric r = 150 - wall 2 = 148, not the 50-unit counter share
+    assert (150.0, 2.0) in nodes_of(L, 1)
+    assert (52.0, 2.0) not in nodes_of(L, 1)
+
+
+def test_a_fully_cancelled_piece_collapses():
+    """A piece exactly cancelled by a counter-wound copy renders as
+    nothing; its corners sit in white space on every side and must not
+    round into visibility."""
+    font, L = xopq_font(box(0, 400, 0, 400), rbox(0, 400, 0, 400))
+    stats = corner_rounding.round_font(font, PARAMS)
+    assert all(node == corner for quad, corner in zip(quads(L, 0), [(0.0, 0.0), (400.0, 0.0),
+               (400.0, 400.0), (0.0, 400.0)]) for node in quad)
+    assert stats["ambiguous"] == 8
+
+
 OVERRIDE_PARAMS = dict(PARAMS, master_overrides={"Bold": {"outer": 333.0, "inner": 11.0}})
 
 

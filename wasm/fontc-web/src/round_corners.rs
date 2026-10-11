@@ -37,6 +37,12 @@ type Dict = BTreeMap<SmolStr, Plist>;
 const ROOM: f64 = 0.48;
 const MIN_TURN_DEG: f64 = 1.0;
 const T_CAP: f64 = 2.0;
+// Corner classification probes the rendered fill on a circle around the
+// corner whose radius scales to the feature: a quarter of the gap to the
+// nearest non-incident segment, never wider than PROBE_MAX (hairline
+// shells are two units apart); below PROBE_MIN the corner collapses.
+const PROBE_MAX: f64 = 4.0;
+const PROBE_MIN: f64 = 0.25;
 const PLANE_TAGS: [&str; 3] = ["XOPQ", "XTRA", "YOPQ"];
 
 // ---------------------------------------------------------------------------
@@ -273,26 +279,13 @@ fn pts(p: &PathData) -> Vec<(f64, f64)> {
     p.nodes.iter().map(|n| (n.x, n.y)).collect()
 }
 
-fn area(p: &[(f64, f64)]) -> f64 {
-    let n = p.len();
-    (0..n)
-        .map(|i| p[i].0 * p[(i + 1) % n].1 - p[(i + 1) % n].0 * p[i].1)
-        .sum::<f64>()
-        / 2.0
-}
-
-fn inside(pt: (f64, f64), poly: &[(f64, f64)]) -> bool {
-    let (x, y) = pt;
-    let n = poly.len();
-    let mut c = false;
-    for i in 0..n {
-        let (x1, y1) = poly[i];
-        let (x2, y2) = poly[(i + 1) % n];
-        if (y1 > y) != (y2 > y) && x < (x2 - x1) * (y - y1) / (y2 - y1) + x1 {
-            c = !c;
-        }
+fn seg_dist(pt: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    if dx == 0.0 && dy == 0.0 {
+        return ((pt.0 - a.0).powi(2) + (pt.1 - a.1).powi(2)).sqrt();
     }
-    c
+    let t = (((pt.0 - a.0) * dx + (pt.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    ((pt.0 - (a.0 + t * dx)).powi(2) + (pt.1 - (a.1 + t * dy)).powi(2)).sqrt()
 }
 
 fn winding(pt: (f64, f64), poly: &[(f64, f64)]) -> i64 {
@@ -311,6 +304,45 @@ fn winding(pt: (f64, f64), poly: &[(f64, f64)]) -> i64 {
     w
 }
 
+/// What the renderer draws at `pt`: nonzero winding over ALL contours.
+/// Overlap constructions (self-crossing contours, shell pairs, folded
+/// counters) all answer correctly where contour identity cannot.
+fn filled(pt: (f64, f64), polys: &[Vec<(f64, f64)>]) -> bool {
+    polys.iter().map(|q| winding(pt, q)).sum::<i64>() != 0
+}
+
+enum Span {
+    Outer,
+    Inner,
+    Hidden,
+    Ambiguous,
+}
+
+/// Classify a corner by the rendered fill around it. Within `eps` only
+/// the two incident edges exist, so the two sector midpoints decide:
+/// all ink -> hidden (construction, not a visible corner), all white ->
+/// ambiguous, otherwise the white sector's span picks outer (>180deg)
+/// or inner (<180deg).
+fn white_span(b: (f64, f64), u1: (f64, f64), u2: (f64, f64), eps: f64,
+              polys: &[Vec<(f64, f64)>]) -> Span {
+    let th1 = (-u1.1).atan2(-u1.0);
+    let th2 = u2.1.atan2(u2.0);
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let span_a = (th2 - th1).rem_euclid(two_pi);
+    let mid_a = th1 + span_a / 2.0;
+    let mid_b = th2 + (two_pi - span_a) / 2.0;
+    let ink_a = filled((b.0 + eps * mid_a.cos(), b.1 + eps * mid_a.sin()), polys);
+    let ink_b = filled((b.0 + eps * mid_b.cos(), b.1 + eps * mid_b.sin()), polys);
+    if ink_a && ink_b {
+        return Span::Hidden;
+    }
+    if !ink_a && !ink_b {
+        return Span::Ambiguous;
+    }
+    let white = if !ink_a { span_a } else { two_pi - span_a };
+    if white > std::f64::consts::PI { Span::Outer } else { Span::Inner }
+}
+
 fn snap(v: f64) -> f64 {
     (v + 0.5).floor()
 }
@@ -321,6 +353,7 @@ struct Stats {
     collapsed: u64,
     clamped: u64,
     hidden: u64,
+    ambiguous: u64,
     concentric: u64,
     twins: u64,
     skipped_layers: Vec<String>,
@@ -697,6 +730,7 @@ pub(crate) fn round_source(
         collapsed: 0,
         clamped: 0,
         hidden: 0,
+        ambiguous: 0,
         concentric: 0,
         twins: 0,
         skipped_layers: Vec::new(),
@@ -733,8 +767,8 @@ pub(crate) fn round_source(
     }
 
     let summary = format!(
-        "round_corners: {} corners over {} layers; {} clamped, {} collapsed, {} buried in overlaps, {} concentric at thin walls{}{}",
-        stats.corners, stats.layers, stats.clamped, stats.collapsed, stats.hidden, stats.concentric,
+        "round_corners: {} corners over {} layers; {} clamped, {} collapsed, {} buried in ink, {} ambiguous, {} concentric at thin walls{}{}",
+        stats.corners, stats.layers, stats.clamped, stats.collapsed, stats.hidden, stats.ambiguous, stats.concentric,
         if params.master_overrides.is_empty() {
             String::new()
         } else {
@@ -939,30 +973,10 @@ fn round_glyph(
         for (pi, corners) in &path_corners {
             let p = &polys[*pi];
             let n = p.len();
-            let s = if area(p) > 0.0 { 1.0 } else { -1.0 };
-            let is_counter = polys
-                .iter()
-                .enumerate()
-                .filter(|(qi, q)| *qi != *pi && inside(p[0], q))
-                .count()
-                % 2
-                == 1;
             for &i in corners {
                 let a = p[(i + n - 1) % n];
                 let b = p[i];
                 let c = p[(i + 1) % n];
-                let w_other: i64 = polys
-                    .iter()
-                    .enumerate()
-                    .filter(|(qi, _)| *qi != *pi)
-                    .map(|(_, q)| winding(b, q))
-                    .sum();
-                let own = if s > 0.0 { 1 } else { -1 };
-                if w_other != 0 && w_other + own != 0 {
-                    plans.entry((lidx, *pi)).or_default().insert(i, (0.0, 0.0));
-                    stats.hidden += 1;
-                    continue;
-                }
                 let v1 = (b.0 - a.0, b.1 - a.1);
                 let v2 = (c.0 - b.0, c.1 - b.1);
                 let l1 = (v1.0 * v1.0 + v1.1 * v1.1).sqrt();
@@ -974,17 +988,53 @@ fn round_glyph(
                     plans.entry((lidx, *pi)).or_default().insert(i, (0.0, 0.0));
                     continue;
                 }
-                let outer = ((cross > 0.0) == (s > 0.0)) != is_counter;
-                if outer {
-                    let r = (((o_pct * w + o_xtra * xt).max(o_min)) + d_out).max(0.0);
-                    let (t, k, r_eff) = fit(r, phi, l1, l2, stats);
-                    plans.entry((lidx, *pi)).or_default().insert(i, (t, k));
-                    if t > 0.0 {
-                        outers.push((b.0, b.1, r_eff, phi));
+                // What renders around the corner decides, not contour
+                // identity: counters formed by overlap (a self-crossing
+                // contour, a shell pair, a folded counter path) render
+                // differently than they are drawn. All ink -> the corner
+                // is construction (a fold flap, a piece end in a stem);
+                // rounding it pulls the outline back and lets white show
+                // through — or bites the counter.
+                let mut gap = f64::INFINITY;
+                for (qi, q) in polys.iter().enumerate() {
+                    let m = q.len();
+                    for j in 0..m {
+                        if qi == *pi && (j == i || j == (i + n - 1) % n) {
+                            continue;
+                        }
+                        gap = gap.min(seg_dist(b, q[j], q[(j + 1) % m]));
                     }
-                } else {
-                    let r = (((i_pct * w + i_xtra * xt).max(i_min)) + d_in).max(0.0);
-                    inners.push((*pi, i, b, phi, l1, l2, r));
+                }
+                let eps = PROBE_MAX.min(0.25 * gap);
+                if eps < PROBE_MIN {
+                    plans.entry((lidx, *pi)).or_default().insert(i, (0.0, 0.0));
+                    stats.ambiguous += 1;
+                    continue;
+                }
+                let u1 = (v1.0 / l1, v1.1 / l1);
+                let u2 = (v2.0 / l2, v2.1 / l2);
+                match white_span(b, u1, u2, eps, &polys) {
+                    span @ (Span::Hidden | Span::Ambiguous) => {
+                        plans.entry((lidx, *pi)).or_default().insert(i, (0.0, 0.0));
+                        if matches!(span, Span::Hidden) {
+                            stats.hidden += 1;
+                        } else {
+                            stats.ambiguous += 1;
+                        }
+                        continue;
+                    }
+                    Span::Outer => {
+                        let r = (((o_pct * w + o_xtra * xt).max(o_min)) + d_out).max(0.0);
+                        let (t, k, r_eff) = fit(r, phi, l1, l2, stats);
+                        plans.entry((lidx, *pi)).or_default().insert(i, (t, k));
+                        if t > 0.0 {
+                            outers.push((b.0, b.1, r_eff, phi));
+                        }
+                    }
+                    Span::Inner => {
+                        let r = (((i_pct * w + i_xtra * xt).max(i_min)) + d_in).max(0.0);
+                        inners.push((*pi, i, b, phi, l1, l2, r));
+                    }
                 }
             }
         }

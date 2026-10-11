@@ -1,0 +1,180 @@
+{
+.appVersion = "895";
+.formatVersion = 3;
+axes = (
+{
+name = "X-Transparency";
+tag = XTRA;
+},
+{
+name = "X-Opacity";
+tag = XOPQ;
+}
+);
+familyName = FoldedMini;
+fontMaster = (
+{
+axesValues = (
+100,
+10
+);
+id = "0DE8A72B-11A1-4CD2-A24B-6D50D61EE4A2";
+metricValues = (
+);
+name = Thin;
+},
+{
+axesValues = (
+100,
+1000
+);
+id = "A7A5CAED-293F-4DED-9C69-2E7427B93A59";
+metricValues = (
+);
+name = Bold;
+}
+);
+glyphs = (
+{
+glyphname = nfold;
+layers = (
+{
+layerId = "0DE8A72B-11A1-4CD2-A24B-6D50D61EE4A2";
+shapes = (
+{
+closed = 1;
+nodes = (
+(1487,0,l),
+(1487,360,l),
+(1935,600,l),
+(1524,600,l),
+(1524,0,l),
+(2986,0,l),
+(2986,600,l),
+(439,600,l),
+(25,379.5,l),
+(25,0,l)
+);
+}
+);
+width = 600;
+},
+{
+layerId = "A7A5CAED-293F-4DED-9C69-2E7427B93A59";
+shapes = (
+{
+closed = 1;
+nodes = (
+(2974,0,l),
+(2974,720,l),
+(3870,1200,l),
+(3048,1200,l),
+(3048,0,l),
+(5972,0,l),
+(5972,1200,l),
+(878,1200,l),
+(50,759,l),
+(50,0,l)
+);
+}
+);
+width = 600;
+}
+);
+},
+{
+glyphname = dfold;
+layers = (
+{
+layerId = "0DE8A72B-11A1-4CD2-A24B-6D50D61EE4A2";
+shapes = (
+{
+closed = 1;
+nodes = (
+(2608,0,l),
+(2996,312.5,l),
+(2996,800,l),
+(1534,800,l),
+(1534,600,l),
+(319.5,600,l),
+(25,361.5,l),
+(25,0,l)
+);
+},
+{
+closed = 1;
+nodes = (
+(1487,322.5,l),
+(1551.5,369,l),
+(1534,369,l),
+(1534,314.5,l),
+(1438,236,l),
+(1487,236,l)
+);
+}
+);
+width = 600;
+},
+{
+layerId = "A7A5CAED-293F-4DED-9C69-2E7427B93A59";
+shapes = (
+{
+closed = 1;
+nodes = (
+(5216,0,l),
+(5992,625,l),
+(5992,1600,l),
+(3068,1600,l),
+(3068,1200,l),
+(639,1200,l),
+(50,723,l),
+(50,0,l)
+);
+},
+{
+closed = 1;
+nodes = (
+(2974,645,l),
+(3103,738,l),
+(3068,738,l),
+(3068,629,l),
+(2876,472,l),
+(2974,472,l)
+);
+}
+);
+width = 600;
+}
+);
+}
+);
+instances = (
+);
+kerningLTR = {
+};
+metrics = (
+{
+type = ascender;
+},
+{
+type = "cap height";
+},
+{
+type = "x-height";
+},
+{
+type = baseline;
+},
+{
+type = descender;
+},
+{
+type = "italic angle";
+}
+);
+stems = (
+);
+unitsPerEm = 1000;
+versionMajor = 1;
+versionMinor = 0;
+}
