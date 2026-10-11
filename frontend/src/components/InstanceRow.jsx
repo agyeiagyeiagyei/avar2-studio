@@ -6,7 +6,7 @@ import RoundingBadge from './RoundingBadge';
 import SlantBadge from './SlantBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
+function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
   roundingEnabled, roundingPct, roundingDefaultPct,
   onSaveInstanceRounding, onRemoveInstanceRounding,
   slantEnabled, slantPct, slantDefaultPct, slantAxisMin,
@@ -33,7 +33,8 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   // Graded rows render at GRAD 0 — the badge marks the grade, the GRAD
   // chip shows 0, and the outline must agree with both (server-app
   // behavior). The grade itself is inspected with the Preview tab's
-  // GRAD slider. (An earlier revision injected GRAD at max here so the
+  // GRAD slider, or by dragging the sidebar's GRAD slider while the
+  // row is selected (editingCoordinates carry the drag; preview only). (An earlier revision injected GRAD at max here so the
   // row showed "the instance at its grade" — near the grade cap that
   // renders closed counters under a chip claiming GRAD: 0.)
 
@@ -94,13 +95,17 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   return (
     <div
       ref={rowRef}
-      className={`instance-row ${isSelected ? 'selected' : ''}`}
+      className={`instance-row ${isSelected ? 'selected' : ''}${isMultiSelected ? ' multi-selected' : ''}`}
+      onMouseDown={(e) => {
+        // Shift-click is range-select, not text-select.
+        if (e.shiftKey) e.preventDefault();
+      }}
       onClick={(e) => {
         // Don't select if clicking on the dot wrapper
         if (e.target.closest('.sync-status-dot-wrapper')) {
           return;
         }
-        onSelect();
+        onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey });
       }}
       data-instance-name={instance.name}
     >

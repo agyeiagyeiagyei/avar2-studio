@@ -833,6 +833,51 @@ fn gvar_err(context: &str) -> JsError {
     err(format!("gvar table malformed: {context}"))
 }
 
+/// Maximum |delta| in a tuple's packed delta runs (x and y together).
+/// `data` starts AFTER any private point numbers. Used by the pruning
+/// pass in `patch_gvar` to find visually negligible splinter tuples.
+fn max_abs_packed_delta(data: &[u8]) -> Result<i32, JsError> {
+    let mut pos = 0usize;
+    let mut max = 0i32;
+    while pos < data.len() {
+        let run = data[pos];
+        pos += 1;
+        let n = (run & 0x3F) as usize + 1;
+        match run & 0xC0 {
+            0x80 => {} // DELTAS_ARE_ZERO
+            0x40 => {
+                for _ in 0..n {
+                    let b = data
+                        .get(pos..pos + 2)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max((i16::from_be_bytes([b[0], b[1]]) as i32).abs());
+                    pos += 2;
+                }
+            }
+            0x00 => {
+                for _ in 0..n {
+                    let b = *data
+                        .get(pos)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max(((b as i8) as i32).abs());
+                    pos += 1;
+                }
+            }
+            _ => {
+                // 0xC0: 32-bit deltas (post-v1 spec); walk, never prune.
+                for _ in 0..n {
+                    let b = data
+                        .get(pos..pos + 4)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max(i32::from_be_bytes([b[0], b[1], b[2], b[3]]).abs());
+                    pos += 4;
+                }
+            }
+        }
+    }
+    Ok(max)
+}
+
 fn be_u16(bytes: &[u8], off: usize, context: &str) -> Result<u16, JsError> {
     bytes
         .get(off..off + 2)
@@ -915,7 +960,17 @@ fn patch_gvar(
         if start == end && gid_extras.is_none() {
             continue; // no variation data for this glyph
         }
-        let (count_flags, mut headers, data_section, trailing) = if start == end {
+        // One record per existing tuple: (padded header, its slice of
+        // the data section, max |delta|). Collected individually so the
+        // pruning pass below can drop splinter tuples when the padded
+        // header block would overflow the format's u16 offsetToData.
+        struct TupleRec<'a> {
+            header: Vec<u8>,
+            data: &'a [u8],
+            max_delta: i32,
+            has_private_points: bool,
+        }
+        let (count_flags, mut tuples_vec, shared_prefix, trailing) = if start == end {
             (0u16, Vec::new(), &[][..], &[][..])
         } else {
             let g = bytes
@@ -925,14 +980,12 @@ fn patch_gvar(
             let tuple_count = (count_flags & GVAR_TUPLE_COUNT_MASK) as usize;
             let off_data = be_u16(g, 2, "offsetToData")? as usize;
 
-            let mut headers: Vec<u8> = Vec::new();
-            let mut pos = 4usize;
-            // Byte length of the old tuple data (shared point numbers +
-            // each tuple's serialized deltas). Anything after it in the
-            // glyph's data slice is trailing alignment padding, which
+            // Shared point numbers prefix the data section; each tuple's
+            // serialized deltas follow in header order. Anything after
+            // the last tuple's data is trailing alignment padding, which
             // must stay at the END — injected tuple data goes before it,
             // since the spec reads tuple data sequentially.
-            let mut old_data_len = if count_flags & GVAR_TUPLES_SHARE_POINT_NUMBERS != 0 {
+            let shared_pts_len = if count_flags & GVAR_TUPLES_SHARE_POINT_NUMBERS != 0 {
                 packed_points_len(
                     g.get(off_data..)
                         .ok_or_else(|| gvar_err("shared points out of range"))?,
@@ -940,23 +993,26 @@ fn patch_gvar(
             } else {
                 0
             };
+            let mut tuples_vec: Vec<TupleRec> = Vec::with_capacity(tuple_count);
+            let mut pos = 4usize;
+            let mut data_cursor = off_data + shared_pts_len;
             for _ in 0..tuple_count {
                 let data_size = be_u16(g, pos, "tuple header")? as usize;
-                old_data_len += data_size;
                 let tflags = be_u16(g, pos + 2, "tuple header")?;
-                headers.extend_from_slice(
+                let mut header: Vec<u8> = Vec::new();
+                header.extend_from_slice(
                     g.get(pos..pos + 4)
                         .ok_or_else(|| gvar_err("tuple header truncated"))?,
                 );
                 pos += 4;
                 if tflags & GVAR_EMBEDDED_PEAK_TUPLE != 0 {
                     let len = old_axes * 2;
-                    headers.extend_from_slice(
+                    header.extend_from_slice(
                         g.get(pos..pos + len)
                             .ok_or_else(|| gvar_err("embedded peak truncated"))?,
                     );
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
                     pos += len;
                 }
@@ -969,45 +1025,126 @@ fn patch_gvar(
                     let end_coords = g
                         .get(pos + len..pos + 2 * len)
                         .ok_or_else(|| gvar_err("intermediate end truncated"))?;
-                    headers.extend_from_slice(start_coords);
+                    header.extend_from_slice(start_coords);
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
-                    headers.extend_from_slice(end_coords);
+                    header.extend_from_slice(end_coords);
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
                     pos += 2 * len;
                 }
+                let data = g
+                    .get(data_cursor..data_cursor + data_size)
+                    .ok_or_else(|| gvar_err("tuple data out of range"))?;
+                data_cursor += data_size;
+                tuples_vec.push(TupleRec {
+                    header,
+                    data,
+                    max_delta: i32::MAX, // computed lazily if pruning is needed
+                    has_private_points: tflags & GVAR_PRIVATE_POINT_NUMBERS != 0,
+                });
             }
-            let data_end = off_data
-                .checked_add(old_data_len)
-                .ok_or_else(|| gvar_err("tuple data section overflow"))?;
-            let data_section = g
-                .get(off_data..data_end)
-                .ok_or_else(|| gvar_err("tuple data section out of range"))?;
-            let trailing = g.get(data_end..).unwrap_or(&[]);
-            (count_flags, headers, data_section, trailing)
+            let shared_prefix = g
+                .get(off_data..off_data + shared_pts_len)
+                .ok_or_else(|| gvar_err("shared points out of range"))?;
+            let trailing = g.get(data_cursor..).unwrap_or(&[]);
+            (count_flags, tuples_vec, shared_prefix, trailing)
         };
 
         // Injected tuples for this glyph.
         let mut added: u16 = 0;
+        let mut extra_headers: Vec<u8> = Vec::new();
         let mut added_data: Vec<u8> = Vec::new();
         if let Some(tuples) = gid_extras {
             for tuple in tuples {
                 let (header, aux) = tuple.serialize();
-                headers.extend_from_slice(&header);
+                extra_headers.extend_from_slice(&header);
                 added_data.extend_from_slice(&aux);
                 added += 1;
             }
         }
-        let new_count_flags =
-            (count_flags & !GVAR_TUPLE_COUNT_MASK) | (added + (count_flags & GVAR_TUPLE_COUNT_MASK));
+
+        // PRUNE if the padded header block cannot fit offsetToData's
+        // u16. Writing the wrapped value instead (shipped once) points
+        // readers into the middle of the headers: the glyph's deltas
+        // decode as garbage and renderers silently drop ALL variations
+        // for it — 'g' froze at the default in every style. Splinter
+        // tuples with max |delta| <= PRUNE_TOL font units (relocation
+        // shards; invisible at 2000 upm) are dropped smallest-first
+        // until the block fits; a glyph that cannot fit even then is a
+        // hard error, never a corrupt table.
+        const PRUNE_TOL: i32 = 2;
+        const HEADROOM: usize = 64;
+        let headers_len = |tv: &Vec<TupleRec>| -> usize {
+            tv.iter().map(|t| t.header.len()).sum::<usize>() + extra_headers.len()
+        };
+        if 4 + headers_len(&tuples_vec) > u16::MAX as usize - HEADROOM {
+            for t in tuples_vec.iter_mut() {
+                let body = if t.has_private_points {
+                    let pts = packed_points_len(t.data)?;
+                    &t.data[pts..]
+                } else {
+                    t.data
+                };
+                t.max_delta = max_abs_packed_delta(body)?;
+            }
+            let mut order: Vec<usize> = (0..tuples_vec.len()).collect();
+            order.sort_by_key(|&i| tuples_vec[i].max_delta);
+            let mut drop = std::collections::HashSet::new();
+            for &i in &order {
+                if 4 + headers_len(&tuples_vec)
+                    - drop
+                        .iter()
+                        .map(|&j: &usize| tuples_vec[j].header.len())
+                        .sum::<usize>()
+                    <= u16::MAX as usize - HEADROOM
+                {
+                    break;
+                }
+                if tuples_vec[i].max_delta > PRUNE_TOL {
+                    return Err(gvar_err(&format!(
+                        "glyph {gid}: padded tuple headers exceed gvar's 64KB                          per-glyph limit and cannot be pruned within the                          {PRUNE_TOL}-unit tolerance"
+                    )));
+                }
+                drop.insert(i);
+            }
+            if !drop.is_empty() {
+                eprintln!(
+                    "spac-inject: glyph {gid}: pruned {} splinter tuple(s)                      (max delta <= {PRUNE_TOL} units) to fit gvar's per-glyph                      header limit",
+                    drop.len()
+                );
+                let mut idx = 0usize;
+                tuples_vec.retain(|_| {
+                    let keep = !drop.contains(&idx);
+                    idx += 1;
+                    keep
+                });
+            }
+        }
+
+        let kept = tuples_vec.len() as u16;
+        let new_count_flags = (count_flags & !GVAR_TUPLE_COUNT_MASK) | (kept + added);
+        let mut headers: Vec<u8> = Vec::new();
+        for t in &tuples_vec {
+            headers.extend_from_slice(&t.header);
+        }
+        headers.extend_from_slice(&extra_headers);
+        let off_to_data = 4 + headers.len();
+        let off_to_data: u16 = off_to_data.try_into().map_err(|_| {
+            gvar_err(&format!(
+                "glyph {gid}: tuple headers still exceed the u16 offsetToData after pruning"
+            ))
+        })?;
 
         new_glyph_data.extend_from_slice(&new_count_flags.to_be_bytes());
-        new_glyph_data.extend_from_slice(&(4 + headers.len() as u16).to_be_bytes());
+        new_glyph_data.extend_from_slice(&off_to_data.to_be_bytes());
         new_glyph_data.extend_from_slice(&headers);
-        new_glyph_data.extend_from_slice(data_section);
+        new_glyph_data.extend_from_slice(shared_prefix);
+        for t in &tuples_vec {
+            new_glyph_data.extend_from_slice(t.data);
+        }
         new_glyph_data.extend_from_slice(&added_data);
         new_glyph_data.extend_from_slice(trailing);
         if !new_glyph_data.len().is_multiple_of(2) {

@@ -3,6 +3,24 @@ import './AxisControl.css';
 import { formatAxisValue } from '../utils/formatNumber';
 
 function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
+  // The slant transform's axis: registered slnt is degrees with the
+  // lean at the NEGATIVE end (0 = upright, min = full lean), which
+  // makes a baffling slider (-11…0, resting pinned to the right edge).
+  // Designers think in percent-of-lean, like grade and rounding — so
+  // present 0–100% and convert at the edges. The font itself keeps
+  // real degrees: only this control's view is remapped.
+  if (axis.tag === 'slnt' && axis.transform_injected
+      && Number(axis.min) !== Number(axis.default)) {
+    const d = Number(axis.default);
+    const m = Number(axis.min);
+    const toPct = (v) => Math.round(((Number(v) - d) / (m - d)) * 1000) / 10;
+    const fromPct = (p) => d + (m - d) * (Number(p) / 100);
+    const innerOnChange = onChange;
+    axis = { ...axis, min: 0, max: 100, name: `${axis.name || 'Slant'} %` };
+    value = toPct(value ?? d);
+    onChange = (p) => innerOnChange(fromPct(p));
+  }
+
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef(null);

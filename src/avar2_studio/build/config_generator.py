@@ -103,8 +103,24 @@ def _load_font_key_from_config(config_path: Path) -> str:
 # CSV Validation and Reading
 # ============================================================================
 
-def validate_csv_structure(csv_path: Path) -> Tuple[str, List[str], List[str]]:
-    """Validate CSV has required columns. Returns (name_col, in_cols, out_cols)."""
+def validate_csv_structure(
+    csv_path: Path,
+    parametric_tags: Optional[set] = None,
+) -> Tuple[str, List[str], List[str]]:
+    """Validate CSV has required columns. Returns (name_col, in_cols, out_cols).
+
+    ``parametric_tags`` — the compiled parametric font's axis tags (from
+    config.yaml's fvarInstances coordinates). When given, a column is
+    parametric (``out:``, strict no-blanks) iff it matches one of them;
+    EVERY other column is a mapping input (``in:``) — custom user axes
+    like ital or slnt included, not just a hardcoded list. Without it
+    (standalone validation), the legacy traditional-axis set decides.
+
+    SPAC is neither, either way: the per-instance spacing column lives
+    OUTSIDE avar2 (builtin_spac._instance_spac_overrides reads it; the
+    spacing transform pins it onto fvar instances). The studio writes it
+    sparsely, so it must never fall into the strict out: set.
+    """
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
@@ -116,23 +132,33 @@ def validate_csv_structure(csv_path: Path) -> Tuple[str, List[str], List[str]]:
         if name_col not in fieldnames:
             raise ValueError(f"CSV must include a '{name_col}' column. Found: {fieldnames}")
 
-        # Detect in: columns (traditional axes, with or without "-e" suffix)
-        # Support both "WGHT" and "WGHT-e" formats
-        in_cols = []
-        traditional_axes = {"WGHT", "WDTH", "OPSZ", "CONTRAST"}
-        for c in fieldnames:
-            # Check if column is a traditional axis (with or without -e suffix)
-            col_upper = c.upper()
-            if col_upper in traditional_axes or col_upper.endswith("-E"):
-                in_cols.append(c)
+        in_cols: List[str] = []
+        if parametric_tags:
+            ptags = {str(t).upper() for t in parametric_tags} - {"SPAC"}
+            for c in fieldnames:
+                if c == name_col or c.upper() == "SPAC":
+                    continue
+                if c.upper() not in ptags:
+                    in_cols.append(c)
+        else:
+            # Legacy fallback: traditional axes (with or without "-e"
+            # suffix). Anything else lands in out: — fine for the
+            # standalone pre-check, authoritative only when no config
+            # exists yet.
+            traditional_axes = {"WGHT", "WDTH", "OPSZ", "CONTRAST"}
+            for c in fieldnames:
+                col_upper = c.upper()
+                if col_upper in traditional_axes or col_upper.endswith("-E"):
+                    in_cols.append(c)
         
         # No traditional columns is NOT an error: such a CSV maps instance
         # names straight onto parametric axes, which only makes sense for a
         # font whose fvar axes ARE those parametric axes. in_axes stay
         # empty here; main() fills them from the source's fvarInstances
         # (see _fill_identity_in_axes).
-        
-        out_cols = [c for c in fieldnames if c not in (name_col,) and c not in in_cols]
+        out_cols = [c for c in fieldnames
+                    if c not in (name_col,) and c not in in_cols
+                    and c.upper() != "SPAC"]
         if not out_cols:
             raise ValueError("CSV contains no parametric axis columns for 'out:'")
 
@@ -143,9 +169,12 @@ def validate_csv_structure(csv_path: Path) -> Tuple[str, List[str], List[str]]:
         return name_col, in_cols, out_cols
 
 
-def read_csv_mappings(csv_path: Path) -> List[RowMapping]:
+def read_csv_mappings(
+    csv_path: Path,
+    parametric_tags: Optional[set] = None,
+) -> List[RowMapping]:
     """Read and validate CSV mappings."""
-    name_col, in_cols, out_cols = validate_csv_structure(csv_path)
+    name_col, in_cols, out_cols = validate_csv_structure(csv_path, parametric_tags)
     out_order = tuple(out_cols)
 
     mappings: List[RowMapping] = []
@@ -1393,7 +1422,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             print(f"  ✓ Expanded CSV written to: {csv_to_use}", file=sys.stderr)
         
-        mappings = read_csv_mappings(csv_to_use)
+        # The compiled parametric font's axis tags, from the config's
+        # fvarInstances coordinates: the authoritative out: set. Columns
+        # beyond it (WGHT/OPSZ/ital/any custom user axis) are mapping
+        # inputs — no hardcoded tag list to fall out of date.
+        parametric_tags: set = set()
+        try:
+            for insts in (load_config(args.config).get("fvarInstances") or {}).values():
+                for inst in insts or []:
+                    parametric_tags.update((inst.get("coordinates") or {}).keys())
+        except Exception as exc:  # noqa: BLE001 — fall back to the legacy split
+            print(f"  (could not derive parametric axes from config: {exc})",
+                  file=sys.stderr)
+        mappings = read_csv_mappings(csv_to_use, parametric_tags or None)
         print(f"  ✓ Read {len(mappings)} mappings", file=sys.stderr)
         
         # Store path for cleanup if temporary file was used

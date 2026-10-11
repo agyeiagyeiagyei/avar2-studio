@@ -68,6 +68,49 @@ def test_fill_excludes_spac(tmp_path):
     assert set(filled.in_axes) == {"XOPQ"}
 
 
+def test_sparse_spac_column_is_tolerated(tmp_path):
+    """The studio writes the SPAC column sparsely (only edited rows carry a
+    value). SPAC lives outside avar2, so it must never land in the strict
+    no-blanks out: set — a blank cell used to abort the whole build
+    ("parametric axis 'SPAC' is blank")."""
+    csv_path = _write(
+        tmp_path,
+        "Instance Name,XOPQ,WGHT,SPAC\nA,2.0,100,\nB,5.0,400,32.5\n",
+    )
+    name_col, in_cols, out_cols = cg.validate_csv_structure(csv_path)
+    assert out_cols == ["XOPQ"]
+    assert "SPAC" not in in_cols
+    a, b = cg.read_csv_mappings(csv_path)
+    assert "SPAC" not in a.out_axes and "SPAC" not in b.out_axes
+    assert "spac" not in a.in_axes and "spac" not in b.in_axes
+
+
+def test_config_driven_split_classifies_any_user_axis(tmp_path):
+    """With the compiled font's parametric tags in hand, classification is
+    membership, not a hardcoded WGHT/WDTH/OPSZ list: ANY non-parametric
+    column (ital, slnt, a custom tag) is an in: mapping input with blanks
+    allowed, while parametric matches stay strict out: columns —
+    case-insensitively. SPAC stays outside both."""
+    csv_path = _write(
+        tmp_path,
+        "Instance Name,XTRA,ital,SLNT,SPAC\nA,100,,,\nB,200,1,-6,20\n",
+    )
+    ptags = {"xtra"}
+    name_col, in_cols, out_cols = cg.validate_csv_structure(csv_path, ptags)
+    assert out_cols == ["XTRA"]
+    assert in_cols == ["ital", "SLNT"]
+    a, b = cg.read_csv_mappings(csv_path, ptags)
+    assert a.in_axes == {}                      # blanks tolerated
+    assert b.in_axes == {"ital": 1, "slnt": -6}
+    assert set(a.out_axes) == set(b.out_axes) == {"XTRA"}
+
+    # A parametric ital (XCrispy's case) flips it to the strict out: set.
+    csv2 = tmp_path / "m2.csv"
+    csv2.write_text("Instance Name,XTRA,ital\nA,100,0\n", encoding="utf-8")
+    _, in2, out2 = cg.validate_csv_structure(csv2, {"xtra", "ital"})
+    assert out2 == ["XTRA", "ital"] and in2 == []
+
+
 def test_fill_falls_back_to_identity_for_unknown_instance(tmp_path):
     """Instance not in fvarInstances → identity (in: = out:), no crash."""
     csv_path = _write(tmp_path, PARAM_ONLY_CSV)

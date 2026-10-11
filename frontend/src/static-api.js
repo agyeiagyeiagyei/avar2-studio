@@ -226,6 +226,7 @@ const serializeDataset = (dataset) => ({
   axes: dataset.axes,
   axisRanges: dataset.axisRanges || {},
   controlAxes: dataset.controlAxes || [],
+  controlInstanceValues: dataset.controlInstanceValues || {},
   transforms: dataset.transforms || [],
   grade: dataset.grade || null,
   cornerPins: dataset.cornerPins || [],
@@ -282,6 +283,7 @@ const restoreSession = async () => {
       exampleId: rec.exampleId || null,
       workspaceEntries: rec.workspaceEntries || null,
       controlAxes: rec.controlAxes || [],
+      controlInstanceValues: rec.controlInstanceValues || {},
       transforms: rec.transforms || [],
       grade: rec.grade || null,
       cornerPins: rec.cornerPins || [],
@@ -380,6 +382,35 @@ const syncInstancesFromCsv = (dataset, fvarInstanceNames = null) => {
       origin: fvarNames.has(row.name) ? 'source' : 'studio',
     })),
   };
+  // Per-instance CONTROL-axis values hydrate into coordinates — same
+  // contract as the studio server's /api/instances.
+  const ctlVals = dataset.controlInstanceValues || {};
+  for (const inst of dataset.instances.instances) {
+    for (const [tag, perName] of Object.entries(ctlVals)) {
+      if (inst.name in perName) inst.coordinates[tag] = perName[inst.name];
+    }
+  }
+};
+
+// Record {tag: value} control-axis values for one instance — clamped to
+// the axis range; a value at the axis default clears the entry (mirrors
+// control_axes.set_instance_values on the server).
+const recordControlInstanceValues = (dataset, instanceName, coordinates) => {
+  const byTag = new Map((dataset.controlAxes || [])
+    .map(a => [String(a.tag).toLowerCase(), a]));
+  if (!byTag.size || !coordinates) return;
+  for (const [tag, raw] of Object.entries(coordinates)) {
+    const ax = byTag.get(String(tag).toLowerCase());
+    if (!ax) continue;
+    let v = Number(raw);
+    if (!Number.isFinite(v)) continue;
+    v = Math.min(Number(ax.max ?? v), Math.max(Number(ax.min ?? v), v));
+    const store = dataset.controlInstanceValues
+      || (dataset.controlInstanceValues = {});
+    const per = store[ax.tag] || (store[ax.tag] = {});
+    if (Math.abs(v - Number(ax.default || 0)) < 1e-9) delete per[instanceName];
+    else per[instanceName] = v;
+  }
 };
 
 // Every authoring mutation funnels here: if the CSV grew user columns
@@ -739,7 +770,8 @@ const buildConfigBundle = (dataset) => ({
     })),
     avar2_out_columns: [...dataset.parametricTags],
   },
-  control_axes: { version: 1, axes: dataset.controlAxes || [] },
+  control_axes: { version: 1, axes: dataset.controlAxes || [],
+    instance_values: dataset.controlInstanceValues || {} },
   avar2_csv: mappingsCsv.serializeMappingsCsv(dataset.instancesCsv),
   // Axis-metadata overrides (min/default/max/display name per user-axis
   // column). Without this section a non-min default silently reverts to
@@ -797,6 +829,7 @@ const applyBundle = async (bundle, dataset) => {
   }
   if (controlAxes.length) {
     dataset.controlAxes = controlAxes;
+    dataset.controlInstanceValues = bundle.control_axes?.instance_values || {};
     if (!rebuildFromSource) {
       // Pure computed sidecar: bytes-level application, as before. Drawn
       // layers in the mix (designspace case) fall back to computed braces —
@@ -1562,6 +1595,13 @@ const staticOverrides = {
   // source of truth, mutations regenerate the avar2 store.
   createInstance: async (instanceName, coordinates, insertAfter = null) => {
     requireProject();
+    // A duplicate of a spaced row keeps its SPAC — same column minting
+    // as updateInstance.
+    if (coordinates && coordinates.SPAC !== undefined
+        && !uploadDataset.instancesCsv.columns.includes('SPAC')) {
+      uploadDataset.instancesCsv.columns.push('SPAC');
+    }
+    recordControlInstanceValues(uploadDataset, instanceName, coordinates);
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates, insertAfter);
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
@@ -1569,6 +1609,14 @@ const staticOverrides = {
   },
   updateInstance: async (instanceName, coordinates) => {
     requireProject();
+    // Per-instance SPAC: mint the column on first use (parity with the
+    // server's update path; the wasm spac transforms read it back like
+    // _instance_spac_overrides).
+    if (coordinates && coordinates.SPAC !== undefined
+        && !uploadDataset.instancesCsv.columns.includes('SPAC')) {
+      uploadDataset.instancesCsv.columns.push('SPAC');
+    }
+    recordControlInstanceValues(uploadDataset, instanceName, coordinates);
     mappingsCsv.upsertRow(uploadDataset.instancesCsv, instanceName, coordinates);
     syncInstancesFromCsv(uploadDataset);
     await regenerateFont(uploadDataset);
@@ -1577,6 +1625,13 @@ const staticOverrides = {
   renameInstance: async (instanceName, newName) => {
     requireProject();
     mappingsCsv.renameRow(uploadDataset.instancesCsv, instanceName, newName);
+    // Migrate per-instance control-axis values keyed by instance name
+    for (const per of Object.values(uploadDataset.controlInstanceValues || {})) {
+      if (instanceName in per) {
+        per[newName] = per[instanceName];
+        delete per[instanceName];
+      }
+    }
     syncInstancesFromCsv(uploadDataset);
     // Migrate grade state keyed by instance name
     const grade = uploadDataset.grade;
@@ -1597,6 +1652,9 @@ const staticOverrides = {
   deleteInstance: async (instanceName) => {
     requireProject();
     mappingsCsv.deleteRow(uploadDataset.instancesCsv, instanceName);
+    for (const per of Object.values(uploadDataset.controlInstanceValues || {})) {
+      delete per[instanceName];
+    }
     // A deleted instance takes its grade with it (server semantics for
     // a full delete; demote keeps the instance, so the grade stays).
     if (uploadDataset.grade?.instances?.length) {
@@ -1969,11 +2027,22 @@ const staticOverrides = {
  * Returns true when static mode was selected.
  */
 export async function selectApiMode() {
-  try {
-    const r = await fetch('/api/health', { signal: AbortSignal.timeout(1500) });
-    if (r.ok) return false;
-  } catch {
-    // fall through — no backend
+  // A timeout is NOT "no backend": the desktop server goes silent for
+  // minutes while the source-transform chain grinds (GIL-bound), and a
+  // tab probed in that window used to latch static mode for its whole
+  // life — "No font loaded" with no way back. Retry timeouts with
+  // growing patience; an actual response (any status) or a fast
+  // connection refusal still decides immediately, so GitHub Pages
+  // (404s fast) and true no-backend hosts are unaffected.
+  for (const ms of [1500, 4000, 8000]) {
+    try {
+      const r = await fetch('/api/health', { signal: AbortSignal.timeout(ms) });
+      if (r.ok) return false;
+      break; // responded with non-ok — a static host, not a busy server
+    } catch (err) {
+      if (err && err.name === 'TimeoutError') continue; // busy server? retry
+      break; // refused/network error — no backend here
+    }
   }
   staticMode = true;
   Object.assign(api, staticOverrides);
@@ -1991,6 +2060,23 @@ export async function selectApiMode() {
       loadError = err;
       console.warn('The bundled example could not be loaded:', err);
     }
+  }
+  // BLIND static mode (no session, no example — a desktop tab that lost
+  // the probe race): keep listening for the backend and reboot into it.
+  // On a true static host the probe returns non-ok fast and never
+  // triggers; where there is no backend at all it stays refused.
+  if (!uploadDataset && typeof window !== 'undefined') {
+    const retry = setInterval(async () => {
+      try {
+        const r = await fetch('/api/health', { signal: AbortSignal.timeout(10000) });
+        if (r.ok) {
+          clearInterval(retry);
+          window.location.reload();
+        }
+      } catch {
+        // still unreachable — keep waiting
+      }
+    }, 5000);
   }
   return true;
 }

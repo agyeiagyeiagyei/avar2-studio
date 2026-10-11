@@ -21,7 +21,7 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
+function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
   onControlAxisReseed, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
@@ -244,11 +244,28 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
           // deferred; if a source happens to declare a SPAC axis it just
           // renders as a normal parametric/avar2 axis with no special UX.
           const renderAxis = (axis) => {
-            // Badge-governed transform axes (ROND/slnt/GRAD): the row's
-            // badge sets the per-style value, so the slider here would
-            // be a lie — it renders inert with a pointer to the badge
-            // and the Preview tab (where the axis stays fully live).
+            // Badge-governed transform axes (ROND/slnt): the row's
+            // badge sets the per-style value AND the row renders at that
+            // percent, so a slider here would be overridden — it renders
+            // inert with a pointer to the badge and the Preview tab.
+            // GRAD is exempt (live preview; the G badge owns the saved
+            // grade) — see badgeGovernedTags in App.
             const badgeGoverned = !!(badgeGovernedTags && badgeGovernedTags.has(axis.tag));
+            if (axis.is_grade_axis) {
+              return (
+                <div
+                  key={axis.tag}
+                  title={`Preview the grade on the selected row — not saved: the G badge on each instance row sets the per-instance grade the build uses.`}
+                >
+                  <AxisControl
+                    axis={axis}
+                    value={coordinates[axis.tag] ?? axis.default}
+                    onChange={(value) => onAxisChange(axis.tag, value)}
+                    disabled={disabled}
+                  />
+                </div>
+              );
+            }
             if (badgeGoverned) {
               return (
                 <div
@@ -283,8 +300,8 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
           // conceptually (with the mapping rows that drive them), not
           // duplicated up here.
           // Secondary parametric (control) axes get their own group: they
-          // deform only their applicable glyphs, and their value is preview
-          // state — saves strip it, like SPAC. The static app flags them
+          // deform only their applicable glyphs. Their per-instance value
+          // persists in the control sidecar. The static app flags them
           // has_master_coverage=false (they'd vanish from Core), the server
           // flags true (they'd blend into Core); splitting on is_control_axis
           // gives both the same sidebar as the Preview tab.
@@ -304,7 +321,7 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
                 <div className="axis-group axis-group-secondary">
                   <h3 className="axis-group-heading">
                     Secondary parametric axes
-                    <span className="axis-group-sub">glyph-scoped · preview only</span>
+                    <span className="axis-group-sub">glyph-scoped · saved per row{multiTargetCount > 0 ? ` · applying to ${multiTargetCount} selected rows` : ''}</span>
                   </h3>
                   {secondaryAxes.map(axis => {
                     const off = !!(disabledControlAxes && disabledControlAxes.has(axis.tag));
@@ -314,7 +331,7 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
                         className={`axis-secondary${off ? ' axis-secondary-off' : ''}`}
                         title={off
                           ? `${axis.tag} is disabled in preview (eye icon in the section below) — rows render it at the axis default.`
-                          : `Moves only the glyphs ${axis.tag} has layers for. Preview state: not saved with the instance.`}
+                          : `Moves only the glyphs ${axis.tag} has layers for. Saved with the selected instance row.`}
                       >
                         <AxisControl
                           axis={axis}

@@ -340,8 +340,9 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                   left as is.</>
               : <>Each view is one editable layer: a corner (master or instance) × the {axisTag} value.
                 Set the {axisTag} value, tick the corners to define it at, then edit
-                each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>) or
-                slash-named (<code>/idotless</code>).</>}
+                each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>),
+                slash-named (<code>/idotless</code>), or dotted/underscored names
+                taken whole (<code>Z.noterminal</code>).</>}
         </p>
         <form onSubmit={handleSubmit}>
           {/* Glyph field only when it's editable — in the locked modes
@@ -711,6 +712,7 @@ function summariseGlyphs(list, limit = 8) {
  *   "AEFH"          → ["A", "E", "F", "H"]
  *   "/idotless"     → ["idotless"]
  *   "A/idotless/B"  → ["A", "idotless", "B"]
+ *   "Z.noterminal"  → ["Z.noterminal"]
  *   "A E F H"       → ["A", "E", "F", "H"]
  *   "A, E, F, H"    → ["A", "E", "F", "H"]
  *   "  "            → []
@@ -718,6 +720,10 @@ function summariseGlyphs(list, limit = 8) {
  * Tokens with no leading "/" are treated as raw text — each
  * character is one glyph. Tokens starting with "/" are a named
  * glyph (the name continues until the next "/" or whitespace).
+ * Exception: a bare token containing "." or "_" is a glyph NAME
+ * typed without the slash ("Z.noterminal", "f_f_i") — nobody
+ * means the period/underscore glyphs inside run-together text,
+ * and suffixed alternates are what designers paste most.
  */
 function parseGlyphString(input) {
   if (!input) return [];
@@ -733,6 +739,10 @@ function parseGlyphString(input) {
   // Split into tokens by whitespace / commas first.
   const tokens = input.split(/[\s,]+/).filter(Boolean);
   for (const token of tokens) {
+    if (token.length > 1 && !token.includes('/') && /[._]/.test(token)) {
+      push(token);
+      continue;
+    }
     let i = 0;
     while (i < token.length) {
       if (token[i] === '/') {

@@ -120,14 +120,23 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
     // below it in the first place.
     const hasBelowRoom = axisMin < axisDefault;
     const hasAboveRoom = axisMax > axisDefault;
+    // Every layer sitting AT the axis default = corrections deliberately
+    // baked into the resting font (the axis is a carrier, not a dial —
+    // Crispy's ymod rests on its corrected state). That is a chosen
+    // configuration, not a coverage defect: the no-coverage/extrapolation
+    // warnings below assume the designer wants the axis to travel.
+    const bakedAtDefault = !hasBelow && !hasAbove
+      && entries.some(e => e.location && e.location[tag] === axisDefault);
     const issues = [];
-    if (hasBelowRoom) {
-      if (!hasBelow) issues.push({ kind: 'no-below' });
-      else if (!reachesMin) issues.push({ kind: 'extrapolates-below', at: belowVal });
-    }
-    if (hasAboveRoom) {
-      if (!hasAbove) issues.push({ kind: 'no-above' });
-      else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
+    if (!bakedAtDefault) {
+      if (hasBelowRoom) {
+        if (!hasBelow) issues.push({ kind: 'no-below' });
+        else if (!reachesMin) issues.push({ kind: 'extrapolates-below', at: belowVal });
+      }
+      if (hasAboveRoom) {
+        if (!hasAbove) issues.push({ kind: 'no-above' });
+        else if (!reachesMax) issues.push({ kind: 'extrapolates-above', at: aboveVal });
+      }
     }
     // Corrections that aren't pinned on every parametric axis leak across it.
     const unbounded = new Map();
@@ -178,6 +187,13 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
   };
 
   const replaceLayer = async (oldEntry, newEntry) => {
+    // The edit modal re-submits only {glyph, location, target} — carry the
+    // drawn outline through, or editing a drawn layer's coordinates
+    // silently discards the drawing (it cost a hand-drawn correction once).
+    if (oldEntry.outline && !newEntry.outline && newEntry.glyph === oldEntry.glyph) {
+      newEntry = { ...newEntry, outline: oldEntry.outline };
+      if (oldEntry.source_sig) newEntry.source_sig = oldEntry.source_sig;
+    }
     await onLayerDelta(tag, { remove: [oldEntry], add: [newEntry] });
   };
 

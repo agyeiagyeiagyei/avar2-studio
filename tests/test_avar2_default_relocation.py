@@ -64,6 +64,10 @@ def _build(tmp_path, monkeypatch, mappings, sub="a"):
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
 def test_default_row_relocates_and_table_is_exact(tmp_path, monkeypatch):
+    # Build-time relocation is EXPORT-ONLY by default now (gvar ~7x cost
+    # compounds with the rounding/slant twins); this test exercises the
+    # opt-in path, which the export pipeline's guarantee rests on.
+    monkeypatch.setenv('AVAR2_RELOCATE_BUILD_DEFAULT', '1')
     out = _build(tmp_path, monkeypatch, MAPPINGS)
     tt = TTFont(str(out))
 
@@ -118,9 +122,16 @@ def test_missing_default_row_sets_the_origin_warning(tmp_path, monkeypatch):
     assert "wght 400" in server.LAST_ORIGIN_WARNING
     assert "ORIGIN row" in server.LAST_ORIGIN_WARNING
 
-    # And a build WITH a default row clears it.
+    # And a build WITH a default row clears it (relocation is on by
+    # default again: the off-mode's excluded ORIGIN row made every
+    # mapping tent collapse toward the corner across the whole default
+    # neighborhood — a valley, not a point dip).
     _build(tmp_path, monkeypatch, MAPPINGS, sub="c")
     assert server.LAST_ORIGIN_WARNING is None
+    # The opt-out keeps the informational variant.
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "0")
+    _build(tmp_path, monkeypatch, MAPPINGS, sub="d")
+    assert "relocation is off" in (server.LAST_ORIGIN_WARNING or "")
 
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")

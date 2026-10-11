@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 
-function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
+function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -140,7 +140,9 @@ function InstanceRows({ instances, selectedInstance, onSelectInstance, editingCo
           <InstanceRow
             instance={instance}
             isSelected={selectedInstance?.name === instance.name}
-            onSelect={() => onSelectInstance(instance)}
+            isMultiSelected={!!(multiSelectedNames && multiSelectedNames.has(instance.name))
+              && selectedInstance?.name !== instance.name}
+            onSelect={(mods) => onSelectInstance(instance, mods)}
             editingCoordinates={editingCoordinates}
             instanceEditingCoordinates={instanceEditingCoordinates}
             sampleText={sampleText}

@@ -48,6 +48,7 @@ function PreviewTab({
   vfFamilyId,
   fontLoaded,
   fontUrl,
+  building,
   builtFontFilename,
   sampleText,
   onSampleTextChange,
@@ -246,21 +247,42 @@ function PreviewTab({
   );
 
   const handleDownload = async () => {
-    if (!fontUrl) return;
+    if (!fontUrl) {
+      // Never exit silently: this was a mystery "nothing happens".
+      setExportError('The font is still loading in this tab — wait for the preview to finish, then try again.');
+      return;
+    }
     const plainDownload = exportHidden.size === 0 && !exportUseDefault;
     if (plainDownload) {
-      // Blob URLs can't carry a query string — the ?download=1 flag is
-      // for the server's fetch path only.
-      const downloadUrl = fontUrl.startsWith('blob:')
-        ? fontUrl
-        : `${fontUrl}${fontUrl.includes('?') ? '&' : '?'}download=1`;
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
-      document.body.appendChild(link);
-      link.click();
-      // Blob-URL downloads cancel if the anchor dies before the download starts.
-      setTimeout(() => document.body.removeChild(link), 0);
+      // Awaited fetch, not a fire-and-forget anchor: while the server
+      // is busy (boot queue, a stale rebuild the Preview tab itself
+      // triggered), an anchor's request sits pending with ZERO feedback
+      // and the browser only surfaces the download once headers arrive
+      // — observed as "nothing happens", then the file popping up
+      // during the next hard refresh. The fetch keeps the button in a
+      // visible busy state and saves via a blob the moment bytes land.
+      setExporting(true);
+      setExportError(null);
+      try {
+        const resp = await fetch(fontUrl.startsWith('blob:') ? fontUrl : fontUrl);
+        if (!resp.ok) throw new Error(`font fetch failed (${resp.status})`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 0);
+        setShowExportModal(false);
+      } catch (err) {
+        setExportError(err.message || 'Download failed');
+      } finally {
+        setExporting(false);
+      }
       return;
     }
     setExporting(true);
@@ -550,12 +572,15 @@ function PreviewTab({
                   type="button"
                   className="btn btn-secondary"
                   onClick={handleDownload}
+                  disabled={exporting || building}
                   disabled={exporting}
                   title={exportUseDefault
                     ? "Rebuilds the font at the chosen location — takes a few seconds"
                     : "Download the built variable font (.ttf)"}
                 >
-                  {exporting ? 'Exporting…' : 'Download'}
+                  {exporting ? 'Preparing…'
+                    : building ? 'Waiting for rebuild…'
+                    : 'Download'}
                 </button>
               </div>
             </div>

@@ -53,6 +53,11 @@ function App() {
                                       clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] });
   const [axes, setAxes] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
+  // SHIFT-CLICK MULTI-SELECT: names of additionally highlighted rows (the
+  // anchor included). Only SECONDARY-axis slider edits broadcast to the
+  // set — those are preview-only values (stripped from saves, skipped by
+  // sync status), so nothing persisted can flatten or mix across rows.
+  const [multiSelectedNames, setMultiSelectedNames] = useState(() => new Set());
   const [editingCoordinates, setEditingCoordinates] = useState({});
   // Store editing coordinates per instance to persist when deselected
   const [instanceEditingCoordinates, setInstanceEditingCoordinates] = useState({});
@@ -373,6 +378,17 @@ function App() {
         setLoading(false);
         return;
       }
+
+      // Clear the blind empty state IMMEDIATELY: a loaded source is
+      // known from this first health response, but familyName used to
+      // be set only at the tail of loadData — on a heavy font the boot
+      // takes ~30-40s (slow endpoints + a 9MB font parse), and the UI
+      // showed "No font loaded" (with its use-Load-Font advice) the
+      // whole time, reading as broken while it was merely loading.
+      setFamilyName(health.family_name || null);
+      setSourceFormat(health.source_format || null);
+      setVfFamilyId(health.vf_family_id
+        || (health.family_name ? `${health.family_name}-VF` : null));
 
       // If font is not built, trigger auto-build on hard reset
       if (!health.font_built && !health.building) {
@@ -779,6 +795,28 @@ function App() {
     [axes],
   );
 
+  // Injected axes that are genuinely preview-only (GRAD/ROND — their
+  // per-instance values live in badge-managed sidecars). SPAC persists
+  // via the CSV's per-instance column; CONTROL axes (ymod/lcwd) persist
+  // via the control sidecar's instance_values — both flow through saves
+  // like any coordinate and hydrate back from /api/instances.
+  const previewOnlyAxisTags = React.useMemo(
+    () => new Set((axes || [])
+      .filter(a => a.transform_injected
+        && String(a.tag).toLowerCase() !== 'spac')
+      .map(a => String(a.tag).toLowerCase())),
+    [axes],
+  );
+
+  // Secondary (control) axes alone — the only tags a multi-select
+  // broadcast may touch.
+  const controlAxisTags = React.useMemo(
+    () => new Set((axes || [])
+      .filter(a => a.is_control_axis)
+      .map(a => String(a.tag).toLowerCase())),
+    [axes],
+  );
+
   const handleAddAvar2Axis = async (axisData) => {
     try {
       const result = await api.addAvar2Axis(axisData);
@@ -1079,9 +1117,15 @@ function App() {
         tags.add(t.injected_axis_tag);
       }
     }
-    if (grade?.enabled) tags.add('GRAD');
+    // GRAD is deliberately NOT here: rows have no per-style GRAD render
+    // overlay (they draw at GRAD 0), so its slider works as a live
+    // preview of the selected row — like the Preview tab's. The badge
+    // still owns the SAVED per-instance grade, and GRAD is
+    // transform_injected, so a drag is stripped from every save and
+    // ignored by the sync dots. ROND/slnt stay inert: their rows render
+    // the badge percent, which would override (and contradict) a drag.
     return tags;
-  }, [transforms, grade?.enabled]);
+  }, [transforms]);
 
   // ---- Grade transform (source-level; toggle + default + per-instance) ----
   const gradeCommitTimer = useRef(null);
@@ -1233,11 +1277,19 @@ function App() {
     // reads against the real source file.
     const sourceCoords = instance.source_coordinates || instance.coordinates || {};
     const persisted = { ...sourceCoords, ...csvIn, ...csvOut };
+    // Control-axis values hydrate from the control sidecar into
+    // instance.coordinates — that IS their persisted home (they are
+    // deliberately absent from source_coordinates and the CSV).
+    for (const k of Object.keys(instance.coordinates || {})) {
+      if (controlAxisTags.has(String(k).toLowerCase())) {
+        persisted[k] = instance.coordinates[k];
+      }
+    }
     const csvCoords = Object.keys(csvOut).length > 0 ? csvOut : null;
 
     if (edits && Object.keys(edits).length > 0) {
       const dirty = Object.keys(edits).some(k => {
-        if (injectedAxisTags.has(String(k).toLowerCase())) return false;   // preview-only axis — never persisted
+        if (previewOnlyAxisTags.has(String(k).toLowerCase())) return false;   // preview-only axis — never persisted
         if (!(k in persisted)) return true;          // value with no persisted home
         const ve = Number(edits[k]);
         const vp = Number(persisted[k]);
@@ -1258,14 +1310,41 @@ function App() {
     }
 
     return 'green';
-  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, avar2Instances, injectedAxisTags]);
+  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, avar2Instances, previewOnlyAxisTags, controlAxisTags]);
 
   // Advance-width measurement (per-row /api/text-width polling with a
   // cache + interpolation + live recalculation) was removed at the
   // designer's request — it dominated request traffic. The backend
   // endpoint survives for easy reinstatement.
 
-  const handleSelectInstance = useCallback((instance) => {
+  const handleSelectInstance = useCallback((instance, mods) => {
+    // Shift-click selects the contiguous range between the already-selected
+    // row (the anchor) and this one; cmd/ctrl-click toggles one row in the
+    // set. The anchor stays the editing target — multi-selection only
+    // widens where secondary-axis edits land.
+    if (mods && (mods.shift || mods.toggle) && selectedInstance
+        && selectedInstance.name !== instance.name) {
+      if (mods.shift) {
+        const names = instances.map(i => i.name);
+        const a = names.indexOf(selectedInstance.name);
+        const b = names.indexOf(instance.name);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          setMultiSelectedNames(new Set(names.slice(lo, hi + 1)));
+          return;
+        }
+      } else {
+        setMultiSelectedNames(prev => {
+          const next = new Set(prev);
+          next.add(selectedInstance.name);
+          if (next.has(instance.name)) next.delete(instance.name);
+          else next.add(instance.name);
+          return next.size > 1 ? next : new Set();
+        });
+        return;
+      }
+    }
+    setMultiSelectedNames(new Set());
     // If clicking the same instance, don't reset coordinates
     if (selectedInstance && selectedInstance.name === instance.name) {
       return; // Already selected, keep current editing coordinates
@@ -1294,7 +1373,7 @@ function App() {
 
     const savedOriginalCoords = instanceOriginalCoordinates[instance.name];
     setOriginalCoordinates(savedOriginalCoords || { ...instance.coordinates });
-  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, instanceOriginalCoordinates, originalCoordinates]);
+  }, [selectedInstance, editingCoordinates, instanceEditingCoordinates, instanceOriginalCoordinates, originalCoordinates, instances]);
 
   const handleAxisChange = useCallback((tag, value) => {
     // Badge-governed axes never take per-instance slider edits — the
@@ -1321,7 +1400,40 @@ function App() {
       }
       return updated;
     });
-  }, [selectedInstance, editingCoordinates, badgeGovernedTags]);
+    // Broadcast SECONDARY-axis edits to every multi-selected row, then
+    // persist them (debounced): per-row control values save to the
+    // control sidecar via the csv-only update path, which never touches
+    // the source file. Only the ONE dragged axis is written, so nothing
+    // else can flatten across rows.
+    if (controlAxisTags.has(String(tag).toLowerCase()) && multiSelectedNames.size > 1) {
+      setInstanceEditingCoordinates(prevStored => {
+        const next = { ...prevStored };
+        for (const name of multiSelectedNames) {
+          if (selectedInstance && name === selectedInstance.name) continue;
+          const inst = instances.find(i => i.name === name);
+          if (!inst) continue;
+          next[name] = { ...(next[name] || inst.coordinates), [tag]: value };
+        }
+        return next;
+      });
+      const targets = [...multiSelectedNames];
+      clearTimeout(broadcastSaveTimer.current);
+      broadcastSaveTimer.current = setTimeout(async () => {
+        // Sequential on purpose: each save rewrites the whole control
+        // sidecar, so parallel PUTs would race the read-modify-write.
+        for (const name of targets) {
+          if (selectedInstance && name === selectedInstance.name
+              && selectedInstance.origin === 'studio') continue; // anchor auto-saves
+          try {
+            await api.updateInstance(name, { [tag]: value }, { csvOnly: true });
+          } catch (err) {
+            console.warn(`Saving ${tag} for "${name}" failed:`, err.message || err);
+          }
+        }
+        api.getInstances().then(d => setInstances(d.instances)).catch(() => {});
+      }, 800);
+    }
+  }, [selectedInstance, editingCoordinates, badgeGovernedTags, controlAxisTags, multiSelectedNames, instances]);
 
   // AUTO-PERSIST studio-instance coordinate edits (debounced,
   // serialized). The old contract — slider edits live in page state
@@ -1333,6 +1445,7 @@ function App() {
   // local editing state alone, so a drag that continues while a save
   // is in flight can't be snapped back by a refetch.
   const autoSaveTimer = useRef(null);
+  const broadcastSaveTimer = useRef(null);
   const autoSaveChain = useRef(Promise.resolve());
   const autoSaveLastSaved = useRef({});
   useEffect(() => {
@@ -1340,11 +1453,12 @@ function App() {
     if (!editingCoordinates || Object.keys(editingCoordinates).length === 0) return undefined;
     const name = selectedInstance.name;
     const coords = { ...selectedInstance.coordinates, ...editingCoordinates };
-    // Preview-only axes (SPAC, secondary parametric) never persist —
-    // dragging them must not schedule CSV writes or destabilize the
-    // saved-key guard.
+    // Preview-only axes (secondary parametric, GRAD/ROND) never
+    // persist — dragging them must not schedule CSV writes or
+    // destabilize the saved-key guard. SPAC stays: it saves to the
+    // CSV's per-instance spacing column.
     for (const k of Object.keys(coords)) {
-      if (injectedAxisTags.has(k.toLowerCase())) delete coords[k];
+      if (previewOnlyAxisTags.has(k.toLowerCase())) delete coords[k];
     }
     const coordsKey = JSON.stringify(Object.keys(coords).sort().map(k => [k, coords[k]]));
     // Idempotence guard. WITHOUT it, a completed rebuild (font reload,
@@ -1376,7 +1490,7 @@ function App() {
       });
     }, 800);
     return () => clearTimeout(autoSaveTimer.current);
-  }, [editingCoordinates, selectedInstance, injectedAxisTags]);
+  }, [editingCoordinates, selectedInstance, previewOnlyAxisTags]);
 
   // Helper function to wait for font to be loaded and ready
   const waitForFontReady = async (maxAttempts = 50, delayMs = 100) => {
@@ -1405,12 +1519,13 @@ function App() {
       throw new Error(`Instance "${instanceName}" not found`);
     }
 
-    // Strip transform-injected axes (SPAC) — live preview state, not
-    // instance data; the server won't persist them and comparing them
-    // makes saves look like no-ops.
-    if (injectedAxisTags.size > 0) {
+    // Strip the preview-only axes (secondary parametric, GRAD/ROND) —
+    // live preview state, not instance data. SPAC goes through: the
+    // server routes it to the CSV's per-instance spacing column (never
+    // to the .glyphs writeback).
+    if (previewOnlyAxisTags.size > 0) {
       coordinatesToUse = Object.fromEntries(
-        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag.toLowerCase()))
+        Object.entries(coordinatesToUse).filter(([tag]) => !previewOnlyAxisTags.has(tag.toLowerCase()))
       );
     }
 
@@ -1745,9 +1860,10 @@ function App() {
         : selectedInstance.coordinates;
       
       // Create new instance, inserting after the selected instance.
-      // Preview-only axes (SPAC, secondary parametric) are not instance data.
+      // Preview-only axes (secondary parametric, GRAD/ROND) are not
+      // instance data; SPAC is kept so a duplicate keeps its spacing.
       const persistedCoords = Object.fromEntries(
-        Object.entries(coordinatesToUse).filter(([tag]) => !injectedAxisTags.has(tag.toLowerCase()))
+        Object.entries(coordinatesToUse).filter(([tag]) => !previewOnlyAxisTags.has(tag.toLowerCase()))
       );
       await api.createInstance(newInstanceName, persistedCoords, selectedInstance.name);
       
@@ -2326,6 +2442,7 @@ function App() {
             axes={axes}
             coordinates={editingCoordinates}
             onAxisChange={handleAxisChange}
+            multiTargetCount={multiSelectedNames.size > 1 ? multiSelectedNames.size : 0}
             badgeGovernedTags={badgeGovernedTags}
             disabled={(staticMode && !isUploadDataset()) || !selectedInstance}
             sampleText={sampleText}
@@ -2370,6 +2487,7 @@ function App() {
           <InstanceRows
             instances={instances}
             selectedInstance={selectedInstance}
+            multiSelectedNames={multiSelectedNames}
             onSelectInstance={handleSelectInstance}
             editingCoordinates={editingCoordinates}
             instanceEditingCoordinates={instanceEditingCoordinates}
@@ -2409,6 +2527,7 @@ function App() {
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
             fontUrl={fontUrl}
+            building={building}
             builtFontFilename={builtFontFilename}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}

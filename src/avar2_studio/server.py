@@ -12,7 +12,9 @@ Provides API endpoints to:
 """
 
 import argparse
+import contextlib
 import csv
+import gc
 import json
 import os
 import shutil
@@ -786,6 +788,21 @@ def get_instances():
             except Exception as e:
                 print(f"Warning: Could not read studio-only rows from CSV: {e}", file=sys.stderr)
 
+        # Per-instance CONTROL-axis values hydrate from the control
+        # sidecar so sliders and row previews come back after a reload.
+        # Deliberately NOT merged into source_coordinates: they are
+        # studio state, and padding that dict would break the CSV-vs-
+        # source divergence check (it compares key sets).
+        try:
+            ctl_values = _control_axes.instance_values(ORIGINAL_PATH)
+        except Exception:  # noqa: BLE001
+            ctl_values = {}
+        if ctl_values:
+            for inst in instances:
+                for tag, per_name in ctl_values.items():
+                    if inst["name"] in per_name:
+                        inst["coordinates"][tag] = per_name[inst["name"]]
+
         # The CSV row order is the user's authored row order (the drag
         # reorder persists it there). Instances without a CSV row keep
         # their current (source) order, ahead of ordered rows — stable
@@ -1115,7 +1132,77 @@ def _apply_transform_chain(vf_path):
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
         LAST_TRANSFORM_ERROR = "; ".join(errors)
-    return out
+    return _stamp_control_instance_values(out)
+
+
+def _stamp_control_instance_values(vf_path):
+    """Pin per-instance CONTROL-axis values (control sidecar
+    ``instance_values``) onto matching fvar named instances — the
+    control-axis analogue of SPAC's ``_instance_spac_overrides``.
+    Best-effort by name: studio-only rows have no fvar instance to
+    stamp (same as SPAC); the UI previews them via the hydrated
+    coordinates instead. Runs after the transform chain because
+    fix_instances regenerates the instance list."""
+    if vf_path is None or ORIGINAL_PATH is None:
+        return vf_path
+    try:
+        values = _control_axes.instance_values(ORIGINAL_PATH)
+    except Exception:  # noqa: BLE001
+        values = {}
+    if not values:
+        return vf_path
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(str(vf_path))
+        if "fvar" not in font:
+            font.close()
+            return vf_path
+        fvar = font["fvar"]
+        axis_by_tag = {a.axisTag: a for a in fvar.axes}
+        name_table = font["name"]
+        stamped = 0
+        for inst in fvar.instances:
+            iname = name_table.getDebugName(inst.subfamilyNameID) or ""
+            for tag, per_name in values.items():
+                axis = axis_by_tag.get(tag)
+                if axis is None or iname not in per_name:
+                    continue
+                v = min(axis.maxValue, max(axis.minValue, float(per_name[iname])))
+                inst.coordinates[tag] = v
+                stamped += 1
+        if stamped:
+            font.save(str(vf_path))
+            print(f"control axes: stamped {stamped} per-instance value(s) "
+                  f"onto fvar instances", file=sys.stderr)
+        font.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"control axes: instance stamping failed: {exc}", file=sys.stderr)
+    return vf_path
+
+
+@contextlib.contextmanager
+def _gc_paused():
+    """Pause CPython's cyclic GC for a build-critical section.
+
+    glyphsLib churns millions of temporaries; with a long-lived server
+    heap, every allocation spurt triggers full-heap collection passes
+    and the IDENTICAL source-transform chain measured 42 seconds in a
+    fresh process vs 8+ minutes after the heap had grown
+    (gc_collect_main dominating the sample). One collect at the end
+    reclaims everything the section leaked."""
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+        # NO forced full collect here: after a build the heap holds
+        # millions of dead objects, and one monolithic collect turned
+        # into a multi-minute munmap storm that wedged the build thread
+        # with BUILDING stuck true (observed: 30+ min of "Rebuilding"
+        # at idle CPU). Re-enabled incremental GC drains it gradually
+        # without blocking the world.
 
 
 def _resolve_active_source() -> Optional[Path]:
@@ -1135,92 +1222,93 @@ def _resolve_active_source() -> Optional[Path]:
     ONLY on the grade-edit path, so a plain reload silently dropped the GRAD
     axis from the built font.
     """
-    global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL, LAST_GRADE_ERROR
-    global LAST_SOURCE_TRANSFORM_ERROR
-    if ORIGINAL_PATH is None:
-        return GLYPHS_PATH
-    LAST_GRADE_ERROR = None
-    LAST_SOURCE_TRANSFORM_ERROR = None
+    with _gc_paused():
+        global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL, LAST_GRADE_ERROR
+        global LAST_SOURCE_TRANSFORM_ERROR
+        if ORIGINAL_PATH is None:
+            return GLYPHS_PATH
+        LAST_GRADE_ERROR = None
+        LAST_SOURCE_TRANSFORM_ERROR = None
 
-    # 1) control-axis shadow (brace layers). regenerate_shadow returns None
-    #    when the sidecar declares no control axes; a shadow with an axis but no
-    #    layers compiles to the original's fvar, so we only *use* it when some
-    #    axis actually has layers.
-    shadow = None
-    try:
-        shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
-        # Regenerating rewrites the watched source file — the caller triggers
-        # the build itself, so suppress the watcher for it.
-        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
-    except Exception as exc:  # noqa: BLE001
-        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
-    try:
-        any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
-    except Exception:  # noqa: BLE001
-        any_layers = False
-
-    # 2) grade braces, composed onto the SAME shadow. fresh_shadow only when
-    #    there's no control shadow to build on, so re-runs never stack braces.
-    any_grades = False
-    try:
-        if _grade.list_graded_instances(ORIGINAL_PATH):
-            grade_shadow = _grade_shadow.apply_grades(
-                ORIGINAL_PATH, _grade_instance_coords(), fresh_shadow=(shadow is None)
-            )
-            if grade_shadow is not None:
-                shadow = grade_shadow
-                any_grades = True
-                _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
-    except Exception as exc:  # noqa: BLE001
-        LAST_GRADE_ERROR = str(exc)
-        print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
-
-    # 3) source-stage transforms (round_corners), over a BUILD COPY of the
-    #    composed shadow (or the original), so the control and grade braces
-    #    generated above go through them together with the masters. Never
-    #    the canonical shadow itself: the shadow is regen's STATE, and its
-    #    preserve-what-the-designer-drew pass would capture a transformed
-    #    brace as a hand drawing and leak it into later untransformed
-    #    builds (measured: a rounded lcwd brace against sharp masters is
-    #    exactly fontc's "interpolation-incompatible paths"). A failure
-    #    keeps the un-transformed source and is surfaced — a silently
-    #    sharp font must not pass as ok.
-    any_source = False
-    src_chain = []
-    try:
-        _transforms.discover()
-        src_chain = _transforms.active(ORIGINAL_PATH, stage="source")
-        # Deterministic order regardless of sidecar entry order: slant
-        # (10) before rounding (50), so rounds land on slanted drawings.
-        src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
-    except Exception as exc:  # noqa: BLE001
-        print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
-    if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
-        current = None
+        # 1) control-axis shadow (brace layers). regenerate_shadow returns None
+        #    when the sidecar declares no control axes; a shadow with an axis but no
+        #    layers compiles to the original's fvar, so we only *use* it when some
+        #    axis actually has layers.
+        shadow = None
         try:
-            base = shadow if shadow is not None else ORIGINAL_PATH
-            transformed = (_control_axes.shadow_dir_for(ORIGINAL_PATH)
-                           / "transformed" / ORIGINAL_PATH.name)
-            transformed.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(base, transformed)
-            from glyphsLib import GSFont as _GSFont
-            font = _GSFont(str(transformed))
-            ctx = _build_context()
-            for current, params in src_chain:
-                current.apply_to_source(font, params, ctx)
-            from .source_font import save_font_atomically as _save_atomically
-            _save_atomically(font, transformed)
-            shadow = transformed
-            any_source = True
+            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            # Regenerating rewrites the watched source file — the caller triggers
+            # the build itself, so suppress the watcher for it.
+            _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
         except Exception as exc:  # noqa: BLE001
-            name = current.spec.id if current is not None else "source-stage transforms"
-            LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
-            print(f"Warning: source transform failed, building without it: "
-                  f"{LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+            print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+        try:
+            any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
+        except Exception:  # noqa: BLE001
+            any_layers = False
 
-    GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
-        else ORIGINAL_PATH
-    return GLYPHS_PATH
+        # 2) grade braces, composed onto the SAME shadow. fresh_shadow only when
+        #    there's no control shadow to build on, so re-runs never stack braces.
+        any_grades = False
+        try:
+            if _grade.list_graded_instances(ORIGINAL_PATH):
+                grade_shadow = _grade_shadow.apply_grades(
+                    ORIGINAL_PATH, _grade_instance_coords(), fresh_shadow=(shadow is None)
+                )
+                if grade_shadow is not None:
+                    shadow = grade_shadow
+                    any_grades = True
+                    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+        except Exception as exc:  # noqa: BLE001
+            LAST_GRADE_ERROR = str(exc)
+            print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
+
+        # 3) source-stage transforms (round_corners), over a BUILD COPY of the
+        #    composed shadow (or the original), so the control and grade braces
+        #    generated above go through them together with the masters. Never
+        #    the canonical shadow itself: the shadow is regen's STATE, and its
+        #    preserve-what-the-designer-drew pass would capture a transformed
+        #    brace as a hand drawing and leak it into later untransformed
+        #    builds (measured: a rounded lcwd brace against sharp masters is
+        #    exactly fontc's "interpolation-incompatible paths"). A failure
+        #    keeps the un-transformed source and is surfaced — a silently
+        #    sharp font must not pass as ok.
+        any_source = False
+        src_chain = []
+        try:
+            _transforms.discover()
+            src_chain = _transforms.active(ORIGINAL_PATH, stage="source")
+            # Deterministic order regardless of sidecar entry order: slant
+            # (10) before rounding (50), so rounds land on slanted drawings.
+            src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
+        except Exception as exc:  # noqa: BLE001
+            print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
+        if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
+            current = None
+            try:
+                base = shadow if shadow is not None else ORIGINAL_PATH
+                transformed = (_control_axes.shadow_dir_for(ORIGINAL_PATH)
+                               / "transformed" / ORIGINAL_PATH.name)
+                transformed.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(base, transformed)
+                from glyphsLib import GSFont as _GSFont
+                font = _GSFont(str(transformed))
+                ctx = _build_context()
+                for current, params in src_chain:
+                    current.apply_to_source(font, params, ctx)
+                from .source_font import save_font_atomically as _save_atomically
+                _save_atomically(font, transformed)
+                shadow = transformed
+                any_source = True
+            except Exception as exc:  # noqa: BLE001
+                name = current.spec.id if current is not None else "source-stage transforms"
+                LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
+                print(f"Warning: source transform failed, building without it: "
+                      f"{LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+
+        GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
+            else ORIGINAL_PATH
+        return GLYPHS_PATH
 
 
 def _run_shadow_regen_and_build():
@@ -1344,7 +1432,12 @@ def _run_build():
     global LAST_BUILD_STATUS, LAST_BUILD_ERROR, LAST_AVAR2_ERROR
 
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
-    avar2_result = _perform_avar2_build()
+    # GC paused for the whole pass: the avar2 pipeline (update_config,
+    # the instancer relocation over a ~9MB gvar, fix/STAT) churns as many
+    # temporaries as the source chain and showed the same
+    # gc_collect_main-dominated profile once the heap had grown.
+    with _gc_paused():
+        avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
         LAST_AVAR2_ERROR = None
         print(f"Avar2 font built: {avar2_result['font_path']}", file=sys.stderr)
@@ -1432,10 +1525,16 @@ def get_font():
     else:
         return jsonify({"error": "Variable font not built yet."}), 404
     
+    # ?download=1 → attachment. The Preview tab's Download button is a
+    # plain anchor at this URL; with the inline-with-filename disposition
+    # the anchor's download attribute never triggered a save, so the
+    # button silently did nothing.
+    as_attachment = request.args.get('download', '').lower() in ('1', 'true', 'yes')
     response = send_file(
         str(font_path),
         mimetype='font/ttf',
-        as_attachment=False
+        as_attachment=as_attachment,
+        download_name=font_path.name if as_attachment else None,
     )
     # Add cache control headers to prevent browser caching
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -1638,8 +1737,6 @@ def create_instance():
     except (ValueError, TypeError):
         return jsonify({"error": "Coordinates must be numeric"}), 400
 
-    coordinates = {k: v for k, v in coordinates.items() if k.upper() != 'SPAC'}
-
     insert_after = data.get('insert_after', None)
     if insert_after:
         insert_after = insert_after.strip()
@@ -1701,6 +1798,31 @@ def create_instance():
             upper = tag.upper()
             value = coordinates.get(tag, coordinates.get(upper, axis["default"]))
             new_row[upper] = str(value)
+        # Per-instance CONTROL-axis values ride along when provided (a
+        # duplicate of a corrected row) — stored in the control sidecar,
+        # same contract as update_instance.
+        try:
+            _ctl_tags = {str(a.get("tag", "")).lower()
+                         for a in _control_axes.list_axes(ORIGINAL_PATH)}
+            ctl_values = {t: v for t, v in coordinates.items()
+                          if str(t).lower() in _ctl_tags}
+            if ctl_values:
+                _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
+                                                  ctl_values)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not save control-axis values: {exc}",
+                  file=sys.stderr)
+
+        # Per-instance SPAC rides along when the caller provides one (a
+        # duplicate of a spaced row) — same contract as update_instance:
+        # mint the column on first use, blanks elsewhere are inert.
+        spac_value = coordinates.get('SPAC', coordinates.get('spac'))
+        if spac_value is not None:
+            if 'SPAC' not in fieldnames:
+                fieldnames.append('SPAC')
+                for row in rows:
+                    row.setdefault('SPAC', "")
+            new_row['SPAC'] = str(spac_value)
         for field in fieldnames:
             # Columns beyond the parametric axes (OPSZ/WGHT mapping
             # inputs) start BLANK, never 0: a stamped zero becomes a
@@ -1805,6 +1927,27 @@ def update_instance(instance_name: str):
         if tag in source_axis_tags or tag == 'SPAC'
     }
 
+    # Per-instance CONTROL-axis values (ymod/lcwd) persist in the control
+    # sidecar — never as CSV columns (the CSV uppercases headers, so a
+    # ymod column mints a bogus YMOD user axis). /api/instances hydrates
+    # them back; the build stamps them onto matching fvar instances.
+    try:
+        _ctl_tags = {str(a.get("tag", "")).lower()
+                     for a in _control_axes.list_axes(ORIGINAL_PATH)}
+    except Exception:  # noqa: BLE001
+        _ctl_tags = set()
+    control_values = {tag: value for tag, value in coordinates.items()
+                      if str(tag).lower() in _ctl_tags}
+    if control_values:
+        global _SUPPRESS_WATCHDOG_UNTIL
+        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+        try:
+            _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
+                                              control_values)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not save control-axis values: {exc}",
+                  file=sys.stderr)
+
     global EDITING_INSTANCES
     EDITING_INSTANCES.discard(instance_name)
 
@@ -1857,18 +2000,30 @@ def update_instance(instance_name: str):
                             for tag, value in csv_coordinates.items():
                                 col = tag.upper()
                                 if col not in fieldnames:
-                                    # Unknown coordinate tag — DON'T create
-                                    # a column for it. The mappings data
-                                    # models source parametric axes plus
-                                    # declared mapping axes only; transform-
-                                    # injected axes (SPAC) ride along in
-                                    # instance coordinates but don't exist
-                                    # when the avar2 table compiles, and a
-                                    # stray SPAC column hard-failed config
-                                    # generation ("parametric axis 'SPAC'
-                                    # is blank"). Spacing is driven live on
-                                    # the preview instead.
-                                    continue
+                                    if col == 'SPAC':
+                                        # Mint the SPAC column on first
+                                        # use. It is the one injected axis
+                                        # with a per-instance CSV contract:
+                                        # /api/instances reads it back, the
+                                        # spacing transforms pin it onto
+                                        # named fvar instances
+                                        # (_instance_spac_overrides), and
+                                        # config generation excludes it
+                                        # everywhere — so blank cells in
+                                        # the other rows are inert.
+                                        fieldnames.append(col)
+                                        for r in rows:
+                                            r.setdefault(col, "")
+                                    else:
+                                        # Unknown coordinate tag — DON'T
+                                        # create a column for it. The
+                                        # mappings data models source
+                                        # parametric axes plus declared
+                                        # mapping axes only; a control-axis
+                                        # column (lcwd/ymod) reads as a
+                                        # required-but-blank parametric
+                                        # axis and aborts the avar2 build.
+                                        continue
                                 row[col] = str(value)
                         instance_updated = True
                         updated_count += 1
@@ -1980,6 +2135,12 @@ def rename_instance(instance_name: str):
             # Keep any grade attached to this instance across the rename.
             try:
                 _grade.rename_instance(ORIGINAL_PATH, instance_name, new_name)
+            except Exception:  # noqa: BLE001
+                pass
+            # Same for per-instance control-axis values.
+            try:
+                _control_axes.rename_instance_values(ORIGINAL_PATH,
+                                                     instance_name, new_name)
             except Exception:  # noqa: BLE001
                 pass
             # Update preview CSV if it exists
@@ -3309,122 +3470,181 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
     earlier binary rebase via fontTools instancer preserved behavior
     by splitting every variation region around the new origin — ~6x
     the font size.) The user's source file is never touched."""
-    import glyphsLib
-    import ufoLib2
-    from fontmake.instantiator import Instantiator
-    from fontTools.designspaceLib import SourceDescriptor, InstanceDescriptor
+    # GC paused: staging interpolates a new default master over the
+    # composed source and writes every master out as a UFO — the same
+    # allocation storm as the build paths, and unwrapped it spent ~9
+    # minutes before the first UFO landed.
+    with _gc_paused():
+        import glyphsLib
+        import ufoLib2
+        from fontmake.instantiator import Instantiator
+        from fontTools.designspaceLib import SourceDescriptor, InstanceDescriptor
 
-    src_dir = export_dir / "sources"
-    src_dir.mkdir(parents=True, exist_ok=True)
+        src_dir = export_dir / "sources"
+        src_dir.mkdir(parents=True, exist_ok=True)
 
-    source_path = Path(source_path) if source_path is not None else GLYPHS_PATH
-    if str(source_path).lower().endswith(".glyphs"):
-        gsfont = glyphsLib.GSFont(str(source_path))
-        nonexport = {str(g.name) for g in gsfont.glyphs
-                     if not getattr(g, "export", True)}
-        ds = glyphsLib.to_designspace(gsfont, ufo_module=ufoLib2)
-    else:
-        from fontTools.designspaceLib import DesignSpaceDocument
-        ds = DesignSpaceDocument.fromfile(str(source_path))
-        ds.loadSourceFonts(ufoLib2.Font.open)
-        _EXPORT_KEY = "com.schriftgestaltung.Glyphs.Export"
-        nonexport = set()
-        for s in ds.sources:
-            for layer in s.font.layers:
-                for g in layer:
-                    if g.lib.get(_EXPORT_KEY) is False:
-                        nonexport.add(g.name)
+        source_path = Path(source_path) if source_path is not None else GLYPHS_PATH
+        if str(source_path).lower().endswith(".glyphs"):
+            gsfont = glyphsLib.GSFont(str(source_path))
+            nonexport = {str(g.name) for g in gsfont.glyphs
+                         if not getattr(g, "export", True)}
+            ds = glyphsLib.to_designspace(gsfont, ufo_module=ufoLib2)
+        else:
+            from fontTools.designspaceLib import DesignSpaceDocument
+            ds = DesignSpaceDocument.fromfile(str(source_path))
+            ds.loadSourceFonts(ufoLib2.Font.open)
+            _EXPORT_KEY = "com.schriftgestaltung.Glyphs.Export"
+            nonexport = set()
+            for s in ds.sources:
+                for layer in s.font.layers:
+                    for g in layer:
+                        if g.lib.get(_EXPORT_KEY) is False:
+                            nonexport.add(g.name)
 
-    # Non-exporting glyphs: fontc's native .glyphs reader drops them,
-    # but glyphsLib's designspace conversion KEEPS them, writing an
-    # export lib key that lands on only some masters' glifs — fontc
-    # then sees the glyph in some masters and not others and dies with
-    # "interpolation-incompatible paths" (Crispy's braceleft, flagged
-    # export=0, broke every designspace build this way). Strip them
-    # from every source so this build matches the .glyphs build.
-    if nonexport:
-        kept = set()
-        for s in ds.sources:
-            for layer in s.font.layers:
-                for name in list(layer.keys()):
-                    if name in nonexport:
-                        del layer[name]
-                    else:
-                        kept.add(name)
-        # An EXPORTING glyph referencing a stripped one would now have a
-        # dangling component — fail loudly rather than compile garbage
-        # (Glyphs decomposes these at export; wire that up if a source
-        # ever legitimately needs it).
-        dangling = set()
-        for s in ds.sources:
-            for layer in s.font.layers:
-                for g in layer:
-                    for comp in g.components:
-                        if comp.baseGlyph in nonexport:
-                            dangling.add(f"{g.name} → {comp.baseGlyph}")
-        if dangling:
-            raise RuntimeError(
-                "exporting glyph(s) reference non-exporting component(s): "
-                + ", ".join(sorted(dangling)))
-        for s in ds.sources:
-            font = s.font
-            order = font.lib.get("public.glyphOrder")
-            if order:
-                font.lib["public.glyphOrder"] = [n for n in order if n not in nonexport]
-            if font.kerning:
-                font.kerning = {pair: v for pair, v in font.kerning.items()
-                                if pair[0] not in nonexport and pair[1] not in nonexport}
-            if font.groups:
-                font.groups = {k: [n for n in v if n not in nonexport]
-                               for k, v in font.groups.items()}
+        # Non-exporting glyphs: fontc's native .glyphs reader drops them,
+        # but glyphsLib's designspace conversion KEEPS them, writing an
+        # export lib key that lands on only some masters' glifs — fontc
+        # then sees the glyph in some masters and not others and dies with
+        # "interpolation-incompatible paths" (Crispy's braceleft, flagged
+        # export=0, broke every designspace build this way). Strip them
+        # from every source so this build matches the .glyphs build.
+        if nonexport:
+            kept = set()
+            for s in ds.sources:
+                for layer in s.font.layers:
+                    for name in list(layer.keys()):
+                        if name in nonexport:
+                            del layer[name]
+                        else:
+                            kept.add(name)
+            # An EXPORTING glyph referencing a stripped one would now have a
+            # dangling component — fail loudly rather than compile garbage
+            # (Glyphs decomposes these at export; wire that up if a source
+            # ever legitimately needs it).
+            dangling = set()
+            for s in ds.sources:
+                for layer in s.font.layers:
+                    for g in layer:
+                        for comp in g.components:
+                            if comp.baseGlyph in nonexport:
+                                dangling.add(f"{g.name} → {comp.baseGlyph}")
+            if dangling:
+                raise RuntimeError(
+                    "exporting glyph(s) reference non-exporting component(s): "
+                    + ", ".join(sorted(dangling)))
+            for s in ds.sources:
+                font = s.font
+                order = font.lib.get("public.glyphOrder")
+                if order:
+                    font.lib["public.glyphOrder"] = [n for n in order if n not in nonexport]
+                if font.kerning:
+                    font.kerning = {pair: v for pair, v in font.kerning.items()
+                                    if pair[0] not in nonexport and pair[1] not in nonexport}
+                if font.groups:
+                    font.groups = {k: [n for n in v if n not in nonexport]
+                                   for k, v in font.groups.items()}
 
-    if str(source_path).lower().endswith(".glyphs"):
-        for i, s in enumerate(ds.sources):
-            fname = Path(s.filename or f"master{i}.ufo").name
-            s.font.save(str(src_dir / fname), overwrite=True)
-            s.path = str(src_dir / fname)
+        # BAKED-CORRECTION braces can sit at a master's EXACT location —
+        # a correction pinned at the control axis's default (ymod rests
+        # on its corrected end) over a master corner. fontc renders the
+        # brace there, but fontmake's Instantiator refuses duplicate
+        # source locations outright ("Locations must be unique", first
+        # seen on glyph 'B'). Reproduce the compiled behavior: copy each
+        # such brace glyph OVER the coincident master's glyph, then drop
+        # the brace source.
+        import copy as _copy
+        full_by_loc = {}
+        for src in ds.sources:
+            if not src.layerName:
+                full_by_loc[tuple(sorted((src.location or {}).items()))] = src
+        merged = 0
+        for src in list(ds.sources):
+            if not src.layerName:
+                continue
+            master = full_by_loc.get(tuple(sorted((src.location or {}).items())))
+            if master is None:
+                continue
+            brace_layer = src.font.layers[src.layerName]
+            target = master.font.layers.defaultLayer
+            for g in brace_layer:
+                dup = _copy.deepcopy(g)
+                if g.name in target:
+                    del target[g.name]
+                target.addGlyph(dup)
+                merged += 1
+            ds.sources.remove(src)
+        if merged:
+            print(f"  export: merged {merged} baked-correction glyph(s) from "
+                  f"brace sources coincident with masters", file=sys.stderr)
 
-    name_by_tag = {a.tag: a.name for a in ds.axes}
-    design_loc = {
-        name_by_tag[t]: float(v)
-        for t, v in parametric_location.items()
-        if t in name_by_tag
-    }
-    # Fill unspecified axes at their (design-space) defaults.
-    for a in ds.axes:
-        if a.name not in design_loc:
-            design_loc[a.name] = float(a.map_forward(a.default))
+        if str(source_path).lower().endswith(".glyphs"):
+            for i, s in enumerate(ds.sources):
+                fname = Path(s.filename or f"master{i}.ufo").name
+                s.font.save(str(src_dir / fname), overwrite=True)
+                s.path = str(src_dir / fname)
 
-    inst = InstanceDescriptor()
-    inst.familyName = ds.sources[0].familyName or "Export"
-    inst.styleName = "ExportOrigin"
-    inst.location = dict(design_loc)
-    generator = Instantiator.from_designspace(ds, round_geometry=True)
-    origin_ufo = generator.generate_instance(inst)
-    origin_path = src_dir / "ExportOrigin.ufo"
-    origin_ufo.save(str(origin_path), overwrite=True)
+        name_by_tag = {a.tag: a.name for a in ds.axes}
+        design_loc = {
+            name_by_tag[t]: float(v)
+            for t, v in parametric_location.items()
+            if t in name_by_tag
+        }
+        # Fill unspecified axes at their (design-space) defaults.
+        for a in ds.axes:
+            if a.name not in design_loc:
+                design_loc[a.name] = float(a.map_forward(a.default))
 
-    s = SourceDescriptor()
-    s.path = str(origin_path)
-    s.name = "Export Origin"
-    s.familyName = inst.familyName
-    s.styleName = "ExportOrigin"
-    s.location = dict(design_loc)
-    ds.addSource(s)
+        inst = InstanceDescriptor()
+        inst.familyName = ds.sources[0].familyName or "Export"
+        inst.styleName = "ExportOrigin"
+        inst.location = dict(design_loc)
+        generator = Instantiator.from_designspace(ds, round_geometry=True)
+        origin_ufo = generator.generate_instance(inst)
 
-    # The added master becomes the DEFAULT: designspace axis defaults
-    # move to its location (parametric axes carry no maps, so design
-    # coords are axis coords).
-    for a in ds.axes:
-        if a.name in design_loc:
-            a.default = design_loc[a.name]
+        # Sources that sit EXACTLY at the new origin (baked corrections
+        # pinned at their axis defaults over this spot) are already in
+        # the interpolated origin — the instantiator returns the source
+        # outline at an exact source location. Keeping them would hand
+        # fontc two sources at one location ("duplicate location",
+        # glyph 'multiply'). Sparse ones are dropped; a coincident FULL
+        # master would mean the chosen default IS a master — fail loud.
+        coincident = [src for src in ds.sources
+                      if {k: float(v) for k, v in (src.location or {}).items()} == design_loc]
+        for src in coincident:
+            if not src.layerName:
+                raise RuntimeError(
+                    "export default location coincides with master "
+                    f"'{src.name}' — pick a location that is not a master, "
+                    "or export without 'set default'")
+            ds.sources.remove(src)
+        if coincident:
+            print(f"  export: dropped {len(coincident)} brace source(s) coincident "
+                  f"with the new origin (content baked into the origin master)",
+                  file=sys.stderr)
+        origin_path = src_dir / "ExportOrigin.ufo"
+        origin_ufo.save(str(origin_path), overwrite=True)
 
-    # SAME stem as the original: the gftools builder derives output
-    # names from the source filename, and the config's stat/avar2
-    # sections are keyed by that name — a suffix here breaks the keys.
-    out = export_dir / f"{Path(str(source_path)).stem}.designspace"
-    ds.write(str(out))
-    return out
+        s = SourceDescriptor()
+        s.path = str(origin_path)
+        s.name = "Export Origin"
+        s.familyName = inst.familyName
+        s.styleName = "ExportOrigin"
+        s.location = dict(design_loc)
+        ds.addSource(s)
+
+        # The added master becomes the DEFAULT: designspace axis defaults
+        # move to its location (parametric axes carry no maps, so design
+        # coords are axis coords).
+        for a in ds.axes:
+            if a.name in design_loc:
+                a.default = design_loc[a.name]
+
+        # SAME stem as the original: the gftools builder derives output
+        # names from the source filename, and the config's stat/avar2
+        # sections are keyed by that name — a suffix here breaks the keys.
+        out = export_dir / f"{Path(str(source_path)).stem}.designspace"
+        ds.write(str(out))
+        return out
 
 
 def _apply_hidden_axes(path: Path, hidden_tags) -> None:
@@ -3493,7 +3713,44 @@ def export_font():
             # renders this exact master.
             # The parametric location the export will REST at — the new
             # default master gets interpolated exactly here.
-            mapped = _evaluate_mapped_location(requested)
+            # The authored mapping rows come FIRST: with build-time
+            # relocation off, the preview font's table cannot express the
+            # default-location row (it is excluded as the un-storable
+            # base), so evaluating THAT table at the default input
+            # returns the compiled corner — and the export would rest on
+            # the wrong style (observed: "set default" at wght 400 aimed
+            # at the origin master and collided with its sources). An
+            # exact row match uses the authored out:; everything else
+            # (in-between locations) still evaluates the built table,
+            # which is exact away from the default input.
+            mapped = None
+            try:
+                import yaml as _yaml
+                cfg = _yaml.safe_load(Path(_get_preview_config_path()).read_text()) or {}
+                av = cfg.get("avar2")
+                rows = av if isinstance(av, list) else (next(iter(av.values())) if isinstance(av, dict) and av else [])
+                req_keys = {str(k).lower() for k in requested}
+                for m in rows or []:
+                    ins = m.get("in") or {}
+                    # Same axis SET and equal values — a row that merely
+                    # omits an axis must not match by default-filling, or
+                    # the parametric-identity rows (in: XOPQ/XTRA/YOPQ)
+                    # match any user request and the export rests on
+                    # whichever row comes first (shipped once: the
+                    # export landed on 1420/150/122 instead of the
+                    # ORIGIN row).
+                    if {str(k).lower() for k in ins} != req_keys:
+                        continue
+                    ins_ci = {str(k).lower(): float(v) for k, v in ins.items()}
+                    if all(abs(ins_ci[str(k).lower()] - float(v)) < 0.01
+                           for k, v in requested.items()):
+                        mapped = {str(t): float(v) for t, v in (m.get("out") or {}).items()}
+                        break
+            except Exception as exc:  # noqa: BLE001 — fall back to the table
+                print(f"export: authored-row lookup failed ({exc}); using the built table",
+                      file=sys.stderr)
+            if mapped is None:
+                mapped = _evaluate_mapped_location(requested)
             export_defaults = {
                 t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
             }
@@ -4387,8 +4644,31 @@ _FONTRA_STUDIO_SHIM_JS = """
     if (!cfg || !cfg.studio) return;
     const keys = [cfg.axis_name, cfg.tag].filter(Boolean);
     const labelRe = new RegExp('(^|[\\\\s,])' + cfg.tag + '\\\\s+-?[\\\\d.]+');
-    const isStudioItem = (item) => {
-      if (!item || item.isFontSource) return false;
+    // The selected glyph's raw sources — their SPARSE locations keep
+    // the authored pins verbatim, unlike the panel items' dense (all
+    // axes, defaults filled) or display (defaults stripped) locations.
+    const glyphSources = () => {
+      const ec = window.editorController;
+      const pg = ec && ec.sceneController && ec.sceneController.sceneModel
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph();
+      return (pg && pg.varGlyph && pg.varGlyph.glyph && pg.varGlyph.glyph.sources) || null;
+    };
+    const isStudioItem = (item, sources) => {
+      if (!item || item.isFontSource || item.isDefaultSource) return false;
+      // A studio brace PINS this control axis explicitly in its own
+      // source location — even when the pinned value IS the axis
+      // default (the designer may deliberately rest the axis on the
+      // corrected end, ymod default 100). Masters never carry the key.
+      // The old value!==default test on the dense location went blind
+      // the day the default moved onto the braces' own value: masters
+      // and braces all read "at default" and every row got hidden.
+      const src = (sources && typeof item.sourceIndex === 'number')
+        ? sources[item.sourceIndex] : null;
+      const sloc = (src && src.location) || null;
+      if (sloc) {
+        for (const k of keys) { if (k in sloc) return true; }
+      }
       const dl = item.denseLocation || {};
       for (const k of keys) {
         if (k in dl) return Number(dl[k]) !== Number(cfg.axis_default);
@@ -4448,13 +4728,14 @@ _FONTRA_STUDIO_SHIM_JS = """
       }
       const list = panel.sourcesList;
       const items = list.items || [];
-      const anyStudio = items.some(isStudioItem);
+      const sources = glyphSources();
+      const anyStudio = items.some((it) => isStudioItem(it, sources));
       const rows = list.shadowRoot
         ? list.shadowRoot.querySelectorAll('.contents > .row') : [];
       rows.forEach((row) => {
         const item = items[Number(row.dataset.rowIndex)];
         if (!item) return;
-        const studio = isStudioItem(item);
+        const studio = isStudioItem(item, sources);
         row.style.display = (anyStudio && !studio) ? 'none' : '';
         if (!anyStudio) return;
         if (!studio && item.editing) {
@@ -5464,7 +5745,14 @@ def update_control_axis(tag: str):
             max_value=data.get("max"),
         )
         try:
-            _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            # Full re-resolve, not a bare regenerate_shadow: the compile
+            # source is the TRANSFORMED shadow (grade + source-stage
+            # transforms layered on the control shadow), and refreshing
+            # only stage 1 left it stale — an axis-default edit then
+            # rebuilt with the OLD default whenever grade/rounding was
+            # enabled (observed: ymod default stuck at 100 after the
+            # sidecar said 0).
+            _resolve_active_source()
             # See set_control_axis_layers: keep the last-good font on failure.
             try:
                 trigger_build()
@@ -5872,6 +6160,10 @@ def delete_instance(instance_name: str):
         if not csv_only_flag and not source_only_flag:
             try:
                 _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _control_axes.remove_instance_values(ORIGINAL_PATH, instance_name)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -6629,7 +6921,22 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # the parametric fvar defaults to the default row's out location on
     # the avar-free font — the row then compiles as a true identity in
     # step 4 and every other row anchors to the real resting state.
-    if avar2_cfg_early and default_rows:
+    #
+    # ON by default. The 2026-10 experiment that turned this off for the
+    # working font (the ~7x gvar growth compounds with rounding/slant
+    # twins; 9.1MB preview font) ran into harder physics: every avar2
+    # tent is anchored to zero at the INPUT default, so with the ORIGIN
+    # row excluded the whole NEIGHBORHOOD of the default input collapses
+    # toward the compiled corner — not a point dip but a valley across
+    # the default cross (observed: wght 399 mapped to XTRA 92 instead of
+    # ~663). A preview font that misrenders near its resting weight is
+    # worse than a large one. Shipped fonts stay small either way: the
+    # export's "set default" uses the interpolated-origin-master method
+    # (~0.67MB measured). AVAR2_RELOCATE_BUILD_DEFAULT=0 restores the
+    # small-but-valleyed working font if ever wanted.
+    relocate_at_build = os.environ.get(
+        "AVAR2_RELOCATE_BUILD_DEFAULT", "1").lower() in ("1", "true", "yes")
+    if relocate_at_build and avar2_cfg_early and default_rows:
         from fontTools.varLib import instancer as _instancer
         font = _TTFont(str(out))
         fvar_by_tag = {a.axisTag: a for a in font["fvar"].axes}
@@ -6655,6 +6962,27 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
 
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
     avar2_cfg = avar2_cfg_early
+    if not relocate_at_build and default_rows:
+        # Without the relocation, the default-location row CANNOT be
+        # expressed: its input is the all-default location, which the
+        # VarStore treats as the base master and silently discards —
+        # and every other row's delta then anchors to it, skewing EVERY
+        # mapped stop by the discarded amount (measured: wght 900 landed
+        # 616/201/121 units short of its authored location). Drop the
+        # row from the preview table so the remaining stops are exact;
+        # the resting state becomes the compiled origin, and the export
+        # path's "set default" still rests shipped fonts on this row.
+        dropped = {id(m) for m in default_rows}
+        avar2_cfg = [m for m in avar2_cfg_early if id(m) not in dropped]
+        print(f"  avar2: default-location row(s) excluded from the preview "
+              f"table (build-time relocation off); mapped stops stay exact, "
+              f"the preview rests at the compiled origin", file=sys.stderr)
+        # (global LAST_ORIGIN_WARNING is declared earlier in this function.)
+        LAST_ORIGIN_WARNING = (
+            "Build-time default relocation is off: the preview font rests at "
+            "the compiled origin, not at the ORIGIN row's style. Every mapped "
+            "stop is exact; use the export's \u201cset default\u201d to ship a font "
+            "resting on the ORIGIN row.")
     if avar2_cfg:
         declared = _declared_axis_ranges(default_overrides)
         _orig = _gen_avar2.gen_fvar_axes

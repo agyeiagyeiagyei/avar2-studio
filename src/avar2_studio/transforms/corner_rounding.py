@@ -301,11 +301,25 @@ def extend_for_axis(font, tag, name, end_value, twin_suffix):
     ax = GSAxis()
     ax.name, ax.axisTag = name, tag
     font.axes.append(ax)
+    # Right-pad every coordinate vector to the PRE-ADD axis count before
+    # appending the new slot. Studio axes are append-only and all
+    # default to 0, so a short vector is always missing a suffix of
+    # zero-default axes — but the twin builders then write the new
+    # axis's value into the LAST slot, and on an under-padded layer that
+    # landed one axis early (observed: a slnt -11 twin written into the
+    # GRAD slot, which clamped onto the real grade brace's location —
+    # corrupting the compiled font's grade/slant interaction and killing
+    # export staging with "Locations must be unique").
+    n_before = len(font.axes) - 1
     originals = list(font.masters)
     for m in originals:
-        m.axes = list(m.axes) + [0.0]
+        ax_list = list(m.axes)
+        ax_list += [0.0] * (n_before - len(ax_list))
+        m.axes = ax_list + [0.0]
     for inst in list(getattr(font, "instances", None) or []):
-        inst.axes = list(inst.axes) + [0.0]
+        ax_list = list(inst.axes)
+        ax_list += [0.0] * (n_before - len(ax_list))
+        inst.axes = ax_list + [0.0]
     for glyph in font.glyphs:
         for L in glyph.layers:
             attrs = getattr(L, "attributes", None)
@@ -316,7 +330,9 @@ def extend_for_axis(font, tag, name, end_value, twin_suffix):
             except AttributeError:
                 continue
             if isinstance(coords, (list, tuple)):
-                L.attributes["coordinates"] = list(coords) + [0.0]
+                c = list(coords)
+                c += [0.0] * (n_before - len(c))
+                L.attributes["coordinates"] = c + [0.0]
     twin_of = {}
     for m in originals:
         parent = getattr(m, "font", None)

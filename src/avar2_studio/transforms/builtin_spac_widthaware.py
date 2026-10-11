@@ -56,6 +56,25 @@ from .base import BuildContext, ParamSpec, Transform, TransformSpec
 from .builtin_spac import _spac_output_name, _instance_spac_overrides
 
 
+def _native_injector():
+    """The Rust SPAC engine (wasm/fontc-web spac.rs, built natively as
+    the spac-inject CLI) — the same code the static demo runs, parity-
+    tested by tests/spac_oracle.rs. Preferred because it splices tuples
+    with write-fonts' compact gvar encoding: the fontTools path below
+    re-encodes the whole table and overflows gvar's 64KB per-glyph
+    header ceiling on twin-heavy fonts (slant x rounding x grade).
+    Returns the binary's path, or None (callers fall back to fontTools).
+    Override with $AVAR2_SPAC_INJECT."""
+    import os
+    env = os.environ.get("AVAR2_SPAC_INJECT")
+    if env:
+        path = Path(env)
+        return path if path.exists() else None
+    path = (Path(__file__).resolve().parents[3]
+            / "wasm" / "fontc-web" / "target" / "release" / "spac-inject")
+    return path if path.exists() else None
+
+
 def _ink_width(glyph_set, name) -> float:
     """Outline bounding-box width at the default master, resolved through the
     glyph set so composites (which reference other glyphs) measure correctly."""
@@ -123,6 +142,34 @@ class WidthAwareSpacTransform(Transform):
         except (TypeError, ValueError):
             scale = 1.25
         scale = max(0.1, scale)
+
+        native = _native_injector()
+        if native is not None:
+            import json as _json
+            import os
+            import subprocess
+            import tempfile
+            out = vf_path.parent / _spac_output_name(ctx.family, vf_path)
+            payload = _json.dumps([{"type": "spac_widthaware", "enabled": True,
+                                    "params": {"min": lo, "max": hi,
+                                               "bias": bias, "scale": scale}}])
+            tf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+            try:
+                tf.write(payload)
+                tf.close()
+                csv_path = ctx.source_path.parent / f"{ctx.source_path.stem}-avar.csv"
+                cmd = [str(native), str(vf_path), str(out), tf.name]
+                if csv_path.exists():
+                    cmd.append(str(csv_path))
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            finally:
+                os.unlink(tf.name)
+            if res.returncode == 0 and out.exists():
+                ctx.log(f"spac_widthaware: native injector ({lo}\u2026{hi}, "
+                        f"bias {bias:g}, scale {scale:g})")
+                return out
+            ctx.log("spac_widthaware: native injector failed; falling back to "
+                    "fontTools (%s)" % ((res.stderr or "").strip()[-300:] or "no stderr"))
 
         font = TTFont(str(vf_path))
         try:
@@ -209,7 +256,20 @@ class WidthAwareSpacTransform(Transform):
                             region.VarRegionAxis.append(spac_region)
 
             out = vf_path.parent / _spac_output_name(ctx.family, vf_path)
-            font.save(str(out))
+            try:
+                font.save(str(out))
+            except OverflowError as exc:
+                # gvar's per-glyph variation data has a hard 64KB header
+                # ceiling. A font whose tuple count is already enormous
+                # (source twins from slant/rounding x grade x the default
+                # relocation) sits just under it, and adding the SPAC
+                # axis inflates every embedded tuple header past it.
+                raise RuntimeError(
+                    "this font's per-glyph variation data is at gvar's "
+                    "64KB ceiling (slant/rounding twins multiply it), so "
+                    "the SPAC axis cannot be injected. Disable the slant "
+                    "transform to get spacing back, or keep slant and go "
+                    "without SPAC.") from exc
         finally:
             font.close()
         ctx.log(f"width-aware SPAC injected ({lo}…{hi}, bias {bias:g}, scale {scale:g}) → {out.name}")

@@ -45,7 +45,9 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -101,6 +103,81 @@ def find_axis(source_path: Path, tag: str) -> Optional[Dict]:
         if str(ax.get("tag", "")).lower() == tag_norm:
             return ax
     return None
+
+
+def instance_values(source_path: Path) -> Dict[str, Dict[str, float]]:
+    """Per-instance control-axis values, ``{tag: {instance name: value}}``.
+    The studio's per-row ymod/lcwd authoring — the control-axis analogue
+    of the CSV's SPAC column (a CSV column is not an option here: the
+    CSV uppercases headers, so a ``ymod`` column would mint a bogus
+    ``YMOD`` user axis — the LCWD/SLNT/YMOD column bug)."""
+    return dict(load(source_path).get("instance_values") or {})
+
+
+_INSTANCE_VALUES_LOCK = threading.Lock()
+
+
+def set_instance_values(source_path: Path, instance_name: str,
+                        values: Dict[str, float]) -> bool:
+    """Record ``{tag: value}`` for one instance. Values are clamped to
+    the axis range; a value at the axis default clears the entry (the
+    default is the absence). Returns True when the sidecar changed."""
+    if not instance_name or not values:
+        return False
+    with _INSTANCE_VALUES_LOCK:
+        data = load(source_path)
+        axes_by_tag = {str(a.get("tag", "")).lower(): a for a in data.get("axes", [])}
+        store = data.setdefault("instance_values", {})
+        changed = False
+        for tag, value in values.items():
+            ax = axes_by_tag.get(str(tag).strip().lower())
+            if ax is None:
+                continue
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            v = min(float(ax.get("max", v)), max(float(ax.get("min", v)), v))
+            key = str(ax.get("tag"))
+            per = store.setdefault(key, {})
+            if abs(v - float(ax.get("default", 0))) < 1e-9:
+                if instance_name in per:
+                    del per[instance_name]
+                    changed = True
+            elif per.get(instance_name) != v:
+                per[instance_name] = v
+                changed = True
+        if changed:
+            _save(source_path, _normalise(data))
+        return changed
+
+
+def rename_instance_values(source_path: Path, old_name: str, new_name: str) -> bool:
+    """Carry per-instance values across an instance rename."""
+    with _INSTANCE_VALUES_LOCK:
+        data = load(source_path)
+        changed = False
+        for per in (data.get("instance_values") or {}).values():
+            if old_name in per:
+                per[new_name] = per.pop(old_name)
+                changed = True
+        if changed:
+            _save(source_path, _normalise(data))
+        return changed
+
+
+def remove_instance_values(source_path: Path, instance_name: str) -> bool:
+    """Drop every per-instance value for a deleted instance."""
+    with _INSTANCE_VALUES_LOCK:
+        data = load(source_path)
+        changed = False
+        for per in (data.get("instance_values") or {}).values():
+            if instance_name in per:
+                del per[instance_name]
+                changed = True
+        if changed:
+            _save(source_path, _normalise(data))
+        return changed
 
 
 # --------------------------------------------------------------------------
@@ -417,7 +494,7 @@ def _layer_key(entry: Dict):
 
 
 def _empty() -> Dict:
-    return {"version": _SCHEMA_VERSION, "axes": []}
+    return {"version": _SCHEMA_VERSION, "axes": [], "instance_values": {}}
 
 
 def _normalise(data: Dict) -> Dict:
@@ -467,7 +544,27 @@ def _normalise(data: Dict) -> Dict:
             "max": max_v,
             "layers": layers,
         })
-    return {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes}
+    # Per-instance control-axis values: {tag: {instance name: value}}.
+    # Carried through normalisation so layer edits (which round-trip the
+    # whole sidecar) never wipe them.
+    instance_values: Dict[str, Dict[str, float]] = {}
+    raw_values = data.get("instance_values")
+    if isinstance(raw_values, dict):
+        for tag, per_name in raw_values.items():
+            if not isinstance(per_name, dict) or not str(tag).strip():
+                continue
+            clean: Dict[str, float] = {}
+            for name, v in per_name.items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                try:
+                    clean[name] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if clean:
+                instance_values[str(tag).strip()] = clean
+    return {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes,
+            "instance_values": instance_values}
 
 
 def _normalise_layers(raw) -> List[Dict]:
@@ -540,14 +637,24 @@ def _save(source_path: Path, data: Dict) -> None:
     # recreate — keep bounded timestamped copies before every rewrite.
     from . import csv_io as _csv_io
     _csv_io.backup_sidecar(sidecar)
-    with sidecar.open("w", encoding="utf-8") as f:
+    # Atomic replace: concurrent request threads each rewrite the whole
+    # file, and interleaved plain writes have torn it (valid JSON with
+    # trailing garbage) — which load() reads as "no control axes at
+    # all". Write-to-temp + rename keeps every reader on a whole file.
+    tmp = sidecar.with_name(sidecar.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
+    os.replace(tmp, sidecar)
 
 
 def _validate_tag(tag: str) -> str:
     """Enforce OpenType tag rules: exactly 4 characters, ASCII
-    printable, lowercase canonical form. Returns the normalised tag.
+    printable. Case is preserved: fvar tags are case-sensitive, and
+    unregistered axes are conventionally uppercase (``XOPQ``) while
+    registered ones are lowercase (``wght``). Duplicate checks stay
+    case-insensitive so two axes can never differ by case alone.
+    Returns the stripped tag.
     """
     if not tag:
         raise ValueError("tag is required")
@@ -591,16 +698,33 @@ def shadow_exists(original_path: Path) -> bool:
     return shadow_path_for(original_path).exists()
 
 
+def _non_parametric_indices(font, control_axis_indices) -> set:
+    """The control axes plus the studio's other shadow-injected axes
+    (GRAD from grade, ROND from rounding): none are parametric
+    dimensions, so corner/instance naming must key locations on the
+    SOURCE parametric axes alone. Without this, enabling grade appended
+    GRAD to the shadow's axis list and silently un-named every corner —
+    the CSV has no GRAD column (every instance-row lookup KeyErrored)
+    and source instances' shorter axis vectors were skipped outright."""
+    out = set(control_axis_indices)
+    for i, ax in enumerate(getattr(font, "axes", None) or []):
+        if str(getattr(ax, "axisTag", "")).upper() in ("GRAD", "ROND"):
+            out.add(i)
+    return out
+
+
 def corner_name_maps(font, control_axis_indices, original_path=None):
     """Master-corner and instance names keyed by parametric coordinate tuple.
 
-    The key is the location across the font's axes minus the control axes,
+    The key is the location across the font's axes minus the control axes
+    (and the other studio-injected axes — see ``_non_parametric_indices``),
     rounded to 0.1 — the add modal's pin granularity. Masters come from the
     font itself; instances from the font's own list plus the studio-only
     rows in the sibling ``-avar.csv`` (when ``original_path`` is given).
     Shared by the shadow labeler and the layers panel so both name a layer
     the same way.
     """
+    control_axis_indices = _non_parametric_indices(font, control_axis_indices)
     param_indices = [
         i for i in range(len(getattr(font, "axes", None) or []))
         if i not in control_axis_indices
@@ -653,6 +777,7 @@ def corner_name_resolver(font, control_axis_indices, original_path=None):
     Unpinned parametric axes take the default master's value, mirroring how
     regenerate_shadow expands the same sparse dict into a full vector."""
     masters, instances = corner_name_maps(font, control_axis_indices, original_path)
+    control_axis_indices = _non_parametric_indices(font, control_axis_indices)
     axes = list(getattr(font, "axes", None) or [])
     param = [
         (i, str(getattr(ax, "axisTag", "")).lower())

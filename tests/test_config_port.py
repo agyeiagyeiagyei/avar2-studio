@@ -47,7 +47,8 @@ def test_build_export_captures_fingerprint_and_authored_state(crispy_source, cri
     ]
     assert bundle["source"]["avar2_out_columns"] == ["XTRA", "XOPQ", "YOPQ"]
     assert bundle["avar2_csv"] == crispy_csv.read_text(encoding="utf-8-sig")
-    assert bundle["control_axes"] == {"version": 1, "axes": []}
+    assert bundle["control_axes"] == {"version": 1, "axes": [],
+                                      "instance_values": {}}
     assert bundle["transforms"] == {"version": 1, "transforms": []}
 
 
