@@ -353,3 +353,14 @@
   font-family: var(--font-sans);
   font-size: 1rem;
 }
+
+/* Format radios in the export modal share the chip shape but are a
+   selection, not a hide — no strike-through on the active one. */
+.preview-export-chip--format.on {
+  text-decoration: none;
+}
+
+.preview-export-size {
+  color: inherit;
+  opacity: 0.65;
+}

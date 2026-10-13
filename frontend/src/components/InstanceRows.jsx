@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
+import { api } from '../api';
+import { isStaticMode } from '../static-api';
+import { registerPreviewFont } from '../fontLoad';
 
 function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
@@ -20,20 +23,10 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
     let cancelled = false;
     let retryTimer = null;
     const attempt = (triesLeft) => {
-      // Remove old font if it exists to force reload
-      const oldFont = Array.from(document.fonts).find(f => f.family === vfFamilyId);
-      if (oldFont) {
-        document.fonts.delete(oldFont);
-      }
-      const fontFace = new FontFace(vfFamilyId, `url(${fontUrl})`);
-      fontFace.load()
-        .then((loadedFont) => {
-          if (cancelled) return undefined;
-          document.fonts.add(loadedFont);
-          // Wait for font to be ready
-          return document.fonts.ready.then(() => {
-            if (!cancelled) setFontReady(true);
-          });
+      registerPreviewFont(vfFamilyId, fontUrl,
+                          isStaticMode() ? null : api.getWoff2PreviewUrl())
+        .then(() => {
+          if (!cancelled) setFontReady(true);
         })
         .catch(err => {
           console.error('Failed to load font:', err);

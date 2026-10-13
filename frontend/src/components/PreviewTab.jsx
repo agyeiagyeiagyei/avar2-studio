@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PreviewTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
+import { isStaticMode } from '../static-api';
+import { registerPreviewFont } from '../fontLoad';
 
 // Font size stays in rem internally; the slider presents it in pt
 // (12pt = 1rem at the default 16px root — same convention as Sidebar).
@@ -12,6 +14,9 @@ const formatPt = (rem) => {
   const pt = roundHalf(remToPt(rem));
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
+
+const formatBytes = (n) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
 
 const DEFAULT_SAMPLE = 'Adhesion';
 
@@ -48,7 +53,6 @@ function PreviewTab({
   vfFamilyId,
   fontLoaded,
   fontUrl,
-  building,
   builtFontFilename,
   sampleText,
   onSampleTextChange,
@@ -187,11 +191,8 @@ function PreviewTab({
   // same global document.fonts as InstanceRows.
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) return;
-    const oldFont = Array.from(document.fonts).find(f => f.family === vfFamilyId);
-    if (oldFont) document.fonts.delete(oldFont);
-    const fontFace = new FontFace(vfFamilyId, `url(${fontUrl})`);
-    fontFace.load()
-      .then((loaded) => { document.fonts.add(loaded); return document.fonts.ready; })
+    registerPreviewFont(vfFamilyId, fontUrl,
+                        isStaticMode() ? null : api.getWoff2PreviewUrl())
       .catch(err => console.error('Preview: failed to load font:', err));
   }, [fontUrl, fontLoaded, vfFamilyId]);
 
@@ -230,9 +231,22 @@ function PreviewTab({
   // compiled origin — ranges stay intact).
   const [exportHidden, setExportHidden] = useState(() => new Set());
   const [exportUseDefault, setExportUseDefault] = useState(false);
+  const [exportFormat, setExportFormat] = useState('ttf');
+  const [exportSizes, setExportSizes] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+
+  // File sizes come from the build queue's export status (TTF exact; WOFF2
+  // exact once the background compression has caught up, else an estimate).
+  useEffect(() => {
+    if (!showExportModal || isStaticMode()) return;
+    let live = true;
+    api.getBuildStatus()
+      .then((st) => { if (live) setExportSizes(st.sizes || null); })
+      .catch(() => { if (live) setExportSizes(null); });
+    return () => { live = false; };
+  }, [showExportModal]);
 
   const toggleExportHidden = (tag) => setExportHidden(prev => {
     const next = new Set(prev);
@@ -252,59 +266,54 @@ function PreviewTab({
       setExportError('The font is still loading in this tab — wait for the preview to finish, then try again.');
       return;
     }
-    const plainDownload = exportHidden.size === 0 && !exportUseDefault;
-    if (plainDownload) {
-      // Awaited fetch, not a fire-and-forget anchor: while the server
-      // is busy (boot queue, a stale rebuild the Preview tab itself
-      // triggered), an anchor's request sits pending with ZERO feedback
-      // and the browser only surfaces the download once headers arrive
-      // — observed as "nothing happens", then the file popping up
-      // during the next hard refresh. The fetch keeps the button in a
-      // visible busy state and saves via a blob the moment bytes land.
-      setExporting(true);
-      setExportError(null);
-      try {
-        const resp = await fetch(fontUrl.startsWith('blob:') ? fontUrl : fontUrl);
-        if (!resp.ok) throw new Error(`font fetch failed (${resp.status})`);
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 0);
-        setShowExportModal(false);
-      } catch (err) {
-        setExportError(err.message || 'Download failed');
-      } finally {
-        setExporting(false);
-      }
-      return;
-    }
-    setExporting(true);
-    setExportError(null);
-    try {
-      const blob = await api.exportFont({
-        hidden_axes: [...exportHidden],
-        default_location: exportUseDefault ? currentUserLocation : null,
-      });
+    const filename = (builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`)
+      .replace(/\.ttf$/i, exportFormat === 'woff2' ? '.woff2' : '.ttf');
+    const saveBlob = (blob) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
-      // Remove + revoke on the next tick — synchronously revoking the
-      // blob can cancel the download before it starts.
       setTimeout(() => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       }, 0);
       setShowExportModal(false);
+    };
+    const plainDownload = exportHidden.size === 0 && !exportUseDefault;
+    setExporting(true);
+    setExportError(null);
+    try {
+      if (plainDownload && exportFormat === 'ttf') {
+        // Awaited fetch, not a fire-and-forget anchor: while the server
+        // is busy (boot queue, a stale rebuild the Preview tab itself
+        // triggered), an anchor's request sits pending with ZERO feedback
+        // and the browser only surfaces the download once headers arrive
+        // — observed as "nothing happens", then the file popping up
+        // during the next hard refresh. The fetch keeps the button in a
+        // visible busy state and saves via a blob the moment bytes land.
+        const resp = await fetch(fontUrl);
+        if (!resp.ok) throw new Error(`font fetch failed (${resp.status})`);
+        saveBlob(await resp.blob());
+        return;
+      }
+      if (plainDownload && exportFormat === 'woff2' && exportSizes && exportSizes.woff2_exact) {
+        // The background compression cache is current: download it
+        // directly, no export job.
+        const resp = await fetch(api.getWoff2DownloadUrl());
+        if (!resp.ok) throw new Error(`woff2 download failed (${resp.status})`);
+        saveBlob(await resp.blob());
+        return;
+      }
+      // Everything else is a queued export job on the build worker —
+      // api.exportFont polls the queue and resolves with the artifact.
+      const blob = await api.exportFont({
+        hidden_axes: [...exportHidden],
+        default_location: exportUseDefault ? currentUserLocation : null,
+        format: exportFormat,
+      });
+      saveBlob(blob);
     } catch (err) {
       setExportError(err.message || 'Export failed');
     } finally {
@@ -516,6 +525,41 @@ function PreviewTab({
                 {familyName || vfFamilyId || 'Aa'}
               </div>
               <div className="preview-export-options">
+                {!isStaticMode() && (
+                  <div className="preview-export-row">
+                    <span
+                      className="preview-export-label"
+                      title="WOFF2 is the same font, Brotli-compressed for the web — lossless (it decompresses back to identical tables). TTF is what you install locally."
+                    >
+                      Format
+                    </span>
+                    <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
+                      {['ttf', 'woff2'].map((fmt) => {
+                        const size = exportSizes
+                          ? (fmt === 'ttf' ? exportSizes.ttf_bytes : exportSizes.woff2_bytes)
+                          : null;
+                        const exact = fmt === 'ttf' || (exportSizes && exportSizes.woff2_exact);
+                        return (
+                          <button
+                            key={fmt}
+                            type="button"
+                            role="radio"
+                            aria-checked={exportFormat === fmt}
+                            className={`preview-export-chip preview-export-chip--format${exportFormat === fmt ? ' on' : ''}`}
+                            onClick={() => setExportFormat(fmt)}
+                          >
+                            {fmt.toUpperCase()}
+                            {size != null && (
+                              <span className="preview-export-size">
+                                {' '}· {formatBytes(size)}{exact ? '' : ' (est.)'}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className="preview-export-row">
                   <span
                     className="preview-export-label"
@@ -572,15 +616,12 @@ function PreviewTab({
                   type="button"
                   className="btn btn-secondary"
                   onClick={handleDownload}
-                  disabled={exporting || building}
                   disabled={exporting}
                   title={exportUseDefault
                     ? "Rebuilds the font at the chosen location — takes a few seconds"
-                    : "Download the built variable font (.ttf)"}
+                    : "Download the built variable font"}
                 >
-                  {exporting ? 'Preparing…'
-                    : building ? 'Waiting for rebuild…'
-                    : 'Download'}
+                  {exporting ? 'Preparing…' : 'Download'}
                 </button>
               </div>
             </div>

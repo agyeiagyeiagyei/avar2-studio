@@ -175,3 +175,17 @@
 .build-blocked-actions { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
 .build-blocked-actions button { padding: 5px 12px; font-weight: 600; cursor: pointer; }
 .main-content-blocked { pointer-events: none; opacity: 0.45; filter: grayscale(0.6); user-select: none; }
+
+.build-veil-cancel {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.9rem;
+  border: 1px solid var(--zinc-400);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--zinc-700);
+  cursor: pointer;
+}
+
+.build-veil-cancel:hover {
+  border-color: var(--zinc-700);
+}

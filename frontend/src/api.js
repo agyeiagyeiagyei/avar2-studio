@@ -93,6 +93,17 @@ export const api = {
     return `${API_BASE}/avar2-font?t=${timestamp}`;
   },
 
+  getWoff2DownloadUrl() {
+    // The background-compressed WOFF2 cache (409 while stale — callers check
+    // the queue's export sizes for woff2_exact first).
+    return `${API_BASE}/font?format=woff2&download=1`;
+  },
+
+  getWoff2PreviewUrl() {
+    // Same cache, content-disposition inline, for preview FontFace loads.
+    return `${API_BASE}/font?format=woff2`;
+  },
+
   async createInstance(instanceName, coordinates, insertAfter = null) {
     const body = { name: instanceName, coordinates };
     if (insertAfter) {
@@ -543,8 +554,11 @@ export const api = {
   },
 
   async exportFont(options) {
-    // POST /api/export-font — returns the font binary. Options:
-    // {hidden_axes: [tags], default_location: {tag: value} | null}.
+    // POST /api/export-font — the export runs as a QUEUED JOB (build worker,
+    // see docs/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll
+    // the job queue until the artifact is ready, then download it. Options:
+    // {hidden_axes: [tags], default_location: {tag: value} | null,
+    //  format: "ttf" | "woff2"}.
     const response = await fetch(`${API_BASE}/export-font`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -554,7 +568,45 @@ export const api = {
       const err = await parseJSON(response).catch(() => ({}));
       throw new Error(err.error || `Export failed: ${response.status}`);
     }
-    return response.blob();
+    const { job_id } = await parseJSON(response);
+    // Poll the queue until THIS job's result lands. Exports are full builds
+    // when a default location is involved — budget 20 minutes.
+    const deadline = Date.now() + 20 * 60 * 1000;
+    for (;;) {
+      const status = await this.getBuildStatus();
+      const last = status && status.last;
+      if (last && last.job_id === job_id) {
+        if (!last.success) {
+          throw new Error(last.error || 'Export failed');
+        }
+        break;
+      }
+      if (Date.now() > deadline) {
+        throw new Error('Export timed out — the job queue is busy');
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    const dl = await fetch(`${API_BASE}/export/${job_id}/download`);
+    if (!dl.ok) {
+      const err = await parseJSON(dl).catch(() => ({}));
+      throw new Error(err.error || `Export download failed: ${dl.status}`);
+    }
+    return dl.blob();
+  },
+
+  async getBuildStatus() {
+    const response = await fetch(`${API_BASE}/build/status`);
+    if (!response.ok) {
+      throw new Error(`Build status failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async cancelBuild(jobId) {
+    const response = await fetch(`${API_BASE}/build/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+    });
+    return parseJSON(response);
   },
 
   async getMappedLocation(coordinates) {

@@ -71,6 +71,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [building, setBuilding] = useState(false);
+  const [buildJob, setBuildJob] = useState(null);
   // Non-null ⇒ the avar2 build is failing and the served font is the
   // plain fallback (no avar2 table / mapped axes). Surfaced on the
   // Preview tab so the fallback is never silent.
@@ -263,6 +264,7 @@ function App() {
         }
 
         setBuilding(health.building || false);
+        setBuildJob(health.build_job || null);
         setAvar2Error(health.avar2_error || null);
         setSourceTransformError(health.source_transform_error || null);
         setOriginWarning(health.origin_warning || null);
@@ -271,6 +273,15 @@ function App() {
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
         setLastBuildStatus(health.last_build_status || null);
         setLastBuildError(health.last_build_error || null);
+
+        // Register the preview font as soon as a build exists — the poll
+        // answers in milliseconds while loadData's endpoint chain takes tens
+        // of seconds on big sources, and the preview sat on the placeholder
+        // font until it finished.
+        if (health.font_built) {
+          setFontUrl(prev => prev ?? api.getFontUrl());
+          setFontLoaded(true);
+        }
 
         // Self-heal the blind empty state: the initial loadData failed
         // (server down or mid-restart when the tab loaded), but health
@@ -436,6 +447,7 @@ function App() {
       const prevBuildTime = lastBuildTimeRef.current;
       lastBuildTimeRef.current = health.last_build_time || null;
       setBuilding(health.building || false);
+      setBuildJob(health.build_job || null);
       setAvar2Error(health.avar2_error || null);
       setSourceTransformError(health.source_transform_error || null);
       setOriginWarning(health.origin_warning || null);
@@ -2539,7 +2551,21 @@ function App() {
         {building && (
           <div className="build-veil" aria-live="polite">
             <span className="build-veil-logo">avar2studio</span>
-            <span className="build-veil-text">Rebuilding — hold your edits…</span>
+            <span className="build-veil-text">
+              {buildJob && buildJob.kind !== 'build'
+                ? `${buildJob.kind === 'export' ? 'Exporting' : 'Compressing'} — the preview stays live…`
+                : 'Rebuilding — hold your edits…'}
+            </span>
+            {buildJob && buildJob.job_id && (
+              <button
+                type="button"
+                className="build-veil-cancel"
+                title="Cancel this job — the last-good font keeps serving"
+                onClick={() => { api.cancelBuild(buildJob.job_id).catch(() => {}); }}
+              >
+                Cancel
+              </button>
+            )}
           </div>
         )}
         </div>
