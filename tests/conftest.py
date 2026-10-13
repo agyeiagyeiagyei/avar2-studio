@@ -63,3 +63,41 @@ def roboto_source(tmp_path):
     dst = tmp_path / "sources"
     shutil.copytree(ROBOTO_SOURCES, dst)
     return dst / "RobotoDeltaMini.designspace"
+
+
+@pytest.fixture(autouse=True)
+def _no_real_build_jobs(monkeypatch, request):
+    """Keep the build queue inert: tests exercise endpoint logic, not the
+    worker machinery (covered by tests/test_build_jobs.py against the real
+    JobQueue). A test opts in with ``@pytest.mark.real_jobs``."""
+    if "real_jobs" in request.keywords:
+        yield
+        return
+    from avar2_studio import server
+
+    class _FakeJobs:
+        def __init__(self):
+            self.requests = []
+        def request_build(self, source_refresh=None):
+            self.requests.append(source_refresh)
+            return True
+        def wait_for_idle(self, timeout=None):
+            return True
+        def is_building(self):
+            return False
+        def status(self):
+            return {"running": None, "queued": [], "last": None,
+                    "sizes": {"ttf_bytes": None, "woff2_bytes": None,
+                              "woff2_exact": False}}
+        def cancel(self, job_id):
+            return False
+        def cancel_all(self):
+            pass
+        def submit_export(self, **kw):
+            return "export-fake"
+        def export_artifact(self, job_id):
+            return None
+
+    fake = _FakeJobs()
+    monkeypatch.setattr(server, "JOBS", fake)
+    yield

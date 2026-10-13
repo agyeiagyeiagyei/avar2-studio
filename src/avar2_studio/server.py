@@ -65,6 +65,7 @@ from . import config_port as _config_port
 from . import transforms as _transforms
 from . import grade as _grade
 from . import grade_shadow as _grade_shadow
+from . import build_jobs as _build_jobs
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -160,6 +161,10 @@ SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
 BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
 LAST_BUILD_TIME: Optional[float] = None
+# Re-entrancy guard inside the build WORKER only (a fresh process per job —
+# see docs/WORKER_BUILD_PLAN.md): _run_build/_perform_avar2_build manage it
+# there. The server process never runs builds; request threads read
+# JOBS.is_building() instead.
 BUILDING: bool = False
 # Outcome of the most recent build attempt. ``ok`` => current preview reflects
 # fresh source state. ``failed`` => the preview is stale (we're still serving
@@ -201,18 +206,9 @@ TRADITIONAL_AXIS_DEFAULTS = {
 # transform — e.g. SPAC — was skipped). Surfaced in /api/health + the
 # transforms PUT so the UI can flag an enabled-but-failing transform.
 LAST_TRANSFORM_ERROR: Optional[str] = None
-# Set when a build was requested while one was already running. The in-flight
-# build drains this when it finishes, so a change made mid-build still lands in
-# the font instead of being silently dropped.
-REBUILD_PENDING: bool = False
-# Set by the file watcher when a SOURCE change lands mid-build: "original"
-# (the designer's file — needs the shadow re-derived and the CSV synced
-# before the queued rebuild) or "source" (the shadow itself — CSV sync only).
-# Without this a queued rebuild would run against the OLD shadow and report
-# success with stale outlines. "original" outranks "source".
-SOURCE_REFRESH_PENDING: Optional[str] = None
 # sync_csv_with_glyphs is a closure inside main(); it registers here so the
-# drain loop in trigger_build can run it for a queued source change.
+# job supervisor can run it before staging a build whose source changed
+# mid-flight.
 _SYNC_CSV_HOOK = None
 # Count of background regen/rebuild tasks in flight. The sidecar write returns
 # immediately so the UI stays responsive, but the shadow regen + font build
@@ -252,6 +248,13 @@ PREVIEW_DIR: Optional[Path] = None  # Per-project workdir (sibling .avar2-studio
 PREVIEW_CSV_PATH: Optional[Path] = None  # Path to preview CSV (sibling to .glyphs)
 PREVIEW_CONFIG_PATH: Optional[Path] = None  # Path to preview config (.avar2-studio/config.yaml)
 EDITING_INSTANCES: set = set()  # Track instances currently being edited (protected from sync)
+
+# The build/export job queue: all heavy pipeline work runs in worker
+# SUBPROCESSES (docs/WORKER_BUILD_PLAN.md) so a build can never starve
+# request threads. trigger_build submits; builds coalesce through it.
+# Bound to this module so the supervisor can read stage-time paths and
+# apply result state (VARIABLE_FONT_PATH, LAST_*).
+JOBS = _build_jobs.JobQueue(sys.modules[__name__])
 
 
 def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
@@ -423,7 +426,7 @@ def get_instances_from_glyphs(glyphs_path: Path) -> List[Dict]:
     caller via the CSV.
     """
     try:
-        font, _fmt = _source_font.load_source(glyphs_path)
+        font, _fmt = _source_font.load_source_cached(glyphs_path)
         instances = _source_font.get_source_instances(font)
         for entry in instances:
             entry["origin"] = "source"
@@ -439,7 +442,7 @@ def get_axes_from_glyphs(glyphs_path: Path) -> List[Dict]:
     Returns a list of ``{tag, name, min, max, default}`` dicts.
     """
     try:
-        font, _fmt = _source_font.load_source(glyphs_path)
+        font, _fmt = _source_font.load_source_cached(glyphs_path)
         return _source_font.get_axes(font)
     except Exception as e:
         print(f"Error reading axes from source file: {e}", file=sys.stderr)
@@ -705,7 +708,7 @@ def get_masters():
     if GLYPHS_PATH is None:
         return jsonify({"masters": []})
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         return jsonify({"masters": _source_font.get_masters(font)})
     except Exception as e:
         print(f"Error reading masters: {e}", file=sys.stderr)
@@ -1380,45 +1383,15 @@ def schedule_debounced_build(delay: float = _CSV_BUILD_DEBOUNCE_SECONDS) -> None
 
 
 def trigger_build():
-    """Build the font, coalescing concurrent requests.
+    """Submit a build job, coalescing concurrent requests.
 
     Callers fire this from independent requests (e.g. clicking ✕ on several
-    brace layers in a row). If a build is already running we must NOT silently
-    drop the new state — the sidecar has already changed, so the font would be
-    left stale. Instead flag it and rebuild once the in-flight build finishes,
-    draining whatever landed meanwhile.
+    brace layers in a row). The job queue runs one worker at a time and
+    re-stages from the current sidecars for every pass, so a request that
+    lands mid-build is never dropped: the next pass builds exactly the
+    state the sidecars hold then.
     """
-    global REBUILD_PENDING, SOURCE_REFRESH_PENDING
-
-    if BUILDING:
-        REBUILD_PENDING = True
-        print("Build in progress; queueing a rebuild for the new state.", file=sys.stderr)
-        return False
-
-    ok = _run_build()
-    # Drain state that changed while we were building. Bounded so a burst of
-    # edits can't spin here forever.
-    passes = 0
-    while REBUILD_PENDING and passes < 3:
-        REBUILD_PENDING = False
-        passes += 1
-        kind, SOURCE_REFRESH_PENDING = SOURCE_REFRESH_PENDING, None
-        if kind == "original":
-            # A Glyphs save landed during the last build: pull it through the
-            # shadow first, exactly as the watcher would have.
-            print("Queued source change: re-deriving the shadow before rebuilding...", file=sys.stderr)
-            try:
-                _resolve_active_source()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
-        if kind in ("original", "source") and _SYNC_CSV_HOOK is not None:
-            try:
-                _SYNC_CSV_HOOK()
-            except Exception as exc:  # noqa: BLE001
-                print(f"Warning: CSV sync for queued change failed: {exc}", file=sys.stderr)
-        print("Rebuilding for state that changed during the last build...", file=sys.stderr)
-        ok = _run_build()
-    return ok
+    return JOBS.request_build()
 
 
 def _run_build():
@@ -1493,16 +1466,18 @@ def _run_build():
 
 @app.route('/api/build', methods=['POST'])
 def build_font():
-    """Build the variable font from Glyphs file using fontmake."""
+    """Submit a build job and wait for the queue to go idle (the wait is
+    GIL-free — every other endpoint keeps answering during the build)."""
     try:
-        success = trigger_build()
-        
+        JOBS.request_build()
+        success = JOBS.wait_for_idle()
+
         if not success:
-            return jsonify({"error": "Build failed or already in progress"}), 500
-        
+            return jsonify({"error": LAST_BUILD_ERROR or "Build failed"}), 500
+
         # Get axes after building (for verification)
         axes = get_axes_from_built_font(VARIABLE_FONT_PATH)
-        
+
         return jsonify({
             "success": True,
             "font_path": str(VARIABLE_FONT_PATH),
@@ -1513,13 +1488,50 @@ def build_font():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/build/status', methods=['GET'])
+def build_status():
+    """Job queue state: running job (+phase), queued jobs, last result,
+    export sizes."""
+    return jsonify(JOBS.status())
+
+
+@app.route('/api/build/<job_id>', methods=['DELETE'])
+def cancel_build(job_id):
+    """Cancel a queued or running job (the worker's process group is
+    killed; the last-good font keeps serving)."""
+    return jsonify({"cancelled": JOBS.cancel(job_id)})
+
+
+@app.route('/api/export/<job_id>/download', methods=['GET'])
+def export_download(job_id):
+    """Serve a finished export job's artifact."""
+    path = JOBS.export_artifact(job_id)
+    if path is None:
+        return jsonify({"error": "no such export (finished artifacts are "
+                                 "kept for a few exports only)"}), 404
+    return send_file(str(path), as_attachment=True, download_name=path.name)
+
+
 @app.route('/api/font', methods=['GET'])
 def get_font():
-    """Serve the built variable font (avar2 build preferred, plain VF fallback)."""
+    """Serve the built variable font (avar2 build preferred, plain VF fallback).
+
+    ``?format=woff2`` serves the background-compressed WOFF2 cache (kept in
+    step with the build by the job queue) when it is current — 409 while it
+    is stale or missing, so the caller falls back to an export job.
+    """
     # Phase 3: SPAC font is deferred and the avar2 build is now the primary
     # output. ``trigger_build()`` sets VARIABLE_FONT_PATH to the avar2 build
     # when it succeeds, or the plain VF when it doesn't, so we just serve
     # whatever's there.
+    if request.args.get('format') == 'woff2':
+        sizes = JOBS.export_sizes()
+        if not (VARIABLE_FONT_PATH and sizes["woff2_exact"]):
+            return jsonify({"error": "woff2 cache is stale or missing"}), 409
+        woff2 = Path(VARIABLE_FONT_PATH).with_suffix(".woff2")
+        return send_file(str(woff2), mimetype='font/woff2',
+                         as_attachment=bool(request.args.get('download')),
+                         download_name=woff2.name)
     if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
         font_path = VARIABLE_FONT_PATH
     else:
@@ -1860,11 +1872,6 @@ def create_instance():
     # Trigger rebuild in background so the avar2 build picks up the new
     # studio-only row.
     def rebuild_in_background():
-        global BUILDING
-        if BUILDING:
-            print("Build already in progress, skipping rebuild after instance creation...", file=sys.stderr)
-            return
-
         print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
         trigger_build()
 
@@ -2074,11 +2081,6 @@ def update_instance(instance_name: str):
         # Explicit source writeback: rebuild immediately, in a
         # background thread to avoid blocking the response.
         def rebuild_in_background():
-            global BUILDING
-            if BUILDING:
-                print("Build already in progress, skipping rebuild after instance update...", file=sys.stderr)
-                return
-
             print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
             trigger_build()
 
@@ -2176,11 +2178,6 @@ def rename_instance(instance_name: str):
             # Trigger rebuild in background thread (same pattern as update_instance)
             # This avoids blocking the response and file locking issues
             def rebuild_in_background():
-                global BUILDING
-                if BUILDING:
-                    print("Build already in progress, skipping rebuild after rename...", file=sys.stderr)
-                    return
-                
                 print(f"Instance renamed, triggering immediate rebuild...", file=sys.stderr)
                 trigger_build()
             
@@ -2275,18 +2272,30 @@ def add_instance_to_source(instance_name: str):
         return jsonify({"error": str(e)}), 500
 
 
+_FAMILY_NAME_CACHE: Dict[str, Optional[str]] = {}
+
+
 def get_font_family_name(glyphs_path: Path) -> Optional[str]:
     """Return the font family name (source file stem in both formats).
 
     Locked convention: file stem, not source-declared family. Keeps the
     avar2 build, sibling CSV, and built-font filename in lockstep
     regardless of what's inside the source.
+
+    Cached by path: the stem can't change for a given path, and /api/health
+    polls this — parsing the source on every probe made health answer in
+    ~1.7s on Crispy.
     """
     try:
         if not glyphs_path or not glyphs_path.exists():
             return None
+        key = str(glyphs_path)
+        if key in _FAMILY_NAME_CACHE:
+            return _FAMILY_NAME_CACHE[key]
         font, _fmt = _source_font.load_source(glyphs_path)
-        return _source_font.get_family_name(font, glyphs_path)
+        name = _source_font.get_family_name(font, glyphs_path)
+        _FAMILY_NAME_CACHE[key] = name
+        return name
     except Exception as e:
         print(f"Error getting font family name: {e}", file=sys.stderr)
         return None
@@ -2438,9 +2447,10 @@ def health():
             # Preview tab rebuilds once on open when it's true.
             "build_stale": _is_build_stale(),
             # Fold in background regen/rebuild work: the layer save returns
-            # instantly, so BUILDING alone would read false while the shadow is
-            # still regenerating and the preview is stale.
-            "building": BUILDING or BACKGROUND_WORK > 0,
+            # instantly, so the queue's state alone would read false while the
+            # shadow is still regenerating and the preview is stale.
+            "building": JOBS.is_building() or BACKGROUND_WORK > 0,
+            "build_job": JOBS.status().get("running"),
         })
     except Exception as e:
         print(f"Error in health endpoint: {e}", file=sys.stderr)
@@ -3233,7 +3243,7 @@ def glyph_coverage():
     if GLYPHS_PATH is None:
         return jsonify({"axes": []})
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         coverage = _glyph_coverage.compute_coverage(font)
 
         # Pair the coverage data with axis names / display info from the
@@ -3663,9 +3673,158 @@ def _apply_hidden_axes(path: Path, hidden_tags) -> None:
         tt.save(str(path))
 
 
+def _save_woff2(font_path, out_path):
+    """Lossless TTF→WOFF2 (fontTools Brotli flavor)."""
+    font = TTFont(str(font_path))
+    font.flavor = "woff2"
+    font.save(str(out_path))
+    font.close()
+    return Path(out_path)
+
+
+def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
+                     format="ttf"):
+    """The export build, caller-agnostic: re-origin at ``default_location``
+    if given, post-transform, flag hidden axes. Returns the artifact path.
+    Runs in the build worker (queued export jobs); ``font_path`` is the
+    current built font, read-only. ``export_dir`` is the job's own dir.
+    ``format`` "woff2" converts the result losslessly.
+    """
+    font_path = Path(font_path)
+    export_dir = Path(export_dir)
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    if not default_location:
+        out_path = export_dir / font_path.name
+        shutil.copy2(str(font_path), str(out_path))
+    else:
+        tt = TTFont(str(font_path), lazy=True)
+        fvar_tags = {str(a.axisTag) for a in tt["fvar"].axes}
+        requested = {}
+        for t, v in default_location.items():
+            if str(t) in fvar_tags:
+                try:
+                    requested[str(t)] = float(v)
+                except (TypeError, ValueError):
+                    pass
+        if not requested:
+            raise ValueError("default_location has no known axis values")
+        tt.close()
+
+        # Where the combination lands in the design space — the
+        # parametric axes get rebased there so the new origin
+        # renders this exact master.
+        # The parametric location the export will REST at — the new
+        # default master gets interpolated exactly here.
+        # The authored mapping rows come FIRST: with build-time
+        # relocation off, the preview font's table cannot express the
+        # default-location row (it is excluded as the un-storable
+        # base), so evaluating THAT table at the default input
+        # returns the compiled corner — and the export would rest on
+        # the wrong style (observed: "set default" at wght 400 aimed
+        # at the origin master and collided with its sources). An
+        # exact row match uses the authored out:; everything else
+        # (in-between locations) still evaluates the built table,
+        # which is exact away from the default input.
+        mapped = None
+        try:
+            import yaml as _yaml
+            cfg = _yaml.safe_load(Path(_get_preview_config_path()).read_text()) or {}
+            av = cfg.get("avar2")
+            rows = av if isinstance(av, list) else (next(iter(av.values())) if isinstance(av, dict) and av else [])
+            req_keys = {str(k).lower() for k in requested}
+            for m in rows or []:
+                ins = m.get("in") or {}
+                # Same axis SET and equal values — a row that merely
+                # omits an axis must not match by default-filling, or
+                # the parametric-identity rows (in: XOPQ/XTRA/YOPQ)
+                # match any user request and the export rests on
+                # whichever row comes first (shipped once: the
+                # export landed on 1420/150/122 instead of the
+                # ORIGIN row).
+                if {str(k).lower() for k in ins} != req_keys:
+                    continue
+                ins_ci = {str(k).lower(): float(v) for k, v in ins.items()}
+                if all(abs(ins_ci[str(k).lower()] - float(v)) < 0.01
+                       for k, v in requested.items()):
+                    mapped = {str(t): float(v) for t, v in (m.get("out") or {}).items()}
+                    break
+        except Exception as exc:  # noqa: BLE001 — fall back to the table
+            print(f"export: authored-row lookup failed ({exc}); using the built table",
+                  file=sys.stderr)
+        if mapped is None:
+            mapped = _evaluate_mapped_location(requested)
+        export_defaults = {
+            t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
+        }
+
+        # Interpolate the new default master at the mapped
+        # location and stage a designspace resting on it.
+        export_source = _build_export_source(export_defaults, export_dir)
+
+        # Config for the export build: regenerated against the
+        # staged designspace, with blank in: cells MATERIALIZED
+        # at the standard declared defaults — blank means "at
+        # default", and with the default relocated the blanks
+        # would alias onto the new origin ("Locations must be
+        # unique").
+        export_workdir = export_dir / "work"
+        export_workdir.mkdir(parents=True, exist_ok=True)
+        export_config = export_workdir / "config.yaml"
+        shutil.copy2(str(_get_preview_config_path()), str(export_config))
+        # The axis metadata must travel with the config:
+        # _declared_axis_defaults resolves it as a config
+        # sibling, and without it the blank-cell fill silently
+        # no-ops — blanks then rebind to the relocated defaults
+        # and alias rows ("Locations must be unique").
+        _meta_src = _get_avar2_metadata_path()
+        if _meta_src and Path(_meta_src).exists():
+            shutil.copy2(str(_meta_src), str(export_workdir / "axis-metadata.json"))
+        from .build import config_generator as _cfg_gen
+        _cfg_gen.update_config(
+            csv_path=_get_preview_csv_path(),
+            config_path=export_config,
+            backup=False,
+            source_path=export_source,
+            fill_in_defaults=True,
+        )
+
+        build_env = _builder_env(default_overrides=requested)
+        fontc_path = shutil.which("fontc", path=build_env["PATH"])
+        if not fontc_path:
+            raise RuntimeError("fontc not found in PATH")
+        # Same in-process pipeline as the preview build (see
+        # _build_in_process); the requested default location rides in
+        # as the declared-axis override, exactly as it did via env.
+        if os.environ.get("AVAR2_STUDIO_GFTOOLS_BUILDER") == "1":
+            builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(export_config.resolve())]
+            result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(export_workdir), env=build_env)
+            if result.returncode != 0:
+                raise RuntimeError("Export build failed: %s"
+                                   % (result.stderr or result.stdout or "")[-800:])
+        else:
+            _build_in_process(export_config, export_workdir, fontc_path,
+                              default_overrides=requested)
+        produced = []
+        for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
+            produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
+        produced = sorted(set(produced), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not produced:
+            raise RuntimeError("Export build produced no font")
+        out_path = export_dir / produced[0].name
+        shutil.move(str(produced[0]), str(out_path))
+        # Same post-build transforms (SPAC…) as the preview.
+        out_path = Path(_apply_transform_chain(out_path))
+
+    _apply_hidden_axes(out_path, hidden_axes)
+    if format == "woff2":
+        out_path = _save_woff2(out_path, out_path.with_suffix(".woff2"))
+    return out_path
+
+
 @app.route('/api/export-font', methods=['POST'])
 def export_font():
-    """Download the built font with export options applied.
+    """Queue an export job; the artifact is polled for and downloaded.
 
     Body::
 
@@ -3681,164 +3840,38 @@ def export_font():
     generated against the requested user-axis defaults, so the font
     OPENS at that style with every axis range intact. The preview's
     served font is never touched.
+
+    Returns 202 + job id; the client polls ``/api/build/status`` and
+    fetches ``/api/export/<job id>/download`` when done.
     """
-    global BUILDING
     if VARIABLE_FONT_PATH is None or not VARIABLE_FONT_PATH.exists():
         return jsonify({"error": "No built font"}), 404
     body = request.get_json(silent=True) or {}
     hidden = body.get("hidden_axes") or []
     default_location = body.get("default_location") or None
+    fmt = body.get("format") or "ttf"
+    if fmt not in ("ttf", "woff2"):
+        return jsonify({"error": "format must be ttf or woff2"}), 400
 
-    try:
-        export_dir = Path(tempfile.mkdtemp(prefix="avar2-export-"))
-
-        if not default_location:
-            out_path = export_dir / VARIABLE_FONT_PATH.name
-            shutil.copy2(str(VARIABLE_FONT_PATH), str(out_path))
-        else:
-            tt = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
-            fvar_tags = {str(a.axisTag) for a in tt["fvar"].axes}
-            requested = {}
-            for t, v in default_location.items():
-                if str(t) in fvar_tags:
-                    try:
-                        requested[str(t)] = float(v)
-                    except (TypeError, ValueError):
-                        pass
-            if not requested:
-                return jsonify({"error": "default_location has no known axis values"}), 400
-
-            # Where the combination lands in the design space — the
-            # parametric axes get rebased there so the new origin
-            # renders this exact master.
-            # The parametric location the export will REST at — the new
-            # default master gets interpolated exactly here.
-            # The authored mapping rows come FIRST: with build-time
-            # relocation off, the preview font's table cannot express the
-            # default-location row (it is excluded as the un-storable
-            # base), so evaluating THAT table at the default input
-            # returns the compiled corner — and the export would rest on
-            # the wrong style (observed: "set default" at wght 400 aimed
-            # at the origin master and collided with its sources). An
-            # exact row match uses the authored out:; everything else
-            # (in-between locations) still evaluates the built table,
-            # which is exact away from the default input.
-            mapped = None
-            try:
-                import yaml as _yaml
-                cfg = _yaml.safe_load(Path(_get_preview_config_path()).read_text()) or {}
-                av = cfg.get("avar2")
-                rows = av if isinstance(av, list) else (next(iter(av.values())) if isinstance(av, dict) and av else [])
-                req_keys = {str(k).lower() for k in requested}
-                for m in rows or []:
-                    ins = m.get("in") or {}
-                    # Same axis SET and equal values — a row that merely
-                    # omits an axis must not match by default-filling, or
-                    # the parametric-identity rows (in: XOPQ/XTRA/YOPQ)
-                    # match any user request and the export rests on
-                    # whichever row comes first (shipped once: the
-                    # export landed on 1420/150/122 instead of the
-                    # ORIGIN row).
-                    if {str(k).lower() for k in ins} != req_keys:
-                        continue
-                    ins_ci = {str(k).lower(): float(v) for k, v in ins.items()}
-                    if all(abs(ins_ci[str(k).lower()] - float(v)) < 0.01
-                           for k, v in requested.items()):
-                        mapped = {str(t): float(v) for t, v in (m.get("out") or {}).items()}
-                        break
-            except Exception as exc:  # noqa: BLE001 — fall back to the table
-                print(f"export: authored-row lookup failed ({exc}); using the built table",
-                      file=sys.stderr)
-            if mapped is None:
-                mapped = _evaluate_mapped_location(requested)
-            export_defaults = {
-                t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
-            }
-
-            if BUILDING:
-                return jsonify({"error": "A build is in progress — try again in a moment"}), 409
-            BUILDING = True
-            try:
-                # Interpolate the new default master at the mapped
-                # location and stage a designspace resting on it.
+    if default_location:
+        tt = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
+        fvar_tags = {str(a.axisTag) for a in tt["fvar"].axes}
+        tt.close()
+        requested = {}
+        for t, v in default_location.items():
+            if str(t) in fvar_tags:
                 try:
-                    export_source = _build_export_source(export_defaults, export_dir)
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    return jsonify({"error": "Could not generate the default master", "details": str(e)}), 500
+                    requested[str(t)] = float(v)
+                except (TypeError, ValueError):
+                    pass
+        if not requested:
+            return jsonify({"error": "default_location has no known axis values"}), 400
 
-                # Config for the export build: regenerated against the
-                # staged designspace, with blank in: cells MATERIALIZED
-                # at the standard declared defaults — blank means "at
-                # default", and with the default relocated the blanks
-                # would alias onto the new origin ("Locations must be
-                # unique").
-                export_workdir = export_dir / "work"
-                export_workdir.mkdir(parents=True, exist_ok=True)
-                export_config = export_workdir / "config.yaml"
-                shutil.copy2(str(_get_preview_config_path()), str(export_config))
-                # The axis metadata must travel with the config:
-                # _declared_axis_defaults resolves it as a config
-                # sibling, and without it the blank-cell fill silently
-                # no-ops — blanks then rebind to the relocated defaults
-                # and alias rows ("Locations must be unique").
-                _meta_src = _get_avar2_metadata_path()
-                if _meta_src and Path(_meta_src).exists():
-                    shutil.copy2(str(_meta_src), str(export_workdir / "axis-metadata.json"))
-                try:
-                    from .build import config_generator as _cfg_gen
-                    _cfg_gen.update_config(
-                        csv_path=_get_preview_csv_path(),
-                        config_path=export_config,
-                        backup=False,
-                        source_path=export_source,
-                        fill_in_defaults=True,
-                    )
-                except Exception as e:
-                    return jsonify({"error": "Export config generation failed", "details": str(e)}), 500
-
-                build_env = _builder_env(default_overrides=requested)
-                fontc_path = shutil.which("fontc", path=build_env["PATH"])
-                if not fontc_path:
-                    return jsonify({"error": "fontc not found in PATH"}), 500
-                # Same in-process pipeline as the preview build (see
-                # _build_in_process); the requested default location rides in
-                # as the declared-axis override, exactly as it did via env.
-                if os.environ.get("AVAR2_STUDIO_GFTOOLS_BUILDER") == "1":
-                    builder_cmd = ["gftools", "builder", "--experimental-fontc", fontc_path, str(export_config.resolve())]
-                    result = subprocess.run(builder_cmd, capture_output=True, text=True, cwd=str(export_workdir), env=build_env)
-                    if result.returncode != 0:
-                        return jsonify({
-                            "error": "Export build failed",
-                            "details": (result.stderr or result.stdout or "")[-800:],
-                        }), 500
-                else:
-                    try:
-                        _build_in_process(export_config, export_workdir, fontc_path,
-                                          default_overrides=requested)
-                    except Exception as e:  # noqa: BLE001
-                        return jsonify({"error": "Export build failed", "details": str(e)[-800:]}), 500
-                produced = []
-                for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
-                    produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
-                produced = sorted(set(produced), key=lambda p: p.stat().st_mtime, reverse=True)
-                if not produced:
-                    return jsonify({"error": "Export build produced no font"}), 500
-                out_path = export_dir / produced[0].name
-                shutil.move(str(produced[0]), str(out_path))
-                # Same post-build transforms (SPAC…) as the preview.
-                out_path = Path(_apply_transform_chain(out_path))
-            finally:
-                BUILDING = False
-
-        _apply_hidden_axes(out_path, hidden)
-        return send_file(str(out_path), as_attachment=True, download_name=out_path.name)
-    except Exception as e:
-        print(f"Error in /api/export-font: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    job_id = JOBS.submit_export(hidden_axes=hidden, default_location=default_location,
+                                format=fmt)
+    if job_id is None:
+        return jsonify({"error": "No source loaded"}), 400
+    return jsonify({"job_id": job_id, "status": "queued"}), 202
 
 
 @app.route('/api/transforms', methods=['GET'])
@@ -6212,11 +6245,6 @@ def delete_instance(instance_name: str):
         
         # Trigger rebuild in background thread (same pattern as update_instance)
         def rebuild_in_background():
-            global BUILDING
-            if BUILDING:
-                print("Build already in progress, skipping rebuild after instance deletion...", file=sys.stderr)
-                return
-            
             print(f"Instance deleted, triggering immediate rebuild...", file=sys.stderr)
             trigger_build()
         
@@ -7332,6 +7360,10 @@ def _apply_source_path(path: Path) -> None:
     except Exception as exc:
         print(f"Warning: failed to resolve active build source on load: {exc}", file=sys.stderr)
 
+    # A new source invalidates every queued/running job: cancel them and
+    # start clean.
+    JOBS.cancel_all()
+
     print(f"Auto-building font from {GLYPHS_PATH}...", file=sys.stderr)
     try:
         trigger_build()
@@ -7844,19 +7876,18 @@ def main():
             elif current_time < _SUPPRESS_WATCHDOG_UNTIL:
                 return
 
-            global BUILDING, VARIABLE_FONT_PATH, LAST_BUILD_TIME
-            global REBUILD_PENDING, SOURCE_REFRESH_PENDING
+            global VARIABLE_FONT_PATH, LAST_BUILD_TIME
 
-            if BUILDING:
-                # Do NOT drop the save. Record what changed so the in-flight
-                # build's drain loop re-derives the source before rebuilding;
-                # a queued rebuild from the old shadow would look like success
-                # while serving stale outlines.
-                if is_original:
-                    SOURCE_REFRESH_PENDING = "original"
-                elif is_source and SOURCE_REFRESH_PENDING != "original":
-                    SOURCE_REFRESH_PENDING = "source"
-                REBUILD_PENDING = True
+            if JOBS.is_building():
+                # Do NOT drop the save. Record what changed so the queue's
+                # next pass re-syncs the CSV and re-stages the source before
+                # rebuilding; a rebuild from the pre-save snapshot would look
+                # like success while serving stale outlines.
+                kind = "original" if is_original else ("source" if is_source else None)
+                if kind:
+                    JOBS.request_build(source_refresh=kind)
+                else:
+                    JOBS.request_build()
                 print("Source changed mid-build; queued for after this build.", file=sys.stderr)
                 return
 
@@ -7921,7 +7952,7 @@ def main():
         PERIODIC_CHECK_INTERVAL = 15
         def check_and_rebuild_periodically():
             global VARIABLE_FONT_PATH, LAST_BUILD_TIME
-            if BUILDING:
+            if JOBS.is_building():
                 return
             try:
                 if GLYPHS_PATH is None or not GLYPHS_PATH.exists():

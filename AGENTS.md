@@ -63,7 +63,10 @@ In addition to that file, these repo-specific rules apply.
   whole-list PUT (whole-list replace from a stale client caused data loss once).
 - Mapping-slider commits run through **one serialized promise chain** with
   flush-on-pointer-up-and-unmount — the server rewrites the whole CSV per commit.
-- `trigger_build()` coalesces; never call `_run_build()` directly.
+- `trigger_build()` submits to the build-job queue (`build_jobs.py`);
+  builds/exports run in worker subprocesses — never call `_run_build()`
+  in the server process, and never write build outputs outside the
+  supervisor's promotion step.
 
 ## Working practices from the field
 

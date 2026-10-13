@@ -116,9 +116,24 @@ Everything below is tribal knowledge as of this handover.
   still loses drawn outlines in practice.
 
 ### Build orchestration (server.py)
-- `trigger_build()` coalesces: if a build is running, it sets
-  `REBUILD_PENDING` and the running build re-runs afterward (bounded at
-  3 passes). Never call `_run_build()` directly.
+
+- **Builds and exports run in a worker SUBPROCESS** (October 2026 rework —
+  `docs/WORKER_BUILD_PLAN.md`): `trigger_build()` submits to
+  `build_jobs.JobQueue` (`JOBS`), one `python -m avar2_studio.build_worker`
+  process per job, a snapshot of the source set staged per job under
+  `.avar2-studio/jobs/<id>/`. The worker imports this module and runs the
+  same `_resolve_active_source` + `_run_build` / `_export_pipeline` code —
+  parity by construction. Progress/result: `progress.jsonl` lines +
+  atomically-renamed `result.json`; only the supervisor promotes artifacts.
+  Cancel = kill the process group; a dead worker is a clean failed state,
+  never a stuck flag. Coalescing is the queue's rebuild-wanted bit (same
+  semantics `REBUILD_PENDING` had). `POST /api/build` waits on an event
+  (GIL-free); `POST /api/export-font` returns 202 + job id, poll
+  `/api/build/status`, artifact from `/api/export/<id>/download`.
+  `BUILDING` is worker-internal now; server-side "is busy" is
+  `JOBS.is_building()` (builds only — exports/compress are background).
+  A WOFF2 cache (`.avar2-studio/build/<font>.woff2` + `.json` key) is
+  refreshed by a low-priority job after every successful build.
 - Layer edits return in ~3ms; `schedule_shadow_rebuild()` debounces
   shadow regen + build by **1.2s** (`_REBUILD_DEBOUNCE_SECONDS`).
   `BACKGROUND_WORK` folds into `/api/health`'s `building` flag — the
@@ -143,6 +158,14 @@ Everything below is tribal knowledge as of this handover.
   (`_repair_placeholder_ranges` / `_derive_traditional_range` in
   `server.py`). Hand-edited ranges are never clobbered; without this the
   placeholder leaked into real fvar.
+- **Source parses are cached** (Oct 2026): `source_font.load_source_cached`
+  memoizes the parsed .glyphs by (path, mtime, size) — the read-mostly
+  endpoints (/api/axes, /api/instances, /api/masters, avar2 listings,
+  glyph-coverage) were re-parsing the 670KB source per request
+  (1.5–7s each; now ~1-3ms warm). Two rules: mutating flows
+  (instance write-back etc.) keep using plain `load_source` — the cached
+  object is shared; and .designspace sources never cache (UFO edits don't
+  move the document's mtime).
 
 ### /api/glyph-coverage response contract
 Classification: `kind` = `universal` (100% coverage) vs `scoped`;

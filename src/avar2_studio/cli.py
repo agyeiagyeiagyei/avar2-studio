@@ -94,6 +94,10 @@ def _build(argv) -> int:
         print(f"error: could not load {args.source}: {exc}", file=sys.stderr)
         return 2
 
+    # The build runs in a worker subprocess (docs/WORKER_BUILD_PLAN.md);
+    # wait for the queue to drain before reading the outcome globals.
+    server.JOBS.wait_for_idle()
+
     if server.LAST_BUILD_STATUS != "ok" or not server.VARIABLE_FONT_PATH:
         print(f"error: build failed: {server.LAST_BUILD_ERROR or 'unknown'}", file=sys.stderr)
         return 1
