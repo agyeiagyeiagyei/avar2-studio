@@ -105,7 +105,7 @@ def get_glyphs_instances(source_path: Path) -> Dict[str, Dict[str, float]]:
 
     Works for ``.glyphs`` and ``.designspace``.
     """
-    font, _fmt = source_font.load_source(source_path)
+    font, _fmt = source_font.load_source_cached(source_path)
     instances: Dict[str, Dict[str, float]] = {}
     for entry in source_font.get_source_instances(font):
         name = entry["name"]
@@ -177,7 +177,7 @@ def read_csv_mappings_with_axes(
         parametric_axis_tags: set = set()
         if source_path and source_path.exists():
             try:
-                font, _fmt = source_font.load_source(source_path)
+                font, _fmt = source_font.load_source_cached(source_path)
                 parametric_axis_tags = {
                     axis["tag"].upper()
                     for axis in source_font.get_axes(font)
@@ -293,7 +293,7 @@ def update_csv_from_glyphs(
             defaults = {}
             try:
                 from . import source_font as _source_font
-                font, _fmt = _source_font.load_source(source_path)
+                font, _fmt = _source_font.load_source_cached(source_path)
                 for ax in _source_font.get_axes(font):
                     tag = str(ax.get("tag") or "")
                     defaults[tag.upper()] = ax.get("default", 0)

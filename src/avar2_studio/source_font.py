@@ -88,6 +88,31 @@ def load_source(path: Path) -> Tuple[object, str]:
     )
 
 
+#: Read-mostly endpoints used to re-parse the source on EVERY request
+#: (~1.5–3.5s each on a 670KB .glyphs, and the frontend polls). The cache
+#: keys on (path, mtime, size), so any on-disk change re-parses. Only
+#: .glyphs is cached: a .designspace's content lives in its UFOs, whose
+#: edits don't move the document's mtime, and its parse is cheap anyway.
+#: Callers that MUTATE the font must keep using load_source() — the cached
+#: object is shared by every read of the same file version.
+_source_cache: Dict[str, Tuple[float, int, object, str]] = {}
+
+
+def load_source_cached(path: Path) -> Tuple[object, str]:
+    """``load_source`` for read-only callers, memoized by file version."""
+    path = Path(path)
+    if path.suffix.lower() != ".glyphs":
+        return load_source(path)
+    st = path.stat()
+    key = str(path)
+    entry = _source_cache.get(key)
+    if entry and entry[0] == st.st_mtime and entry[1] == st.st_size:
+        return entry[2], entry[3]
+    font, fmt = load_source(path)
+    _source_cache[key] = (st.st_mtime, st.st_size, font, fmt)
+    return font, fmt
+
+
 def reload_source(path: Path) -> Tuple[object, str]:
     """Re-read the source from disk. Convenience alias for ``load_source``."""
     return load_source(path)
