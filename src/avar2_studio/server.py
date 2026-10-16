@@ -8071,6 +8071,14 @@ def main():
                 # like success while serving stale outlines.
                 kind = "original" if is_original else ("source" if is_source else None)
                 if kind:
+                    # Re-resolve NOW so the read endpoints (/api/instances,
+                    # /api/axes, coverage) stop serving the pre-save shadow
+                    # while the current build is still running; the queue
+                    # re-resolves before staging the follow-up regardless.
+                    try:
+                        _resolve_active_source()
+                    except Exception as exc:
+                        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
                     JOBS.request_build(source_refresh=kind)
                 else:
                     JOBS.request_build()

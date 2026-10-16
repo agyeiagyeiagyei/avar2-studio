@@ -96,6 +96,25 @@ def tempfile_dir():
     return tempfile.mkdtemp(prefix="build-jobs-test-")
 
 
+def test_a_midbuild_save_resolves_before_syncing(queue, monkeypatch):
+    """A source change landing mid-build: the follow-up job must re-resolve
+    the active source BEFORE the CSV hook and staging — the shadow still
+    reflects the pre-save state, and both read from it."""
+    calls = []
+    monkeypatch.setenv("STUB_WORKER_MODE", "sleep")
+    monkeypatch.setenv("STUB_WORKER_SLEEP", "2")
+    server = queue.server
+    server._resolve_active_source = lambda: calls.append("resolve")
+    server._SYNC_CSV_HOOK = lambda: calls.append("csv")
+    queue.request_build()
+    assert _wait_for(queue, lambda: queue.status()["running"], 10)
+    queue.request_build(source_refresh="original")   # the watcher's mid-build save
+    monkeypatch.setenv("STUB_WORKER_SLEEP", "0.01")
+    assert queue.wait_for_idle(timeout=30)
+    assert calls == ["resolve", "csv"], \
+        f"resolve must precede the CSV hook (and both precede staging), got {calls}"
+
+
 def test_cancel_a_running_build(queue, monkeypatch):
     monkeypatch.setenv("STUB_WORKER_MODE", "sleep")
     queue.request_build()

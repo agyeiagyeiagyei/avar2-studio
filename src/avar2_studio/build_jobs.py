@@ -247,9 +247,17 @@ class JobQueue:
         job["started"] = time.time()
         try:
             if job["kind"] == "build" and job.get("source_refresh") in ("original", "source"):
-                # A source change landed mid-build: the CSV sync stays
-                # server-side (the server owns sidecar writes) and runs
-                # BEFORE the snapshot, so the job builds the new state.
+                # A source change landed mid-build: re-resolve the active
+                # source FIRST — the shadow still reflects the pre-save
+                # state, and both the CSV hook and the staging below read
+                # from it (a stale one syncs old instances and builds old
+                # outlines while looking like success).
+                resolve = getattr(self.server, "_resolve_active_source", None)
+                if resolve is not None:
+                    resolve()
+                # The CSV sync stays server-side (the server owns sidecar
+                # writes) and runs BEFORE the snapshot, so the job builds
+                # the new state.
                 hook = self.server._SYNC_CSV_HOOK
                 if hook is not None:
                     hook()

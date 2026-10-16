@@ -143,3 +143,31 @@ results, and what is inferred vs verified.
   regenerated shadow. Fails pre-fix (stash-checked: KeyError on the
   dropped outline). (2) no-donor delta is a clean no-op. (3) carry never
   lands on a computed entry. 3 passed.
+
+## T0.7 — mid-build saves re-resolve
+
+- Mechanism [verified by reading]: watcher mid-build branch
+  (`GlyphsFileHandler.on_modified`, `JOBS.is_building()` true) only did
+  `request_build(source_refresh=kind)`; `_run_one` then ran the CSV hook
+  — which reads `GLYPHS_PATH`, still the pre-save shadow — and staged
+  that same stale shadow. The not-mid-build path already resolved
+  (server.py:8091).
+- Fix, both branches per the brief:
+  1. `build_jobs._run_one` source_refresh branch calls
+     `server._resolve_active_source()` (getattr-guarded like the hook)
+     BEFORE `_SYNC_CSV_HOOK` and `_stage`.
+  2. The watcher's mid-build branch resolves immediately too, so read
+     endpoints refresh during the running build (the observed "needed a
+     PATCH to refresh" window), not only at follow-up staging time.
+- Concurrency note [reasoned]: the running worker only touches its
+  snapshot; server-side regen writes the shadow via
+  `save_font_atomically` (tmp+rename), so a concurrent `_stage` copy2
+  reads a whole file. The pre-existing unlocked-resolve hazard (audit
+  §3) is T2.1 scope, not enlarged materially by one more caller.
+- Test [verified]: `test_a_midbuild_save_resolves_before_syncing`
+  records `resolve`/`csv` calls through the real queue (stub worker);
+  asserts `["resolve", "csv"]`. Old code contains no resolve call, so
+  the test fails by construction pre-fix (not stash-verified).
+  `pytest tests/test_build_jobs.py -q` → 11 passed. server.py compiles
+  and imports [verified]; the watcher branch itself is nested in
+  `main()` — reading-verified only until T3.10 makes it testable.
