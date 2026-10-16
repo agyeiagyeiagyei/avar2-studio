@@ -795,3 +795,23 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - Test [verified]: `test_promotion_reaps_stale_fonts_but_keeps_the_newest`
   (five fonts, two with twins → the newest two survive, 7 files removed).
   `tests/test_build_jobs.py` green; ruff clean.
+
+## T2.13 — Kinetikern tuples carry an explicit marker
+
+- `inject()` records every tuple it adds — (glyph, axes support) — in a
+  private sfnt table `KKRN`; `strip()` removes exactly those and deletes
+  the table; a font without the record has nothing of ours to remove.
+  The old rule ("phantom-only on the parametric axes") also matched
+  genuine compile output (22 tuples in Crispy's `three`). Survival of the
+  table through later stages: fontTools saves keep unknown tables; the
+  native SPAC injector repacks every table raw (`FontBuilder::add_raw`
+  in `wasm/fontc-web/src/lib.rs`).
+- Tests [verified]: `test_strip_removes_only_the_recorded_tuples` plants a
+  phantom-only tuple at a master-corner peak before injecting — strip
+  removes only the injected ones, the planted one survives, a second
+  strip removes nothing; `test_marker_survives_a_save_and_reload`.
+  `tests/test_kinetikern_inject.py` + `test_kinetikern.py`: 7 passed
+  (fontc + engine); ruff clean.
+- Known residual: a font injected by the PREVIOUS code (no marker) keeps
+  its old tuples until the next fresh build; preview fonts are rebuilt
+  from scratch every build, so this only affects one export in between.

@@ -95,3 +95,45 @@ def test_apply_to_font_reads_the_sidecar_and_is_idempotent(tmp_path):
     base = _metrics(_build(src, tmp_path / "again.ttf"), loc)
     for g in glyphs:
         assert once[g][1] - base[g][1] == 15 and once[g][0] - base[g][0] == 40, (g, base[g], once[g])
+
+
+@needs_fontc
+def test_strip_removes_only_the_recorded_tuples(tmp_path):
+    """T2.13: a genuine compile tuple that happens to be phantom-only on the
+    parametric axes (Crispy's `three` has 22) must survive strip(); only
+    the tuples inject() recorded in the marker table go."""
+    from fontTools.ttLib.tables.TupleVariation import TupleVariation
+    src = tmp_path / "CrispyMini.glyphs"
+    shutil.copy2(MINI, src)
+    vf = _build(src, tmp_path / "vf.ttf")
+    font = TTFont(str(vf))
+    glyph = next(n for n in font.getGlyphOrder() if font["glyf"][n].numberOfContours > 0)
+    variations = font["gvar"].variations.setdefault(glyph, [])
+    n = len(variations[0].coordinates) if variations else inject._point_count(font["glyf"][glyph], font["glyf"])
+    planted = [None] * n
+    planted[-4], planted[-3] = (3, 0), (5, 0)
+    variations.append(TupleVariation({"XOPQ": (0.0, 1.0, 1.0)}, planted))  # a master-corner peak
+    before = len(variations)
+    locs = _locations(font)
+    added = inject.inject(font, [(locs["far"], {glyph: (20, 30)})])
+    assert added >= 1 and inject.MARKER_TABLE in font
+    assert len(font["gvar"].variations[glyph]) == before + added
+    removed = inject.strip(font)
+    assert removed == added
+    assert inject.MARKER_TABLE not in font
+    assert len(font["gvar"].variations[glyph]) == before, "a genuine phantom-only tuple was stripped"
+    assert inject.strip(font) == 0, "nothing recorded → nothing to remove"
+
+
+@needs_fontc
+def test_marker_survives_a_save_and_reload(tmp_path):
+    src = tmp_path / "CrispyMini.glyphs"
+    shutil.copy2(MINI, src)
+    vf = _build(src, tmp_path / "vf.ttf")
+    font = TTFont(str(vf))
+    glyph = next(n for n in font.getGlyphOrder() if font["glyf"][n].numberOfContours > 0)
+    added = inject.inject(font, [(_locations(font)["far"], {glyph: (20, 30)})])
+    out = tmp_path / "injected.ttf"
+    font.save(str(out))
+    reloaded = TTFont(str(out))
+    assert inject.strip(reloaded) == added
