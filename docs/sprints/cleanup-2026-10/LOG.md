@@ -277,3 +277,60 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   pre-existing skips as the worktree run.
 - T0.11 [verified]: `.venv/` added to `.gitignore`;
   `git check-ignore -v .venv/bin/python` → `.gitignore:29:.venv/`.
+
+## T0.7 fix v2 (685c297) — watermark suppression; probe evidence
+
+- The round-2 probe on a Crispy copy (5071) showed the first fix damped
+  but did not kill the storm: exactly one follow-up per build, forever.
+  Mechanism [verified from the log]: the suppression TIME window is
+  checked at event-PROCESSING time, but the handler thread is busy in a
+  multi-second resolve when the self-write's event arrives → window
+  expired → self-event re-fires the mid-build branch → resolve →
+  re-queue → repeat.
+- Fix: `_suppress_watcher()` arms window + mtime watermark
+  (`_SELF_WRITE_WATERMARK` / `_SELF_WRITE_ORIGINAL_WATERMARK`); an event
+  whose file mtime is not newer than the last server write is dropped
+  however late it is processed (a designer save always re-writes the
+  file). All six arm sites converted; the Glyphs.app round-trip also
+  re-arms in `finally`. The handler settles the save and processes only
+  the first event per final mtime.
+- Probe v3 [verified, `/tmp/av2-sprint/probe`]: POST /api/build,
+  glyphsLib re-save of the original 8 s in → **exactly 1 follow-up
+  build** (2 total from the POST), **2** `[transform] slant` lines
+  (watcher resolve + `_run_one` resolve), **0** Unexpected EOF, **1**
+  "Source changed mid-build", idle at end (incl. compress). v2 of the
+  same probe showed the storm (7+ builds) before this fix.
+
+## T0.9 fix (9e4b3fc) — capture key drift, found via the probe
+
+- Probe v2 phase B: a shadow save produced a build but NO capture.
+  Root cause [verified on the live copy]: braces created before the
+  GRAD append carry 5-value coordinates in a 6-axis shadow;
+  `_extract_brace_outlines` keyed by the raw tuple while capture/regen
+  look up full-length vectors → capture silently wrote 0 (this is the
+  audit's "28 layers, no captured outline" on Crispy) and regen
+  preservation missed them too. Fix: extraction pads to the full axis
+  vector with default-master values.
+- Verified: capture of a hand-drawn 'a' brace on the live probe copy →
+  `captured: 1`, sidecar carries the +250 outline + source_sig;
+  regression test fails pre-fix (stash-checked). Note: my first probe
+  drew into a *computed* (target) layer, which capture deliberately
+  skips — probe corrected to match the sidecar entry by full location.
+- Side observation for the verifier (pre-existing, not touched): the
+  live Crispy `-control.json` holds DUPLICATE (glyph, location) layer
+  entries (e.g. two `LCWD a` rows, one with outline) — the next
+  normalise+save dedups first-wins and would drop the outlined copy.
+  Also bogus entries naming glyph `3` (nice-name lookup resolves to
+  `three`, so regen seeds land on the wrong glyph).
+- Probe v3 phase B [verified]: shadow save → "Captured 1 drawn
+  outline(s) into the sidecar.", exactly 1 build, idle at end, sidecar
+  carries the +250 drawing.
+
+## Hand-off — Tier 0 (round 2)
+
+- Full suite after all round-2 changes [verified]: **453 passed,
+  8 skipped in 36.55 s** (same 8 pre-existing skips).
+- Latest-deps venv (glyphsLib 6.16.0 / fontTools 4.67.0 / fontc 1.0.0):
+  **452 passed, 8 skipped** [verified] — grade tests and the new
+  component-capture test pass on both glyphsLib versions.
+- Live probe: see above; both phases meet the verifier's acceptance.
