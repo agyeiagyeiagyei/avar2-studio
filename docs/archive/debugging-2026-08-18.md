@@ -1,3 +1,5 @@
+> **Archived 2026-10-16.** A dated bug-hunt record. The oracle-fixture recipe at the end is still the way to regenerate the cargo oracle inputs until deterministic fixtures land (sprint item T2.9); the avar2 default-row physics it uncovered is recorded in [decision 0001](../decisions/0001-build-time-default-relocation.md).
+
 # Debugging record — 18 Aug 2026 (avar2 mapping, reflection, grade)
 
 A one-day hunt through the static app while the designer authored

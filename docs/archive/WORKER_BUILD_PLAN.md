@@ -1,3 +1,5 @@
+> **Archived 2026-10-16.** The worker-rework takeover plan and its builder progress log. Delivered 2026-10-13; the decisions it records are now [0002 — TTF preview, background WOFF2](../decisions/0002-ttf-preview-background-woff2.md) and [0003 — worker subprocess, finish-then-rebuild](../decisions/0003-worker-subprocess-finish-then-rebuild.md); the current job-queue design is in [ARCHITECTURE.md](../ARCHITECTURE.md). Line numbers here are from the 2026-10-11 snapshot.
+
 # Worker-process build rework — takeover plan
 
 Audience: the agent taking over this work. Repo: `avar2-studio`
