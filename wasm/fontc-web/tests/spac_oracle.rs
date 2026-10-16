@@ -4,14 +4,13 @@
 //! `WidthAwareSpacTransform` and gftools `gen-spac` via `SpacTransform`
 //! (spike/compare_spac.py).
 //!
-//! Prerequisites (paths overridable via env, same defaults as
-//! avar2_oracle.rs):
-//!   - spike font:  $AVAR2_SPIKE_FONT  (default /tmp/fontc-wasm-spike.ttf)
-//!   - mappings:    $AVAR2_CSV         (default the studio's CrispyMini-avar.csv)
-//!   - python with fontTools + avar2_studio + gftools: $AVAR2_PYTHON
+//! Fixtures come from tests/common (generated from examples/crispy-mini;
+//! $AVAR2_SPIKE_FONT / $AVAR2_CSV / $AVAR2_PYTHON override).
 
 use std::path::Path;
 use std::process::Command;
+
+mod common;
 
 /// The e2e bundle's exact width-aware parameter set.
 const TRANSFORMS_WA: &str = r#"[{"type":"spac_widthaware","enabled":true,"params":{"min":-20,"max":40,"bias":1.0,"scale":1.25}}]"#;
@@ -31,19 +30,9 @@ const OVERRIDE_CSV: &str =
 #[test]
 fn spac_matches_studio_oracle() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let font_path = std::env::var("AVAR2_SPIKE_FONT")
-        .unwrap_or_else(|_| "/tmp/fontc-wasm-spike.ttf".to_string());
-    let csv_path = std::env::var("AVAR2_CSV").unwrap_or_else(|_| {
-        manifest
-            .join("../../examples/crispy-mini/sources/CrispyMini-avar.csv")
-            .to_string_lossy()
-        .into_owned()
-    });
-    let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| {
-        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
-    });
+    let font_path = common::spike_font();
+    let csv_path = common::mappings_csv();
+    let python = common::python();
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
