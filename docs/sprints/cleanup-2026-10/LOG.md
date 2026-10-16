@@ -634,3 +634,11 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   by name). Optional = never fails the gate (ok=True with detail + fix),
   same contract as the fontra check. Tests + live run [verified]:
   2 passed; `doctor` lists both.
+
+## T1.31 — log when the native SPAC injector is absent
+- `_native_injector()` returned None silently; builds fell back to the
+  fontTools SPAC path invisibly (the path whose gvar re-encode overflow
+  the native injector exists to avoid). The transform now logs the
+  absence and the consequence via `ctx.log`. Test [verified]:
+  test_spac_fallback_log.py — the absence message fires before the
+  fallback runs.

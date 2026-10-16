@@ -170,6 +170,13 @@ class WidthAwareSpacTransform(Transform):
                 return out
             ctx.log("spac_widthaware: native injector failed; falling back to "
                     "fontTools (%s)" % ((res.stderr or "").strip()[-300:] or "no stderr"))
+        else:
+            # Absence used to be silent: the fallback is slower and its gvar
+            # re-encode can overflow the 64KB per-glyph tuple-header ceiling
+            # on twin-heavy fonts — say which path is running and why.
+            ctx.log("spac_widthaware: native injector not found — the fontTools "
+                    "path runs (slower; can overflow gvar's 64KB tuple-header "
+                    "ceiling on twin-heavy fonts). `avar2-studio doctor` lists it.")
 
         font = TTFont(str(vf_path))
         try:
