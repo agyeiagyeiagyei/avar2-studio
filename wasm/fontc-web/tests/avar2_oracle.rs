@@ -37,7 +37,7 @@ fn avar2_matches_gftools_oracle() {
 
     std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
     let rust_out = format!("{}/target/tmp/av2-rust.ttf", env!("CARGO_MANIFEST_DIR"));
-    std::fs::write(rust_out, &out).expect("write rust output");
+    std::fs::write(&rust_out, &out).expect("write rust output");
 
     let comparator = manifest.join("spike/compare_avar2.py");
     let status = Command::new(&python)
