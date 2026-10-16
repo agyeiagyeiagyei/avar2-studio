@@ -21,7 +21,7 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
+function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
   onControlAxisReseed, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
@@ -366,7 +366,6 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
         allInstances={instances}
         vfFamilyId={vfFamilyId}
         fontLoaded={fontLoaded}
-        building={building}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}

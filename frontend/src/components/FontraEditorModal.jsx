@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 import './FontraEditorModal.css';
 
 /**
@@ -20,6 +21,9 @@ import './FontraEditorModal.css';
  *               trigger a font rebuild so the preview catches up.
  */
 function FontraEditorModal({ editor, onClose }) {
+  // A save in the drawer triggers a rebuild (the watcher captures the
+  // drawing and recompiles): say so while it runs.
+  const { building } = useBuildStatus();
   // Drawer width — persisted across sessions. Default 60vw, min 600px
   // (Fontra needs room to render a meaningful canvas + sidebars).
   const [width, setWidth] = useState(() => {
@@ -127,6 +131,11 @@ function FontraEditorModal({ editor, onClose }) {
           </span>
           <span className="fontra-editor-subtitle">
             Draw the {editor.axisName || editor.tag} change here. Close to update the preview.
+            {building && (
+              <span title="The studio is compiling your latest save into the preview.">
+                {' '}· rebuilding preview…
+              </span>
+            )}
             {bridgeDirty && (
               <span title="Edits applied — the preview catches up while a rebuild runs.">
                 {' '}●

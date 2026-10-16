@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { api } from './api';
+import { useBuildStatus } from './hooks/useBuildStatus';
+import { useBuildWait, scrollToInstance } from './hooks/useBuildWait';
 import { isStaticMode, isUploadDataset, getSampleText, setSampleText as persistSampleText, getTesterState, setTesterState as persistTesterState } from './static-api';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -70,8 +72,9 @@ function App() {
   const [fontUrl, setFontUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [building, setBuilding] = useState(false);
-  const [buildJob, setBuildJob] = useState(null);
+  // The one building/stale signal (hooks/useBuildStatus): fed by the health
+  // poll + loadData below, flipped early by the mutation handlers.
+  const { building, setBuilding, buildJob, buildStale, lastBuildStatus, lastBuildError, applyHealth } = useBuildStatus();
   // Non-null ⇒ the avar2 build is failing and the served font is the
   // plain fallback (no avar2 table / mapped axes). Surfaced on the
   // Preview tab so the fallback is never silent.
@@ -84,9 +87,6 @@ function App() {
   // defaults: the font rests at the compiled origin, not at any
   // authored style (the "resting dip").
   const [originWarning, setOriginWarning] = useState(null);
-  // True ⇒ the CSV changed after the last build (auto-saved edits no
-  // longer rebuild per save). The Preview tab rebuilds once on open.
-  const [buildStale, setBuildStale] = useState(false);
   const [sampleText, setSampleTextState] = useState(DEFAULT_SAMPLE_TEXT);
   // Wrap setSampleText to also persist to the session when in static mode
   const setSampleText = useCallback((text) => {
@@ -153,11 +153,6 @@ function App() {
   // for the first ~40s after load (shipped once, with the slnt-doubled
   // Crispy). A ref updates synchronously; duplicate reloads can't fire.
   const lastBuildTimeRef = useRef(null);
-  // Outcome of the most recent build attempt. "failed" => the preview is stale
-  // (we're still showing the last-good font); "ok" => preview reflects fresh
-  // source state. Null until the first build completes.
-  const [lastBuildStatus, setLastBuildStatus] = useState(null);
-  const [lastBuildError, setLastBuildError] = useState(null);
   // avar2Mode is now always true when avar2 data exists (no toggle needed)
   const [avar2Mode] = useState(true);
   const [avar2Instances, setAvar2Instances] = useState([]);
@@ -261,16 +256,12 @@ function App() {
           setShowLanding(true);
         }
 
-        setBuilding(health.building || false);
-        setBuildJob(health.build_job || null);
+        applyHealth(health);
         setAvar2Error(health.avar2_error || null);
         setSourceTransformError(health.source_transform_error || null);
         setOriginWarning(health.origin_warning || null);
-        setBuildStale(health.build_stale || false);
         setSessionLockLost(!!health.session_lock_lost);
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
-        setLastBuildStatus(health.last_build_status || null);
-        setLastBuildError(health.last_build_error || null);
 
         // Register the preview font as soon as a build exists — the poll
         // answers in milliseconds while loadData's endpoint chain takes tens
@@ -441,12 +432,10 @@ function App() {
       setBuiltFontFilename(health.built_font_filename || null);
       const prevBuildTime = lastBuildTimeRef.current;
       lastBuildTimeRef.current = health.last_build_time || null;
-      setBuilding(health.building || false);
-      setBuildJob(health.build_job || null);
+      applyHealth(health);
       setAvar2Error(health.avar2_error || null);
       setSourceTransformError(health.source_transform_error || null);
       setOriginWarning(health.origin_warning || null);
-      setBuildStale(health.build_stale || false);
 
       // Restore persisted sample text (static mode with upload only)
       if (isStaticMode() && isUploadDataset()) {
@@ -1499,23 +1488,10 @@ function App() {
     return () => clearTimeout(autoSaveTimer.current);
   }, [editingCoordinates, selectedInstance, previewOnlyAxisTags]);
 
-  // Helper function to wait for font to be loaded and ready
-  const waitForFontReady = async (maxAttempts = 50, delayMs = 100) => {
-    if (!vfFamilyId) {
-      // No family registered yet; the polling loop will populate it.
-      return false;
-    }
-    for (let i = 0; i < maxAttempts; i++) {
-      // Check if font is loaded by checking document.fonts
-      if (document.fonts && document.fonts.check(`12px "${vfFamilyId}"`)) {
-        // Also wait for fonts.ready to ensure font is fully ready
-        await document.fonts.ready;
-        return true;
-      }
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-    return false; // Timeout - font might not be ready, but proceed anyway
-  };
+  // The post-mutation dance (wait for the server's rebuild, reload the
+  // preview font, wait for the browser to have it) — one helper for the
+  // update / duplicate / rename / delete paths (hooks/useBuildWait).
+  const waitForBuildAndReloadFont = useBuildWait({ vfFamilyId, setFontUrl, setFontLoaded });
 
   // Helper function to update a specific instance by name. ``csvOnly``
   // is threaded into the API call so the server skips the source-file
@@ -1711,46 +1687,9 @@ function App() {
       // Store instance name before rebuild (in case it changes)
       const instanceNameToScroll = targetInstanceName;
       
-      // Backend already rebuilds the font (regular or SPAC) after instance update
-      // Just wait for it to complete - no need to trigger another rebuild
-      // The backend will regenerate SPAC font if it exists, or rebuild regular font otherwise
-      
-      // Backend rebuilds automatically after instance update
-      // Wait for build to complete by polling health endpoint
-      let buildComplete = false;
-      let attempts = 0;
-      const maxAttempts = 60; // 60 seconds max wait
-      
-      while (!buildComplete && attempts < maxAttempts) {
-        try {
-          const health = await api.health();
-          if (!health.building) {
-            buildComplete = true;
-            break;
-          }
-        } catch (err) {
-          // Ignore polling errors, continue waiting
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-      
-      // Reload font URL to get updated font (with timestamp to force reload)
-      // This ensures we get the newly built font, not a cached/partial version
-      // Set fontLoaded to false first to prevent duplicate loading
-      setFontLoaded(false);
-      // Use setTimeout to batch state updates and prevent duplicate font loads
-      await new Promise(resolve => setTimeout(resolve, 100));
-      const newFontUrl = api.getFontUrl();
-      setFontUrl(newFontUrl);
-      await new Promise(resolve => setTimeout(resolve, 100));
-      setFontLoaded(true);
-      
-      // Wait for font to be loaded before scrolling
-      await waitForFontReady();
-      
-      // Additional small delay to ensure DOM is updated after font load
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // The backend rebuilds after the update: wait it out and reload the
+      // preview font (no second build is triggered here).
+      await waitForBuildAndReloadFont();
       
       // Reload instances to ensure we have the latest data (in case updateInstanceByName didn't reload)
       // This is important because the backend may have updated the Glyphs file
@@ -1794,13 +1733,7 @@ function App() {
       setBuilding(false);
       
       // Scroll to updated instance after font is ready
-      const element = document.querySelector(`[data-instance-name="${instanceNameToScroll}"]`);
-      if (element) {
-        // Use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(() => {
-          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      }
+      scrollToInstance(instanceNameToScroll);
     } catch (err) {
       setError(err.message);
       console.error('Update failed:', err);
@@ -1897,39 +1830,10 @@ function App() {
       setEditingCoordinates(newCoords);
       setOriginalCoordinates(newCoords);
       
-      // Backend rebuilds the font after instance creation
-      // Wait for build to complete by polling health endpoint (same as update instance)
+      // The backend rebuilds after the creation: wait it out and reload
+      // the preview font.
       setBuilding(true); // Set building state immediately to show UI feedback
-      
-      let buildComplete = false;
-      let attempts = 0;
-      const maxAttempts = 60; // 60 seconds max wait
-      
-      while (!buildComplete && attempts < maxAttempts) {
-        try {
-          const health = await api.health();
-          if (!health.building) {
-            buildComplete = true;
-            break;
-          }
-        } catch (err) {
-          // Ignore polling errors, continue waiting
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-      
-      // Reload font URL to get updated font (with timestamp to force reload)
-      setFontUrl(api.getFontUrl());
-      setFontLoaded(false);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setFontLoaded(true);
-      
-      // Wait for font to be loaded before scrolling
-      await waitForFontReady();
-      
-      // Additional small delay to ensure DOM is updated after font load
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await waitForBuildAndReloadFont();
       
       // Reload instances to get updated data (with new instance)
       const instancesDataAfterDup = await api.getInstances();
@@ -1942,13 +1846,7 @@ function App() {
       setBuilding(false);
       
       // Scroll to new instance after font is ready
-      const element = document.querySelector(`[data-instance-name="${instanceNameToScroll}"]`);
-      if (element) {
-        // Use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(() => {
-          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      }
+      scrollToInstance(instanceNameToScroll);
     } catch (err) {
       setError(err.message);
       console.error('Duplicate failed:', err);
@@ -1970,45 +1868,13 @@ function App() {
       // Store new name for scrolling after rebuild
       const instanceNameToScroll = newName;
       
-      // Backend already rebuilds the font (regular or SPAC) after rename
-      // Just wait for it to complete - no need to trigger another rebuild
-      // The backend will regenerate SPAC font if it exists, or rebuild regular font otherwise
-      
-      // Backend rebuilds automatically after rename
-      // Wait for build to complete by polling health endpoint
-      let buildComplete = false;
-      let attempts = 0;
-      const maxAttempts = 60; // 60 seconds max wait
-      
-      while (!buildComplete && attempts < maxAttempts) {
-        try {
-          const health = await api.health();
-          if (!health.building) {
-            buildComplete = true;
-            break;
-          }
-        } catch (err) {
-          // Ignore polling errors, continue waiting
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-      
+      // The backend rebuilds after the rename: wait it out and reload the
+      // preview font.
+      await waitForBuildAndReloadFont();
+
       // Reload instances to get updated data (with new name)
       const instancesData = await api.getInstances();
       setInstances(instancesData.instances);
-      
-      // Reload font URL to get updated font (with timestamp to force reload)
-      setFontUrl(api.getFontUrl());
-      setFontLoaded(false);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setFontLoaded(true);
-      
-      // Wait for font to be loaded before updating state
-      await waitForFontReady();
-      
-      // Additional small delay to ensure DOM is updated after font load
-      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Update selected instance if it was renamed
       if (selectedInstance && selectedInstance.name === oldName) {
@@ -2057,13 +1923,7 @@ function App() {
       setBuilding(false);
       
       // Scroll to renamed instance after font is ready
-      const element = document.querySelector(`[data-instance-name="${instanceNameToScroll}"]`);
-      if (element) {
-        // Use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(() => {
-          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      }
+      scrollToInstance(instanceNameToScroll);
     } catch (err) {
       setError(err.message);
       console.error('Rename failed:', err);
@@ -2135,41 +1995,13 @@ function App() {
 
         await api.deleteInstance(instanceName);
 
-        // Backend already rebuilds the font after deletion
-        // Wait for build to complete by polling health endpoint
-        let buildComplete = false;
-        let attempts = 0;
-        const maxAttempts = 60; // 60 seconds max wait
-
-        while (!buildComplete && attempts < maxAttempts) {
-          try {
-            const health = await api.health();
-            if (!health.building) {
-              buildComplete = true;
-              break;
-            }
-          } catch (err) {
-            // Ignore polling errors, continue waiting
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          attempts++;
-        }
+        // The backend rebuilds after the deletion: wait it out and reload
+        // the preview font.
+        await waitForBuildAndReloadFont();
 
         // Reload instances to get updated list (without deleted instance)
         const instancesData = await api.getInstances();
         setInstances(instancesData.instances);
-
-        // Reload font URL to get updated font (with timestamp to force reload)
-        setFontUrl(api.getFontUrl());
-        setFontLoaded(false);
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setFontLoaded(true);
-
-        // Wait for font to be loaded
-        await waitForFontReady();
-
-        // Additional small delay to ensure DOM is updated after font load
-        await new Promise(resolve => setTimeout(resolve, 200));
 
         // Reset building state after font is fully loaded and ready
         setBuilding(false);
@@ -2211,7 +2043,7 @@ function App() {
       setBuilding(false); // Reset building state on error
       // Keep modal open so user can try again or cancel
     }
-  }, [instanceToDelete, selectedInstance, waitForFontReady]);
+  }, [instanceToDelete, selectedInstance, waitForBuildAndReloadFont]);
 
   const handleMoveInstance = useCallback((instanceToMove, targetInstance, position) => {
     if (!instanceToMove || !targetInstance) return;
@@ -2285,7 +2117,6 @@ function App() {
       />
       <Header
         onBuildFont={handleBuildFont}
-        building={building}
         fontLoaded={fontLoaded}
         familyName={familyName}
         onSourceLoaded={loadData}
@@ -2422,7 +2253,6 @@ function App() {
             axes={axes}
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
-            building={building}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}
             fontSize={fontSize}
@@ -2484,7 +2314,6 @@ function App() {
             masters={masters}
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
-            building={building}
           />
           <InstanceRows
             instances={instances}
@@ -2529,7 +2358,6 @@ function App() {
             vfFamilyId={vfFamilyId}
             fontLoaded={fontLoaded}
             fontUrl={fontUrl}
-            building={building}
             builtFontFilename={builtFontFilename}
             sampleText={sampleText}
             onSampleTextChange={setSampleText}

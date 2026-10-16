@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 import './Header.css';
 import { api } from '../api';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
@@ -49,7 +50,6 @@ interface ImportData {
 
 interface HeaderProps {
   onBuildFont?: () => void;
-  building?: boolean;
   fontLoaded?: boolean;
   familyName?: string;
   onSourceLoaded?: () => void;
@@ -115,12 +115,14 @@ interface GradeState {
 // useEffect. Its content keeps the original load-font-menu /
 // transforms-menu markup and styling hooks. The Load Font and Config
 // dropdowns still use the old manual pattern.
-function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
+function Header({ onBuildFont, fontLoaded, familyName, onSourceLoaded, busy,
                  transforms = [], onToggleTransform, onTransformParam,
                  transformsDirty = {}, onApplyTransform,
                  grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
                  isUploadDataset = false }: HeaderProps) {
+  // Building / stale come from the shared build signal, not a threaded prop.
+  const { building, buildStale } = useBuildStatus();
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -627,8 +629,12 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           <button
             onClick={onBuildFont}
             disabled={building}
-            className="btn btn-3d btn-rebuild"
+            className={`btn btn-3d btn-rebuild${buildStale && !building ? ' btn-rebuild-stale' : ''}`}
+            title={buildStale && !building
+              ? 'The preview font is out of date — edits saved since the last build are not in it yet. Rebuild to refresh it.'
+              : undefined}
           >
+            {buildStale && !building && <span className="btn-rebuild-stale-dot" aria-hidden="true" />}
             {building ? 'Building...' : fontLoaded ? 'Rebuild' : 'Build'}
           </button>
         )}
