@@ -365,6 +365,22 @@ class JobQueue:
                 target = src_dir / ".avar2-studio" / p.name
                 target.parent.mkdir(exist_ok=True)
             shutil.copy2(str(p), str(target))
+        # The control-axis shadow is derived state EXCEPT for the drawings
+        # in it: until capture_outlines writes them into the sidecar, a
+        # Fontra-drawn brace outline exists only here. The worker's regen
+        # preserves a staged shadow and silently rebuilds from the sidecar
+        # alone when it is missing — so a build would drop every uncaptured
+        # drawing. .glyphs only: the designspace shadow regen ignores
+        # outlines, and its shadow references pooled UFOs we do not stage.
+        # shadow/transformed/ stays out: the worker re-derives it from the
+        # staged shadow.
+        if orig.suffix == ".glyphs":
+            from . import control_axes
+            shadow = control_axes.shadow_path_for(orig)
+            if shadow.exists():
+                target = src_dir / ".avar2-studio" / "shadow" / orig.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(shadow), str(target))
         if orig.suffix == ".designspace":
             for ufo in orig.parent.glob("*.ufo"):
                 if ufo.is_dir():

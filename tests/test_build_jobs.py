@@ -186,3 +186,20 @@ def test_stage_copies_every_sidecar(queue, tmp_path):
     staged = {p.name for p in (job["dir"] / "src").iterdir()}
     assert "Mini-kinetikern.json" in staged
     assert all(("Mini" + suffix) in staged for suffix in build_jobs.SIDECAR_SUFFIXES)
+
+
+def test_stage_copies_the_shadow(queue, tmp_path):
+    """Uncaptured Fontra drawings exist ONLY in .avar2-studio/shadow/ until
+    capture_outlines runs; the worker's regen preserves a staged shadow and
+    silently rebuilds from the sidecar alone when it is missing."""
+    shadow = tmp_path / ".avar2-studio" / "shadow" / "Mini.glyphs"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("familyName = Mini; # shadow carrying a drawing")
+    job = {"kind": "build"}
+    queue._stage(job)
+    staged = job["dir"] / "src" / ".avar2-studio" / "shadow" / "Mini.glyphs"
+    assert staged.exists()
+    assert staged.read_bytes() == shadow.read_bytes()
+    # shadow/transformed/ is derived — the worker re-creates it from the
+    # staged shadow, so it must NOT need staging
+    assert not (job["dir"] / "src" / ".avar2-studio" / "shadow" / "transformed").exists()
