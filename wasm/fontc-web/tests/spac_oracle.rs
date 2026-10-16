@@ -61,38 +61,45 @@ fn spac_matches_studio_oracle() {
     // declares none), so the per-instance override path needs a font
     // that HAS instances: synthesize one, then apply with the plain
     // CSV (pins 0.0) and the SPAC-column CSV (pins the overrides).
+    let tmp = common::tmp_dir();
+    let instanced_path = tmp.join("spac-instanced-input.ttf");
     let maker = manifest.join("spike/make_instanced_font.py");
     let status = Command::new(&python)
         .arg(maker)
         .arg(&font_path)
-        .arg("/tmp/spac-instanced-input.ttf")
+        .arg(&instanced_path)
         .status()
         .expect("run instanced-font fixture builder");
     assert!(status.success(), "instanced-font fixture build failed");
-    let instanced = std::fs::read("/tmp/spac-instanced-input.ttf").expect("read instanced font");
+    let instanced = std::fs::read(&instanced_path).expect("read instanced font");
     let wa_inst_plain = fontc_web::apply_transforms(instanced.clone(), TRANSFORMS_WA, &csv)
         .expect("width-aware SPAC on instanced font");
     let wa_inst_ovr = fontc_web::apply_transforms(instanced.clone(), TRANSFORMS_WA, OVERRIDE_CSV)
         .expect("width-aware SPAC with instance overrides");
 
-    std::fs::write("/tmp/spac-wasm-widthaware.ttf", &wa).expect("write width-aware output");
-    std::fs::write("/tmp/spac-wasm-uniform.ttf", &uni).expect("write uniform output");
-    std::fs::write("/tmp/spac-wasm-inst-plain.ttf", &wa_inst_plain)
-        .expect("write instanced plain output");
-    std::fs::write("/tmp/spac-wasm-inst-override.ttf", &wa_inst_ovr)
-        .expect("write instanced override output");
+    let wa_path = tmp.join("spac-wasm-widthaware.ttf");
+    let uni_path = tmp.join("spac-wasm-uniform.ttf");
+    let inst_plain_path = tmp.join("spac-wasm-inst-plain.ttf");
+    let inst_ovr_path = tmp.join("spac-wasm-inst-override.ttf");
+    let override_csv_path = tmp.join("spac-override-avar.csv");
+    std::fs::write(&wa_path, &wa).expect("write width-aware output");
+    std::fs::write(&uni_path, &uni).expect("write uniform output");
+    std::fs::write(&inst_plain_path, &wa_inst_plain).expect("write instanced plain output");
+    std::fs::write(&inst_ovr_path, &wa_inst_ovr).expect("write instanced override output");
     // The oracle reads the override CSV as a source sidecar
     // (`<stem>-avar.csv`); the wasm call takes it directly.
-    std::fs::write("/tmp/spac-override-avar.csv", OVERRIDE_CSV).expect("write override csv");
+    std::fs::write(&override_csv_path, OVERRIDE_CSV).expect("write override csv");
 
     let comparator = manifest.join("spike/compare_spac.py");
     let status = Command::new(&python)
         .arg(comparator)
         .arg(&font_path)
-        .arg("/tmp/spac-wasm-widthaware.ttf")
-        .arg("/tmp/spac-wasm-uniform.ttf")
-        .arg("/tmp/spac-wasm-inst-plain.ttf")
-        .arg("/tmp/spac-wasm-inst-override.ttf")
+        .arg(&wa_path)
+        .arg(&uni_path)
+        .arg(&inst_plain_path)
+        .arg(&inst_ovr_path)
+        .arg(&instanced_path)
+        .arg(&override_csv_path)
         .status()
         .expect("run comparator");
     assert!(status.success(), "oracle comparison failed");
