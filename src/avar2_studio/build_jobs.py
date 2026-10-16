@@ -41,7 +41,7 @@ SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.js
 PREVIEW_FILES = ("axis-metadata.json", "instance-renames.json", "config.yaml")
 LEGACY_CSV = "avar2-mappings.csv"
 
-#: Worker env passthrough — the build consults these (see server.py).
+#: Worker env passthrough — the build consults these (see pipeline.py).
 ENV_KEYS = ("AVAR2_RELOCATE_BUILD_DEFAULT", "AVAR2_STUDIO_GFTOOLS_BUILDER",
             "AVAR2_SPAC_INJECT")
 

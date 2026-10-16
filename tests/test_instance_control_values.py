@@ -109,8 +109,7 @@ def test_values_survive_layer_edits_and_follow_renames(tmp_path):
 
 
 def test_build_stamps_fvar_instances(tmp_path, monkeypatch):
-    import avar2_studio.server as server
-    from avar2_studio import state
+    from avar2_studio import pipeline, state
 
     source = tmp_path / "T.glyphs"
     source.write_text("{}")
@@ -136,7 +135,7 @@ def test_build_stamps_fvar_instances(tmp_path, monkeypatch):
     fb.save(str(vf))
 
     monkeypatch.setattr(state, "ORIGINAL_PATH", source)
-    assert server._stamp_control_instance_values(vf) == vf
+    assert pipeline._stamp_control_instance_values(vf) == vf
 
     from fontTools.ttLib import TTFont
     font = TTFont(str(vf))

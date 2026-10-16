@@ -6,7 +6,8 @@ docs/decisions/0003-worker-subprocess-finish-then-rebuild.md).
 
 The spec points at a SNAPSHOT of the source set (the server stages it per
 job), so a mid-build save in Glyphs can't tear the worker's inputs. The
-worker imports the server module and runs the very same pipeline the
+worker imports the pipeline module — Flask-free, so no app or supervisor
+thread is constructed here — and runs the very same pipeline the
 in-process build ran — parity by construction — writing line-delimited
 JSON progress to ``progress_path`` and a single ``result.json``
 (atomically renamed) at the end. Only the job directory is written;
@@ -82,17 +83,17 @@ def _bind_server_globals(spec):
             os.environ[var] = str(val)
 
 
-def _run_build_job(server, spec, progress):
+def _run_build_job(pipeline, spec, progress):
     _bind_server_globals(spec)
     progress.phase("resolve")
-    server._resolve_active_source()
+    pipeline._resolve_active_source()
     progress.phase("build")
-    ok = server._run_build()
+    ok = pipeline._run_build()
     return {"success": bool(ok),
             "built_font": str(state.VARIABLE_FONT_PATH) if state.VARIABLE_FONT_PATH else None}
 
 
-def _run_export_job(server, spec, progress):
+def _run_export_job(pipeline, spec, progress):
     _bind_server_globals(spec)
     current = Path(spec["current_font"])
     state.VARIABLE_FONT_PATH = current
@@ -100,7 +101,7 @@ def _run_export_job(server, spec, progress):
     out_dir = Path(spec["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     progress.phase("export")
-    artifact = server._export_pipeline(
+    artifact = pipeline._export_pipeline(
         current,
         hidden_axes=spec.get("hidden_axes") or [],
         default_location=spec.get("default_location"),
@@ -111,12 +112,12 @@ def _run_export_job(server, spec, progress):
             "artifact_name": Path(artifact).name}
 
 
-def _run_compress_job(server, spec, progress):
+def _run_compress_job(pipeline, spec, progress):
     font_path = Path(spec["font_path"])
     progress.phase("compress")
     out = Path(spec["out_dir"]) / (font_path.stem + ".woff2")
     out.parent.mkdir(parents=True, exist_ok=True)
-    server._save_woff2(font_path, out)
+    pipeline._save_woff2(font_path, out)
     return {"success": True, "artifact": str(out), "artifact_name": out.name,
             "woff2_bytes": out.stat().st_size, "source_bytes": font_path.stat().st_size}
 
@@ -127,12 +128,12 @@ def main(spec_path):
     result = {"job_id": spec["job_id"], "kind": spec["kind"], "success": False}
     try:
         # Imported here so a failure lands in the result, not on the floor.
-        from avar2_studio import server
+        from avar2_studio import pipeline
         sys.stderr = progress
         progress.emit(job_id=spec["job_id"], kind=spec["kind"], phase="start")
         handler = {"build": _run_build_job, "export": _run_export_job,
                    "compress": _run_compress_job}[spec["kind"]]
-        result.update(handler(server, spec, progress))
+        result.update(handler(pipeline, spec, progress))
         _apply_result(result)
     except Exception as exc:
         result["success"] = False

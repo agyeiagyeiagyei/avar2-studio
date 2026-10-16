@@ -2,7 +2,7 @@
 
 How avar2-studio is put together, as of 2026-10-16 (branch
 `cleanup-2026-10`). Everything here was checked against the code; the
-reference is always a symbol (`server._resolve_active_source`), never a
+reference is always a symbol (`pipeline._resolve_active_source`), never a
 line number. Sidecar schemas are in [SIDECARS.md](SIDECARS.md), the
 developer loop in [DEVELOPMENT.md](DEVELOPMENT.md), and the *why* behind
 the load-bearing choices in [decisions/](decisions/README.md).
@@ -31,7 +31,8 @@ that pending work into `/api/health`'s `building`.
 
 **Build worker** — `python -m avar2_studio.build_worker <spec.json>`, one
 fresh interpreter per job (`build`, `export`, `compress`). It imports
-`server`, points the path globals at the job snapshot
+`pipeline` (Flask-free — no app or supervisor thread in the worker),
+points the path globals at the job snapshot
 (`_bind_server_globals`), runs the very same pipeline functions, writes
 `progress.jsonl` (phases plus a stderr tee) and an atomically renamed
 `result.json`, and never writes shared state. The supervisor promotes.
@@ -79,7 +80,8 @@ decision 0010).
 |---|---|
 | `__init__.py`, `__main__.py` | package; `python -m avar2_studio` → `cli.main` |
 | `cli.py` | dispatch: `doctor`, `build SOURCE --out DIR`, `install-glyphs-plugins`, otherwise `server.main()` |
-| `server.py` | the Flask app and every route; the state globals (`ORIGINAL_PATH`, `GLYPHS_PATH`, `VARIABLE_FONT_PATH`, `LAST_*`, …); source-path model (`_resolve_active_source`, `_apply_source_path`); build pipeline (`_run_build`, `_perform_avar2_build`, `_build_in_process`, `_apply_transform_chain`, `_stamp_control_instance_values`); export (`_export_pipeline`, `_build_export_source`); the watcher (`main`, `_classify_watched_path`, suppression); Fontra lifecycle, proxy and shim; upload / zip / example loading |
+| `server.py` | the Flask app and every route; the state globals (`ORIGINAL_PATH`, `GLYPHS_PATH`, `VARIABLE_FONT_PATH`, `LAST_*`, …); the watcher (`main`, `_classify_watched_path`, suppression state); Fontra lifecycle, proxy and shim; upload / zip / example loading. The pipeline functions are imported back from `pipeline.py`, so `server.X` call sites stay valid |
+| `pipeline.py` | Flask-free build/export pipeline: source-path model (`_apply_source_path`, `_resolve_active_source`), build (`_run_build`, `_perform_avar2_build`, `_build_in_process`, `build_variable_font`), transform chain (`_apply_transform_chain`, `_strip_injected_axes`, `_stamp_control_instance_values`), export (`_export_pipeline`, `_build_export_source`, `_save_woff2`), the preview-path getters and axis metadata (`_load_axis_metadata`, `_save_axis_metadata`, `_derive_traditional_range`, `_repair_placeholder_ranges`), `_builder_env`/`_declared_axis_ranges`, watcher suppression (`_suppress_watcher`) |
 | `build_jobs.py` | `JobQueue`: coalescing build requests, FIFO exports, lowest-priority WOFF2 compress; snapshot staging (`_stage`), supervisor, promotion, export reaping (`KEEP_EXPORTS`) |
 | `build_worker.py` | worker entry: `build` / `export` / `compress` handlers, progress + result files |
 | `build/config_generator.py` | CSV → `config.yaml` `stat` and `avar2` sections (`update_config`); the in/out column split and row dedupe |

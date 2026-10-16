@@ -1066,3 +1066,22 @@ bar; findings rounds still get written so a second reviewer can re-check.
   in conversation).
 - Gates on the final tree [verified]: pytest 511 passed / 3 skipped;
   ruff clean; frontend lint/tsc/build/test:unit all exit 0.
+
+## Tier 3
+
+## T3.1 — pipeline.py + Flask-free worker (subagent agent-7)
+- New `src/avar2_studio/pipeline.py` (1,955 lines): the audit's (c) list
+  (`_resolve_active_source`, `_run_build`, `_perform_avar2_build`,
+  `_build_in_process`, `_apply_transform_chain`, `_apply_source_path`)
+  plus pipeline-only helpers (builder env, declared ranges + memo,
+  metadata I/O, export pipeline, transform chain helpers). Shared
+  helpers both sides need moved there with server.py back-importing
+  (bare-name resolution keeps the ~8 test monkeypatch sites working
+  unedited; `server.X is pipeline.X` verified). `_apply_source_path`
+  uses `state.JOBS` (new in state.py); conftest patches both.
+- `build_worker.py` imports pipeline + state only — no Flask: verified
+  by me: `import avar2_studio.build_worker` with
+  `'flask' not in sys.modules` assertion → OK.
+- server.py 7,663 → 5,773 lines. Verified by me: 511 passed / 3 skipped,
+  ruff clean, the real-worker e2e (test_worker_shadow.py) passes —
+  the worker path builds a real font end to end.

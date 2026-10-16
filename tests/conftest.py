@@ -74,7 +74,7 @@ def _no_real_build_jobs(monkeypatch, request):
     if "real_jobs" in request.keywords:
         yield
         return
-    from avar2_studio import server
+    from avar2_studio import server, state
 
     class _FakeJobs:
         def __init__(self):
@@ -103,6 +103,8 @@ def _no_real_build_jobs(monkeypatch, request):
 
     fake = _FakeJobs()
     monkeypatch.setattr(server, "JOBS", fake)
+    # pipeline.py reaches the queue through state.JOBS — patch both names.
+    monkeypatch.setattr(state, "JOBS", fake)
     yield
 
 @pytest.fixture

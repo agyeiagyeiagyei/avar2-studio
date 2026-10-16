@@ -20,7 +20,7 @@ import yaml
 from fontTools.ttLib import TTFont
 from fontTools.varLib.models import normalizeLocation
 
-from avar2_studio import server, state
+from avar2_studio import pipeline, state
 
 REPO = Path(__file__).resolve().parents[1]
 CRISPY_MINI = REPO / "examples/crispy-mini/sources/CrispyMini.glyphs"
@@ -57,8 +57,8 @@ def _build(tmp_path, monkeypatch, mappings, sub="a"):
         "sources": [str(src)],
         "avar2": {"CrispyMiniTest.ttf": mappings},
     }), encoding="utf-8")
-    monkeypatch.setattr(server, "_load_axis_metadata", lambda: METADATA)
-    return server._build_in_process(config_path, workdir, str(FONTC))
+    monkeypatch.setattr(pipeline, "_load_axis_metadata", lambda: METADATA)
+    return pipeline._build_in_process(config_path, workdir, str(FONTC))
 
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
@@ -155,6 +155,6 @@ def test_two_default_rows_fail_loudly(tmp_path, monkeypatch):
     meta = dict(METADATA)
     meta["OPSZ"] = {"registered_tag": "opsz", "is_parametric": False,
                     "min": 14, "default": 144, "max": 144}
-    monkeypatch.setattr(server, "_load_axis_metadata", lambda: meta)
+    monkeypatch.setattr(pipeline, "_load_axis_metadata", lambda: meta)
     with pytest.raises(RuntimeError, match="multiple mapping rows sit at the axis defaults"):
-        server._build_in_process(config_path, workdir, str(FONTC))
+        pipeline._build_in_process(config_path, workdir, str(FONTC))

@@ -1,9 +1,9 @@
 """Mutable runtime state extracted from ``server.py`` (audit §3 step b).
 
 Pure values only — no imports from this package, so nothing here can
-cycle. Every reader/writer (server.py, build_jobs.py, the build worker,
-tests) goes through ``state.X``; never ``from .state import X`` — that
-binds a copy that goes stale on the next assignment.
+cycle. Every reader/writer (server.py, pipeline.py, build_jobs.py, the
+build worker, tests) goes through ``state.X``; never ``from .state import
+X`` — that binds a copy that goes stale on the next assignment.
 """
 
 from pathlib import Path
@@ -79,6 +79,11 @@ _SUPPRESS_WATCHDOG_UNTIL: float = 0.0
 _SUPPRESS_ORIGINAL_UNTIL = 0.0
 _SELF_WRITE_WATERMARK = 0.0
 _SELF_WRITE_ORIGINAL_WATERMARK = 0.0
+
+# The build/export job queue, constructed by server.py at import time
+# (server.JOBS is the same object; pipeline.py reaches it via this slot so
+# it never has to import server).
+JOBS = None
 
 # Debounce timer for the shadow-regen + rebuild burst coalescing in
 # server.schedule_shadow_rebuild.
