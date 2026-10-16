@@ -4,65 +4,51 @@
 //! path), and structurally compare each result against the
 //! `axisregistry.build_stat(ttFont, [])` oracle via spike/compare_stat.py.
 //!
-//! Prerequisites (paths overridable via env):
-//!   - spike font:  $AVAR2_SPIKE_FONT  (default /tmp/fontc-wasm-spike.ttf)
-//!   - mappings:    $AVAR2_CSV         (default the studio's CrispyMini-avar.csv)
-//!   - python with fontTools + axisregistry: $AVAR2_PYTHON
-//!     (default the avar2-studio venv)
+//! Fixtures come from tests/common (generated from examples/crispy-mini;
+//! $AVAR2_SPIKE_FONT / $AVAR2_CSV / $AVAR2_PYTHON override).
 
 use std::path::Path;
 use std::process::Command;
 
-fn python() -> String {
-    std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| {
-        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
-    })
-}
+mod common;
 
-fn compare(manifest: &Path, input_ttf: &str, candidate: &[u8], out_path: &str) {
+fn compare(manifest: &Path, input_ttf: &Path, candidate: &[u8], out_path: &Path) {
     std::fs::write(out_path, candidate).expect("write candidate");
     let comparator = manifest.join("spike/compare_stat.py");
-    let status = Command::new(python())
+    let status = Command::new(common::python())
         .arg(comparator)
         .arg(input_ttf)
         .arg(out_path)
         .status()
         .expect("run comparator");
-    assert!(status.success(), "oracle comparison failed for {out_path}");
+    assert!(status.success(), "oracle comparison failed for {}", out_path.display());
 }
 
 #[test]
 fn stat_matches_axisregistry_oracle() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let font_path = std::env::var("AVAR2_SPIKE_FONT")
-        .unwrap_or_else(|_| "/tmp/fontc-wasm-spike.ttf".to_string());
-    let csv_path = std::env::var("AVAR2_CSV").unwrap_or_else(|_| {
-        manifest
-            .join("../../examples/crispy-mini/sources/CrispyMini-avar.csv")
-            .to_string_lossy()
-        .into_owned()
-    });
+    let font_path = common::spike_font();
+    let csv_path = common::mappings_csv();
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
+    let tmp = common::tmp_dir();
 
     // 1. The spike font as compiled (XTRA/XOPQ/YOPQ, no STAT).
     let out = fontc_web::regen_stat(font_bytes.clone()).expect("regen_stat spike");
-    compare(manifest, &font_path, &out, "/tmp/stat-rust-spike.ttf");
+    compare(manifest, &font_path, &out, &tmp.join("stat-rust-spike.ttf"));
 
     // 2. The avar2-patched font (opsz/wght/wdth added by the pipeline).
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
     let av2 = fontc_web::add_avar2(font_bytes, &csv, None, None).expect("add_avar2");
-    let av2_path = "/tmp/stat-av2-input.ttf";
-    std::fs::write(av2_path, &av2).expect("write avar2 input");
+    let av2_path = tmp.join("stat-av2-input.ttf");
+    std::fs::write(&av2_path, &av2).expect("write avar2 input");
     let out = fontc_web::regen_stat(av2).expect("regen_stat avar2");
-    compare(manifest, av2_path, &out, "/tmp/stat-rust-av2.ttf");
+    compare(manifest, &av2_path, &out, &tmp.join("stat-rust-av2.ttf"));
 
     // 3. Idempotency: regen again on the STAT'd output (exercises the
     // old-STAT removal + name-record cleanup path).
-    let twice_path = "/tmp/stat-rust-av2-once.ttf";
-    std::fs::write(twice_path, &out).expect("write regen input");
+    let twice_path = tmp.join("stat-rust-av2-once.ttf");
+    std::fs::write(&twice_path, &out).expect("write regen input");
     let out2 = fontc_web::regen_stat(out).expect("regen_stat twice");
-    compare(manifest, twice_path, &out2, "/tmp/stat-rust-av2-twice.ttf");
+    compare(manifest, &twice_path, &out2, &tmp.join("stat-rust-av2-twice.ttf"));
 }

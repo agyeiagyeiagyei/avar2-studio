@@ -2,34 +2,21 @@
 //! font + the studio's CrispyMini-avar.csv and structurally compare the
 //! result against the gftools `gen_avar2_mapping` oracle with fontTools.
 //!
-//! Prerequisites (paths overridable via env):
-//!   - spike font:  $AVAR2_SPIKE_FONT  (default /tmp/fontc-wasm-spike.ttf)
-//!   - mappings:    $AVAR2_CSV         (default the studio's CrispyMini-avar.csv)
-//!   - oracle TTF:  $AVAR2_ORACLE      (default /tmp/av2-oracle.ttf),
-//!     built by `spike/build_oracle.py`
-//!   - python with fontTools: $AVAR2_PYTHON (default the avar2-studio venv)
+//! Fixtures come from tests/common (generated from examples/crispy-mini;
+//! $AVAR2_SPIKE_FONT / $AVAR2_CSV / $AVAR2_ORACLE / $AVAR2_PYTHON override).
 
 use std::path::Path;
 use std::process::Command;
 
+mod common;
+
 #[test]
 fn avar2_matches_gftools_oracle() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let font_path = std::env::var("AVAR2_SPIKE_FONT")
-        .unwrap_or_else(|_| "/tmp/fontc-wasm-spike.ttf".to_string());
-    let csv_path = std::env::var("AVAR2_CSV").unwrap_or_else(|_| {
-        manifest
-            .join("../../examples/crispy-mini/sources/CrispyMini-avar.csv")
-            .to_string_lossy()
-        .into_owned()
-    });
-    let oracle_path =
-        std::env::var("AVAR2_ORACLE").unwrap_or_else(|_| "/tmp/av2-oracle.ttf".to_string());
-    let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| {
-        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
-    });
+    let font_path = common::spike_font();
+    let csv_path = common::mappings_csv();
+    let oracle_path = common::oracle_font(&font_path, &csv_path);
+    let python = common::python();
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
