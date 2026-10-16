@@ -450,3 +450,15 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   message; the unreachable `server.CSV_PATH = ...` in cli.py removed.
 - Test [verified]: tests/test_dead_cli_flags.py — both flags exit 2 with
   the message (server + build CLI), `--help` unaffected. 4 passed.
+
+## T1.10 — _running clears after the result is read and promoted
+
+- `_run_one` cleared `_running` right after `proc.wait()`, before
+  `_read_result`/`_finish` — `wait_for_idle` saw idle in the gap and
+  returned the PREVIOUS build's outcome. Now cleared after `_finish`.
+  Cancel safety: a cancel during the gap finds `proc` already exited
+  (`_kill` no-ops on a dead process).
+- Test [verified]:
+  `test_wait_for_idle_returns_the_current_builds_outcome` — hold
+  `_read_result` open, assert the waiter blocks, then reports the current
+  build's failure (not the previous ok). Fails pre-fix (stash-checked).

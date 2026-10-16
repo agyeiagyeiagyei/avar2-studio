@@ -286,10 +286,13 @@ class JobQueue:
             job["proc"] = proc
         print(f"[jobs] {jid} started ({job['kind']})", file=sys.stderr)
         proc.wait()
-        with self._lock:
-            self._running = None
         result = self._read_result(job)
         self._finish(job, result)
+        # Running until the result is READ and promoted: clearing this right
+        # after proc.wait() let wait_for_idle answer with the PREVIOUS
+        # build's outcome in the gap.
+        with self._lock:
+            self._running = None
 
     def _kill(self, job):
         job["cancelled"] = True

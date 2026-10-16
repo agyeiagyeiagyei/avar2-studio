@@ -226,3 +226,32 @@ def test_stage_copies_the_shadow(queue, tmp_path):
     # shadow/transformed/ is derived — the worker re-creates it from the
     # staged shadow, so it must NOT need staging
     assert not (job["dir"] / "src" / ".avar2-studio" / "shadow" / "transformed").exists()
+
+
+def test_wait_for_idle_returns_the_current_builds_outcome(queue, monkeypatch):
+    """_running used to clear right after proc.wait(): in the gap before
+    _finish, wait_for_idle answered with the PREVIOUS build's outcome."""
+    import threading
+    release = threading.Event()
+    orig = build_jobs.JobQueue._read_result
+
+    def held(self, job):
+        release.wait(10)
+        return orig(self, job)
+
+    queue.request_build()   # build 1: ok
+    assert queue.wait_for_idle(timeout=30)
+
+    monkeypatch.setattr(build_jobs.JobQueue, "_read_result", held)
+    monkeypatch.setenv("STUB_WORKER_MODE", "die")   # build 2: fails
+    queue.request_build()
+    outcome = []
+    t = threading.Thread(
+        target=lambda: outcome.append(queue.wait_for_idle(timeout=30)))
+    t.start()
+    time.sleep(1.0)   # the build reaches the held _read_result
+    assert t.is_alive(), "wait_for_idle answered during the result gap"
+    release.set()
+    t.join(timeout=30)
+    assert outcome == [False], \
+        f"wait_for_idle must report the CURRENT build's failure, got {outcome}"
