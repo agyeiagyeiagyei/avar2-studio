@@ -219,6 +219,14 @@ BACKGROUND_WORK: int = 0
 # Serializes read-modify-write on the control-axis sidecar so two concurrent
 # edits can't interleave and drop each other's layers.
 SIDECAR_LOCK = threading.Lock()
+# Serializes _resolve_active_source: it rewrites the shadow + transformed
+# copy and re-points GLYPHS_PATH, and is called from request threads, the
+# debounce timer, the watchdog thread and the job supervisor — two
+# overlapping resolves interleave those writes (measured in the T0.7
+# verifier round). Never taken while holding SIDECAR_LOCK, and nothing
+# holding it may take SIDECAR_LOCK (the config import nests
+# SIDECAR→RESOLVE; keep that the only order).
+_RESOLVE_LOCK = threading.RLock()
 
 # Watchdog suppression window: while time.time() < this value, the file
 # watcher ignores source-file modifications. Set around SERVER-INITIATED
@@ -1255,8 +1263,12 @@ def _resolve_active_source() -> Optional[Path]:
     a restart or an unrelated rebuild. Previously the grade composition lived
     ONLY on the grade-edit path, so a plain reload silently dropped the GRAD
     axis from the built font.
+
+    Serialized on ``_RESOLVE_LOCK``: callers arrive from request threads, the
+    debounce timer, the watchdog thread and the job supervisor, and two
+    overlapping resolves interleave the shadow/transformed writes.
     """
-    with _gc_paused():
+    with _RESOLVE_LOCK, _gc_paused():
         global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL, LAST_GRADE_ERROR
         global LAST_SOURCE_TRANSFORM_ERROR
         if ORIGINAL_PATH is None:
@@ -1332,6 +1344,12 @@ def _resolve_active_source() -> Optional[Path]:
                     current.apply_to_source(font, params, ctx)
                 from .source_font import save_font_atomically as _save_atomically
                 _save_atomically(font, transformed)
+                # Re-arm the watcher suppression for OUR transformed-copy
+                # write: the window set after the shadow regen above can
+                # expire during a multi-second transform pass, and an
+                # unsuppressed self-write re-fires the watcher as an external
+                # save → resolve → write → … (the T0.7 storm).
+                _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
                 shadow = transformed
                 any_source = True
             except Exception as exc:  # noqa: BLE001
@@ -1343,6 +1361,68 @@ def _resolve_active_source() -> Optional[Path]:
         GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
             else ORIGINAL_PATH
         return GLYPHS_PATH
+
+
+def _wait_for_save_to_settle(path: Path, settle: float = 0.5, timeout: float = 30.0) -> None:
+    """Block until ``path``'s mtime has stopped moving for ``settle`` seconds.
+
+    A multi-second glyphsLib/Fontra save fires its first watchdog event
+    mid-write; acting on that event reads a half-written file ("Unexpected
+    EOF while parsing plist"). Runs on the watchdog thread — never on a
+    request path.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return  # vanished mid-dance (save rename) — let the caller's parse say so
+        if age >= settle:
+            return
+        time.sleep(min(settle - age, 0.5))
+
+
+def _resolve_source_after_save(path: Path) -> None:
+    """Resolve the active source once a just-saved file is complete: wait for
+    the write to settle, then resolve, retrying once — OS event delivery can
+    still lag a long save. Final failures keep the established warning."""
+    _wait_for_save_to_settle(path)
+    for attempt in (0, 1):
+        try:
+            _resolve_active_source()
+            return
+        except Exception as exc:
+            if attempt:
+                print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+            else:
+                _wait_for_save_to_settle(path, settle=1.0)
+
+
+def _classify_watched_path(src: Path) -> Optional[str]:
+    """Which studio file a watchdog event belongs to: "source" (the active
+    build source — the transformed copy when source transforms are on),
+    "original" (the designer's own file), "shadow" (the control-axis shadow
+    that studio-axis Fontra sessions save into), or "glif" (inside a
+    designspace shadow's pooled UFOs). None — not ours; ignore the event.
+
+    The shadow needs its own class: with transforms on, GLYPHS_PATH is the
+    transformed/ copy, so a Fontra save to shadow/<name> is neither source
+    nor original and would go unseen (T0.9).
+    """
+    if GLYPHS_PATH is None:
+        return None
+    resolved = src.resolve()
+    if resolved == Path(GLYPHS_PATH).resolve():
+        return "source"
+    if ORIGINAL_PATH is not None:
+        if resolved == Path(ORIGINAL_PATH).resolve():
+            return "original"
+        if resolved == _control_axes.shadow_path_for(ORIGINAL_PATH).resolve():
+            return "shadow"
+    if str(GLYPHS_PATH).lower().endswith(".designspace") \
+            and src.suffix.lower() in (".glif", ".plist"):
+        return "glif"
+    return None
 
 
 def _run_shadow_regen_and_build():
@@ -8035,29 +8115,22 @@ def main():
             if event.is_directory:
                 return
 
-            # Two kinds of relevant change: the source file itself
-            # (sync + rebuild), and — for an active .designspace
-            # shadow — .glif edits inside its UFOs, which is how the
-            # embedded Fontra saves pooled brace-layer drawings
-            # (build only; instances didn't change).
+            # Relevant changes: the active build source (sync + rebuild),
+            # the designer's ORIGINAL (GLYPHS_PATH is the SHADOW once a
+            # secondary axis has layers — comparing only against it meant
+            # edits to the real source never fired: deleting an instance in
+            # Glyphs left the shadow stale), the shadow itself (Fontra saves
+            # for studio axes — a separate class because GLYPHS_PATH is the
+            # transformed/ copy when source transforms are on), and — for an
+            # active .designspace shadow — .glif edits inside its UFOs.
             src = Path(event.src_path)
-            is_source = src.resolve() == GLYPHS_PATH.resolve()
-            # GLYPHS_PATH is the SHADOW once a secondary axis has layers, so
-            # comparing only against it meant edits to the designer's actual
-            # source never fired: deleting an instance in Glyphs left the
-            # shadow stale, and the studio kept listing the deleted instance
-            # (and its duplicates) because it reads instances from the shadow.
-            is_original = (
-                ORIGINAL_PATH is not None
-                and src.resolve() == Path(ORIGINAL_PATH).resolve()
-                and src.resolve() != GLYPHS_PATH.resolve()
-            )
-            is_glif = (
-                GLYPHS_PATH.suffix.lower() == ".designspace"
-                and src.suffix.lower() in (".glif", ".plist")
-            )
-            if not (is_source or is_glif or is_original):
+            event_kind = _classify_watched_path(src)
+            if event_kind is None:
                 return
+            is_source = event_kind == "source"
+            is_original = event_kind == "original"
+            is_shadow = event_kind == "shadow"
+            is_glif = event_kind == "glif"
 
             # Debounce rapid saves
             current_time = time.time()
@@ -8087,9 +8160,13 @@ def main():
                 # next pass re-syncs the CSV and re-stages the source before
                 # rebuilding; a rebuild from the pre-save snapshot would look
                 # like success while serving stale outlines.
-                kind = "original" if is_original else ("source" if is_source else None)
+                kind = "original" if is_original else ("source" if (is_source or is_shadow) else None)
                 if kind:
-                    if is_source:
+                    # A long save fires its first event mid-write: act once
+                    # the file has stopped moving (mid-write reads crash on
+                    # "Unexpected EOF"), and retry the resolve once.
+                    _wait_for_save_to_settle(src)
+                    if is_source or is_shadow:
                         # A Fontra save writes the SHADOW: secure any drawing
                         # into the sidecar before the resolve below regens it.
                         try:
@@ -8100,10 +8177,7 @@ def main():
                     # /api/axes, coverage) stop serving the pre-save shadow
                     # while the current build is still running; the queue
                     # re-resolves before staging the follow-up regardless.
-                    try:
-                        _resolve_active_source()
-                    except Exception as exc:
-                        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+                    _resolve_source_after_save(src)
                     JOBS.request_build(source_refresh=kind)
                 else:
                     JOBS.request_build()
@@ -8120,13 +8194,13 @@ def main():
                     # save in Glyphs silently dropped the grade braces (and the
                     # GRAD axis with them) until an unrelated grade edit ran.
                     print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
-                    try:
-                        _resolve_active_source()
-                    except Exception as exc:
-                        print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+                    _resolve_source_after_save(src)
                     sync_csv_with_glyphs()
-                elif is_source:
+                elif is_source or is_shadow:
                     print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                    # A long save fires its first event mid-write — let the
+                    # file stop moving before reading it.
+                    _wait_for_save_to_settle(src)
                     # A Fontra save writes the SHADOW: pull hand-drawn brace
                     # outlines into the sidecar first, so drawings are durable
                     # even if the shadow is later regenerated away. Untouched
@@ -8171,6 +8245,20 @@ def main():
                     observer.schedule(event_handler, path=str(orig_dir), recursive=False)
         except Exception as exc:
             print(f"Warning: could not watch the original source: {exc}", file=sys.stderr)
+        # And the shadow directory itself when the active source is the
+        # transformed/ copy (source transforms on): studio-axis Fontra
+        # sessions save shadow/<name>, which the GLYPHS_PATH watch —
+        # transformed/ only — never sees (T0.9). When transforms are off
+        # GLYPHS_PATH IS the shadow and its dir is already watched.
+        try:
+            if (ORIGINAL_PATH is not None
+                    and Path(GLYPHS_PATH).resolve() != Path(ORIGINAL_PATH).resolve()):
+                shadow_dir = _control_axes.shadow_dir_for(ORIGINAL_PATH)
+                if shadow_dir.exists() \
+                        and shadow_dir.resolve() != Path(GLYPHS_PATH).parent.resolve():
+                    observer.schedule(event_handler, path=str(shadow_dir), recursive=False)
+        except Exception as exc:
+            print(f"Warning: could not watch the shadow dir: {exc}", file=sys.stderr)
         observer.start()
         OBSERVER = observer
         print(f"Real-time file watching enabled: watching {GLYPHS_PATH}", file=sys.stderr)
