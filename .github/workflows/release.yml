@@ -72,6 +72,9 @@ jobs:
           CI: false
         run: |
           npm ci
+          npm run lint
+          npm run typecheck
+          npm run test:unit
           npm run build
 
       - name: Bundle frontend into the Python package

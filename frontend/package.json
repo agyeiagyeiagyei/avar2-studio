@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

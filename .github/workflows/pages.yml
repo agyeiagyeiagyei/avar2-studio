@@ -41,6 +41,9 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
+      - run: npm run lint && npm run typecheck && npm run test:unit
+        working-directory: frontend
+
       # Base = the repo's project-Pages path; dist-pages is a separate
       # outDir so this never clobbers the Flask-served build/.
       - run: npx vite build --base=/avar2-studio/ --outDir dist-pages
