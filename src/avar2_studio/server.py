@@ -4872,7 +4872,10 @@ _FONTRA_STUDIO_SHIM_JS = """
   fetch('/api/fontra-shim-config').then(r => r.json()).then((cfg) => {
     if (!cfg || !cfg.studio) return;
     const keys = [cfg.axis_name, cfg.tag].filter(Boolean);
-    const labelRe = new RegExp('(^|[\\\\s,])' + cfg.tag + '\\\\s+-?[\\\\d.]+');
+    // Case-insensitive and regex-escaped: labels print the AUTHORED tag
+    // case, and a tag drift on either side must never silently unmatch.
+    const tagEsc = String(cfg.tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const labelRe = new RegExp('(^|[\\\\s,])' + tagEsc + '\\\\s+-?[\\\\d.]+', 'i');
     // The selected glyph's raw sources — their SPARSE locations keep
     // the authored pins verbatim, unlike the panel items' dense (all
     // axes, defaults filled) or display (defaults stripped) locations.
@@ -5246,7 +5249,7 @@ _FONTRA_STUDIO_SHIM_JS = """
           if (!m) return;
           refData = m;
           const loc = Object.entries(m.location || {})
-            .filter(([k]) => k.toLowerCase() !== 'lcwd')
+            .filter(([k]) => k.toLowerCase() !== String(cfg.tag || '').toLowerCase())
             .map(([k, v]) => k + ' ' + v).join(' \u00b7 ');
           cell('.hd', 'at ' + loc);
           paintRef();

@@ -484,3 +484,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   as sent. Updated the test pin (`xouc` → `XOUC`).
 - Tests [verified]: test_open_editor.py + tag-case + delta-carry +
   capture suites → 15 passed.
+
+## T1.14 — shim labelRe case-insensitive; 'lcwd' hardcode dropped
+
+- `_FONTRA_STUDIO_SHIM_JS`: `labelRe` now regex-escapes the tag and
+  compiles with `i` (labels print authored case; a case drift on either
+  side must not silently unmatch); the reference-metrics location line
+  filters the SESSION axis (`cfg.tag`, case-insensitive) instead of the
+  hard-coded 'lcwd'. Verified by reading the rendered string (not an
+  f-string; `\\s`/`\\d` escapes intact) + py_compile; the shim has no JS
+  harness — T3.4 (single shim implementation) is where it becomes
+  testable.
