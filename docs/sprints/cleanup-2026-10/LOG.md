@@ -651,3 +651,22 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 ## T1.33 — real_jobs marker registered
 - The marker was documented and honored in conftest but unregistered.
   Registered under [tool.pytest.ini_options]; `pytest --markers` lists it.
+
+## T1.34 — merged branches pruned
+- `git branch -d` ×6 (collapse-helper-scripts, designspace-support,
+  example-roboto-delta-demo, glyph-scoped-axes, grade-transform,
+  vite-ts-shadcn) — all merged into github-pages. Kept:
+  `grade-comparison` (unmerged, parked WIP — user's call), main,
+  github-pages. Remotes untouched.
+
+## T1.35 — tag v0.1.0: BLOCKED
+- §10 verified first: https://pypi.org/pypi/avar2-studio/json → 404 —
+  the 0.1.0 release never published to PyPI (release.yml may have run,
+  but nothing landed). No tag without a real release; needs the user's
+  decision (publish first, or drop the release).
+
+## T1.36 — git gc
+- [verified] before: 4,727 loose objects, 0 packs, 124.5 MB loose;
+  after `git gc`: 92 loose, 4,562 in-pack, 31.2 MB pack. The 7.45 MB
+  wasm blob history persists in the pack — that's T3.7 (history rewrite
+  needs explicit user approval).
