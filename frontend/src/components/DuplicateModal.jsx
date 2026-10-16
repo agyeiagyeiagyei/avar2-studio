@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 
 /** "X Copy", then "X Copy 2", "X Copy 3"… — the first not already taken. */
 function nextFreeName(base, taken) {
@@ -69,11 +70,9 @@ function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'dupl
     setCoords(prev => ({ ...prev, [tag]: Number.isFinite(numeric) ? numeric : raw }));
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="modal-content block border-0" onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>{title}</h3>
         <p>{prompt}</p>
         <form onSubmit={handleSubmit}>
@@ -118,8 +117,8 @@ function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'dupl
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './AddControlAxisModal.css';
 
 /**
@@ -61,8 +62,6 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
       }, 50);
     }
   }, [isOpen, isEdit, editAxis]);
-
-  if (!isOpen) return null;
 
   const validate = () => {
     const next = {};
@@ -131,8 +130,8 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="add-control-axis-modal">
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="add-control-axis-modal block border-0" onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>{isEdit ? `Edit secondary parametric axis · ${editAxis.tag}` : 'New secondary parametric axis'}</h3>
         <p className="modal-help">
           {isEdit
@@ -220,8 +219,8 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

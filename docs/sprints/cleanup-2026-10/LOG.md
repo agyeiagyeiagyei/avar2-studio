@@ -991,3 +991,30 @@ bar; findings rounds still get written so a second reviewer can re-check.
   `docs/decisions/0013-designspace-authoring.md` for T2.15; the two
   `examples/` README anchors; the three chat-only decisions listed as
   "Not yet recorded" in `docs/decisions/README.md`.
+
+## Resumed Tier 2 (post-round-3)
+
+- Assessment on resume: the previous session had already landed T1.8/T1.22
+  fixes + T2.1/T2.2/T2.4/T2.9–T2.16 (+T2.17) and parked T2.5/T2.6/T2.7 on
+  the unmerged side branch `t2-frontend`. Reviewed that branch (per-job
+  result registry is bounded, finished-before-running ordering correct,
+  cancel-from-queue records a terminal state) and merged it (3f73bda);
+  one test-file conflict (both sides appended) resolved keeping both.
+  Gates on the landed tree before merging: 502 passed, ruff/lint/tsc/
+  build clean (run mid-merge — see the conflict-marker errors it caught;
+  the marker fix was verified by `pytest tests/test_build_jobs.py` → 17
+  passed and re-run below).
+
+## T2.8 — Radix Dialog for the hand-rolled modals (subagent agent-5)
+- Six modals converted to the vendored ui/dialog.tsx: AddAxisModal,
+  AddBraceLocationModal, AddControlAxisModal, DeleteInstanceModal,
+  DuplicateModal, EditAxisModal. Inner markup/classes byte-identical
+  (e2e selectors preserved); outside-click close suppressed where the
+  original had none; DeleteInstanceModal's Escape/X routes through
+  handleCancel so the checkbox reset invariant holds.
+- Verified by the subagent: lint/typecheck/build/test:unit all exit 0;
+  a real-browser DOM smoke (playwright-core + Chrome, throwaway harness
+  in /tmp) — 44/44 checks: role="dialog" present, focus lands inside,
+  overlay click does not close, Escape closes. I re-ran the four gates
+  myself (all 0). Not run: the full e2e browser specs (need the demo
+  harness) — flagged for the verifier.
