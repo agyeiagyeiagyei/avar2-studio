@@ -43,7 +43,7 @@ add to source, edit coords) apply.
 
 The parametric → stylistic workflow — covering both fixtures, with
 animations of each — lives in
-[../docs/authoring-instances.md](../docs/authoring-instances.md).
+[../docs/guides/authoring-instances.md](../docs/guides/authoring-instances.md).
 
 The fixture READMEs below stay focused on what each example *is*:
 axes table, glyph coverage, and how the subset was assembled from

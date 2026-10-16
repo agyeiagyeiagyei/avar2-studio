@@ -27,7 +27,11 @@ def test_assets_are_package_files():
                 "glyphsapp/document_modified.applescript", "glyphsapp/reload_document.applescript"):
         assert (PKG / rel).is_file(), rel
         assert (PKG / rel).stat().st_size > 100, rel
-    assert server._FONTRA_STUDIO_SHIM_JS == (PKG / "fontra/shim.js").read_text(encoding="utf-8")
+    assert server._FONTRA_STUDIO_SHIM_JS == (
+        '\n<script id="avar2-studio-fontra-shim">\n'
+        + (PKG / "fontra/shim.js").read_text(encoding="utf-8")
+        + '\n</script>\n'
+    )
     for rel in ("glyphsapp/document_modified.applescript", "glyphsapp/reload_document.applescript"):
         script = Template(server._read_asset(rel)).substitute(abs_path="/tmp/F.glyphs")
         assert 'POSIX file "/tmp/F.glyphs"' in script and "$" not in script

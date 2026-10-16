@@ -592,7 +592,7 @@ export const api = {
 
   async exportFont(options, { signal } = {}) {
     // POST /api/export-font — the export runs as a QUEUED JOB (build worker,
-    // see docs/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll
+    // see docs/archive/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll
     // THAT job's status until its artifact is ready, then download it.
     // Options: {hidden_axes: [tags], default_location: {tag: value} | null,
     //  format: "ttf" | "woff2"}. An AbortSignal stops the poll, cancels the

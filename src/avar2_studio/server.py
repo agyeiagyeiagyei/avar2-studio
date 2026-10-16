@@ -4720,8 +4720,13 @@ def _fontra_focus_css() -> str:
 # If no row matches, the list is left untrimmed (fail open) and
 # nothing is auto-enabled (fail closed).
 # The Fontra studio shim (sidebar focus, layer labels, the metrics HUD)
-# lives in fontra/shim.js so it can be linted and diffed as JavaScript.
-_FONTRA_STUDIO_SHIM_JS = _read_asset("fontra/shim.js")
+# lives in fontra/shim.js so it can be linted and diffed as JavaScript;
+# the <script> wrapper belongs to the injection, not the file.
+_FONTRA_STUDIO_SHIM_JS = (
+    '\n<script id="avar2-studio-fontra-shim">\n'
+    + _read_asset("fontra/shim.js")
+    + '\n</script>\n'
+)
 
 
 def _is_html_response(headers) -> bool:

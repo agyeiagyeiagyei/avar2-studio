@@ -20,7 +20,7 @@ deforms every glyph).
 The parametric → stylistic workflow walkthrough — including the
 animation morphing `Aa Bb 12` from Regular to Bold across all nine
 parametric axes — lives in the centralized
-[../../docs/authoring-instances.md](../../docs/authoring-instances.md)
+[../../docs/guides/authoring-instances.md](../../docs/guides/authoring-instances.md)
 alongside the matching Crispy walkthrough.
 
 ## Why this exists

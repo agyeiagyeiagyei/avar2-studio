@@ -1032,3 +1032,24 @@ bar; findings rounds still get written so a second reviewer can re-check.
   server.py. New tests/test_state_module.py probes the seam.
 - Verified by me independently: 511 passed / 3 skipped (509 baseline +
   2 new probes), ruff clean, and the no-shadow-attribute probe passes.
+
+## Tier-2 follow-ups (from the previous session's notes)
+
+- Frontend doc-path citations: api.js's worker comment now points at
+  `docs/archive/WORKER_BUILD_PLAN.md` (the file moved). The other cited
+  files (static-api.js, fontc-compile.js, ControlAxes.jsx) had no stale
+  doc refs (grep-verified).
+- `fontra/shim.js` is now pure JavaScript: the `<script>` wrapper moved
+  into the injector (`_FONTRA_STUDIO_SHIM_JS` wraps at read time). The
+  T2.4 golden test passes AND the wrapped content is byte-identical in
+  the golden (verified by direct string check), so the injected HTML is
+  unchanged.
+- `docs/decisions/0013-designspace-authoring-501.md` written for T2.15
+  and indexed (the previous session's deferral).
+- examples/ README anchors: both example READMEs + examples/README.md
+  now link `docs/guides/authoring-instances.md` directly (the redirect
+  stub stays for any other inbound links).
+- The three chat-only decisions (ROND white-room cap, collision badge,
+  Def-as-real-master shelf) stay "Not yet recorded" in
+  docs/decisions/README.md — only the user knows their terms; BLOCKED on
+  them (write down or consciously drop).

@@ -1,5 +1,3 @@
-
-<script id="avar2-studio-fontra-shim">
 (function () {
   'use strict';
   fetch('/api/fontra-shim-config').then(r => r.json()).then((cfg) => {
@@ -418,4 +416,3 @@
 
   }).catch((e) => console.warn('avar2-studio shim:', e));
 })();
-</script>

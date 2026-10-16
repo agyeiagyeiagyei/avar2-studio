@@ -21,6 +21,7 @@ gets a new record that supersedes the old one rather than an edit.
 | [0010](0010-fontra-embed-gpl-subproject.md) | The browser editor is fontra-embed, a separate GPL sub-project over postMessage | Accepted | 2026-09-30 |
 | [0011](0011-ymod-baked-corrections.md) | Baked corrections: a correction axis rests at its corrected end (dead axis by design) | Accepted | 2026-10-11 |
 | [0012](0012-foundry-tags-uppercase-registered-lowercase.md) | Authored tag case preserved: foundry tags uppercase, registered lowercase | Accepted | 2026-10-16 |
+| [0013](0013-designspace-authoring-501.md) | Secondary-axis authoring is .glyphs-only; designspace sources get a clean 501 | Accepted | 2026-10-16 |
 
 ## Not yet recorded
 

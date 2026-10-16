@@ -11,7 +11,7 @@ author each new style.
 The parametric → stylistic workflow walkthrough — including the
 animation that morphs `Adhesion` from the corner `Default` to a
 `Regular Condensed` location — lives in the centralized
-[../../docs/authoring-instances.md](../../docs/authoring-instances.md)
+[../../docs/guides/authoring-instances.md](../../docs/guides/authoring-instances.md)
 alongside the matching Roboto Delta walkthrough.
 
 ```bash
