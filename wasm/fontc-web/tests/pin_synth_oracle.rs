@@ -9,19 +9,17 @@
 
 use std::path::Path;
 use std::process::Command;
+mod common;
 
 #[test]
 fn pin_synthesis_and_refusal() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| {
-        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
-    });
+    let python = common::python();
+    let tmp = common::tmp_dir();
     let source_path = manifest.join("../../frontend/e2e/fixtures/Crispy-test.glyphs");
     let source = std::fs::read_to_string(&source_path).expect("read Crispy-test.glyphs");
     let before = fontc_web::compile_glyphs(source).expect("fontc compile");
-    std::fs::write("/tmp/pinsynth-before.ttf", &before).expect("write before");
+    std::fs::write(tmp.join("pinsynth-before.ttf"), &before).expect("write before");
 
     // 1. (47,700,1): unreachable by the tent model (every XOPQ-heavy
     // master also lifts XTRA or YOPQ), but 'a' is YOPQ-invariant, so
@@ -36,13 +34,13 @@ fn pin_synthesis_and_refusal() {
         .to_string(),
     )
     .expect("synthesis pin should succeed");
-    std::fs::write("/tmp/pinsynth-after.ttf", &pinned).expect("write after");
+    std::fs::write(tmp.join("pinsynth-after.ttf"), &pinned).expect("write after");
 
     let comparator = manifest.join("spike/compare_pin_synth.py");
     let status = Command::new(&python)
         .arg(&comparator)
-        .arg("/tmp/pinsynth-before.ttf")
-        .arg("/tmp/pinsynth-after.ttf")
+        .arg(tmp.join("pinsynth-before.ttf"))
+        .arg(tmp.join("pinsynth-after.ttf"))
         .arg("47")
         .arg("700")
         .arg("1")
@@ -61,11 +59,11 @@ fn pin_synthesis_and_refusal() {
         .to_string(),
     )
     .expect("synthesis pin should succeed");
-    std::fs::write("/tmp/pinsynth-after2.ttf", &pinned2).expect("write after2");
+    std::fs::write(tmp.join("pinsynth-after2.ttf"), &pinned2).expect("write after2");
     let status = Command::new(&python)
         .arg(&comparator)
-        .arg("/tmp/pinsynth-before.ttf")
-        .arg("/tmp/pinsynth-after2.ttf")
+        .arg(tmp.join("pinsynth-before.ttf"))
+        .arg(tmp.join("pinsynth-after2.ttf"))
         .arg("47")
         .arg("700")
         .arg("300")

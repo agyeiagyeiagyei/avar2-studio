@@ -925,3 +925,12 @@ bar; findings rounds still get written so a second reviewer can re-check.
   the worktree contains all four files. Full suite **505 passed**; ruff
   clean; cargo oracles after the T2.9 merge: 17 binaries, 21 passed,
   0 failed, 1 ignored.
+
+## T2.17 — the five remaining oracles: `target/tmp` outputs, shared python derivation
+
+- `measure`, `pin`, `pin_synth`, `round_corners`, `slant` oracles now use
+  `common::python()` and write every intermediate under
+  `common::tmp_dir()` (CARGO_TARGET_TMPDIR) instead of fixed `/tmp`
+  names; the comparators already took their paths as arguments.
+- [verified] `cargo test` for the five binaries on the warm target: all
+  ok; no `"/tmp/` literal left in `wasm/fontc-web/tests/*.rs`.

@@ -7,15 +7,13 @@
 
 use std::path::Path;
 use std::process::Command;
+mod common;
 
 #[test]
 fn pin_holds_corner_without_bleeding() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| {
-        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
-    });
+    let python = common::python();
+    let tmp = common::tmp_dir();
     let source_path = manifest.join("../../frontend/e2e/fixtures/Crispy-test.glyphs");
     let source = std::fs::read_to_string(&source_path).expect("read crispy-test fixture");
     let before = fontc_web::compile_glyphs(source).expect("compile");
@@ -27,14 +25,14 @@ fn pin_holds_corner_without_bleeding() {
     let after = fontc_web::pin_corner(before.clone(), &request.to_string()).expect("pin_corner");
     assert_ne!(before, after, "pin must change the font");
 
-    std::fs::write("/tmp/pin-before.ttf", &before).expect("write before");
-    std::fs::write("/tmp/pin-after.ttf", &after).expect("write after");
+    std::fs::write(tmp.join("pin-before.ttf"), &before).expect("write before");
+    std::fs::write(tmp.join("pin-after.ttf"), &after).expect("write after");
 
     let comparator = manifest.join("spike/compare_pin.py");
     let status = Command::new(&python)
         .arg(comparator)
-        .arg("/tmp/pin-before.ttf")
-        .arg("/tmp/pin-after.ttf")
+        .arg(tmp.join("pin-before.ttf"))
+        .arg(tmp.join("pin-after.ttf"))
         .status()
         .expect("run comparator");
     assert!(status.success(), "pin oracle comparison failed");
