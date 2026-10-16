@@ -80,6 +80,58 @@ a regression against `github-pages` for the user's configuration, and
 T0.10 means the install that T0.2 just enabled breaks the capture path.
 Everything else in Tier 0 is accepted and need not be touched again.
 
+## Round 2 — hand-off `38a4ccf` (HEAD `9e4b3fc`), Tier 0 re-check — 2026-10-16
+
+**Verification environment.** Same recipe as round 1: (a) the round-1
+clone fast-forwarded to `38a4ccf` with its latest-deps venv (glyphsLib
+6.16.0 / fontTools 4.67.0 / fontc 1.0.0, fontc-gated tests enabled) →
+**461 passed, 0 skipped**; (b) a brand-new clone + venv at `38a4ccf` →
+`pip install -e .[dev]` resolves the same latest versions → **461
+passed**; (c) the new tests against the pre-fix source (`8a06878`) on the
+6.16 venv → 9 failures (watcher retry/serialization/classifier, component
+round-trip, pre-axis-add capture, both grade tests), 14 passed on the
+fixed source; (d) live smoke on a fresh Crispy copy at 5071.
+
+Live smoke results: boot build 1 job only; mappings exact (rest
+663.1/202.5/121.8, wght 399 → 662.9, 900 → 725.9/316.3/235.2, 100 →
+619.2/48.7/41.0); all 12 axes; WOFF2 preview `wOF2`; 30 instances / 9
+with `YMOD` / no lowercase keys. **T0.7 acceptance probe** (POST
+`/api/build` in the background — note the endpoint blocks until the build
+ends — then a glyphsLib re-save of the original 12 s in, health confirmed
+`building: true`): **2 builds** from the POST, **2** `[transform] slant`
+passes after the save (watcher resolve + `_run_one` resolve), **1** "Source
+changed mid-build", **0** `Unexpected EOF`, **0** warnings, idle after the
+compress. **T0.9 probe** (Fontra-style save of `shadow/Crispy.glyphs`
+with all `a` brace layers shifted +250): "Captured 1 drawn outline(s)",
+exactly **1** build, and the copy's sidecar holds the `a` outline at
+dy = +250.0 (the computed `target` layer was skipped, as designed).
+
+| ID | Verdict | Evidence / notes |
+|---|---|---|
+| T0.7 | **VERIFIED** | `_RESOLVE_LOCK`, mtime watermarks armed after every self-write (incl. after the `transformed/` save), settle-then-retry, first-event-per-final-mtime dedup. Probe numbers above match the acceptance exactly; round-1's storm (21 resolves) is gone. |
+| T0.9 | **VERIFIED** | Shadow dir watched when transforms are on (`_classify_watched_path` + observer schedule); plus the real find: `_extract_brace_outlines` now pads short coordinate vectors, so braces created before an axis was appended match again — this is the audit's "28 layers with no captured outline" on Crispy. Regression test fails pre-fix. |
+| T0.10 | **VERIFIED** | `getattr(t, "value", t)` at both sites; component round-trip test passes on glyphsLib 6.13 and 6.16; pins `glyphsLib<7`, `fontc<2`. Fresh install + suite green on the latest resolved set. |
+| T0.11 | **VERIFIED** | `.venv/` ignored. |
+
+**Tier 0 is closed.** Notes, no action required from the executor:
+- The "duplicate (glyph, location) entries" observed in round 2 do not
+  exist in the user's live `Crispy-control.json` (0 duplicate keys in
+  LCWD and YMOD) — most likely an artefact of the probe copy. The live
+  YMOD axis does carry six entries naming glyphs `2 3 4 5 6 8` (no such
+  glyph names in the font); that is the user's data and is being raised
+  with them, not with you.
+- For a shadow save that arrives when no build is running, the server
+  does not re-resolve `transformed/` before queuing (the worker regenerates
+  from the staged shadow); read endpoints can lag for drawings only, which
+  is harmless. Logged as an observation for T2's watcher/state work.
+- `POST /api/build` blocking until completion is fine and documented
+  behaviour, but any future mid-build test must start the build out of
+  band (the executor's probe did; the verifier's first attempt did not).
+
+**Next:** proceed to Tier 1 in audit order (server → control axes →
+frontend → rust/tests/process → docs). Hand off at the end of Tier 1 or
+every ~15 commits, whichever comes first.
+
 ---
 
 ## Standing instructions (apply to every round) — added 2026-10-16
