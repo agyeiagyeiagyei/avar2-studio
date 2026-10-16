@@ -79,3 +79,30 @@ off Tier 0 again (round 2) **before** starting Tier 1 — T0.7 as pushed is
 a regression against `github-pages` for the user's configuration, and
 T0.10 means the install that T0.2 just enabled breaks the capture path.
 Everything else in Tier 0 is accepted and need not be touched again.
+
+---
+
+## Standing instructions (apply to every round) — added 2026-10-16
+
+1. **Scope is the whole audit.** The sprint runs until every item in
+   `PLAN.md` — all of §9: Tier 0, Tier 1, Tier 2 (including the docs
+   restructure and the 12 ADRs), Tier 3 — is **VERIFIED** here, or is
+   **BLOCKED** with a reason that needs the user's decision. Do not stop
+   after Tier 0 or Tier 1; do not skip Tier 3 as "later". The verifier
+   sets `STATE: verified-complete` only when the last item closes.
+2. **Cadence.** Hand off after each tier, or every ~15 commits inside a
+   big tier (Tier 1 and Tier 2 will need several rounds). Each hand-off
+   is verified in a fresh clone + live smoke, and this file gains a new
+   "Round N" section. FAILED items from a round are fixed **before** new
+   items in the next round; VERIFIED items are closed.
+3. **Order.** Audit order within each tier (server → control axes →
+   frontend → rust/tests/process → docs for Tier 1). Items the verifier
+   adds (T0.9…, T1.x…) slot into their tier at the end and are due in
+   the next hand-off of that tier.
+4. **Evidence bar is unchanged.** A command and its result in `LOG.md`
+   for every claim; a test or probe for every behavioural change; §10
+   claims verified before changed. Anything else is NOT-VERIFIED and
+   comes back.
+5. **Keep the user's environment out of it.** Never touch
+   `~/Documents/Crispy`; never start/stop port 5070; live probes on a
+   copy at 5071 only.
