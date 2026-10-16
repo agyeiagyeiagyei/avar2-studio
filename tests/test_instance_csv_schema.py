@@ -46,6 +46,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "ORIGINAL_PATH", tmp_path / "F.glyphs")
     monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server._source_font, "load_source", lambda _p: (object(), "glyphs"))
+    monkeypatch.setattr(server._source_font, "load_source_cached", lambda _p: (object(), "glyphs"))
     monkeypatch.setattr(server._source_font, "get_source_instances", lambda _f: [])
     monkeypatch.setattr(server._source_font, "get_axes", lambda _f: SHADOW_AXES)
     monkeypatch.setattr(server, "_get_preview_csv_path", lambda: csv_path)

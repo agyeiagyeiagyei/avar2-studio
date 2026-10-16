@@ -410,3 +410,20 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   not-found path returned None → same fallback — behavior identical.
 - Test [verified]: tests/test_family_name.py — stem returned with the
   loader rigged to raise; None for no path.
+
+## T1.7 — load_source_cached on the read paths
+
+- Swapped the audit-listed read sites to the mtime-keyed cache:
+  `create_instance`, `_load_axis_metadata`, `_get_glyphs_axis_tags`,
+  `_grade_instance_coords`, `_grade_param_ranges`, `get_avar2_axes`
+  (its second parse rides `_load_axis_metadata`). Mutating callers
+  (rename/delete/writeback) keep the uncached loader — the cached font
+  object is shared.
+- Found while swapping: `create_instance` reused `font` after a
+  swallowed load failure (UnboundLocalError → 500). Hoisted the axis
+  derivation into the load's try; a failed load now means empty
+  source_axes, not a crash. Pre-existing bug, fixed in place because
+  the swap made a test hit it.
+- Test harnesses that stub `load_source` now also stub
+  `load_source_cached` (test_instance_csv_schema.py).
+- Verification [verified]: full suite 465 passed, 8 skipped.

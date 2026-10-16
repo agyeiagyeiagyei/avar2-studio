@@ -1836,11 +1836,20 @@ def create_instance():
         insert_after = insert_after.strip()
 
     # Refuse to create if the name already exists either in the source or in the CSV.
+    # The axis list rides the same load: the previous shape read `font`
+    # again AFTER the except, so a failed load crashed with
+    # UnboundLocalError instead of falling back.
+    _excluded = _non_mapping_axis_tags()
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         existing_source_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
+        # ``font`` is the TRANSFORMED SHADOW: subtract the injected and
+        # control axes or they become CSV mapping columns below.
+        source_axes = [a for a in _source_font.get_axes(font)
+                       if str(a.get("tag", "")).upper() not in _excluded]
     except Exception:
         existing_source_names = set()
+        source_axes = []
     if instance_name in existing_source_names:
         return jsonify({"error": f"Instance '{instance_name}' already exists in the source file"}), 400
 
@@ -1865,11 +1874,6 @@ def create_instance():
         # supply a value, NOT to 0. wght=0 is outside the [100, 900] axis
         # range and would silently corrupt the row; defaulting to the
         # source's own declared default value keeps the row valid.
-        # ``font`` is the TRANSFORMED SHADOW: subtract the injected and
-        # control axes or they become CSV mapping columns here.
-        _excluded = _non_mapping_axis_tags()
-        source_axes = [a for a in _source_font.get_axes(font)
-                       if str(a.get("tag", "")).upper() not in _excluded]
         axis_defaults = {axis["tag"].upper(): axis["default"] for axis in source_axes}
 
         # Evolve the CSV schema: if the source declares an axis the CSV
@@ -2937,7 +2941,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     # Get parametric axes from the source file and add to metadata if missing.
     if GLYPHS_PATH and GLYPHS_PATH.exists():
         try:
-            font, _fmt = _source_font.load_source(GLYPHS_PATH)
+            font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
             metadata_updated = False
 
             for axis in _source_font.get_axes(font):
@@ -3089,7 +3093,7 @@ def _get_glyphs_axis_tags() -> set:
         return set()
 
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         return {axis["tag"].lower() for axis in _source_font.get_axes(font)}
     except Exception as e:
         print(f"Error reading axes from source file: {e}", file=sys.stderr)
@@ -4045,7 +4049,7 @@ def _grade_instance_coords():
     (the original bug) found no coords and every grade was skipped."""
     coords = {}
     try:
-        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source_cached(ORIGINAL_PATH)
         for inst in _source_font.get_source_instances(font):
             coords[inst["name"]] = dict(inst.get("coordinates", {}))
     except Exception:  # noqa: BLE001
@@ -4078,7 +4082,7 @@ def _grade_param_ranges():
     """(min, max) per parametric tag, or {} when the source can't be read."""
     ranges = {}
     try:
-        axes = _source_font.get_axes(_source_font.load_source(ORIGINAL_PATH)[0])
+        axes = _source_font.get_axes(_source_font.load_source_cached(ORIGINAL_PATH)[0])
         by_tag = {a["tag"].upper(): a for a in axes}
         for t in _grade.PARAM_TAGS:
             if t in by_tag:
@@ -6147,7 +6151,7 @@ def get_avar2_axes():
         glyphs_axes_info = {}
         if GLYPHS_PATH and GLYPHS_PATH.exists():
             try:
-                font, _fmt = _source_font.load_source(GLYPHS_PATH)
+                font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
                 for axis in _source_font.get_axes(font):
                     tag = axis["tag"]
                     tag_upper = tag.upper()
