@@ -354,10 +354,26 @@ plugins into `~/Library/Application Support/Glyphs 3/Plugins/` and
 records this Python in `~/.avar2-studio/glyphs-plugin.json` for the
 menu's *Open in avar2 Studio*; `--uninstall` reverses both.
 
-Environment variables: `AVAR2_STUDIO_DEBUG=1` (same as `--debug`),
-`AVAR2_STUDIO_GFTOOLS_BUILDER=1` (build through an external
-`gftools-builder` instead of in-process), `AVAR2_STUDIO_DEMO=1` (show
-the landing overlay, for a shared host).
+Environment variables (every one the studio reads; the verifier checks
+this table against `grep -rn os.environ src/`):
+
+| Variable | Effect |
+|---|---|
+| `AVAR2_STUDIO_DEBUG=1` | Flask debug + reloader (same as `--debug`) |
+| `AVAR2_STUDIO_GFTOOLS_BUILDER=1` | Build through an external `gftools-builder` instead of in-process |
+| `AVAR2_STUDIO_DEMO=1` | Show the landing overlay (for a shared host) |
+| `AVAR2_RELOCATE_BUILD_DEFAULT` | `0` disables the build-time default-origin relocation (on by default) |
+| `AVAR2_SPAC_INJECT` | Path to the native `spac-inject` binary (overrides the repo build) |
+| `AVAR2_KK2_DYLIB` | Path to the Kinetikern2 engine library (overrides the repo build) |
+| `AVAR2_STUDIO_AXIS_RANGES` | Set *by the build* for the gen-avar2 shim — never set it yourself |
+
+Frontend (vite build-time): `VITE_API_URL` (backend URL for the embedded
+demo), `VITE_FONTRA_EMBED_URL` (the fontra-embed bundle); at runtime the
+page also honors `window.AVAR2_EMBED_URL`.
+
+Cargo oracle tests: `AVAR2_PYTHON` (the python that has fontTools+gftools;
+defaults to the repo `.venv`), `AVAR2_SPIKE_FONT` / `AVAR2_ORACLE` /
+`AVAR2_CSV` / `CORRECTION_FONT` (fixture overrides).
 
 ## Development
 

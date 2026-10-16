@@ -686,3 +686,23 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   docs/readme-screenshots.md); removed the Space-tab section (the tab was
   removed in T1.17). All `blob/main` links → relative. Verified: every
   referenced file exists; every relative doc/image link resolves.
+
+## T1.38 — env-var table
+- README now documents every env var the code reads, in a table:
+  AVAR2_STUDIO_DEBUG / _DEMO / _GFTOOLS_BUILDER /
+  AVAR2_RELOCATE_BUILD_DEFAULT / AVAR2_SPAC_INJECT / AVAR2_KK2_DYLIB /
+  AVAR2_STUDIO_AXIS_RANGES (set BY the build, never set by hand);
+  frontend VITE_API_URL / VITE_FONTRA_EMBED_URL / window.AVAR2_EMBED_URL;
+  cargo oracles AVAR2_PYTHON / AVAR2_SPIKE_FONT / AVAR2_ORACLE /
+  AVAR2_CSV / CORRECTION_FONT. Verified against `grep -rn os.environ
+  src/` + the ENV_KEYS passthrough in build_jobs (which the plain grep
+  misses) + frontend VITE_*/window.* + the cargo tests.
+
+## T1.39 — HANDOVER one-line contradictions
+- `server.py ~832` → symbol `_resolve_active_source` (docs reference
+  symbols, not line numbers); debounce "1.2s" → 0.4s (the code's value);
+  "41 server tests" → 483 collected (measured now); deleted the orphaned
+  paragraph fragment (its lead was long gone; the Coverage button it
+  described was Space-tab UI). The structural contradictions (§3 vs §4.6
+  caching, §4.8 designspace roadmap) are T2.16's docs restructure, not
+  one-line edits.

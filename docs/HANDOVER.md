@@ -98,7 +98,7 @@ Everything below is tribal knowledge as of this handover.
 - `ORIGINAL_PATH` = the user's real source file. `GLYPHS_PATH` = the
   **active build source**, which is promoted to the shadow copy
   (`<dir>/.avar2-studio/shadow/<name>`) **once any studio axis has at
-  least one brace layer** (`server.py` ~832; a declared-but-empty axis
+  least one brace layer** (`server.py::_resolve_active_source`; a declared-but-empty axis
   builds from the original). Sidecars (`-avar.csv`, `-control.json`,
   `-transforms.json`) always resolve against `ORIGINAL_PATH` — resolving
   against the shadow was a bug class once (CSV written into the shadow
@@ -135,7 +135,7 @@ Everything below is tribal knowledge as of this handover.
   A WOFF2 cache (`.avar2-studio/build/<font>.woff2` + `.json` key) is
   refreshed by a low-priority job after every successful build.
 - Layer edits return in ~3ms; `schedule_shadow_rebuild()` debounces
-  shadow regen + build by **1.2s** (`_REBUILD_DEBOUNCE_SECONDS`).
+  shadow regen + build by **0.4s** (`_REBUILD_DEBOUNCE_SECONDS`).
   `BACKGROUND_WORK` folds into `/api/health`'s `building` flag — the
   frontend's "rebuilding preview…" indicator hangs off that.
 - **The 19× perf fix** (`control_axes.py`, `_interpolated_seed`):
@@ -250,8 +250,6 @@ treat any change here as high-risk.
   `window.AVAR2_EMBED_URL`.
 - e2e: `frontend/e2e/editor-bridge.spec.mjs` (55 checks; serves
   dist-pages + fontra-embed/dist, system Chrome).
-  when Fontra isn't up, and the frontend silently shows no Coverage
-  button. If the panel is "missing" in the full app, check Fontra first.
 
 ### Transforms internals (user-facing story is in README)
 - Registry: built-ins + any `.py` subclassing `Transform` in
@@ -658,7 +656,7 @@ or `$AVAR2_KK2_DYLIB`. Routes: `GET /api/kinetikern` (sidecar),
 ## 5. Verification playbook
 
 ```bash
-.venv/bin/python -m pytest tests/ -q            # 41 server tests
+.venv/bin/python -m pytest tests/ -q            # 483 tests collected
 cd wasm/fontc-web && cargo test                 # crate oracles (avar2/braces/clamp/pin/spac/stat/measure)
 cd frontend && npx vite build --base=./ --outDir dist-pages
 python3 -m http.server 8123 -d frontend/dist-pages &
