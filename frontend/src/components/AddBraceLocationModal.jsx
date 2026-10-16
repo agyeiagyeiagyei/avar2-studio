@@ -408,7 +408,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="pin-tag">{axis.tag}</span>
                     </label>
                     <div className="pin-slider-wrap">
-                      <input type="range" className="pin-slider" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
+                      <input type="range" className="pin-slider" aria-label={`Pin ${axis.tag}`} disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
                       <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                     </div>
                     <input type="number" className="pin-value" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
@@ -430,7 +430,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="form-row-hint">the control-axis position these views define</span>
                     </label>
                     <div className="control-value-row">
-                      <input type="range" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
+                      <input type="range" aria-label={`${axisTag} value`} min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
                       <input type="number" className="pin-value" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
                     </div>
                   </div>
@@ -474,7 +474,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                         <div key={axis.tag} className="location-pin-row pinned">
                           <span className="pin-tag">{axis.tag}</span>
                           <div className="pin-slider-wrap">
-                            <input type="range" className="pin-slider" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
+                            <input type="range" className="pin-slider" aria-label={`Pin ${axis.tag}`} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
                             <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                           </div>
                           <input type="number" className="pin-value" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
@@ -568,7 +568,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                         <span className="pin-tag">{axis.tag}</span>
                       </label>
                       <div className="pin-slider-wrap">
-                        <input type="range" className="pin-slider" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
+                        <input type="range" className="pin-slider" aria-label={`Correction ${axis.tag}`} disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
                         <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                       </div>
                       <input type="number" className="pin-value correction-value" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />

@@ -409,6 +409,7 @@ function PreviewTab({
           <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
           <input
             type="range"
+            aria-label="Font size"
             min="9"
             max="144"
             step="0.5"

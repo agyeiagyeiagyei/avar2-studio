@@ -324,6 +324,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
           <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
           <input
             type="range"
+            aria-label="Font size"
             min="9"
             max="144"
             step="0.5"
@@ -419,6 +420,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
             <span className="kk-looseness-end">tight</span>
             <input
               type="range"
+              aria-label="Looseness"
               min="-1"
               max="1"
               step="0.05"

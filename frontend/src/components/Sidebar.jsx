@@ -188,6 +188,7 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
         <div className="axis-slider-container">
           <input
             type="range"
+            aria-label="Font size"
             min="9"
             max="144"
             step="0.5"
@@ -580,6 +581,7 @@ function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled,
                             <div className="axis-slider-container traditional-axis-slider-container">
                               <input
                                 type="range"
+                                aria-label={axisLabel}
                                 className="axis-slider"
                                 min={axisMin}
                                 max={axisMax}

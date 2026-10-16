@@ -141,6 +141,7 @@ function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
       <div className="axis-slider-container">
         <input
           type="range"
+          aria-label={`${axis.name} (${axis.tag})`}
           min={axis.min}
           max={axis.max}
           step={0.1}

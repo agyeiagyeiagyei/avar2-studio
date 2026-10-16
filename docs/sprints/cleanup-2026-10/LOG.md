@@ -569,3 +569,9 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - The Kinetikern tab needs the live engine routes; on Pages (static
   provider) it shipped half-implemented. The tab button + content now
   render only when `!staticMode`. Verified: build/lint/typecheck exit 0.
+
+## T1.24 — sliders get accessible names
+- All 10 `type="range"` inputs gained `aria-label`: axis sliders
+  (`{name} ({tag})`), font-size sliders ×3, the Kinetikern looseness
+  slider, the Sidebar mapping slider (`axisLabel`), and the four
+  AddBraceLocationModal pin/correction sliders. Build + lint exit 0.
