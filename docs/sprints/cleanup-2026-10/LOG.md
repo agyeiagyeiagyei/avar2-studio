@@ -1085,3 +1085,21 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - server.py 7,663 → 5,773 lines. Verified by me: 511 passed / 3 skipped,
   ruff clean, the real-worker e2e (test_worker_shadow.py) passes —
   the worker path builds a real font end to end.
+
+## T3.2 — routes/ blueprints (subagent agent-7, timed out; finished by me)
+- The subagent's tree was ~95% done at timeout: 13 blueprint modules
+  (routes/{ui,source,health,build,text_width,coverage,config,
+  transforms_grade,kinetikern,avar2,instances,control_axes,load,fontra})
+  with handlers reading `state.X`, calling pipeline.py, and reaching
+  server helpers via late-bound `server.X` (they load mid-import and
+  tests patch server.X). It had not registered `fontra` in
+  `routes/__init__.py` — the url_map snapshot caught exactly that (12
+  missing paths: the Fontra proxy set, the UI catch-all, shim config,
+  the websocket). Registered it; snapshot green.
+- Test call sites the subagent missed, migrated by me:
+  test_fontra_assets.py → `routes.fontra` (rewrite + shim);
+  test_watcher_save_flow.py → `pipeline._grade/_transforms/
+  _resolve_active_source`. Both files' import order re-sorted (ruff).
+- server.py is 1,321 lines (from the audit's 8,180). Verified by me:
+  full suite **512 passed / 3 skipped**, ruff clean, snapshot test
+  green, no-flask import probe still OK.

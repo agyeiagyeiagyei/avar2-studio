@@ -10,7 +10,7 @@ import threading
 import time
 
 import avar2_studio.server as server
-from avar2_studio import state
+from avar2_studio import pipeline, state
 
 
 def test_settle_returns_immediately_for_an_old_file(tmp_path):
@@ -75,12 +75,12 @@ def test_resolves_are_serialized(crispy_source, monkeypatch):
 
     monkeypatch.setattr(server._control_axes, "regenerate_shadow", slow_regen)
     monkeypatch.setattr(server._control_axes, "list_axes", lambda _p: [])
-    monkeypatch.setattr(server._grade, "list_graded_instances", lambda _p: [])
-    monkeypatch.setattr(server._transforms, "active", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline._grade, "list_graded_instances", lambda _p: [])
+    monkeypatch.setattr(pipeline._transforms, "active", lambda *a, **k: [])
     monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
     monkeypatch.setattr(state, "GLYPHS_PATH", crispy_source)
 
-    threads = [threading.Thread(target=server._resolve_active_source)
+    threads = [threading.Thread(target=pipeline._resolve_active_source)
                for _ in range(4)]
     for t in threads:
         t.start()

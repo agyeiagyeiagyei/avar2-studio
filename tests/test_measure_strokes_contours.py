@@ -8,7 +8,7 @@ must be unchanged by the addition."""
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
-from avar2_studio.server import _measure_strokes
+from avar2_studio.routes.control_axes import _measure_strokes
 
 
 def _font_with_H(tmp_path):
