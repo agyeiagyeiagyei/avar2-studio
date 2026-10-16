@@ -1,7 +1,6 @@
 """T2.15 decision: secondary-axis authoring is .glyphs-only; on a
 .designspace source the mutating control-axis routes answer 501 with a
 clear message, reads keep working, and nothing is written."""
-from test_open_editor import studio_client  # noqa: F401 — fixture
 
 from avar2_studio import control_axes
 

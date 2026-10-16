@@ -18,35 +18,7 @@ these tests pin the routing decision, not the editor.
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-
 from avar2_studio import control_axes
-
-
-@pytest.fixture
-def studio_client(monkeypatch):
-    """Flask test client with _ensure_fontra_running replaced by a
-    recording fake (returns a made-up port, spawns nothing)."""
-    import avar2_studio.server as server
-
-    calls = []
-
-    def fake_ensure_fontra(content_root, watch_file=None):
-        calls.append((Path(content_root), Path(watch_file) if watch_file else None))
-        return 8123
-
-    monkeypatch.setattr(server, "_ensure_fontra_running", fake_ensure_fontra)
-
-    def set_paths(original, active):
-        monkeypatch.setattr(server, "ORIGINAL_PATH", original)
-        monkeypatch.setattr(server, "GLYPHS_PATH", active)
-
-    return SimpleNamespace(
-        client=server.app.test_client(), fontra_calls=calls, set_paths=set_paths
-    )
 
 
 def test_studio_axis_without_shadow_refuses_with_400(studio_client, crispy_source):

@@ -900,3 +900,10 @@ bar; findings rounds still get written so a second reviewer can re-check.
   mutations → 501 mentioning "designspace", reads 200, no shadow and no
   sidecar written; a .glyphs source is unaffected. Control-axis cluster
   71 passed; ruff clean.
+- T2.12 post-fix probe [verified]: same `examples/roboto-delta-mini` copy,
+  worktree code, port 5074, no edits for 150 s after the boot build →
+  **1 build, 0 self-trigger lines, 0 warnings** (pre-fix: 46 builds,
+  51,215 lines).
+- T2.15 lint follow-up: the `studio_client` fixture moved from
+  `test_open_editor.py` to `conftest.py` so other route tests can use it
+  without an F811 import; ruff clean.
