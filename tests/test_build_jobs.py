@@ -103,8 +103,12 @@ def test_cancel_a_running_build(queue, monkeypatch):
     job_id = queue.status()["running"]["job_id"]
     assert queue.cancel(job_id)
     assert not queue.wait_for_idle(timeout=30), "a cancelled build reports failure"
-    assert queue.server.LAST_BUILD_STATUS == "failed"
-    assert "cancel" in (queue.server.LAST_BUILD_ERROR or "")
+    # A cancel is not a broken source: the previous build status is
+    # untouched, so the build gate (LAST_BUILD_STATUS == "failed") stays
+    # in whatever state it was — here, never-set.
+    assert queue.server.LAST_BUILD_STATUS != "failed"
+    assert queue.server.LAST_BUILD_STATUS is None
+    assert queue.server.LAST_BUILD_ERROR is None
     # and the queue recovers
     monkeypatch.setenv("STUB_WORKER_MODE", "ok")
     queue.request_build()

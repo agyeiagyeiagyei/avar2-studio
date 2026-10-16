@@ -464,10 +464,16 @@ class JobQueue:
             if key in result:
                 setattr(self.server, key.upper(), result[key])
         if not result.get("success") and "last_build_status" not in result:
-            # The worker died before it could report state (kill -9,
-            # crash) — fail loudly, keep serving the last-good font.
-            self.server.LAST_BUILD_STATUS = "failed"
-            self.server.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
+            if result.get("cancelled"):
+                # A cancel is not a broken source: leave the previous
+                # status alone — "ok" keeps the gate open, a prior
+                # "failed" (cancelled retry) keeps it closed.
+                pass
+            else:
+                # The worker died before it could report state (kill -9,
+                # crash) — fail loudly, keep serving the last-good font.
+                self.server.LAST_BUILD_STATUS = "failed"
+                self.server.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
 
     def _maybe_compress(self):
         font = self.server.VARIABLE_FONT_PATH
