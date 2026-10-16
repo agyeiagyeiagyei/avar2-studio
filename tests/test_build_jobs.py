@@ -262,6 +262,7 @@ def test_promotion_reaps_stale_fonts_but_keeps_the_newest(tmp_path):
     others; older fonts go together with their WOFF2 twins."""
     import os
     import time
+
     from avar2_studio.build_jobs import KEEP_BUILDS, reap_build_dir
     build = tmp_path / "build"
     build.mkdir()
