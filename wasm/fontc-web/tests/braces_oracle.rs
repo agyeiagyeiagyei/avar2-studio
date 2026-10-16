@@ -61,6 +61,9 @@ fn braces_match_fonttools_oracle() {
         .arg(format!("{}/target/tmp/braces-control.ttf", env!("CARGO_MANIFEST_DIR")))
         .arg(format!("{}/target/tmp/braces-grade.ttf", env!("CARGO_MANIFEST_DIR")))
         .arg(format!("{}/target/tmp/braces-full.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/braces-control.json", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/braces-grade.json", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/braces-coords.json", env!("CARGO_MANIFEST_DIR")))
         .status()
         .expect("run comparator");
     assert!(status.success(), "oracle comparison failed");
