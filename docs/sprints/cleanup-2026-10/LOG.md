@@ -1134,3 +1134,17 @@ bar; findings rounds still get written so a second reviewer can re-check.
   launch is a no-op, and POST /api/load-source triggers reschedule.
 - Verified by me: full suite **514 passed / 3 skipped**, ruff clean,
   no-flask probe OK. server.py now **1,024 lines** (audit: 8,180).
+
+## T3.8 — parameterised default relocation for export
+- Per decisions/0007 (the decided direction, verbatim): `_build_in_process`
+  gains `relocate_default` (None → the env, default on); the export build
+  passes **False** — it stages its own origin master via
+  `_build_export_source`, and the step-3.5 instancer rebase on top was
+  the ~7× densification (audit §2 H3). The `round()`-vs-decimal mismatch
+  is inert under it (the rebase no longer runs there); noted as a
+  fidelity follow-up if exact resting-location matters at 0.2-unit level.
+- Tests [verified]: tests/test_export_relocation.py — relocate True/False
+  move/keep the fvar default (XTRA 800.0 vs compiled origin) and the
+  natural build's gvar tuple count ≤ the relocated one's; env default +
+  `0` both honored when no parameter is passed. 2 passed. fontc via the
+  interpreter-sibling idiom (worktree-safe).

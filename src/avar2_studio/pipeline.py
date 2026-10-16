@@ -555,7 +555,8 @@ def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
 
 
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
-                      default_overrides: Optional[Dict[str, float]] = None) -> Path:
+                      default_overrides: Optional[Dict[str, float]] = None,
+                      relocate_default: Optional[bool] = None) -> Path:
     """The gftools-builder pipeline, without gftools-builder.
 
     Profiling a rebuild put fontc at 0.06s and ``gftools builder`` at 9.5s:
@@ -691,9 +692,14 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # row dropped every tent is zero-anchored at the input default and the
     # neighbourhood collapses toward the compiled corner (the valley).
     # AVAR2_RELOCATE_BUILD_DEFAULT=0 restores the small-but-valleyed font.
-    # See docs/decisions/0001-build-time-default-relocation.md.
-    relocate_at_build = os.environ.get(
-        "AVAR2_RELOCATE_BUILD_DEFAULT", "1").lower() in ("1", "true", "yes")
+    # An explicit ``relocate_default`` parameter wins over the env — the
+    # export build passes False: it stages its own origin master
+    # (_build_export_source), and running this instancer rebase AS WELL
+    # densified the shipped font ~7× (audit §2 H3; decisions/0001+0007).
+    if relocate_default is None:
+        relocate_default = os.environ.get(
+            "AVAR2_RELOCATE_BUILD_DEFAULT", "1").lower() in ("1", "true", "yes")
+    relocate_at_build = relocate_default
     if relocate_at_build and avar2_cfg_early and default_rows:
         from fontTools.varLib import instancer as _instancer
         font = _TTFont(str(out))
@@ -1362,8 +1368,12 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                 raise RuntimeError("Export build failed: %s"
                                    % (result.stderr or result.stdout or "")[-800:])
         else:
+            # relocate_default=False: the export stages its own origin
+            # master above — step 3.5's instancer rebase must not run on
+            # top of it (that's what densified shipped fonts ~7×).
             _build_in_process(export_config, export_workdir, fontc_path,
-                              default_overrides=requested)
+                              default_overrides=requested,
+                              relocate_default=False)
         produced = []
         for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
             produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
