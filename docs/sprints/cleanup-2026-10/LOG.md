@@ -613,3 +613,15 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   was stale; it proved no-change via a stash round-trip (472 both ways).
 - Verified by me independently: `ruff check src tests` exit 0;
   `pytest tests/ -q` 472 passed, 8 skipped.
+
+### T1.26–T1.28 verification (after the avar2_oracle move fix)
+- `cargo test --no-run` compiles all 14 test binaries [verified].
+- `AVAR2_PYTHON=<repo>/.venv/bin/python cargo test --no-fail-fast`
+  [verified]: 13 of 15 targets ok (incl. fix/measure/pin/round_corners/
+  slant oracles that failed on the python default before); the 4
+  failures (avar2, braces, spac, stat) are all the pre-existing missing
+  /tmp INPUT fixtures (panic: read spike font NotFound) — T2.9 generates
+  them deterministically; correction_oracle shows `1 ignored` with the
+  reason. Note for the verifier: in a worktree there's no `.venv`, so
+  the oracle python falls back to `python3` — set AVAR2_PYTHON to a venv
+  with fontTools+gftools to run them.
