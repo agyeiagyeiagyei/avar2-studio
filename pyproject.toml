@@ -27,9 +27,12 @@ classifiers = [
 dependencies = [
     "flask>=3.0",
     "flask-cors>=4.0",
-    "glyphsLib>=6.4",
+    # Majors-only upper bounds: fresh installs resolve latest, and breaking
+    # API changes have arrived mid-major (glyphsLib 6.16: GSComponent.transform
+    # became a plain tuple). The next major stays a deliberate review.
+    "glyphsLib>=6.4,<7",
     "fontTools>=4.50",
-    "fontc>=0.6",
+    "fontc>=0.6,<2",
     "uharfbuzz>=0.39",
     "watchdog>=4.0",
     "pyyaml>=6.0",

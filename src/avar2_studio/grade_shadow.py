@@ -184,7 +184,9 @@ def apply_grades(
                 lay.paths.append(p)
             for ci, tc in enumerate(comp_ref):
                 c = GSComponent(tc.componentName)
-                c.transform = Transform(*tc.transform.value)
+                # glyphsLib ≥6.16 makes GSComponent.transform a plain tuple;
+                # earlier versions wrap it in Transform (.value).
+                c.transform = Transform(*getattr(tc.transform, "value", tc.transform))
                 c.position = Point(dot(cdel[ci][0]), dot(cdel[ci][1]))
                 lay.components.append(c)
             lay.width = dot(wdel)

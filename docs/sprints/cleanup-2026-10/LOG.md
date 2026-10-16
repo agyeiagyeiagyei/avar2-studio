@@ -211,3 +211,69 @@ results, and what is inferred vs verified.
   T0.2's fresh-clone install and T0.3's fail-without-fix e2e included.
 - Not done by rule: the audit's "run capture_outlines once on Crispy"
   (would write the designer's live sidecar) — left for the user.
+
+## Round 2 — verifier findings (8a06878)
+
+findings.md: T0.1–T0.6 VERIFIED, T0.8 verified-but-inert on transform
+configs, T0.7 FAILED (watcher-side resolve storms: 21 resolves / 18
+queued builds from one glyphsLib save on a Crispy copy; mid-write EOF
+parse; two overlapping resolves). NEW: T0.9 (shadow un watched when
+transforms on), T0.10 (glyphsLib 6.16 tuple-transform breaks
+grade_shadow + component capture), T0.11 (.venv not gitignored).
+T0.11 was folded into the T0.10 commit series (hygiene, one line).
+
+## T0.7 fix + T0.9 — one commit (ad014cd)
+
+- T0.7 root causes addressed per the verifier's (1)–(3):
+  1. `_SUPPRESS_WATCHDOG_UNTIL` is now re-armed AFTER the
+     `shadow/transformed/` save — the post-regen window (2.5 s) expired
+     during the multi-second transform pass, so the server's own write
+     re-fired the mid-build branch (the storm).
+  2. `_resolve_active_source` serialized on a new module-level
+     `_RESOLVE_LOCK` (RLock). Lock order: the config import nests
+     SIDECAR→RESOLVE; resolve never takes SIDECAR, so no cycle.
+  3. Watcher acts only after the file's mtime settles
+     (`_wait_for_save_to_settle`, 0.5 s) and the resolve retries once
+     (`_resolve_source_after_save`) — kills the mid-write EOF crash.
+     Applied to the mid-build branch AND the non-mid-build
+     is_original/is_source branches.
+- T0.9: `_classify_watched_path` (module-level, testable) classifies
+  source/original/shadow/glif; "shadow" maps onto the source flow
+  (settle → capture → sync → build). Observer now also watches
+  `shadow_dir_for(ORIGINAL_PATH)` (non-recursive) when a shadow is
+  active and the dir isn't already covered. Not covered (pre-existing,
+  logged): the watcher is scheduled once in `main()` — a shadow created
+  AFTER launch still unwatched until restart (the reschedule gap, audit
+  §1/T3.10).
+- Option (4) (drop the watcher-side resolve) not needed: (1)–(3) hold in
+  the probe below.
+- Tests [verified]: tests/test_watcher_save_flow.py — settle timing (old
+  file returns <0.3 s; fresh file waits ≥0.5 s), retry-once + final
+  warning, serialization (4 threads → max depth 1; FAILS without the
+  lock, stash-checked), classifier incl. transforms-on shadow case.
+  Full suite after the edits: **452 passed, 8 skipped in 34.5 s**.
+
+## T0.10 + T0.11 — fresh-install compatibility
+
+- T0.10 root cause [verified]: glyphsLib 6.16 makes `GSComponent.transform`
+  a plain tuple. `grade_shadow.py:187` (`Transform(*tc.transform.value)`)
+  raised AttributeError (the verifier's 2 fresh-clone failures);
+  `control_axes._parts_to_outline` caught the AttributeError and stored
+  the component WITHOUT its transform — silent data loss on capture.
+  Fix: `getattr(t, "value", t)` at both read sites (tuple on 6.16,
+  .value wrapper before). Write sites (`Transform(*...)`) are fine on
+  both. Other `.transform` uses are in Glyphs plugins, which run on
+  Glyphs' own runtime — untouched.
+- Pins: `glyphsLib>=6.4,<7`, `fontc>=0.6,<2` (majors-only; fontTools
+  deliberately left unbounded — stable API, no observed break).
+- Test: `test_component_outlines_round_trip_with_transform` — component
+  with a transform through set_layers → shadow restore → capture;
+  faithful round trip rewrites nothing (n == 0) and the stored transform
+  survives. Passes on BOTH versions.
+- Verification [verified]: fresh venv (`pip install -e worktree[dev]`,
+  glyphsLib 6.16.0 / fontTools 4.67.0 / fontc 1.0.0): **452 passed,
+  8 skipped** — incl. the two previously-failing grade tests, the new
+  component test, and the real-worker e2e built by fontc 1.0.0. Same 8
+  pre-existing skips as the worktree run.
+- T0.11 [verified]: `.venv/` added to `.gitignore`;
+  `git check-ignore -v .venv/bin/python` → `.gitignore:29:.venv/`.

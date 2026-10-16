@@ -1707,7 +1707,9 @@ def _parts_to_outline(src_paths, src_components, src_anchors, width) -> Dict:
     components = []
     for c in src_components or []:
         try:
-            xform = [float(v) for v in c.transform.value]
+            # glyphsLib ≥6.16: GSComponent.transform is a plain tuple;
+            # earlier versions wrap it in Transform (.value).
+            xform = [float(v) for v in getattr(c.transform, "value", c.transform)]
         except Exception:
             xform = None
         entry = {"name": getattr(c, "name", None)}
