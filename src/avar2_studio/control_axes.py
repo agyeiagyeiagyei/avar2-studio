@@ -42,12 +42,22 @@ config bundle. See docs/secondary-parametric-axes.md.
 
 from __future__ import annotations
 
+from . import sidecar_io
+
+
+def _locked(fn):
+    """Load → mutate → save under the shared sidecar lock (see sidecar_io)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with sidecar_io.LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
 import copy
 import csv
+import functools
 import json
-import os
 import shutil
-import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -113,7 +123,7 @@ def instance_values(source_path: Path) -> Dict[str, Dict[str, float]]:
     return dict(load(source_path).get("instance_values") or {})
 
 
-_INSTANCE_VALUES_LOCK = threading.Lock()
+_INSTANCE_VALUES_LOCK = sidecar_io.LOCK  # one lock for every sidecar writer
 
 
 def set_instance_values(source_path: Path, instance_name: str,
@@ -184,6 +194,7 @@ def remove_instance_values(source_path: Path, instance_name: str) -> bool:
 # --------------------------------------------------------------------------
 
 
+@_locked
 def save_all(source_path: Path, data: Dict) -> Dict:
     """Replace the WHOLE sidecar with ``data`` (normalised first). Returns
     the payload that was written.
@@ -198,6 +209,7 @@ def save_all(source_path: Path, data: Dict) -> Dict:
     return payload
 
 
+@_locked
 def add_axis(
     source_path: Path,
     tag: str,
@@ -247,6 +259,7 @@ def add_axis(
     return entry
 
 
+@_locked
 def update_axis(
     source_path: Path,
     tag: str,
@@ -325,6 +338,7 @@ def update_axis(
     return entry
 
 
+@_locked
 def remove_axis(source_path: Path, tag: str) -> bool:
     """Delete a control-axis declaration. Returns True if a row was
     removed, False if no axis matched the tag."""
@@ -343,6 +357,7 @@ def remove_axis(source_path: Path, tag: str) -> bool:
     return True
 
 
+@_locked
 def set_layers(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
     """Replace an axis's unified ``layers`` list. Each entry shape:
     ``{glyph: str, location: {axis_tag: number}}``. De-duplicates by
@@ -368,6 +383,7 @@ def set_layers(source_path: Path, tag: str, entries: List[Dict]) -> List[Dict]:
     return cleaned
 
 
+@_locked
 def apply_layer_delta(source_path: Path, tag: str, add=None, remove=None) -> List[Dict]:
     """Merge a delta into an axis's layers, using the ON-DISK list as the base.
 
@@ -424,6 +440,7 @@ def apply_layer_delta(source_path: Path, tag: str, add=None, remove=None) -> Lis
     return merged
 
 
+@_locked
 def reseed_layers(
     source_path: Path,
     tag: str,
@@ -667,11 +684,7 @@ def _save(source_path: Path, data: Dict) -> None:
     # file, and interleaved plain writes have torn it (valid JSON with
     # trailing garbage) — which load() reads as "no control axes at
     # all". Write-to-temp + rename keeps every reader on a whole file.
-    tmp = sidecar.with_name(sidecar.name + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, sidecar)
+    sidecar_io.write_json(sidecar, data)
 
 
 def _validate_tag(tag: str) -> str:
@@ -1780,6 +1793,7 @@ def _outline_to_layer_data(outline) -> Optional[Dict[str, object]]:
         return None
 
 
+@_locked
 def capture_outlines(source_path: Path) -> int:
     """Copy hand-drawn brace outlines out of the shadow and INTO the sidecar.
 

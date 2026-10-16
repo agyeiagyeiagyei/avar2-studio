@@ -31,6 +31,18 @@ by both so the UI can preview coords without touching the source.
 
 from __future__ import annotations
 
+from . import sidecar_io
+
+
+def _locked(fn):
+    """Load → mutate → save under the shared sidecar lock (see sidecar_io)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with sidecar_io.LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+import functools
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -150,6 +162,7 @@ def find_instance(source_path: Path, name: str) -> Optional[Dict]:
 # --------------------------------------------------------------------------
 
 
+@_locked
 def set_enabled(source_path: Path, enabled: bool) -> Dict:
     """Flip the Grade transform toggle. Per-instance grades PERSIST when off —
     the toggle only gates whether the GRAD axis is built."""
@@ -159,6 +172,7 @@ def set_enabled(source_path: Path, enabled: bool) -> Dict:
     return data
 
 
+@_locked
 def set_default_pct(source_path: Path, pct: float) -> Dict:
     data = load(source_path)
     data["default_pct"] = _validate_pct(pct)
@@ -166,6 +180,7 @@ def set_default_pct(source_path: Path, pct: float) -> Dict:
     return data
 
 
+@_locked
 def set_intensity(source_path: Path, value: float) -> Dict:
     """Set the global grade multiplier. 0 disables every grade without
     forgetting the authored per-instance values."""
@@ -175,6 +190,7 @@ def set_intensity(source_path: Path, value: float) -> Dict:
     return data
 
 
+@_locked
 def set_clamp_to_headroom(source_path: Path, value: bool) -> Dict:
     data = load(source_path)
     data["clamp_to_headroom"] = bool(value)
@@ -182,6 +198,7 @@ def set_clamp_to_headroom(source_path: Path, value: bool) -> Dict:
     return data
 
 
+@_locked
 def set_instance_grade(source_path: Path, name: str, pct: Optional[float] = None) -> Dict:
     """Add or update a graded instance. ``pct=None`` uses the current global
     default. Returns the stored ``{name, pct}`` entry."""
@@ -201,6 +218,7 @@ def set_instance_grade(source_path: Path, name: str, pct: Optional[float] = None
     return entry
 
 
+@_locked
 def remove_instance_grade(source_path: Path, name: str) -> bool:
     """Remove a graded instance. Returns True if a row was removed."""
     data = load(source_path)
@@ -212,6 +230,7 @@ def remove_instance_grade(source_path: Path, name: str) -> bool:
     return True
 
 
+@_locked
 def save_all(source_path: Path, data: Dict) -> Dict:
     """Replace the WHOLE grade sidecar with ``data`` (normalised first).
     Returns the stored payload. Used by config-bundle import; the per-field
@@ -220,6 +239,7 @@ def save_all(source_path: Path, data: Dict) -> Dict:
     return load(source_path)
 
 
+@_locked
 def rename_instance(source_path: Path, old_name: str, new_name: str) -> bool:
     """Keep a grade attached to its instance across a rename. Returns True if
     an entry was renamed."""
@@ -416,6 +436,4 @@ def _save(source_path: Path, data: Dict) -> None:
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     payload = _normalise(data)
     payload["enabled"] = bool(data.get("enabled", payload["enabled"]))
-    with sidecar.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-        f.write("\n")
+    sidecar_io.write_json(sidecar, payload)

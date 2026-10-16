@@ -27,6 +27,8 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+from .. import sidecar_io
+
 _SCHEMA_VERSION = 1
 
 
@@ -83,7 +85,5 @@ def save(source_path: Path, entries_list: List[Dict]) -> List[Dict]:
         })
     sidecar = sidecar_path_for(source_path)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
-    with sidecar.open("w", encoding="utf-8") as f:
-        json.dump({"version": _SCHEMA_VERSION, "transforms": cleaned}, f, indent=2)
-        f.write("\n")
+    sidecar_io.write_json(sidecar, {"version": _SCHEMA_VERSION, "transforms": cleaned})
     return cleaned

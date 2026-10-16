@@ -33,7 +33,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from . import source_font
+from . import sidecar_io, source_font
 
 
 def backup_sidecar(path: Path, keep: int = 20) -> None:
@@ -394,7 +394,7 @@ def update_csv_from_glyphs(
 
         if updated_count or removed_count or added_count or new_axes:
             backup_sidecar(csv_path)
-            with csv_path.open("w", encoding="utf-8", newline="") as f:
+            with sidecar_io.atomic_writer(csv_path, encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(updated_rows)

@@ -757,3 +757,31 @@ bar; findings rounds still get written so a second reviewer can re-check.
 
 - Full suite after the three changes [verified]: **484 passed, 0 skipped
   in 54.9 s** (fontc-gated tests included); `ruff check src tests` clean.
+
+## T2.1 — one lock + one atomic writer for every sidecar
+
+- New `src/avar2_studio/sidecar_io.py`: `LOCK` (process-wide RLock) and
+  `atomic_writer` (mkstemp beside the target + fsync + `os.replace`,
+  mode preserved, temp removed on failure; holds the lock while writing),
+  plus `write_text`/`write_json`.
+- Converted every writer [verified by the new code-shape guard]: the 11
+  CSV sites in server.py, `config.yaml`, `axis-metadata.json` (×2),
+  `csv_io.update_csv_from_glyphs`, `grade._save`, `transforms/config.save`,
+  `kinetikern/sidecar._save`, `control_axes._save` (which keeps its
+  backup call). `server.SIDECAR_LOCK` and `control_axes._INSTANCE_VALUES_LOCK`
+  are now aliases of `sidecar_io.LOCK` — one lock.
+- Locked the read-modify-write cycles: `@_sidecar_locked` on the CSV
+  routes (`reorder_instances`, `create_instance`, `update_instance`,
+  `rename_instance`, `delete_instance`, `add/update/delete_avar2_axis`,
+  `update_avar2_mapping`, `update_transforms`) and helpers
+  (`_add_missing_instance_to_csv`, `_save_axis_metadata`), on the
+  supervisor's CSV hook `sync_csv_with_glyphs`, and on every load→mutate→
+  save function in control_axes (8), grade (8) and kinetikern/sidecar (4)
+  via a module-local `@_locked`. Lock order stays SIDECAR → RESOLVE
+  (`_resolve_active_source` never takes the sidecar lock).
+- Tests [verified]: `tests/test_sidecar_io.py` — failed write leaves the
+  target intact and no temp file; JSON round trip keeps mode + trailing
+  newline; 8 threads × 40 locked RMW increments lose nothing (320);
+  code-shape guard finds no raw `.open("w")` on a sidecar path under
+  src/ (Glyphs plugins excluded). Full suite **484 passed** + 4 new;
+  `ruff check` clean (9 import-order fixes applied).

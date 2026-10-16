@@ -14,6 +14,7 @@ Provides API endpoints to:
 import argparse
 import contextlib
 import csv
+import functools
 import gc
 import json
 import os
@@ -65,6 +66,7 @@ from . import grade as _grade
 from . import grade_shadow as _grade_shadow
 from . import instance_aliases as _instance_aliases
 from . import kinetikern as _kinetikern
+from . import sidecar_io as _sidecar_io
 from . import source_font as _source_font
 from . import transforms as _transforms
 from .source_font import UnsupportedSourceFormat
@@ -219,7 +221,18 @@ _SYNC_CSV_HOOK = None
 BACKGROUND_WORK: int = 0
 # Serializes read-modify-write on the control-axis sidecar so two concurrent
 # edits can't interleave and drop each other's layers.
-SIDECAR_LOCK = threading.Lock()
+SIDECAR_LOCK = _sidecar_io.LOCK
+
+
+def _sidecar_locked(fn):
+    """Run ``fn`` under the sidecar lock: every handler that reads a
+    sidecar, mutates it and writes it back must hold the lock for the
+    whole cycle, or two concurrent writers drop each other's change."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with SIDECAR_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
 # Serializes _resolve_active_source: it rewrites the shadow + transformed
 # copy and re-points GLYPHS_PATH, and is called from request threads, the
 # debounce timer, the watchdog thread and the job supervisor — two
@@ -828,6 +841,7 @@ def get_instances():
 
 
 @app.route('/api/instances/order', methods=['PUT'])
+@_sidecar_locked
 def reorder_instances():
     """Persist the instance row order by reordering the CSV rows.
 
@@ -857,7 +871,7 @@ def reorder_instances():
         rows.sort(key=lambda r: rank.get((r.get("Instance Name") or "").strip(),
                                          len(rank)))
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -1806,6 +1820,7 @@ def get_text_width():
 
 
 @app.route('/api/instance', methods=['POST'])
+@_sidecar_locked
 def create_instance():
     """Create a new studio-only instance.
 
@@ -1941,7 +1956,7 @@ def create_instance():
             rows.append(new_row)
 
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -1965,6 +1980,7 @@ def create_instance():
 
 
 @app.route('/api/instance/<instance_name>', methods=['PUT'])
+@_sidecar_locked
 def update_instance(instance_name: str):
     """Update instance coordinates.
 
@@ -2117,7 +2133,7 @@ def update_instance(instance_name: str):
                     if updated_count > 1:
                         print(f"Warning: Found {updated_count} duplicate rows for '{instance_name}', updated all", file=sys.stderr)
                     _csv_io.backup_sidecar(csv_path)
-                    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+                    with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
@@ -2173,6 +2189,7 @@ def update_instance(instance_name: str):
 
 
 @app.route('/api/instance/<instance_name>/rename', methods=['PUT'])
+@_sidecar_locked
 def rename_instance(instance_name: str):
     """Rename an instance in the Glyphs file."""
     data = request.get_json(silent=True)
@@ -2240,7 +2257,7 @@ def rename_instance(instance_name: str):
 
                     # Write updated CSV
                     _csv_io.backup_sidecar(csv_path)
-                    with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+                    with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
@@ -2676,7 +2693,7 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
         # Always create the CSV with the header so studio-only instance
         # creation works against an empty designspace (zero source instances).
         fieldnames = ["Instance Name"] + parametric_axes
-        with csv_path.open("w", encoding="utf-8", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for entry in source_instances:
@@ -2776,7 +2793,7 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
             config["fvarInstances"] = {font_filename: fvar_instances}
 
         # Write config
-        with config_path.open("w", encoding="utf-8") as f:
+        with _sidecar_io.atomic_writer(config_path) as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
         print(f"Initialized preview config: {config_path}", file=sys.stderr)
@@ -2922,8 +2939,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     # Create file with empty dict if it doesn't exist
     if not metadata_path.exists():
         try:
-            with metadata_path.open("w", encoding="utf-8") as f:
-                json.dump({}, f, indent=2)
+            _sidecar_io.write_json(metadata_path, {})
         except Exception as e:
             print(f"Error creating axis metadata file: {e}", file=sys.stderr)
             return {}
@@ -2992,6 +3008,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     return metadata
 
 
+@_sidecar_locked
 def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
     """Save axis metadata to JSON file."""
     metadata_path = _get_avar2_metadata_path()
@@ -3000,8 +3017,7 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
 
     try:
         _csv_io.backup_sidecar(metadata_path)
-        with metadata_path.open("w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        _sidecar_io.write_json(metadata_path, metadata)
         return True
     except Exception as e:
         print(f"Error saving axis metadata: {e}", file=sys.stderr)
@@ -3098,6 +3114,7 @@ def _get_glyphs_axis_tags() -> set:
         return set()
 
 
+@_sidecar_locked
 def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, float], csv_path: Path) -> bool:
     """Add a missing instance to CSV with blank traditional axis values."""
     import csv
@@ -3140,7 +3157,7 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
 
         # Write updated CSV (use normalized fieldnames)
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -3918,6 +3935,7 @@ def list_transforms():
 
 
 @app.route('/api/transforms', methods=['PUT'])
+@_sidecar_locked
 def update_transforms():
     """Replace the project's transform set. Body::
 
@@ -6355,6 +6373,7 @@ def register_editing_instance(instance_name: str):
     return jsonify({"success": True, "message": f"Instance '{instance_name}' registered as editing"})
 
 @app.route('/api/instance/<instance_name>', methods=['DELETE'])
+@_sidecar_locked
 def delete_instance(instance_name: str):
     """Delete or demote an instance. Three modes selected by query param:
 
@@ -6430,7 +6449,7 @@ def delete_instance(instance_name: str):
 
                 # Write updated CSV (without deleted instance)
                 _csv_io.backup_sidecar(csv_path)
-                with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+                with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)
@@ -6465,6 +6484,7 @@ def unregister_editing_instance(instance_name: str):
     return jsonify({"success": True, "message": f"Instance '{instance_name}' unregistered from editing"})
 
 @app.route('/api/avar2/axis', methods=['POST'])
+@_sidecar_locked
 def add_avar2_axis():
     """Add a new traditional axis to the CSV."""
     try:
@@ -6546,7 +6566,7 @@ def add_avar2_axis():
         # Write updated CSV (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -6586,6 +6606,7 @@ def add_avar2_axis():
 
 
 @app.route('/api/avar2/axis/<axis_name>', methods=['PUT'])
+@_sidecar_locked
 def update_avar2_axis(axis_name: str):
     """Update axis metadata. Cannot edit axes that exist in Glyphs file (parametric axes)."""
     try:
@@ -6713,7 +6734,7 @@ def update_avar2_axis(axis_name: str):
         # Write CSV back (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -6732,6 +6753,7 @@ def update_avar2_axis(axis_name: str):
 
 
 @app.route('/api/avar2/axis/<axis_name>', methods=['DELETE'])
+@_sidecar_locked
 def delete_avar2_axis(axis_name: str):
     """Delete a mapping axis: drop its CSV column and its metadata
     entry, then rebuild (the axis leaves the compiled fvar). Parametric
@@ -6772,7 +6794,7 @@ def delete_avar2_axis(axis_name: str):
 
         kept = [c for c in fieldnames if c.upper() != axis_name_normalized]
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=kept)
             writer.writeheader()
             writer.writerows([{k: v for k, v in row.items() if k in kept} for row in rows])
@@ -6798,6 +6820,7 @@ def delete_avar2_axis(axis_name: str):
 
 
 @app.route('/api/avar2/mapping/<instance_name>/<axis_name>', methods=['PUT'])
+@_sidecar_locked
 def update_avar2_mapping(instance_name: str, axis_name: str):
     """Update a single cell value in the CSV."""
     try:
@@ -6861,7 +6884,7 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         # Write updated CSV (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
+        with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -7979,6 +8002,7 @@ def main():
         print(f"Preview config: {preview_config}", file=sys.stderr)
 
     # Set up real-time file watching using watchdog
+    @_sidecar_locked
     def sync_csv_with_glyphs():
         """Sync CSV with the source file, skipping instances being edited."""
         global EDITING_INSTANCES
