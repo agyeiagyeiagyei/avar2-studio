@@ -384,3 +384,18 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   → JSON 400 (or JSON 404 where a no-source guard runs first), never
   415/500; non-string names → JSON 400. 8 passed; pre-fix 5 failed
   (stash-checked: three 415s + two 500s).
+
+## T1.5 — dead code deletion
+
+- Verified unused first (grep across src/tests/frontend/scripts):
+  `create_instance_in_glyphs` (the add-to-source route calls
+  `_source_font.add_instance_to_source` directly — the dead function's
+  docstring lied), `schedule_debounced_build` + `_CSV_BUILD_TIMER` +
+  `_CSV_BUILD_TIMER_LOCK` + `_CSV_BUILD_DEBOUNCE_SECONDS`, routes
+  `/api/avar2/mappings` and `/api/avar2/sync-csv` (the latter duplicated
+  the CSV hook), and four `rebuild_in_background` thread wrappers whose
+  entire body was a call to the now-non-blocking `trigger_build()`
+  (inlined as direct calls). The audit's empty `routes/` dir exists only
+  untracked in the main checkout — nothing tracked to delete; noted.
+- Verification [verified]: zero references (grep), py_compile OK,
+  `pytest -k "instance or rename or gate or build"` → 69 passed.

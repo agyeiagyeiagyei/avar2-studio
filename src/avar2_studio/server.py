@@ -630,34 +630,6 @@ def _source_is_glyphs(glyphs_path: Path) -> bool:
     return glyphs_path.suffix.lower() == ".glyphs"
 
 
-def create_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates: Dict[str, float], insert_after_instance_name: Optional[str] = None) -> bool:
-    """Add an instance directly to the source file.
-
-    Note: the UI's Create/Duplicate flow does NOT call this anymore — those
-    paths now write to the CSV only and surface the instance as
-    ``origin: studio``. This helper survives as the implementation behind
-    ``POST /api/instance/<name>/add-to-source``, which promotes a
-    studio-only instance into the source's instance list.
-    """
-    try:
-        font, _fmt = _source_font.load_source(glyphs_path)
-        ok = _source_font.add_instance_to_source(
-            font, glyphs_path, instance_name, coordinates, insert_after_instance_name
-        )
-        if not ok:
-            raise ValueError(f"Instance '{instance_name}' already exists")
-        if _source_is_glyphs(glyphs_path):
-            _force_reload_glyphs_document(glyphs_path, font_object=font)
-        return True
-    except ValueError:
-        raise
-    except Exception as e:
-        print(f"Error creating instance in source file: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return False
-
-
 def rename_instance_in_glyphs(glyphs_path: Path, old_name: str, new_name: str) -> bool:
     """Rename a source-defined instance."""
     try:
@@ -1490,39 +1462,6 @@ def schedule_shadow_rebuild():
         _REBUILD_TIMER.start()
 
 
-_CSV_BUILD_TIMER: Optional[threading.Timer] = None
-_CSV_BUILD_TIMER_LOCK = threading.Lock()
-_CSV_BUILD_DEBOUNCE_SECONDS = 3.0
-
-
-def schedule_debounced_build(delay: float = _CSV_BUILD_DEBOUNCE_SECONDS) -> None:
-    """Coalesce a burst of CSV-level edits (auto-saved instance
-    coordinates, mapping tweaks) into ONE rebuild ``delay`` seconds
-    after the last one. An immediate rebuild per save made every
-    slider settle cost a multi-second build plus a preview reload
-    mid-editing. Folds into /api/health's ``building`` via
-    BACKGROUND_WORK, same as the shadow-regen debounce."""
-    global _CSV_BUILD_TIMER, BACKGROUND_WORK
-
-    def _run():
-        global _CSV_BUILD_TIMER, BACKGROUND_WORK
-        try:
-            trigger_build()
-        finally:
-            with _CSV_BUILD_TIMER_LOCK:
-                _CSV_BUILD_TIMER = None
-                BACKGROUND_WORK -= 1
-
-    with _CSV_BUILD_TIMER_LOCK:
-        if _CSV_BUILD_TIMER is not None:
-            _CSV_BUILD_TIMER.cancel()
-        else:
-            BACKGROUND_WORK += 1
-        _CSV_BUILD_TIMER = threading.Timer(delay, _run)
-        _CSV_BUILD_TIMER.daemon = True
-        _CSV_BUILD_TIMER.start()
-
-
 def trigger_build():
     """Submit a build job, coalescing concurrent requests.
 
@@ -2012,14 +1951,9 @@ def create_instance():
         traceback.print_exc()
         return jsonify({"error": f"Failed to create instance: {e}"}), 500
 
-    # Trigger rebuild in background so the avar2 build picks up the new
-    # studio-only row.
-    def rebuild_in_background():
-        print(f"Instance created, triggering immediate rebuild...", file=sys.stderr)
-        trigger_build()
-
-    rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-    rebuild_thread.start()
+    # Rebuild so the avar2 build picks up the new studio-only row.
+    # (Non-blocking — trigger_build submits to the job queue.)
+    trigger_build()
 
     return jsonify({
         "success": True,
@@ -2220,14 +2154,9 @@ def update_instance(instance_name: str):
         # cost a multi-second build and a preview flash.
         pass
     else:
-        # Explicit source writeback: rebuild immediately, in a
-        # background thread to avoid blocking the response.
-        def rebuild_in_background():
-            print(f"Instance updated, triggering immediate rebuild...", file=sys.stderr)
-            trigger_build()
-
-        rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-        rebuild_thread.start()
+        # Explicit source writeback: rebuild immediately (non-blocking —
+        # trigger_build submits to the job queue).
+        trigger_build()
     
     message_parts = []
     if glyphs_updated:
@@ -2322,17 +2251,8 @@ def rename_instance(instance_name: str):
                     print(f"Warning: Could not update instance name in preview CSV: {e}", file=sys.stderr)
                     import traceback
                     traceback.print_exc()
-            
-            # Trigger rebuild in background thread (same pattern as update_instance)
-            # This avoids blocking the response and file locking issues
-            def rebuild_in_background():
-                print(f"Instance renamed, triggering immediate rebuild...", file=sys.stderr)
-                trigger_build()
-            
-            # Start rebuild in background thread (small delay to ensure file save completes)
-            rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-            rebuild_thread.start()
-            
+            trigger_build()
+
             return jsonify({"success": True, "message": f"Renamed instance '{instance_name}' to '{new_name}'"})
         else:
             return jsonify({"error": f"Failed to rename instance '{instance_name}'"}), 500
@@ -3326,31 +3246,6 @@ def get_avar2_instances():
             "instances": matches,
             "csv_path": str(csv_path),
             "added_instances": added_count
-        })
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/avar2/mappings', methods=['GET'])
-def get_avar2_mappings():
-    """Get all avar2 mappings from CSV."""
-    try:
-        csv_path = _get_avar2_csv_path()
-        if not csv_path or not csv_path.exists():
-            return jsonify({
-                "error": "avar2-mappings.csv not found"
-            }), 404
-        
-        
-        rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
-        return jsonify({
-            "mappings": rows,
-            "fieldnames": fieldnames,
-            "traditional_axes": in_cols,
-            "parametric_axes": out_cols
         })
     except Exception as e:
         import traceback
@@ -6558,16 +6453,8 @@ def delete_instance(instance_name: str):
                 print(f"Warning: Could not remove instance from preview CSV: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
-        
-        # Trigger rebuild in background thread (same pattern as update_instance)
-        def rebuild_in_background():
-            print(f"Instance deleted, triggering immediate rebuild...", file=sys.stderr)
-            trigger_build()
-        
-        # Start rebuild in background thread (small delay to ensure file save completes)
-        rebuild_thread = threading.Thread(target=rebuild_in_background, daemon=True)
-        rebuild_thread.start()
-        
+        trigger_build()
+
         if csv_only_flag:
             msg = f"Deleted instance '{instance_name}' from CSV (source untouched)"
         elif source_only_flag:
@@ -6587,35 +6474,6 @@ def unregister_editing_instance(instance_name: str):
     global EDITING_INSTANCES
     EDITING_INSTANCES.discard(instance_name)
     return jsonify({"success": True, "message": f"Instance '{instance_name}' unregistered from editing"})
-
-@app.route('/api/avar2/sync-csv', methods=['POST'])
-def sync_csv():
-    """Update CSV parametric values to match source file."""
-    try:
-        csv_path = _get_avar2_csv_path()
-        if not csv_path or not csv_path.exists():
-            return jsonify({"error": "avar2-mappings.csv not found"}), 404
-
-        ok = _csv_io.update_csv_from_glyphs(
-            GLYPHS_PATH,
-            csv_path,
-            skip_instances=set(EDITING_INSTANCES),
-            exclude_axes=_non_mapping_axis_tags(),
-        )
-        if not ok:
-            return jsonify({"error": "Failed to sync CSV"}), 500
-        _update_csv_modification_time(csv_path)   # ours, not external
-
-        return jsonify({
-            "success": True,
-            "csv_path": str(csv_path),
-            "skipped_instances": list(EDITING_INSTANCES),
-        })
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/avar2/axis', methods=['POST'])
 def add_avar2_axis():
