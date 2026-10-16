@@ -907,3 +907,21 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - T2.15 lint follow-up: the `studio_client` fixture moved from
   `test_open_editor.py` to `conftest.py` so other route tests can use it
   without an F811 import; ruff clean.
+
+## T2.4 — assets out of Python strings
+
+- `src/avar2_studio/fontra/shim.js` (the 420-line Fontra shim, written
+  from the evaluated string so escapes are preserved), `fontra/focus.css`
+  (the focus stylesheet as a `string.Template` with `$panel_rules` /
+  `$chrome_rules`), `glyphsapp/document_modified.applescript` and
+  `glyphsapp/reload_document.applescript` (`$abs_path`). Loaded through
+  `_read_asset()` (`importlib.resources`, cached); `_FONTRA_STUDIO_SHIM_JS`
+  keeps its name. server.py: 8,180 → 7,843 lines.
+- Guard [verified]: goldens captured from the PRE-move code
+  (`tests/fixtures/fontra_rewrite_{input,studio,plain}.html`) and
+  `tests/test_fontra_assets.py` asserts `_rewrite_html_paths` output is
+  byte-identical for a studio session and for none; assets exist in the
+  package; the AppleScript templates substitute cleanly. Wheel built from
+  the worktree contains all four files. Full suite **505 passed**; ruff
+  clean; cargo oracles after the T2.9 merge: 17 binaries, 21 passed,
+  0 failed, 1 ignored.

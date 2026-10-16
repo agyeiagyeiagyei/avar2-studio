@@ -1,0 +1,484 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fontra/css/x.css"><script type="importmap">{"imports": {"fontra/": "/fontra/"}}</script><script src="/fontra/js/y.js"></script>
+<style id="avar2-studio-fontra-focus">
+  /* Hide the sidebar panels that aren't useful for a brace-layer
+     edit. avar2-studio seeds and manages the control-axis layers
+     and navigates Fontra to the exact layer via the ↗ button.
+
+     NOTE: the accordion SECTIONS inside designspace-navigation (the
+     #font-axes / #glyph-sources items) live in a shadow DOM that
+     injected global CSS can't reach — so hiding happens at the
+     light-DOM container level (here) or via the shim script. */
+  .sidebar-tab[data-sidebar-name="text-entry"],
+  .sidebar-content[data-sidebar-name="text-entry"],
+  .sidebar-tab[data-sidebar-name="designspace-navigation"],
+  .sidebar-content[data-sidebar-name="designspace-navigation"],
+  .sidebar-tab[data-sidebar-name="selection-info"],
+  .sidebar-content[data-sidebar-name="selection-info"],
+  .sidebar-tab[data-sidebar-name="reference-font"],
+  .sidebar-content[data-sidebar-name="reference-font"],
+  .sidebar-tab[data-sidebar-name="glyph-search"],
+  .sidebar-content[data-sidebar-name="glyph-search"],
+  .sidebar-tab[data-sidebar-name="selection-transformation"],
+  .sidebar-content[data-sidebar-name="selection-transformation"],
+  .sidebar-tab[data-sidebar-name="glyph-note"],
+  .sidebar-content[data-sidebar-name="glyph-note"],
+  .sidebar-tab[data-sidebar-name="related-glyphs"],
+  .sidebar-content[data-sidebar-name="related-glyphs"],
+  .sidebar-tab[data-sidebar-name="characters-glyphs"],
+  .sidebar-content[data-sidebar-name="characters-glyphs"] {
+    display: none !important;
+  }
+
+  /* Top-level menu bar (File / Edit / View / Font / Glyph / Help).
+     Not needed — the studio drives the editor. The edit tools live
+     in a floating #edit-tools overlay, not a sidebar, so they
+     survive. */
+  .top-bar-container,
+  .sidebar-container.left,
+  .sidebar-container.right,
+  menu-bar {
+    display: none !important;
+  }
+
+  /* Edit tools — hide drawing tools, knife, shapes. Keep:
+     pointer-tools (selection + drag), power-ruler-tool
+     (measure), metrics-tool (sidebearings — kerning sub-tool
+     stays visible inside the group), hand-tool (pan), and the
+     entire zoom-tools group. Structural edits would also desync
+     multi-source editing, so the pen stays hidden in studio
+     sessions on purpose. */
+  #edit-tools > .tool-button[data-tool="pen-tool"],
+  #edit-tools > .tool-button[data-tool="pen-tool-cubic"],
+  #edit-tools > .tool-button[data-tool="pen-tool-quad"],
+  #edit-tools > .tool-button[data-tool="knife-tool"],
+  #edit-tools > .tool-button[data-tool="shape-tool"],
+  #edit-tools > .tool-button[data-tool="shape-tool-rectangle"],
+  #edit-tools > .tool-button[data-tool="shape-tool-ellipse"],
+  .tool-button.multi-tool[data-tool="pen-tool"],
+  .tool-button.multi-tool[data-tool="shape-tool"] {
+    display: none !important;
+  }
+</style>
+
+<script id="avar2-studio-fontra-shim">
+(function () {
+  'use strict';
+  fetch('/api/fontra-shim-config').then(r => r.json()).then((cfg) => {
+    if (!cfg || !cfg.studio) return;
+    const keys = [cfg.axis_name, cfg.tag].filter(Boolean);
+    // Case-insensitive and regex-escaped: labels print the AUTHORED tag
+    // case, and a tag drift on either side must never silently unmatch.
+    const tagEsc = String(cfg.tag).replace(/[.*+?^${}()|[\]\]/g, '\$&');
+    const labelRe = new RegExp('(^|[\\s,])' + tagEsc + '\\s+-?[\\d.]+', 'i');
+    // The selected glyph's raw sources — their SPARSE locations keep
+    // the authored pins verbatim, unlike the panel items' dense (all
+    // axes, defaults filled) or display (defaults stripped) locations.
+    const glyphSources = () => {
+      const ec = window.editorController;
+      const pg = ec && ec.sceneController && ec.sceneController.sceneModel
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph();
+      return (pg && pg.varGlyph && pg.varGlyph.glyph && pg.varGlyph.glyph.sources) || null;
+    };
+    const isStudioItem = (item, sources) => {
+      if (!item || item.isFontSource || item.isDefaultSource) return false;
+      // A studio brace PINS this control axis explicitly in its own
+      // source location — even when the pinned value IS the axis
+      // default (the designer may deliberately rest the axis on the
+      // corrected end, ymod default 100). Masters never carry the key.
+      // The old value!==default test on the dense location went blind
+      // the day the default moved onto the braces' own value: masters
+      // and braces all read "at default" and every row got hidden.
+      const src = (sources && typeof item.sourceIndex === 'number')
+        ? sources[item.sourceIndex] : null;
+      const sloc = (src && src.location) || null;
+      if (sloc) {
+        for (const k of keys) { if (k in sloc) return true; }
+      }
+      const dl = item.denseLocation || {};
+      for (const k of keys) {
+        if (k in dl) return Number(dl[k]) !== Number(cfg.axis_default);
+      }
+      return labelRe.test(String(item.name || ''));
+    };
+    let tabOpened = false, panelTrimmed = false, sortSet = false;
+    const sweep = () => {
+      const host = document.querySelector(
+        '.sidebar-content[data-sidebar-name="designspace-navigation"]');
+      const panel = host && host.children[0];
+      if (!panel || !panel.sourcesList) return;
+      if (!sortSet) {
+        // Alphabetical by source name — studio layers are labelled by
+        // master/instance name, so the list reads A→Z by style. Retry
+        // until the editor's settings object exists: the panel's DOM can
+        // be queryable before start.js finishes wiring the controller.
+        const settings = window.editorController
+          && window.editorController.sceneController
+          && window.editorController.sceneController.applicationSettings;
+        if (settings) {
+          if (settings.glyphSourcesSortOptions !== 'by-source-name') {
+            settings.glyphSourcesSortOptions = 'by-source-name';
+          }
+          if (typeof panel._updateSources === 'function') panel._updateSources();
+          sortSet = true;
+        }
+      }
+      if (!tabOpened) {
+        const tab = document.querySelector(
+          '.sidebar-tab[data-sidebar-name="designspace-navigation"]');
+        if (tab && !tab.classList.contains('selected')) tab.click();
+        tabOpened = true;
+      }
+      if (!panelTrimmed && panel.shadowRoot) {
+        // The accordion items live TWO shadow roots deep —
+        // panel-designspace-navigation#shadow > ui-accordion#shadow — so a
+        // style appended to the panel's own root never reaches them (CSS does
+        // not cross a shadow boundary). Verified against a live editor: the
+        // ids resolve only inside the inner ui-accordion.
+        const rules =
+          '#font-axes-accordion-item,#glyph-axes-accordion-item,' +
+          '#glyph-layers-accordion-item,#sources-list-add-remove-buttons' +
+          '{display:none !important;}';
+        const roots = [panel.shadowRoot];
+        const inner = panel.shadowRoot.querySelector('ui-accordion');
+        if (inner && inner.shadowRoot) roots.push(inner.shadowRoot);
+        for (const root of roots) {
+          const st = document.createElement('style');
+          st.textContent = rules;
+          root.appendChild(st);
+        }
+        // Only claim success once the inner root — the one that matters — was
+        // actually reachable; otherwise retry on the next sweep, since the
+        // accordion may not have upgraded yet.
+        panelTrimmed = roots.length > 1;
+      }
+      const list = panel.sourcesList;
+      const items = list.items || [];
+      const sources = glyphSources();
+      const anyStudio = items.some((it) => isStudioItem(it, sources));
+      const rows = list.shadowRoot
+        ? list.shadowRoot.querySelectorAll('.contents > .row') : [];
+      rows.forEach((row) => {
+        const item = items[Number(row.dataset.rowIndex)];
+        if (!item) return;
+        const studio = isStudioItem(item, sources);
+        row.style.display = (anyStudio && !studio) ? 'none' : '';
+        if (!anyStudio) return;
+        if (!studio && item.editing) {
+          // Hard rule: masters and source layers are never batch-edit
+          // targets — Fontra's own init can put the selected source
+          // here, so keep stripping it, not just once.
+          item.editing = false;
+        }
+      });
+    };
+    setInterval(sweep, 500);
+
+    // REFERENCE MEASUREMENTS.
+    //
+    // Correcting a glyph's horizontals means matching it to the glyphs that
+    // already read right — E's bar to H's, at the same designspace point.
+    // Fontra's ruler can measure what you have drawn, but it cannot tell you
+    // what to aim at, because the target lives in a different glyph. This HUD
+    // supplies those numbers: every figure is measured on the built font at
+    // THIS layer's exact coordinates.
+    //
+    // The numbers live in a plain DOM panel (no Fontra internals to break);
+    // the comparison overlay rides Fontra's visualization-layer registry so it
+    // draws in the drawing editor itself, and degrades to nothing if that API
+    // ever moves. The edited glyph's own row is its PRE-EDIT state — the server
+    // measures the last build, not what is on the canvas right now.
+    if (!cfg.glyph) return;
+
+    // Scanline stroke measurement, matching the server's rule so the live and
+    // reference numbers are comparable: a horizontal cut low in the letter
+    // reads its vertical stems, a vertical cut mid-advance reads its
+    // horizontal bars, and the THINNEST run of each is the stroke weight.
+    const measure = (contours, advance) => {
+      const runs = (coord, vertical) => {
+        const vals = [];
+        for (const c of contours) {
+          for (let i = 0; i < c.length; i++) {
+            const P = c[i], Q = c[(i + 1) % c.length];
+            const a1 = vertical ? P[0] : P[1], b1 = vertical ? P[1] : P[0];
+            const a2 = vertical ? Q[0] : Q[1], b2 = vertical ? Q[1] : Q[0];
+            if ((a1 <= coord && coord < a2) || (a2 <= coord && coord < a1)) {
+              vals.push(b1 + (coord - a1) * (b2 - b1) / (a2 - a1));
+            }
+          }
+        }
+        vals.sort((x, y) => x - y);
+        const out = [];
+        for (let i = 0; i + 1 < vals.length; i += 2) {
+          const w = vals[i + 1] - vals[i];
+          if (w > 5) out.push([w, vals[i], vals[i + 1]]);
+        }
+        return out;
+      };
+      const ys = [];
+      for (const c of contours) for (const pt of c) ys.push(pt[1]);
+      if (!ys.length) return {};
+      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      // Scan coordinates + the winning (thinnest) run extents ride along so
+      // the overlay can draw EXACTLY what produced each number.
+      const scanY = yMin + (yMax - yMin) * 0.25;
+      const scanX = advance * 0.5;
+      const stems = runs(scanY, false);
+      const bars = runs(scanX, true);
+      const r = { scanY: scanY, scanX: scanX };
+      if (stems.length) {
+        const m = stems.reduce((a, b) => (b[0] < a[0] ? b : a));
+        r.stem = m[0]; r.stemRun = [m[1], m[2]];
+      }
+      if (bars.length) {
+        const m = bars.reduce((a, b) => (b[0] < a[0] ? b : a));
+        r.bar = m[0]; r.barRun = [m[1], m[2]];
+      }
+      if (r.stem && r.bar) r.contrast = r.stem / r.bar;
+      return r;
+    };
+
+    // Fontra's live path for the glyph being edited: a flat coordinate array
+    // plus contourInfo endpoints. Reading it is what makes the figure track
+    // the points as they move, rather than reporting the last build.
+    const livePath = () => {
+      const ec = window.editorController;
+      const pg = ec && ec.sceneController && ec.sceneController.sceneModel
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph
+        && ec.sceneController.sceneModel.getSelectedPositionedGlyph();
+      if (!pg || !pg.glyph || !pg.glyph.path) return null;
+      const path = pg.glyph.path;
+      const co = path.coordinates, info = path.contourInfo;
+      if (!co || !info) return null;
+      const contours = [];
+      let startPt = 0;
+      for (const ci of info) {
+        const pts = [];
+        for (let i = startPt; i <= ci.endPoint; i++) pts.push([co[i * 2], co[i * 2 + 1]]);
+        if (pts.length > 2) contours.push(pts);
+        startPt = ci.endPoint + 1;
+      }
+      return { name: pg.glyph.name, contours, advance: pg.glyph.xAdvance };
+    };
+
+    // The location being edited RIGHT NOW: Fontra's scene follows the
+    // selected source/layer (axis-NAME-keyed, source space). This is what
+    // the reference must be measured at — a glyph can carry several layers
+    // on the axis, and the sidecar's first one is not necessarily the one
+    // on the canvas.
+    const editLocation = () => {
+      const ec = window.editorController;
+      const ss = ec && ec.sceneController
+        && ((ec.sceneController.sceneModel && ec.sceneController.sceneModel.sceneSettings)
+            || ec.sceneController.sceneSettings);
+      const loc = ss && ss.fontLocationSourceMapped;
+      if (!loc || typeof loc !== 'object') return null;
+      const out = {};
+      for (const k of Object.keys(loc)) {
+        const v = Number(loc[k]);
+        if (isFinite(v)) out[k] = v;
+      }
+      return Object.keys(out).length ? out : null;
+    };
+
+    const num = (v) => (v === undefined || v === null) ? '–' : (Math.round(v * 10) / 10).toFixed(1);
+    let refData = null, refGlyph = '', lastLive = null;
+
+    const box = document.createElement('div');
+    box.id = 'avar2-studio-metrics';
+    box.innerHTML =
+      '<div class="hd"></div>'
+      + '<table><tr><th></th><th>bar</th><th>stem</th><th>s/b</th></tr>'
+      + '<tr class="live"><td class="g"></td><td class="b"></td><td class="s"></td><td class="c"></td></tr>'
+      + '<tr class="ref"><td class="g"><input id="avar2-ref-glyph" value="" placeholder="H" maxlength="12" spellcheck="false"></td>'
+      + '<td class="b"></td><td class="s"></td><td class="c"></td></tr></table>'
+      + '<div class="ft">live vs reference, measured at this location. '
+      + 'Type a glyph name to compare — its outline is drawn in the editor '
+      + 'under the glyph (scan cuts marked). Clear the field to hide it.</div>';
+    const st = document.createElement('style');
+    st.textContent =
+      '#avar2-studio-metrics{position:fixed;right:12px;bottom:12px;z-index:99999;'
+      + 'background:rgba(28,28,30,.94);color:#eee;font:11px/1.45 ui-monospace,monospace;'
+      + 'padding:8px 10px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.4);min-width:200px}'
+      + '#avar2-studio-metrics .hd{color:#9a9aa0;margin-bottom:5px;font-size:10px}'
+      + '#avar2-studio-metrics table{border-collapse:collapse;width:100%}'
+      + '#avar2-studio-metrics th{color:#8a8a90;font-weight:400;text-align:right;'
+      + 'padding:0 0 2px 10px;font-size:10px}'
+      + '#avar2-studio-metrics td{text-align:right;padding:1px 0 1px 10px}'
+      + '#avar2-studio-metrics td.g{text-align:left;padding-left:0;color:#9a9aa0}'
+      + '#avar2-studio-metrics tr.live td{color:#ffd479}'
+      + '#avar2-studio-metrics input{width:5.5em;background:#3a3a3e;border:1px solid #55555a;'
+      + 'color:#eee;font:inherit;border-radius:3px;padding:0 3px}'
+      + '#avar2-studio-metrics .ft{color:#7a7a80;margin-top:6px;font-size:9.5px;'
+      + 'max-width:215px;white-space:normal;line-height:1.35}';
+    document.head.appendChild(st);
+    document.body.appendChild(box);
+
+    const cell = (sel, v) => { const e = box.querySelector(sel); if (e) e.textContent = v; };
+    // CANVAS OVERLAY. The reference outline is drawn in the drawing editor
+    // itself, under the glyph being edited: editorController
+    // .visualizationLayers.definitions IS Fontra's live registry array, so a
+    // definition spliced in at runtime (zIndex-ordered, exactly what
+    // registerVisualizationLayerDefinition does) paints on every frame and
+    // pans/zooms with the canvas. Scan cuts are marked on both shapes —
+    // gray for the reference, amber for the live glyph — so the table's
+    // numbers are visible as geometry, in place, at drawing scale.
+    const LAYER_ID = 'avar2.studio.reference';
+    const overlay = { contours: null, bbox: null, refCuts: null, liveCuts: null, sig: null };
+    let layerInstalled = false;
+    const repaint = () => {
+      const ec = window.editorController;
+      if (ec && ec.canvasController) ec.canvasController.requestUpdate();
+    };
+    const drawOverlay = (context, positionedGlyph, parameters) => {
+      const contours = overlay.contours;
+      if (!contours) return;
+      const path = new Path2D();
+      for (const c of contours) {
+        path.moveTo(c[0][0], c[0][1]);
+        for (let i = 1; i < c.length; i++) path.lineTo(c[i][0], c[i][1]);
+        path.closePath();
+      }
+      context.fillStyle = parameters.fillColor;
+      context.fill(path, 'nonzero');
+      const line = (x1, y1, x2, y2, color, width, dashed) => {
+        context.strokeStyle = color;
+        context.lineWidth = width;
+        context.setLineDash(dashed ? [parameters.dash * 2, parameters.dash] : []);
+        context.beginPath();
+        context.moveTo(x1, y1);
+        context.lineTo(x2, y2);
+        context.stroke();
+      };
+      const bb = overlay.bbox;
+      const cuts = (m, color) => {
+        if (!m || !bb) return;
+        if (m.scanY !== undefined) line(bb.x0, m.scanY, bb.x1, m.scanY, color, parameters.hair, true);
+        if (m.scanX !== undefined) line(m.scanX, bb.y0, m.scanX, bb.y1, color, parameters.hair, true);
+        if (m.stemRun) line(m.stemRun[0], m.scanY, m.stemRun[1], m.scanY, color, parameters.bold, false);
+        if (m.barRun) line(m.scanX, m.barRun[0], m.scanX, m.barRun[1], color, parameters.bold, false);
+      };
+      cuts(overlay.refCuts, parameters.refColor);
+      cuts(overlay.liveCuts, parameters.liveColor);
+    };
+    const installLayer = () => {
+      if (layerInstalled) return true;
+      const ec = window.editorController;
+      const vl = ec && ec.visualizationLayers;
+      if (!vl || !Array.isArray(vl.definitions)) return false;
+      const def = {
+        identifier: LAYER_ID,
+        name: 'avar2 reference overlay',
+        selectionFunc: (visContext) => {
+          if (!overlay.contours) return [];
+          const pg = visContext.model.getSelectedPositionedGlyph
+            && visContext.model.getSelectedPositionedGlyph();
+          return pg ? [pg] : [];
+        },
+        zIndex: 100,
+        // screenParameters are divided by the magnification before draw, so
+        // these are screen pixels: constant weight at any zoom.
+        screenParameters: { hair: 1, bold: 4, dash: 7 },
+        colors: { fillColor: 'rgba(128,128,136,0.30)', refColor: 'rgba(96,96,104,0.85)',
+                  liveColor: 'rgba(200,128,0,0.9)' },
+        colorsDarkMode: { fillColor: 'rgba(170,170,180,0.28)', refColor: 'rgba(190,190,200,0.85)',
+                          liveColor: 'rgba(255,212,121,0.9)' },
+        draw: drawOverlay,
+      };
+      let idx = 0;
+      while (idx < vl.definitions.length && vl.definitions[idx].zIndex <= def.zIndex) idx++;
+      vl.definitions.splice(idx, 0, def);
+      vl.toggle(LAYER_ID, true);
+      layerInstalled = true;
+      return true;
+    };
+    const syncOverlay = () => {
+      installLayer();
+      const refM = refGlyph && refData && refData.metrics && refData.metrics[refGlyph];
+      if (!refM || !refM.contours || !refM.contours.length) {
+        if (overlay.contours) { overlay.contours = null; overlay.sig = null; repaint(); }
+        return;
+      }
+      const pts = [];
+      for (const c of refM.contours) for (const pt of c) pts.push(pt);
+      if (lastLive) for (const c of lastLive.contours) for (const pt of c) pts.push(pt);
+      const xs = pts.map((pt) => pt[0]), ysv = pts.map((pt) => pt[1]);
+      const bb = { x0: Math.min(...xs), x1: Math.max(...xs),
+                   y0: Math.min(...ysv), y1: Math.max(...ysv) };
+      const refCuts = measure(refM.contours, refM.advance || 0);
+      const liveCuts = lastLive ? measure(lastLive.contours, lastLive.advance) : null;
+      const sig = JSON.stringify([refGlyph, bb, refCuts, liveCuts]);
+      if (sig !== overlay.sig) {
+        overlay.bbox = bb; overlay.refCuts = refCuts; overlay.liveCuts = liveCuts;
+        overlay.contours = refM.contours; overlay.sig = sig;
+        repaint();
+      }
+    };
+    const paintRef = () => {
+      const m = refData && refData.metrics && refData.metrics[refGlyph];
+      cell('tr.ref td.b', m ? num(m.bar) : '–');
+      cell('tr.ref td.s', m ? num(m.stem) : '–');
+      cell('tr.ref td.c', m && m.contrast ? m.contrast.toFixed(2) : '–');
+    };
+    let fetchedLocKey = null;
+    const loadRef = (g) => {
+      refGlyph = g;
+      if (!g) {
+        // Blank is the OFF state: no reference row, no overlay.
+        refData = null;
+        fetchedLocKey = null;
+        cell('.hd', '');
+        paintRef();
+        syncOverlay();
+        return;
+      }
+      const loc = editLocation();
+      fetchedLocKey = loc ? JSON.stringify(loc) : null;
+      fetch('/api/control-axes/' + encodeURIComponent(cfg.tag)
+            + '/reference-metrics?glyph=' + encodeURIComponent(cfg.glyph)
+            + '&refs=' + encodeURIComponent(g)
+            + (loc ? '&location=' + encodeURIComponent(JSON.stringify(loc)) : ''))
+        .then(r => r.ok ? r.json() : null)
+        .then((m) => {
+          if (!m) return;
+          refData = m;
+          const loc = Object.entries(m.location || {})
+            .filter(([k]) => k.toLowerCase() !== String(cfg.tag || '').toLowerCase())
+            .map(([k, v]) => k + ' ' + v).join(' · ');
+          cell('.hd', 'at ' + loc);
+          paintRef();
+          syncOverlay();
+        }).catch(() => {});
+    };
+    const input = box.querySelector('#avar2-ref-glyph');
+    input.addEventListener('change', () => loadRef(input.value.trim()));
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+    });
+    paintRef();
+
+    setInterval(() => {
+      // Reference follows the canvas: switching layers (or nudging the
+      // location) re-measures at the NEW location.
+      if (refGlyph) {
+        const loc = editLocation();
+        const key = loc ? JSON.stringify(loc) : null;
+        if (key && key !== fetchedLocKey) loadRef(refGlyph);
+      }
+      const lp = livePath();
+      if (lp) {
+        lastLive = lp;
+        const m = measure(lp.contours, lp.advance);
+        cell('tr.live td.g', lp.name);
+        cell('tr.live td.b', num(m.bar));
+        cell('tr.live td.s', num(m.stem));
+        cell('tr.live td.c', m.contrast ? m.contrast.toFixed(2) : '–');
+      }
+      syncOverlay();
+    }, 400);
+
+  }).catch((e) => console.warn('avar2-studio shim:', e));
+})();
+</script>
+</head><body><p>hi</p></body></html>
