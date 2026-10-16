@@ -1546,6 +1546,17 @@ def build_status():
     return jsonify(JOBS.status())
 
 
+@app.route('/api/build/<job_id>', methods=['GET'])
+def build_job_status(job_id):
+    """One job's state by id (queued / running / finished + outcome). The
+    export poll keys on this: ``status().last`` names only the newest
+    finished job, so any job finishing inside a poll window went missing."""
+    status = JOBS.job_status(job_id)
+    if status is None:
+        return jsonify({"error": "no such job"}), 404
+    return jsonify(status)
+
+
 @app.route('/api/build/<job_id>', methods=['DELETE'])
 def cancel_build(job_id):
     """Cancel a queued or running job (the worker's process group is

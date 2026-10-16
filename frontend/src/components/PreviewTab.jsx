@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PreviewTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
-import { isStaticMode } from '../static-api';
 import { registerPreviewFont } from '../fontLoad';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -192,7 +191,7 @@ function PreviewTab({
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) return;
     registerPreviewFont(vfFamilyId, fontUrl,
-                        isStaticMode() ? null : api.getWoff2PreviewUrl())
+                        api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
       .catch(err => console.error('Preview: failed to load font:', err));
   }, [fontUrl, fontLoaded, vfFamilyId]);
 
@@ -236,11 +235,19 @@ function PreviewTab({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  // The in-flight export's AbortController: Cancel aborts it (the poll
+  // stops and the queued job is dropped server-side).
+  const exportAbortRef = useRef(null);
+  const cancelExport = () => {
+    if (exportAbortRef.current) exportAbortRef.current.abort();
+    setShowExportModal(false);
+  };
 
   // File sizes come from the build queue's export status (TTF exact; WOFF2
   // exact once the background compression has caught up, else an estimate).
+  // Only where WOFF2 exists (the format row below is gated the same way).
   useEffect(() => {
-    if (!showExportModal || isStaticMode()) return;
+    if (!showExportModal || !api.capabilities.woff2) return;
     let live = true;
     api.getBuildStatus()
       .then((st) => { if (live) setExportSizes(st.sizes || null); })
@@ -282,6 +289,9 @@ function PreviewTab({
       setShowExportModal(false);
     };
     const plainDownload = exportHidden.size === 0 && !exportUseDefault;
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    const { signal } = controller;
     setExporting(true);
     setExportError(null);
     try {
@@ -293,7 +303,7 @@ function PreviewTab({
         // — observed as "nothing happens", then the file popping up
         // during the next hard refresh. The fetch keeps the button in a
         // visible busy state and saves via a blob the moment bytes land.
-        const resp = await fetch(fontUrl);
+        const resp = await fetch(fontUrl, { signal });
         if (!resp.ok) throw new Error(`font fetch failed (${resp.status})`);
         saveBlob(await resp.blob());
         return;
@@ -301,22 +311,26 @@ function PreviewTab({
       if (plainDownload && exportFormat === 'woff2' && exportSizes && exportSizes.woff2_exact) {
         // The background compression cache is current: download it
         // directly, no export job.
-        const resp = await fetch(api.getWoff2DownloadUrl());
+        const resp = await fetch(api.getWoff2DownloadUrl(), { signal });
         if (!resp.ok) throw new Error(`woff2 download failed (${resp.status})`);
         saveBlob(await resp.blob());
         return;
       }
       // Everything else is a queued export job on the build worker —
-      // api.exportFont polls the queue and resolves with the artifact.
+      // api.exportFont polls that job and resolves with the artifact.
       const blob = await api.exportFont({
         hidden_axes: [...exportHidden],
         default_location: exportUseDefault ? currentUserLocation : null,
         format: exportFormat,
-      });
+      }, { signal });
       saveBlob(blob);
     } catch (err) {
-      setExportError(err.message || 'Export failed');
+      // An AbortError is the user's own Cancel — nothing to report.
+      if (!err || err.name !== 'AbortError') {
+        setExportError(err.message || 'Export failed');
+      }
     } finally {
+      if (exportAbortRef.current === controller) exportAbortRef.current = null;
       setExporting(false);
     }
   };
@@ -526,7 +540,7 @@ function PreviewTab({
                 {familyName || vfFamilyId || 'Aa'}
               </div>
               <div className="preview-export-options">
-                {!isStaticMode() && (
+                {api.capabilities.woff2 && (
                   <div className="preview-export-row">
                     <span
                       className="preview-export-label"
@@ -608,8 +622,8 @@ function PreviewTab({
                 <button
                   type="button"
                   className="btn btn-cancel"
-                  onClick={() => setShowExportModal(false)}
-                  disabled={exporting}
+                  onClick={cancelExport}
+                  title={exporting ? 'Stop this export and close' : undefined}
                 >
                   Cancel
                 </button>

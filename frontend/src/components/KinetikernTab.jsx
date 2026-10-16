@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import './KinetikernTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 
 // Kinetikern — per-instance spacing from Kinetikern2's engine (Mirko
 // Velimirovic, MIT). Pick an instance from the dropdown the way the plugin
@@ -30,7 +31,8 @@ function coordOf(instance, tag) {
   return v === undefined || v === null || v === '' ? undefined : Number(v);
 }
 
-function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
+function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
+  const { building } = useBuildStatus();
   const { userAxes, controlAxes, transformAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];

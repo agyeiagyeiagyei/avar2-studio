@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 import { api } from '../api';
-import { isStaticMode } from '../static-api';
 import { registerPreviewFont } from '../fontLoad';
 
 function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
@@ -24,7 +23,7 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
     let retryTimer = null;
     const attempt = (triesLeft) => {
       registerPreviewFont(vfFamilyId, fontUrl,
-                          isStaticMode() ? null : api.getWoff2PreviewUrl())
+                          api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
         .then(() => {
           if (!cancelled) setFontReady(true);
         })

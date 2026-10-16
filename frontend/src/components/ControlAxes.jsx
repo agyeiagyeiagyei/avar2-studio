@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import './ControlAxes.css';
 import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 
 /**
  * SECONDARY PARAMETRIC AXES panel.
@@ -31,7 +32,8 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, onReseed, allAxes, allMasters, allInstances, vfFamilyId, fontLoaded, building = false, glyphChars = {} }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, onReseed, allAxes, allMasters, allInstances, vfFamilyId, fontLoaded, glyphChars = {} }) {
+  const { building } = useBuildStatus();
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
