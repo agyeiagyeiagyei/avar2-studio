@@ -427,3 +427,16 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - Test harnesses that stub `load_source` now also stub
   `load_source_cached` (test_instance_csv_schema.py).
 - Verification [verified]: full suite 465 passed, 8 skipped.
+
+## T1.8 — _declared_axis_ranges once per input version
+
+- The three per-build call sites (`_builder_env` shim env,
+  `_build_in_process`'s default-row detection + fvar fix) span two build
+  paths and an export path, so a parameter thread-through would have
+  touched three signatures. Instead: single-entry memo keyed on
+  (metadata path, mtime, size; source path, mtime, size; sorted
+  overrides) — one computation per build per state, no staleness
+  (any edit re-keys), no signature changes. Callers get a fresh copy.
+- Test [verified]: tests/test_declared_ranges_cache.py — one computation
+  across repeat calls, recompute on metadata touch, overrides key
+  separately, callers get copies.

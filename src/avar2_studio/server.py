@@ -6930,6 +6930,10 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
     put the default where the designer said it is. Shared by the subprocess
     shim (via env) and the in-process build (directly).
     """
+    key = _declared_ranges_cache_key(default_overrides)
+    cached = _DECLARED_RANGES_CACHE.get(key)
+    if cached is not None:
+        return {t: list(v) for t, v in cached.items()}
     try:
         _meta = _load_axis_metadata() or {}
     except Exception:  # noqa: BLE001
@@ -6955,7 +6959,28 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
             if _tag in _ranges:
                 _lo, _, _hi = _ranges[_tag]
                 _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
+    _DECLARED_RANGES_CACHE.clear()
+    _DECLARED_RANGES_CACHE[key] = _ranges
     return _ranges
+
+
+# One computation per input version: a single build consults
+# _declared_axis_ranges from three sites (the shim env via _builder_env,
+# the default-row detection and the fvar-axes fix in _build_in_process),
+# each of which used to re-read axis-metadata.json + re-parse the source.
+_DECLARED_RANGES_CACHE: Dict[tuple, Dict[str, list]] = {}
+
+
+def _declared_ranges_cache_key(default_overrides) -> tuple:
+    parts = []
+    for p in (_get_avar2_metadata_path(), GLYPHS_PATH):
+        try:
+            st = Path(p).stat()
+            parts.append((str(p), st.st_mtime, st.st_size))
+        except (OSError, TypeError):
+            parts.append(None)
+    ov = tuple(sorted((str(k), float(v)) for k, v in (default_overrides or {}).items()))
+    return (tuple(parts), ov)
 
 
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
