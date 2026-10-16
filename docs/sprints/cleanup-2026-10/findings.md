@@ -132,6 +132,87 @@ dy = +250.0 (the computed `target` layer was skipped, as designed).
 frontend → rust/tests/process → docs). Hand off at the end of Tier 1 or
 every ~15 commits, whichever comes first.
 
+## Round 3 — hand-off `9e4ca1d` (HEAD `ac69887`), Tier 1 — 2026-10-16
+
+**Verification environment.** Brand-new clone + venv at `9e4ca1d`
+(resolves glyphsLib 6.16.0 / fontc 1.0.0 / ruff 0.17.1): install OK;
+`pytest` **482 passed, 1 failed** (see T1.8); `ruff check src tests` →
+"All checks passed"; `doctor` lists the two new optional checks (absent →
+hint; with `$AVAR2_SPAC_INJECT`/`$AVAR2_KK2_DYLIB` → paths); CLI
+`build --csv` and server `--build-dir` exit **2** with the message;
+frontend `npm ci` → lint **0 errors** (43 warnings baseline), typecheck
+clean, `test:unit` all passed, vite build OK. Rust: with a warm `target/`
+all 14 oracle test binaries compile; `round_corners_oracle` (in-repo input)
+passes; `correction_oracle` is `#[ignore]`d with a reason; python derived
+from `CARGO_MANIFEST_DIR`. New/updated tests against the pre-fix source
+(`197d7a4`): **16 failures across T1.1/3/4/6/8/9/10/12/13/31**, 39 passed
+on the fixed source. The ruff sweep was reviewed for removed side effects:
+every removed call-bearing line is a deleted dead function, a renamed
+variable, a split statement, or a dead computation (the `opsz_values`
+block never applied its result; the dropped `preview` variable was
+unused) — none removes behaviour. Live smoke (Crispy copy, 5071): boot
+build 1 job; mappings exact; WOFF2 `wOF2`; 30 instances / 9 YMOD / no
+lowercase keys; `open-editor` on `YMOD` answers `"tag": "YMOD"`; **one
+layer delta → exactly 1 build, 0 mid-build lines, 1 resolve pass** (the
+audit's M2 double build is indeed dead).
+
+| ID | Verdict | Evidence / what to change |
+|---|---|---|
+| T1.1 | **VERIFIED** | `global OBSERVER`; `test_blind_launch` fails pre-fix, passes now. |
+| T1.2 | **VERIFIED** | Probe above: 1 build per control-axis edit. |
+| T1.3 | **VERIFIED** | `secure_filename`; traversal test fails pre-fix (escaped the workspace), passes now. |
+| T1.4 | **VERIFIED** | Six sites silent; live: form-encoded body and non-string name both → JSON 400. |
+| T1.5 | **VERIFIED** | Zero references to the deleted names in `src/`, `frontend/src/`, `tests/`, and fontra-embed. |
+| T1.6 | **VERIFIED** | Stem without parsing; test. |
+| T1.7 | **VERIFIED** | All six listed functions use `load_source_cached`; the `create_instance` unbound-`font` fix is a genuine extra. |
+| T1.8 | **FAILED** | The memo is correct when both paths exist, but `_declared_ranges_cache_key` appends `None` for a missing/unset path, so with `GLYPHS_PATH` unset every call shares the key `((None, None), ())` and the first computation is returned forever. Repro: `pytest tests/test_declared_ranges_cache.py tests/test_avar2_default_relocation.py` (either order) → `test_two_default_rows_fail_loudly` raises `VariationModelError: Locations must be unique` instead of the loud failure, because it receives the ranges cached by the previous test; alone it passes. Production exposure: any call before a source is bound (boot, worker before `_bind_server_globals`, tests that patch `_load_axis_metadata`). **Fix:** never cache when any key part is `None`, and key on what the function actually consumes — the metadata dict (e.g. `json.dumps(_meta, sort_keys=True)`) plus overrides — rather than file stats; given T1.7 already caches the source parse, dropping the memo entirely is an acceptable alternative. Add the two-file ordering repro to the test. |
+| T1.9 | **VERIFIED** | Both flags exit 2. |
+| T1.10 | **VERIFIED** | `_running` cleared after promotion; test fails pre-fix. |
+| T1.11 | aliased to T0.7 | — |
+| T1.12 | **VERIFIED** | `SUBS` range test fails pre-fix. |
+| T1.13 | **VERIFIED** | Live `open-editor` echoes authored case. |
+| T1.14 | **VERIFIED (by reading)** | `labelRe` escaped + `i`; `'lcwd'` gone. Becomes testable in T3.4. |
+| T1.15 | **VERIFIED** | Docstring matches code. |
+| T1.16 | **BLOCKED (user)** | Correct call — the bug is in `~/Documents/fontra-embed`. The verifier can fix it there on the user's approval (one-line forward of `location` in `embed-font.js`). |
+| T1.17 | **VERIFIED** | SpaceTab removed; the executor reports the user chose removal directly — user to confirm. `coverage.js`/`pinCorner`/`clampOutOfRange` correctly kept (static provider uses them); the now-dead live-mode `pinCorner`/`clampOutOfRange`/`addMappingRow` api methods + routes are a Tier-2 cleanup note. |
+| T1.18 | **VERIFIED** | `tsc --noEmit` clean. |
+| T1.19 | **VERIFIED** | eslint 0 errors. |
+| T1.20 | **VERIFIED** | Scripts present; wired in `pages.yml` and `release.yml`; stale grade-model oracle values regenerated against the current Python. |
+| T1.21 | **VERIFIED** | Orphans + 2 deps gone. |
+| T1.22 | **FAILED (one string)** | 11 of 12 reworded. Leftover: `frontend/src/App.jsx:634` — ``This rewrites the sidecar and can't be undone from here.`` (a `window.confirm`). Reword (e.g. "This updates the studio's saved layers and can't be undone from here."). |
+| T1.23 | **VERIFIED** | Tab + content gated on `!staticMode`. |
+| T1.24 | **VERIFIED** | 10 of 10 range inputs carry `aria-label` (multi-line-aware check). |
+| T1.25 | **VERIFIED** | Dismiss control present. |
+| T1.26–T1.28 | **VERIFIED** | Compile + oracle run above. `/tmp` INPUT fixtures remain until T2's deterministic generation, as logged. |
+| T1.29 | **VERIFIED** | ruff clean in a fresh venv; sweep reviewed (above); suite green. |
+| T1.30 | **VERIFIED** | `doctor` output above. Nit: `test_doctor_native` assumes no repo-relative binary exists — it fails in a checkout with a built `target/`; monkeypatch `_native_injector`/`engine_path` to make it hermetic (fold into Tier 2's test work). |
+| T1.31 | **VERIFIED** | Test fails pre-fix. |
+| T1.32 | **VERIFIED** | Absent in the clone; the stale copy in the main checkout is the user's to delete. |
+| T1.33 | **VERIFIED** | Marker registered. |
+| T1.34 | **VERIFIED** | Six merged branches gone; `grade-comparison` kept (user's call). |
+| T1.35 | **BLOCKED (user)** | avar2-studio is not on PyPI, so there is no 0.1.0 to tag. User decides: publish 0.1.0 (release workflow exists) or correct README/`pyproject` to say so. |
+| T1.36 | **VERIFIED** | One pack, 128 loose objects. |
+| T1.37 | **VERIFIED** | Every README link/image target resolves (0 missing). |
+| T1.38 | **VERIFIED** | All six `os.environ` names in `src/` documented. |
+| T1.39 | **VERIFIED** | Debounce/test-count/`~832` claims gone. Nit: the HANDOVER title still says "July 2026, updated August 2026" — goes away with the Tier-2 split. |
+
+### Round-3 decision
+Tier 1 closes once **T1.8** and **T1.22** are fixed. **APPROVED: fix T1.8
+and T1.22 first, then Tier 2 in audit order** (one lock + one atomic-write
+helper for every sidecar incl. the supervisor's CSV hook; `logging`
+migration; `state.py` + test migration; assets out of Python strings;
+export polling on a per-job endpoint + AbortSignal + Cancel; `useBuildWait`
+/ `useBuildStatus`; `api.capabilities` + parity test; Radix Dialog for the
+hand-rolled modals; CI `test.yml` + deterministic oracle fixtures; version
+gate / unknown-key passthrough / corrupt-file surfacing in the sidecar
+layer; watch sidecars + handle moved/created events; exclude
+`.avar2-studio/jobs/` from the recursive watch; Kinetikern explicit tuple
+marker; `build/` reaper; designspace parity-or-501; docs restructure +
+the 12 ADRs). Hand off every ~15 commits — Tier 2 will take several
+rounds. Carry the two nits (doctor test hermeticity; dead live-mode
+pin/clamp/addMappingRow api methods + routes) into Tier 2's test and
+dead-code work.
+
 ---
 
 ## Standing instructions (apply to every round) — added 2026-10-16
