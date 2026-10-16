@@ -1,7 +1,6 @@
-STATE: working
-ROUND: 3
-HEAD: ac698877001d62ffbaf9b24e32ad7e11abaf4c51
-VERIFIED_HEAD: 9e4ca1d
-NEXT: fix T1.8 + T1.22, then Tier 2 → Tier 3 continuously; checkpoint every ~15 commits, do not stop
-APPROVED: everything remaining in PLAN.md order (Tier 2 and Tier 3); checkpoints are not stops; ready-for-verification only when the backlog is exhausted
-DECISIONS: T1.16 fixed in fontra-embed by the verifier; T1.35 user publishes separately (no action); T1.17 confirmed
+STATE: ready-for-verification
+ROUND: 4
+HEAD: 462d49d5a59e7690143db6d73e57ee0e65c21002
+ITEMS_READY: T1.8(fix),T1.22(fix),T2.1,T2.2,T2.3,T2.4,T2.5,T2.6,T2.7,T2.8,T2.9,T2.10,T2.11,T2.12,T2.13,T2.14,T2.15,T2.16
+ITEMS_BLOCKED: T1.16 (fontra-embed repo), T1.35 (not on PyPI), decisions/three chat-only ones (user's memory required)
+ITEMS_ALIASED: T1.11 (done as part of T0.7)
