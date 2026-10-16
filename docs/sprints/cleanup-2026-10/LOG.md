@@ -564,3 +564,8 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   "sidecars" → "studio data"; the Fontra "not a studio sidecar" → "not
   just in the studio". Verified: the only remaining mentions are code
   comments (grep). lint/typecheck/build all exit 0.
+
+## T1.23 — Kinetikern fenced out of static mode
+- The Kinetikern tab needs the live engine routes; on Pages (static
+  provider) it shipped half-implemented. The tab button + content now
+  render only when `!staticMode`. Verified: build/lint/typecheck exit 0.

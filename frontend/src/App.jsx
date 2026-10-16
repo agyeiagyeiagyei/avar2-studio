@@ -2390,6 +2390,7 @@ function App() {
           >
             Preview
           </button>
+          {!staticMode && (
           <button
             type="button"
             className={`main-tab${mainTab === 'kinetikern' ? ' active' : ''}`}
@@ -2397,6 +2398,7 @@ function App() {
           >
             Kinetikern
           </button>
+          )}
           <button
             type="button"
             className={`main-tab${mainTab === 'tester' ? ' active' : ''}`}
@@ -2406,7 +2408,7 @@ function App() {
           </button>
         </div>
         <div className={`build-scope${building ? ' is-building' : ''}`}>
-        {mainTab === 'kinetikern' ? (
+        {mainTab === 'kinetikern' && !staticMode ? (
           <KinetikernTab
             instances={instances}
             axes={axes}
