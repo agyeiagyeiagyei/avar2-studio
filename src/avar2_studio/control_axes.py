@@ -63,6 +63,37 @@ from typing import Dict, List, Optional
 
 _SCHEMA_VERSION = 1
 
+# Keys this module understands. Anything else in a sidecar is carried
+# through load → save untouched, so a file written by a newer studio (or
+# a sibling tool) is never silently stripped by an older one.
+_KNOWN_TOP_KEYS = {"version", "axes", "instance_values"}
+_KNOWN_AXIS_KEYS = {"tag", "display_name", "default", "min", "max", "layers",
+                    "coverage", "extra_locations"}
+_KNOWN_LAYER_KEYS = {"glyph", "location", "target", "outline", "source_sig"}
+
+
+class SidecarError(ValueError):
+    """The control sidecar cannot be written in its current state."""
+
+
+class SidecarCorruptError(SidecarError):
+    """The file on disk failed to parse: refuse to overwrite it, the user's
+    layers may still be recoverable from it."""
+
+
+class SidecarVersionError(SidecarError):
+    """The file carries a schema version newer than this studio knows."""
+
+
+# {sidecar path: parse error} for files that failed to load; readers get
+# an empty schema (the studio keeps working), writers refuse until the
+# file is repaired or removed. Surfaced by /api/health as sidecar_errors.
+_LOAD_ERRORS: Dict[str, str] = {}
+
+
+def load_errors() -> Dict[str, str]:
+    return dict(_LOAD_ERRORS)
+
 
 # --------------------------------------------------------------------------
 # Path resolution
@@ -86,15 +117,20 @@ def load(source_path: Path) -> Dict:
     """Return the sidecar's contents as a dict, or an empty
     schema-shaped dict if it doesn't exist or is unreadable."""
     sidecar = sidecar_path_for(source_path)
+    key = str(sidecar)
     if not sidecar.exists():
+        _LOAD_ERRORS.pop(key, None)
         return _empty()
     try:
         with sidecar.open("r", encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        _LOAD_ERRORS[key] = str(exc)
         return _empty()
     if not isinstance(data, dict):
+        _LOAD_ERRORS[key] = "top level is not a JSON object"
         return _empty()
+    _LOAD_ERRORS.pop(key, None)
     return _normalise(data)
 
 
@@ -577,14 +613,18 @@ def _normalise(data: Dict) -> Dict:
                     layers.append(entry)
         layers = _normalise_layers(layers)
 
-        out_axes.append({
+        axis_entry = {
             "tag": ax.get("tag", ""),
             "display_name": ax.get("display_name", ax.get("tag", "")),
             "default": float(ax.get("default", 0)),
             "min": min_v,
             "max": max_v,
             "layers": layers,
-        })
+        }
+        for k, v in ax.items():
+            if k not in _KNOWN_AXIS_KEYS:
+                axis_entry.setdefault(k, v)
+        out_axes.append(axis_entry)
     # Per-instance control-axis values: {tag: {instance name: value}}.
     # Carried through normalisation so layer edits (which round-trip the
     # whole sidecar) never wipe them.
@@ -604,8 +644,12 @@ def _normalise(data: Dict) -> Dict:
                     continue
             if clean:
                 instance_values[str(tag).strip()] = clean
-    return {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes,
-            "instance_values": instance_values}
+    out = {"version": data.get("version") or _SCHEMA_VERSION, "axes": out_axes,
+           "instance_values": instance_values}
+    for k, v in data.items():
+        if k not in _KNOWN_TOP_KEYS:
+            out.setdefault(k, v)
+    return out
 
 
 def _normalise_layers(raw) -> List[Dict]:
@@ -669,12 +713,28 @@ def _normalise_layers(raw) -> List[Dict]:
             sig = entry.get("source_sig")
             if isinstance(sig, str) and sig:
                 item["source_sig"] = sig
+        for k, v in entry.items():
+            if k not in _KNOWN_LAYER_KEYS:
+                item.setdefault(k, v)
         out.append(item)
     return out
 
 
 def _save(source_path: Path, data: Dict) -> None:
     sidecar = sidecar_path_for(source_path)
+    err = _LOAD_ERRORS.get(str(sidecar))
+    if err and sidecar.exists():
+        raise SidecarCorruptError(
+            f"{sidecar.name} could not be read ({err}); the studio will not overwrite it "
+            f"— repair or move the file, then retry")
+    try:
+        version = int(data.get("version") or _SCHEMA_VERSION)
+    except (TypeError, ValueError):
+        version = _SCHEMA_VERSION
+    if version > _SCHEMA_VERSION:
+        raise SidecarVersionError(
+            f"{sidecar.name} was written by a newer studio (schema {version}, this one "
+            f"knows {_SCHEMA_VERSION}); update the studio before editing it")
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     # Authored brace layers are the hardest data in the studio to
     # recreate — keep bounded timestamped copies before every rewrite.

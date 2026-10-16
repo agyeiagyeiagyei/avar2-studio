@@ -2505,6 +2505,9 @@ def health():
             "last_build_time": LAST_BUILD_TIME,
             "last_build_status": LAST_BUILD_STATUS,
             "last_build_error": LAST_BUILD_ERROR,
+            # {sidecar path: parse error} — a corrupt control sidecar reads as
+            # empty but is never overwritten; the UI should say so.
+            "sidecar_errors": _control_axes.load_errors(),
             "transform_error": LAST_TRANSFORM_ERROR,
             # Non-null ⇒ the served font is the plain fallback build;
             # the avar2 build is failing for this reason.

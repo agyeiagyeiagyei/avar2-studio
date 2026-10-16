@@ -815,3 +815,22 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - Known residual: a font injected by the PREVIOUS code (no marker) keeps
   its old tuples until the next fresh build; preview fonts are rebuilt
   from scratch every build, so this only affects one export in between.
+
+## T2.10 — control sidecar: passthrough, version gate, corrupt-file surfacing
+
+- Unknown keys at the top level, per axis and per layer now survive
+  `load → _normalise → _save` (`_KNOWN_*_KEYS` sets; known keys win).
+- Version gate: `_save` raises `SidecarVersionError` (a `ValueError`, so
+  the existing route handlers answer 400) when the file's `version` is
+  newer than `_SCHEMA_VERSION`; reads still work.
+- Corrupt file: `load` records the parse error in `_LOAD_ERRORS`
+  (`load_errors()`), returns the empty shape so readers keep working,
+  and `_save` raises `SidecarCorruptError` instead of overwriting; the
+  error clears on the next successful load. `/api/health` carries
+  `sidecar_errors` ({path: message}) for the UI.
+- Tests [verified]: `tests/test_control_sidecar_robustness.py` — unknown
+  keys round-trip through `update_axis`; version 99 is readable but
+  `add_axis` refuses and the file is byte-identical; a truncated file is
+  reported, `add_axis` refuses, the bytes are preserved, and repairing
+  the file clears the error; `/api/health` lists the error and drops it
+  once the file is gone. Control-axis cluster: 85 passed; ruff clean.
