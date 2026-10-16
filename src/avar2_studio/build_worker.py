@@ -22,6 +22,8 @@ import time
 import traceback
 from pathlib import Path
 
+from . import state
+
 
 class _Progress:
     """Line-delimited JSON progress, plus a stderr tee so pipeline prints
@@ -50,29 +52,29 @@ class _Progress:
         pass
 
 
-def _apply_result(server, result):
-    """Snapshot the server module's build-state globals into the result."""
+def _apply_result(result):
+    """Snapshot the shared build-state globals into the result."""
     for name in ("LAST_BUILD_STATUS", "LAST_BUILD_ERROR", "LAST_AVAR2_ERROR",
                  "LAST_GRADE_ERROR", "LAST_SOURCE_TRANSFORM_ERROR",
                  "LAST_TRANSFORM_ERROR", "LAST_ORIGIN_WARNING", "LAST_BUILD_TIME"):
-        result[name.lower()] = getattr(server, name, None)
+        result[name.lower()] = getattr(state, name, None)
 
 
-def _bind_server_globals(server, spec):
-    """Point the server module's path globals at the job snapshot, exactly
+def _bind_server_globals(spec):
+    """Point the shared path globals at the job snapshot, exactly
     as _apply_source_path would after loading a source."""
     src = Path(spec["original_path"])
-    server.ORIGINAL_PATH = src
-    server.GLYPHS_PATH = src
-    server.BUILD_DIR = Path(spec["job_dir"]) / "build"
-    server.USE_FONTC = bool(spec.get("use_fontc", True))
+    state.ORIGINAL_PATH = src
+    state.GLYPHS_PATH = src
+    state.BUILD_DIR = Path(spec["job_dir"]) / "build"
+    state.USE_FONTC = bool(spec.get("use_fontc", True))
     # Lazy getters derive everything (preview dir, CSV, config, build dir)
     # from ORIGINAL_PATH — clear any memoized values so nothing leaks a
     # server-side path in.
-    server.PREVIEW_DIR = None
-    server.PREVIEW_CSV_PATH = None
-    server.PREVIEW_CONFIG_PATH = None
-    server.CSV_PATH = None
+    state.PREVIEW_DIR = None
+    state.PREVIEW_CSV_PATH = None
+    state.PREVIEW_CONFIG_PATH = None
+    state.CSV_PATH = None
     for var, val in (spec.get("env") or {}).items():
         if val is None:
             os.environ.pop(var, None)
@@ -81,20 +83,20 @@ def _bind_server_globals(server, spec):
 
 
 def _run_build_job(server, spec, progress):
-    _bind_server_globals(server, spec)
+    _bind_server_globals(spec)
     progress.phase("resolve")
     server._resolve_active_source()
     progress.phase("build")
     ok = server._run_build()
     return {"success": bool(ok),
-            "built_font": str(server.VARIABLE_FONT_PATH) if server.VARIABLE_FONT_PATH else None}
+            "built_font": str(state.VARIABLE_FONT_PATH) if state.VARIABLE_FONT_PATH else None}
 
 
 def _run_export_job(server, spec, progress):
-    _bind_server_globals(server, spec)
+    _bind_server_globals(spec)
     current = Path(spec["current_font"])
-    server.VARIABLE_FONT_PATH = current
-    server.GLYPHS_PATH = Path(spec["glyphs_path"])
+    state.VARIABLE_FONT_PATH = current
+    state.GLYPHS_PATH = Path(spec["glyphs_path"])
     out_dir = Path(spec["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     progress.phase("export")
@@ -131,7 +133,7 @@ def main(spec_path):
         handler = {"build": _run_build_job, "export": _run_export_job,
                    "compress": _run_compress_job}[spec["kind"]]
         result.update(handler(server, spec, progress))
-        _apply_result(server, result)
+        _apply_result(result)
     except Exception as exc:
         result["success"] = False
         result["error"] = str(exc)

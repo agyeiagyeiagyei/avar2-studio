@@ -8,7 +8,7 @@ import pytest
 from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileMovedEvent
 
 import avar2_studio.server as server
-from avar2_studio import sidecar_io
+from avar2_studio import sidecar_io, state
 
 
 def _settled(path):
@@ -26,11 +26,11 @@ def watched(tmp_path, monkeypatch):
     shadow = tmp_path / ".avar2-studio" / "shadow" / "F.glyphs"
     shadow.parent.mkdir(parents=True)
     shadow.write_text("familyName = F;")
-    monkeypatch.setattr(server, "ORIGINAL_PATH", original)
-    monkeypatch.setattr(server, "GLYPHS_PATH", shadow)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", original)
+    monkeypatch.setattr(state, "GLYPHS_PATH", shadow)
     for name in ("_SUPPRESS_WATCHDOG_UNTIL", "_SUPPRESS_ORIGINAL_UNTIL",
                  "_SELF_WRITE_WATERMARK", "_SELF_WRITE_ORIGINAL_WATERMARK"):
-        monkeypatch.setattr(server, name, 0.0)
+        monkeypatch.setattr(state, name, 0.0)
     calls = []
     monkeypatch.setattr(server, "schedule_shadow_rebuild", lambda: calls.append("regen"))
     monkeypatch.setattr(server, "trigger_build", lambda: calls.append("build"))
@@ -94,7 +94,7 @@ def test_the_original_and_the_shadow_keep_their_paths(watched):
     handler.on_modified(FileModifiedEvent(str(original)))
     assert calls == ["resolve", "csv", "build"]
     calls.clear()
-    shadow = server.GLYPHS_PATH
+    shadow = state.GLYPHS_PATH
     _settled(shadow)
     handler.on_modified(FileModifiedEvent(str(shadow)))
     assert calls == ["csv", "build"]

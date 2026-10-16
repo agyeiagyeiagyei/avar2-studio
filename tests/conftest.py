@@ -110,6 +110,7 @@ def studio_client(monkeypatch):
     """Flask test client with _ensure_fontra_running replaced by a
     recording fake (returns a made-up port, spawns nothing)."""
     import avar2_studio.server as server
+    from avar2_studio import state
 
     calls = []
 
@@ -120,8 +121,8 @@ def studio_client(monkeypatch):
     monkeypatch.setattr(server, "_ensure_fontra_running", fake_ensure_fontra)
 
     def set_paths(original, active):
-        monkeypatch.setattr(server, "ORIGINAL_PATH", original)
-        monkeypatch.setattr(server, "GLYPHS_PATH", active)
+        monkeypatch.setattr(state, "ORIGINAL_PATH", original)
+        monkeypatch.setattr(state, "GLYPHS_PATH", active)
 
     return SimpleNamespace(
         client=server.app.test_client(), fontra_calls=calls, set_paths=set_paths

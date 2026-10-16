@@ -10,7 +10,7 @@ import glyphsLib
 import pytest
 
 import avar2_studio.server as server
-from avar2_studio import control_axes
+from avar2_studio import control_axes, state
 
 OUTLINE = {
     "width": 421.0,
@@ -24,8 +24,8 @@ OUTLINE = {
 
 @pytest.fixture
 def client(crispy_source, monkeypatch):
-    monkeypatch.setattr(server, "ORIGINAL_PATH", crispy_source)
-    monkeypatch.setattr(server, "GLYPHS_PATH", crispy_source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", crispy_source)
     # The endpoint's rebuild debounce is timing-dependent under tests; the
     # shadow assertion below regenerates explicitly instead.
     monkeypatch.setattr(server, "schedule_shadow_rebuild", lambda: None)

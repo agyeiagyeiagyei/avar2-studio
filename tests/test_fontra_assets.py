@@ -6,6 +6,7 @@ from pathlib import Path
 from string import Template
 
 import avar2_studio.server as server
+from avar2_studio import state
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PKG = Path(server.__file__).resolve().parent
@@ -13,11 +14,11 @@ PKG = Path(server.__file__).resolve().parent
 
 def test_rewrite_output_is_byte_identical_to_the_golden(monkeypatch):
     sample = (FIXTURES / "fontra_rewrite_input.html").read_bytes()
-    monkeypatch.setattr(server, "FONTRA_EDITOR_SESSION",
+    monkeypatch.setattr(state, "FONTRA_EDITOR_SESSION",
                         {"studio": True, "tag": "YMOD", "axis_name": "Horizontal correction",
                          "axis_default": 100, "glyph": "e"})
     assert server._rewrite_html_paths(sample) == (FIXTURES / "fontra_rewrite_studio.html").read_bytes()
-    monkeypatch.setattr(server, "FONTRA_EDITOR_SESSION", None)
+    monkeypatch.setattr(state, "FONTRA_EDITOR_SESSION", None)
     assert server._rewrite_html_paths(sample) == (FIXTURES / "fontra_rewrite_plain.html").read_bytes()
 
 

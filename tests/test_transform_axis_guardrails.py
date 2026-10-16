@@ -12,7 +12,7 @@ from pathlib import Path
 import glyphsLib
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 from avar2_studio.transforms import corner_rounding, slanting
 
 WASMTEST = Path(__file__).resolve().parents[1] / "frontend/e2e/fixtures/WasmTest.glyphs"
@@ -40,8 +40,8 @@ def client():
 
 
 def _put(client, monkeypatch, src_tags, enabled=True):
-    monkeypatch.setattr(server, "ORIGINAL_PATH", Path("/tmp/F.glyphs"))
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "ORIGINAL_PATH", Path("/tmp/F.glyphs"))
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server, "_get_glyphs_axis_tags", lambda: src_tags)
     monkeypatch.setattr(server._transforms, "discover", lambda: None)
     monkeypatch.setattr(server._transforms, "available", lambda _p: [])

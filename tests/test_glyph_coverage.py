@@ -251,10 +251,11 @@ def test_invertible_map_separates_design_and_user_locations(mapped_designspace):
 def coverage_client(monkeypatch):
     """Flask test client with the server pointed at a tmp source."""
     import avar2_studio.server as server
+    from avar2_studio import state
 
     def set_paths(original, active):
-        monkeypatch.setattr(server, "ORIGINAL_PATH", original)
-        monkeypatch.setattr(server, "GLYPHS_PATH", active)
+        monkeypatch.setattr(state, "ORIGINAL_PATH", original)
+        monkeypatch.setattr(state, "GLYPHS_PATH", active)
 
     return server.app.test_client(), set_paths
 

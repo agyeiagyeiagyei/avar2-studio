@@ -11,7 +11,7 @@ set rides along as ``source_coordinates`` for the sync dot."""
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def test_csv_out_columns_override_source_coordinates(client, monkeypatch, tmp_pa
         "Default 400,,210.0,157.0,400.0,12\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.glyphs")
     monkeypatch.setattr(server, "get_instances_from_glyphs", lambda _p: [
         {"name": "Default 400",
          "coordinates": {"XTRA": 663.1, "XOPQ": 202.5, "YOPQ": 121.8},

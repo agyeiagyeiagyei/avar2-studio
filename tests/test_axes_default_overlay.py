@@ -10,7 +10,7 @@ import pytest
 from fontTools.fontBuilder import FontBuilder
 from fontTools.ttLib.tables._g_l_y_f import Glyph
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -37,9 +37,9 @@ def _built_font(path):
 def test_axes_default_comes_from_the_built_font(client, monkeypatch, tmp_path):
     built = tmp_path / "built.ttf"
     _built_font(built)
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "ORIGINAL_PATH", None)  # skip sidecar overlays
-    monkeypatch.setattr(server, "VARIABLE_FONT_PATH", built)
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "ORIGINAL_PATH", None)  # skip sidecar overlays
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", built)
     monkeypatch.setattr(server, "get_axes_from_glyphs", lambda _p: [
         {"tag": "XTRA", "name": "X-Transparency", "min": 47.0,
          "default": 47.0, "max": 1715.0, "has_master_coverage": True},

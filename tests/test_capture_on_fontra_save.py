@@ -8,7 +8,7 @@ import pytest
 from test_capture_outlines import _draw_into
 
 import avar2_studio.server as server
-from avar2_studio import control_axes
+from avar2_studio import control_axes, state
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ def drawn_shadow(crispy_source, monkeypatch):
     shadow = control_axes.regenerate_shadow(crispy_source)
     drawn = _draw_into(shadow, "e")
     assert drawn is not None
-    monkeypatch.setattr(server, "ORIGINAL_PATH", crispy_source)
-    monkeypatch.setattr(server, "GLYPHS_PATH", shadow)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", shadow)
     return crispy_source
 
 
@@ -48,13 +48,13 @@ def test_no_capture_when_editing_the_original(crispy_source, monkeypatch):
         add=[{"glyph": "e", "location": {"ymod": 100, "XOPQ": 500}}])
     shadow = control_axes.regenerate_shadow(crispy_source)
     _draw_into(shadow, "e")
-    monkeypatch.setattr(server, "ORIGINAL_PATH", crispy_source)
-    monkeypatch.setattr(server, "GLYPHS_PATH", crispy_source)  # editing_original
+    monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", crispy_source)  # editing_original
     assert server._capture_shadow_drawings() == 0
     assert "outline" not in control_axes.list_axes(crispy_source)[0]["layers"][0]
 
 
 def test_no_source_loaded_is_a_noop(monkeypatch):
-    monkeypatch.setattr(server, "ORIGINAL_PATH", None)
-    monkeypatch.setattr(server, "GLYPHS_PATH", None)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", None)
+    monkeypatch.setattr(state, "GLYPHS_PATH", None)
     assert server._capture_shadow_drawings() == 0

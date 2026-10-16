@@ -5,6 +5,7 @@ detection, the fvar-axes fix); each used to re-read axis-metadata.json and
 re-parse the source. The memo keys on the inputs' on-disk versions.
 """
 import avar2_studio.server as server
+from avar2_studio import state
 
 META = {"WGHT": {"registered_tag": "wght", "min": 100, "max": 900,
                  "default": 400, "is_parametric": False}}
@@ -16,11 +17,11 @@ def test_declared_axis_ranges_memoized_per_input_version(monkeypatch, tmp_path):
     src = tmp_path / "F.glyphs"
     src.write_text("familyName = F;")
     monkeypatch.setattr(server, "_get_avar2_metadata_path", lambda: meta)
-    monkeypatch.setattr(server, "GLYPHS_PATH", src)
+    monkeypatch.setattr(state, "GLYPHS_PATH", src)
     calls = []
     monkeypatch.setattr(server, "_load_axis_metadata",
                         lambda: calls.append(1) or dict(META))
-    server._DECLARED_RANGES_CACHE.clear()
+    state._DECLARED_RANGES_CACHE.clear()
     try:
         a = server._declared_axis_ranges()
         b = server._declared_axis_ranges()
@@ -36,7 +37,7 @@ def test_declared_axis_ranges_memoized_per_input_version(monkeypatch, tmp_path):
         server._declared_axis_ranges({"wght": 700})   # overrides key separately
         assert len(calls) == 3
     finally:
-        server._DECLARED_RANGES_CACHE.clear()
+        state._DECLARED_RANGES_CACHE.clear()
 
 
 def test_no_caching_without_a_versioned_source(monkeypatch):
@@ -44,9 +45,9 @@ def test_no_caching_without_a_versioned_source(monkeypatch):
     ((None, None), ()) and the first computation leaked into every later
     call (reproduced across test_avar2_default_relocation). Unversioned
     inputs must compute every time."""
-    monkeypatch.setattr(server, "GLYPHS_PATH", None)
+    monkeypatch.setattr(state, "GLYPHS_PATH", None)
     monkeypatch.setattr(server, "_get_avar2_metadata_path", lambda: None)
-    server._DECLARED_RANGES_CACHE.clear()
+    state._DECLARED_RANGES_CACHE.clear()
     try:
         monkeypatch.setattr(server, "_load_axis_metadata", lambda: dict(META))
         first = server._declared_axis_ranges()
@@ -56,6 +57,6 @@ def test_no_caching_without_a_versioned_source(monkeypatch):
         second = server._declared_axis_ranges()
         assert first == {"wght": [100.0, 400.0, 900.0]}
         assert second == {"opsz": [8.0, 72.0, 144.0]}, "stale ranges leaked across calls"
-        assert not server._DECLARED_RANGES_CACHE, "nothing may be cached under an unversioned key"
+        assert not state._DECLARED_RANGES_CACHE, "nothing may be cached under an unversioned key"
     finally:
-        server._DECLARED_RANGES_CACHE.clear()
+        state._DECLARED_RANGES_CACHE.clear()

@@ -16,7 +16,7 @@ import pytest
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
 
-from avar2_studio import build_jobs, control_axes
+from avar2_studio import build_jobs, control_axes, state
 
 FONTC = Path(sys.executable).with_name("fontc")
 needs_fontc = pytest.mark.skipif(not FONTC.exists(),
@@ -24,20 +24,12 @@ needs_fontc = pytest.mark.skipif(not FONTC.exists(),
 
 
 class _CrispyServer:
-    """The slice of server-module state the JobQueue touches (staging +
-    promotion); the real worker subprocess does everything else."""
-
-    def __init__(self, original):
-        self.ORIGINAL_PATH = original
-        self.GLYPHS_PATH = original
-        self.USE_FONTC = True
-        self.VARIABLE_FONT_PATH = None
-        self.LAST_BUILD_STATUS = None
-        self.LAST_BUILD_ERROR = None
-        self._SYNC_CSV_HOOK = None
+    """The queue's method surface (staging + promotion); the value state it
+    used to carry is monkeypatched onto ``state``, and the real worker
+    subprocess does everything else."""
 
     def _get_preview_dir(self):
-        d = self.ORIGINAL_PATH.parent / ".avar2-studio"
+        d = state.ORIGINAL_PATH.parent / ".avar2-studio"
         d.mkdir(exist_ok=True)
         return d
 
@@ -75,7 +67,7 @@ def _outline_max_y(font_path, location, glyph="e"):
 
 
 @needs_fontc
-def test_a_shadow_drawing_survives_the_worker_build(crispy_source, crispy_csv):
+def test_a_shadow_drawing_survives_the_worker_build(crispy_source, crispy_csv, monkeypatch):
     control_axes.add_axis(crispy_source, "ymod", "Horizontal correction", 0, 0, 100)
     control_axes.apply_layer_delta(
         crispy_source, "ymod",
@@ -86,12 +78,21 @@ def test_a_shadow_drawing_survives_the_worker_build(crispy_source, crispy_csv):
     # The drawing is deliberately NOT captured into the sidecar (no
     # capture_outlines call) — the shadow is its only home, exactly like a
     # Fontra edit before the next export.
+    for name, value in (
+            ("ORIGINAL_PATH", crispy_source), ("GLYPHS_PATH", crispy_source),
+            ("USE_FONTC", True), ("VARIABLE_FONT_PATH", None),
+            ("LAST_BUILD_STATUS", None), ("LAST_BUILD_ERROR", None),
+            ("LAST_BUILD_TIME", None), ("LAST_AVAR2_ERROR", None),
+            ("LAST_GRADE_ERROR", None), ("LAST_SOURCE_TRANSFORM_ERROR", None),
+            ("LAST_TRANSFORM_ERROR", None), ("LAST_ORIGIN_WARNING", None),
+            ("_SYNC_CSV_HOOK", None)):
+        monkeypatch.setattr(state, name, value)
 
-    queue = build_jobs.JobQueue(_CrispyServer(crispy_source))  # real worker
+    queue = build_jobs.JobQueue(_CrispyServer())  # real worker
     queue.request_build()
     assert queue.wait_for_idle(timeout=600), \
-        f"build failed: {queue.server.LAST_BUILD_ERROR}"
-    built = queue.server.VARIABLE_FONT_PATH
+        f"build failed: {state.LAST_BUILD_ERROR}"
+    built = state.VARIABLE_FONT_PATH
     assert built and Path(built).exists()
     # drain the follow-up WOFF2 compress job so no worker outlives tmp_path
     deadline = time.time() + 120

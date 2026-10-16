@@ -13,7 +13,7 @@ import csv as csv_mod
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 SHADOW_AXES = [
     {"tag": "XTRA", "default": 663.1},
@@ -41,9 +41,9 @@ def harness(monkeypatch, tmp_path):
         "Default 400,663.1,202.5,121.8,400.0\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "ORIGINAL_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "ORIGINAL_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server._source_font, "load_source", lambda _p: (object(), "glyphs"))
     monkeypatch.setattr(server._source_font, "load_source_cached", lambda _p: (object(), "glyphs"))
     monkeypatch.setattr(server._source_font, "get_source_instances", lambda _f: [])

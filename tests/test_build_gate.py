@@ -3,7 +3,7 @@ endpoint, keeps reads open, and leaves the recovery routes reachable."""
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -15,8 +15,8 @@ def client():
 
 @pytest.fixture
 def broken_build(monkeypatch):
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "failed")
-    monkeypatch.setattr(server, "LAST_BUILD_ERROR", "fontc: 'z' has interpolation-incompatible paths")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "failed")
+    monkeypatch.setattr(state, "LAST_BUILD_ERROR", "fontc: 'z' has interpolation-incompatible paths")
 
 
 def test_mutations_are_refused_while_broken(client, broken_build):
@@ -55,7 +55,7 @@ def test_recovery_routes_stay_open_while_broken(client, broken_build):
 
 
 def test_gate_is_inert_when_build_is_ok(client, monkeypatch):
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     r = client.put("/api/transforms", json={})
     assert r.status_code != 409
 
@@ -65,13 +65,13 @@ def test_a_cancelled_build_keeps_the_gate_open(client, monkeypatch):
     stamp LAST_BUILD_STATUS "failed" (the gate would then 409 every edit
     until a build succeeds — a stuck studio)."""
     from avar2_studio import build_jobs
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
-    monkeypatch.setattr(server, "LAST_BUILD_ERROR", None)
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "LAST_BUILD_ERROR", None)
     queue = build_jobs.JobQueue(server)
     queue._apply_build_state({"success": False, "cancelled": True,
                               "error": "cancelled"})
-    assert server.LAST_BUILD_STATUS == "ok"
-    assert server.LAST_BUILD_ERROR is None
+    assert state.LAST_BUILD_STATUS == "ok"
+    assert state.LAST_BUILD_ERROR is None
     r = client.put("/api/transforms", json={})
     assert r.status_code != 409
 
@@ -80,11 +80,11 @@ def test_a_cancelled_retry_keeps_the_gate_closed(client, monkeypatch):
     """If the source was already broken, cancelling the retry build must
     leave the gate closed — the last-good font is still stale."""
     from avar2_studio import build_jobs
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "failed")
-    monkeypatch.setattr(server, "LAST_BUILD_ERROR", "fontc: incompatible")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "failed")
+    monkeypatch.setattr(state, "LAST_BUILD_ERROR", "fontc: incompatible")
     queue = build_jobs.JobQueue(server)
     queue._apply_build_state({"success": False, "cancelled": True,
                               "error": "cancelled"})
-    assert server.LAST_BUILD_STATUS == "failed"
+    assert state.LAST_BUILD_STATUS == "failed"
     r = client.put("/api/transforms", json={})
     assert r.status_code == 409

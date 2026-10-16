@@ -10,6 +10,7 @@ import threading
 import time
 
 import avar2_studio.server as server
+from avar2_studio import state
 
 
 def test_settle_returns_immediately_for_an_old_file(tmp_path):
@@ -76,8 +77,8 @@ def test_resolves_are_serialized(crispy_source, monkeypatch):
     monkeypatch.setattr(server._control_axes, "list_axes", lambda _p: [])
     monkeypatch.setattr(server._grade, "list_graded_instances", lambda _p: [])
     monkeypatch.setattr(server._transforms, "active", lambda *a, **k: [])
-    monkeypatch.setattr(server, "ORIGINAL_PATH", crispy_source)
-    monkeypatch.setattr(server, "GLYPHS_PATH", crispy_source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", crispy_source)
 
     threads = [threading.Thread(target=server._resolve_active_source)
                for _ in range(4)]
@@ -94,27 +95,27 @@ def test_classify_watched_path(tmp_path, monkeypatch):
     original = tmp_path / "F.glyphs"
     shadow = tmp_path / ".avar2-studio" / "shadow" / "F.glyphs"
     transformed = tmp_path / ".avar2-studio" / "shadow" / "transformed" / "F.glyphs"
-    monkeypatch.setattr(server, "ORIGINAL_PATH", original)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", original)
 
     # Transforms on: the build source is the transformed copy.
-    monkeypatch.setattr(server, "GLYPHS_PATH", transformed)
+    monkeypatch.setattr(state, "GLYPHS_PATH", transformed)
     assert server._classify_watched_path(transformed) == "source"
     assert server._classify_watched_path(original) == "original"
     assert server._classify_watched_path(shadow) == "shadow"
     assert server._classify_watched_path(tmp_path / "notes.txt") is None
 
     # Transforms off: GLYPHS_PATH IS the shadow.
-    monkeypatch.setattr(server, "GLYPHS_PATH", shadow)
+    monkeypatch.setattr(state, "GLYPHS_PATH", shadow)
     assert server._classify_watched_path(shadow) == "source"
     assert server._classify_watched_path(original) == "original"
 
     # No shadow at all: a save to the original is "source" (it IS the build
     # source), and a designspace build sees pooled-UFO edits as "glif".
-    monkeypatch.setattr(server, "GLYPHS_PATH", original)
+    monkeypatch.setattr(state, "GLYPHS_PATH", original)
     assert server._classify_watched_path(original) == "source"
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.designspace")
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.designspace")
     assert server._classify_watched_path(tmp_path / "F.ufo/glyphs/e.glif") == "glif"
 
     # Blind launch: nothing loaded, nothing classified.
-    monkeypatch.setattr(server, "GLYPHS_PATH", None)
+    monkeypatch.setattr(state, "GLYPHS_PATH", None)
     assert server._classify_watched_path(original) is None

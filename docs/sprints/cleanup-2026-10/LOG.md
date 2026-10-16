@@ -1018,3 +1018,17 @@ bar; findings rounds still get written so a second reviewer can re-check.
   overlay click does not close, Escape closes. I re-ran the four gates
   myself (all 0). Not run: the full e2e browser specs (need the demo
   harness) — flagged for the verifier.
+
+## T2.3 — state.py extraction (subagent agent-6)
+- New `src/avar2_studio/state.py` holds the 37 mutable runtime-state
+  globals (pure values, no package imports); server.py reads/writes
+  `state.X` everywhere (tokenize-based rewrite, comments/strings
+  untouched), all `global` declarations for moved names deleted.
+  build_jobs reads values off `state` (methods still off the server
+  module); build_worker binds/reports via `state`; tests' ~60 setattr
+  sites migrated to `monkeypatch.setattr(state, …)`; StubServer became
+  method-only + a `stub_state` fixture. `_SYNC_CSV_HOOK` moved to state
+  (runtime-registered callable). Locks/constants/JOBS stayed in
+  server.py. New tests/test_state_module.py probes the seam.
+- Verified by me independently: 511 passed / 3 skipped (509 baseline +
+  2 new probes), ruff clean, and the no-shadow-attribute probe passes.

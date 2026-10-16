@@ -30,6 +30,7 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
+from . import state
 from .studio_log import get_logger
 
 #: Source-set sidecars staged into every job snapshot (siblings of the
@@ -78,7 +79,7 @@ def reap_build_dir(current: Path, keep: int = KEEP_BUILDS) -> int:
 
 class JobQueue:
     def __init__(self, server, worker_cmd=None):
-        self.server = server  # the server module itself (globals live there)
+        self.server = server  # the server module itself (methods; value state lives in state.py)
         self._worker_cmd = worker_cmd  # tests stub the worker subprocess
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -109,7 +110,7 @@ class JobQueue:
         return True
 
     def submit_export(self, hidden_axes, default_location, format="ttf"):
-        if self.server.ORIGINAL_PATH is None:
+        if state.ORIGINAL_PATH is None:
             return None
         job = {"kind": "export", "hidden_axes": list(hidden_axes),
                "default_location": default_location, "format": format}
@@ -242,7 +243,7 @@ class JobQueue:
     def export_sizes(self):
         """TTF exact; WOFF2 exact when the cache matches the current build,
         else an estimate from the last known ratio (fallback 8%)."""
-        font = self.server.VARIABLE_FONT_PATH
+        font = state.VARIABLE_FONT_PATH
         if not font or not Path(font).exists():
             return {"ttf_bytes": None, "woff2_bytes": None, "woff2_exact": False}
         font = Path(font)
@@ -335,7 +336,7 @@ class JobQueue:
                 # The CSV sync stays server-side (the server owns sidecar
                 # writes) and runs BEFORE the snapshot, so the job builds
                 # the new state.
-                hook = self.server._SYNC_CSV_HOOK
+                hook = state._SYNC_CSV_HOOK
                 if hook is not None:
                     hook()
             self._stage(job)
@@ -433,7 +434,7 @@ class JobQueue:
         job["dir"] = self._job_dir(job)
         src_dir = job["dir"] / "src"
         src_dir.mkdir()
-        orig = Path(self.server.ORIGINAL_PATH)
+        orig = Path(state.ORIGINAL_PATH)
         stem = orig.stem
         copies = [orig]
         for suffix in SIDECAR_SUFFIXES:
@@ -478,13 +479,13 @@ class JobQueue:
         spec = {"job_id": self._job_id(job), "kind": job["kind"],
                 "job_dir": str(job["dir"]),
                 "original_path": str(src_dir / orig.name),
-                "use_fontc": bool(self.server.USE_FONTC),
+                "use_fontc": bool(state.USE_FONTC),
                 "env": {k: os.environ.get(k) for k in ENV_KEYS},
                 "progress_path": str(job["dir"] / "progress.jsonl"),
                 "result_path": str(job["dir"] / "result.json"),
                 "out_dir": str(job["dir"] / "out")}
         if job["kind"] == "export":
-            current = self.server.VARIABLE_FONT_PATH
+            current = state.VARIABLE_FONT_PATH
             if not current or not Path(current).exists():
                 raise RuntimeError("no built font to export from")
             staged_font = src_dir / Path(current).name
@@ -492,8 +493,8 @@ class JobQueue:
             # The active source (possibly the transformed build copy) is
             # staged too — a server-side shadow regen could otherwise
             # rewrite it under the worker's feet.
-            active = Path(self.server.GLYPHS_PATH)
-            if active.resolve() == Path(self.server.ORIGINAL_PATH).resolve():
+            active = Path(state.GLYPHS_PATH)
+            if active.resolve() == Path(state.ORIGINAL_PATH).resolve():
                 staged_active = spec["original_path"]
             else:
                 staged_active = src_dir / ("active-" + active.name)
@@ -519,11 +520,11 @@ class JobQueue:
                 raise RuntimeError("worker reported success but produced no font")
             dst = Path(self.server._get_avar2_font_dir()) / Path(built).name
             shutil.move(built, str(dst))  # jobs/ and build/ share a filesystem
-            self.server.VARIABLE_FONT_PATH = dst
+            state.VARIABLE_FONT_PATH = dst
             reap_build_dir(dst)
             # The regenerated gftools config is the current one — the
             # export row-lookup reads it (from snapshots).
-            cfg = Path(self.server.ORIGINAL_PATH).parent / ".avar2-studio" / "config.yaml"
+            cfg = Path(state.ORIGINAL_PATH).parent / ".avar2-studio" / "config.yaml"
             job_cfg = job["dir"] / "src" / ".avar2-studio" / "config.yaml"
             if job_cfg.exists():
                 shutil.move(str(job_cfg), str(cfg))
@@ -552,7 +553,7 @@ class JobQueue:
                     "last_grade_error", "last_source_transform_error",
                     "last_transform_error", "last_origin_warning", "last_build_time"):
             if key in result:
-                setattr(self.server, key.upper(), result[key])
+                setattr(state, key.upper(), result[key])
         if not result.get("success") and "last_build_status" not in result:
             if result.get("cancelled"):
                 # A cancel is not a broken source: leave the previous
@@ -562,11 +563,11 @@ class JobQueue:
             else:
                 # The worker died before it could report state (kill -9,
                 # crash) — fail loudly, keep serving the last-good font.
-                self.server.LAST_BUILD_STATUS = "failed"
-                self.server.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
+                state.LAST_BUILD_STATUS = "failed"
+                state.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
 
     def _maybe_compress(self):
-        font = self.server.VARIABLE_FONT_PATH
+        font = state.VARIABLE_FONT_PATH
         if not font:
             return
         sizes = self.export_sizes()

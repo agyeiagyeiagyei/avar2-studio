@@ -91,7 +91,7 @@ def _build(argv) -> int:
         print(f"warning: {meta} is missing — traditional axis defaults fall back "
               f"to each CSV column's minimum, and named styles may land off "
               f"their mapped values", file=sys.stderr)
-    from . import server
+    from . import server, state
     try:
         server._apply_source_path(args.source)
     except Exception as exc:
@@ -102,32 +102,32 @@ def _build(argv) -> int:
     # wait for the queue to drain before reading the outcome globals.
     server.JOBS.wait_for_idle()
 
-    if server.LAST_BUILD_STATUS != "ok" or not server.VARIABLE_FONT_PATH:
-        print(f"error: build failed: {server.LAST_BUILD_ERROR or 'unknown'}", file=sys.stderr)
+    if state.LAST_BUILD_STATUS != "ok" or not state.VARIABLE_FONT_PATH:
+        print(f"error: build failed: {state.LAST_BUILD_ERROR or 'unknown'}", file=sys.stderr)
         return 1
-    if server.LAST_AVAR2_ERROR:
+    if state.LAST_AVAR2_ERROR:
         # The plain-VF fallback built, but the avar2 mapping did not. In CI
         # that is a failure, not a warning — the mapped font IS the product.
         print(f"error: avar2 build failed (plain fallback built instead): "
-              f"{server.LAST_AVAR2_ERROR}", file=sys.stderr)
+              f"{state.LAST_AVAR2_ERROR}", file=sys.stderr)
         return 1
-    if getattr(server, "LAST_GRADE_ERROR", None):
+    if state.LAST_GRADE_ERROR:
         # Grade is declared in the sidecar but its braces were not
         # generated: the font built, without its GRAD axis. Passing that
         # off as success is how a missing axis reaches a release.
         print(f"error: grade generation failed (the font has no GRAD axis): "
-              f"{server.LAST_GRADE_ERROR}", file=sys.stderr)
+              f"{state.LAST_GRADE_ERROR}", file=sys.stderr)
         return 1
-    if getattr(server, "LAST_SOURCE_TRANSFORM_ERROR", None):
+    if state.LAST_SOURCE_TRANSFORM_ERROR:
         # An enabled source-stage transform (round_corners) did not run:
         # the font built from the un-transformed source.
         print(f"error: source transform failed (the font built without it): "
-              f"{server.LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+              f"{state.LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
-    dest = args.out / server.VARIABLE_FONT_PATH.name
-    shutil.copy2(server.VARIABLE_FONT_PATH, dest)
+    dest = args.out / state.VARIABLE_FONT_PATH.name
+    shutil.copy2(state.VARIABLE_FONT_PATH, dest)
     print(dest)
     return 0
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -31,9 +31,9 @@ def harness(monkeypatch, tmp_path):
     csv_path = tmp_path / "F-avar.csv"
     csv_path.write_text(
         "Instance Name,XTRA,XOPQ\nDefault,663.1,188.5\n", encoding="utf-8")
-    monkeypatch.setattr(server, "ORIGINAL_PATH", original)
-    monkeypatch.setattr(server, "GLYPHS_PATH", shadow)
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "ORIGINAL_PATH", original)
+    monkeypatch.setattr(state, "GLYPHS_PATH", shadow)
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server._source_font, "load_source", lambda _p: (object(), "glyphs"))
     # The shadow's listing carries the RENAMED (display) name — the
     # alias sidecar applied it on regen; the original still says "Def".

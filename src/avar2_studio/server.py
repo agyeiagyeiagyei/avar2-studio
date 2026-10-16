@@ -73,6 +73,7 @@ from . import instance_aliases as _instance_aliases
 from . import kinetikern as _kinetikern
 from . import sidecar_io as _sidecar_io
 from . import source_font as _source_font
+from . import state
 from . import transforms as _transforms
 from .source_font import UnsupportedSourceFormat
 
@@ -146,55 +147,8 @@ def _serve_ui_favicon():
         return ('', 204)  # silent: no favicon in the bundle is fine
     return send_from_directory(str(_BUNDLE_DIR), "favicon.ico")
 
-# Global state
-GLYPHS_PATH: Optional[Path] = None  # The ACTIVE source — what reads + builds operate on. When CONTROL AXES are declared, this points at the shadow .glyphs; otherwise it's the same as ORIGINAL_PATH. Name kept for git history; SOURCE_FORMAT tracks which.
-ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at. Sidecar paths and push-to-source target this. Studio NEVER writes to it directly for control-axis work (shadow staging only).
-
-# Fontra subprocess management — v2.5a launches the Fontra editor as
-# a child process pointed at the shadow folder so we can iframe it in
-# the studio UI. Started lazily on first "open in editor" request and
-# kept warm across opens. Killed on shutdown via atexit.
-FONTRA_PROCESS: Optional[object] = None
-FONTRA_PORT: int = 8001
-# Per-session state for the embedded editor, set by open-editor and
-# read by the proxy's CSS builder + the injected shim (via
-# /api/fontra-shim-config). Studio sessions get the trimmed
-# multi-source panel; source-derived sessions keep the bare canvas.
-FONTRA_EDITOR_SESSION: Optional[dict] = None
-FONTRA_CONTENT_ROOT: Optional[Path] = None
-# mtime of the shadow .glyphs Fontra was spawned against. If the file
-# is rewritten (a layer edit regenerates the shadow), Fontra's backend
-# still serves the cached/old glyph, so we restart it on next open.
-FONTRA_SHADOW_MTIME: Optional[float] = None
-SOURCE_FORMAT: Optional[str] = None  # "glyphs" | "designspace"
-BUILD_DIR: Optional[Path] = None
-VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
-LAST_BUILD_TIME: Optional[float] = None
-# Re-entrancy guard inside the build WORKER only (a fresh process per job —
-# see docs/WORKER_BUILD_PLAN.md): _run_build/_perform_avar2_build manage it
-# there. The server process never runs builds; request threads read
-# JOBS.is_building() instead.
-BUILDING: bool = False
-# Outcome of the most recent build attempt. ``ok`` => current preview reflects
-# fresh source state. ``failed`` => the preview is stale (we're still serving
-# the last-good font; the user's most recent edit didn't make it through).
-LAST_BUILD_STATUS: Optional[str] = None  # "ok" | "failed" | None
-LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
-# Set when the avar2 build failed and the plain-VF fallback is being
-# served instead. The fallback keeps LAST_BUILD_STATUS "ok", which made
-# avar2 failures invisible — the preview silently lost its mapped axes.
-LAST_AVAR2_ERROR: Optional[str] = None
-# Set when grade is declared but its braces could not be generated — the
-# built font is then missing its GRAD axis, which must not pass as ok.
-LAST_GRADE_ERROR: Optional[str] = None
-# Set when an enabled SOURCE-stage transform (round_corners) failed: the
-# font then built from the un-transformed source, which must not pass as ok.
-LAST_SOURCE_TRANSFORM_ERROR: Optional[str] = None
-# Non-null ⇒ the mappings define styles but NO row sits at the axis
-# defaults: the font rests at the compiled origin rather than any
-# authored style (the "resting dip" — e.g. opsz default 48 with rows
-# only at 14 and 144). Surfaced as a banner; the build itself is fine.
-LAST_ORIGIN_WARNING: Optional[str] = None
+# Mutable runtime state lives in state.py (imported as ``state``); this
+# module keeps the constants, locks and the job-queue wiring.
 
 # Registered-axis conventions, used wherever a declared axis has no
 # explicit default: the /api/avar2/axes response AND the compiled-axis
@@ -210,20 +164,6 @@ TRADITIONAL_AXIS_DEFAULTS = {
     "grad": 0.0,
     "spac": 0.0,
 }
-# Set when an ENABLED post-build transform failed during the last build (the
-# base font still compiled, so LAST_BUILD_STATUS stays "ok", but the requested
-# transform — e.g. SPAC — was skipped). Surfaced in /api/health + the
-# transforms PUT so the UI can flag an enabled-but-failing transform.
-LAST_TRANSFORM_ERROR: Optional[str] = None
-# sync_csv_with_glyphs is a closure inside main(); it registers here so the
-# job supervisor can run it before staging a build whose source changed
-# mid-flight.
-_SYNC_CSV_HOOK = None
-# Count of background regen/rebuild tasks in flight. The sidecar write returns
-# immediately so the UI stays responsive, but the shadow regen + font build
-# take seconds — /api/health folds this into `building` so the frontend can
-# show the preview catching up.
-BACKGROUND_WORK: int = 0
 
 @functools.lru_cache(maxsize=None)
 def _read_asset(relative: str) -> str:
@@ -261,7 +201,6 @@ _RESOLVE_LOCK = threading.RLock()
 # produced a redundant CSV sync plus a second full build per edit (the
 # "saved, saved, rebuilt, rebuilt" sequence). External saves from
 # Glyphs.app outside the window still sync + rebuild as before.
-_SUPPRESS_WATCHDOG_UNTIL: float = 0.0
 _SUPPRESS_WATCHDOG_SECONDS = 2.5   # outlast the server's own shadow write (~1s), no more
 # The one server path that writes the designer's ORIGINAL is the instance-edit
 # round-trip through Glyphs.app (save / close / reopen via AppleScript), which
@@ -269,7 +208,6 @@ _SUPPRESS_WATCHDOG_SECONDS = 2.5   # outlast the server's own shadow write (~1s)
 # never held hostage to the shadow-regen window above: the two files are
 # written by different things and must be suppressed for different reasons.
 _SUPPRESS_ORIGINAL_SECONDS = 6.0
-_SUPPRESS_ORIGINAL_UNTIL = 0.0
 # mtime watermarks, armed at the same sites as the windows above. The time
 # window alone fails when the watchdog handler is BUSY (a multi-second
 # resolve): the self-write's event is processed after the window expired
@@ -278,42 +216,31 @@ _SUPPRESS_ORIGINAL_UNTIL = 0.0
 # file's mtime is not newer than the last server-initiated write, no matter
 # how late the event is processed; a designer's save always re-writes the
 # file, so its mtime is newer and the event goes through.
-_SELF_WRITE_WATERMARK = 0.0
-_SELF_WRITE_ORIGINAL_WATERMARK = 0.0
 
 
 def _suppress_watcher(original: bool = False) -> None:
     """Mark a server-initiated write for watcher suppression: the time
     window covers the in-flight write (mtime still moving), the watermark
     covers events processed late. Arm AFTER the write when possible."""
-    global _SUPPRESS_WATCHDOG_UNTIL, _SUPPRESS_ORIGINAL_UNTIL
-    global _SELF_WRITE_WATERMARK, _SELF_WRITE_ORIGINAL_WATERMARK
     now = time.time()
     if original:
-        _SUPPRESS_ORIGINAL_UNTIL = now + _SUPPRESS_ORIGINAL_SECONDS
-        _SELF_WRITE_ORIGINAL_WATERMARK = now
+        state._SUPPRESS_ORIGINAL_UNTIL = now + _SUPPRESS_ORIGINAL_SECONDS
+        state._SELF_WRITE_ORIGINAL_WATERMARK = now
     else:
-        _SUPPRESS_WATCHDOG_UNTIL = now + _SUPPRESS_WATCHDOG_SECONDS
-        _SELF_WRITE_WATERMARK = now
+        state._SUPPRESS_WATCHDOG_UNTIL = now + _SUPPRESS_WATCHDOG_SECONDS
+        state._SELF_WRITE_WATERMARK = now
 # Debounced shadow-regen + rebuild. Layer edits arrive in bursts (clicking ✕ a
 # few times, adding several glyphs); regenerating the shadow and recompiling
 # per edit costs seconds each and would queue up. Coalesce a burst into one job.
-_REBUILD_TIMER = None
 _REBUILD_TIMER_LOCK = threading.Lock()
 _REBUILD_DEBOUNCE_SECONDS = 0.4    # sized for a ~1s in-process build, not the old 9s one
-OBSERVER: Optional[Observer] = None
-CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
-USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
-PREVIEW_DIR: Optional[Path] = None  # Per-project workdir (sibling .avar2-studio/)
-PREVIEW_CSV_PATH: Optional[Path] = None  # Path to preview CSV (sibling to .glyphs)
-PREVIEW_CONFIG_PATH: Optional[Path] = None  # Path to preview config (.avar2-studio/config.yaml)
-EDITING_INSTANCES: set = set()  # Track instances currently being edited (protected from sync)
 
 # The build/export job queue: all heavy pipeline work runs in worker
 # SUBPROCESSES (docs/WORKER_BUILD_PLAN.md) so a build can never starve
 # request threads. trigger_build submits; builds coalesce through it.
-# Bound to this module so the supervisor can read stage-time paths and
-# apply result state (VARIABLE_FONT_PATH, LAST_*).
+# Bound to this module for its methods (_resolve_active_source, the
+# preview-dir getters); the stage-time paths and result state it reads
+# and writes (ORIGINAL_PATH, VARIABLE_FONT_PATH, LAST_*) live in state.py.
 JOBS = _build_jobs.JobQueue(sys.modules[__name__])
 
 
@@ -643,7 +570,7 @@ def _source_instance_name(display_name: str) -> str:
     writeback for a renamed instance must address the ORIGINAL name or
     it silently finds nothing."""
     try:
-        aliases = _instance_aliases.load(ORIGINAL_PATH) if ORIGINAL_PATH else {}
+        aliases = _instance_aliases.load(state.ORIGINAL_PATH) if state.ORIGINAL_PATH else {}
     except Exception:
         return display_name
     for old, new in aliases.items():
@@ -685,10 +612,10 @@ def get_masters():
     (shadow when control axes are live); master parametric coordinates
     are identical either way.
     """
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return jsonify({"masters": []})
     try:
-        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
         return jsonify({"masters": _source_font.get_masters(font)})
     except Exception as e:
         log.error(f"Error reading masters: {e}")
@@ -705,10 +632,10 @@ def get_instances():
       Edits write to the CSV; the source is untouched until the user
       explicitly calls ``POST /api/instance/<name>/add-to-source``.
     """
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return jsonify({"instances": []})
     try:
-        instances = get_instances_from_glyphs(GLYPHS_PATH)
+        instances = get_instances_from_glyphs(state.GLYPHS_PATH)
         source_names = {entry["name"] for entry in instances}
 
         # Pull studio-only rows: any CSV row whose Instance Name isn't in
@@ -721,7 +648,7 @@ def get_instances():
         # axis tag, plus SPAC (transform-injected, never a source axis).
         try:
             source_axis_tags = {str(ax.get("tag", ""))
-                                for ax in get_axes_from_glyphs(GLYPHS_PATH)}
+                                for ax in get_axes_from_glyphs(state.GLYPHS_PATH)}
         except Exception:
             source_axis_tags = set()
         csv_path = _get_preview_csv_path()
@@ -777,7 +704,7 @@ def get_instances():
         # studio state, and padding that dict would break the CSV-vs-
         # source divergence check (it compares key sets).
         try:
-            ctl_values = _control_axes.instance_values(ORIGINAL_PATH)
+            ctl_values = _control_axes.instance_values(state.ORIGINAL_PATH)
         except Exception:
             ctl_values = {}
         if ctl_values:
@@ -850,10 +777,10 @@ def get_axes():
     (``get_axes_from_built_font``) is kept around for verification but
     isn't the API path anymore.
     """
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return jsonify({"axes": []})
     try:
-        axes = get_axes_from_glyphs(GLYPHS_PATH)
+        axes = get_axes_from_glyphs(state.GLYPHS_PATH)
 
         # CONTROL AXES overlay. The source/shadow .glyphs may or may
         # not have the control axis yet (depending on slice — slice 2
@@ -861,9 +788,9 @@ def get_axes():
         # source-derived axes won't include the control axis). Either
         # way the sidecar carries the canonical declaration; merge
         # it in so the frontend gets a unified list.
-        if ORIGINAL_PATH is not None:
+        if state.ORIGINAL_PATH is not None:
             try:
-                sidecar_axes = list(_control_axes.list_axes(ORIGINAL_PATH))
+                sidecar_axes = list(_control_axes.list_axes(state.ORIGINAL_PATH))
                 if sidecar_axes:
                     by_tag = {str(ax.get("tag", "")).lower(): ax for ax in axes}
                     for spec in sidecar_axes:
@@ -908,9 +835,9 @@ def get_axes():
         # surface the real -10..+10 range so the sidebar renders a usable
         # slider. Like SPAC it's a live-preview axis (transform_injected), not
         # per-instance data.
-        if ORIGINAL_PATH is not None:
+        if state.ORIGINAL_PATH is not None:
             try:
-                if _grade.list_graded_instances(ORIGINAL_PATH):
+                if _grade.list_graded_instances(state.ORIGINAL_PATH):
                     tag_lower = _grade.GRAD_TAG.lower()
                     entry = next((a for a in axes if str(a.get("tag", "")).lower() == tag_lower), None)
                     if entry is None:
@@ -932,11 +859,11 @@ def get_axes():
         # SPAC and GRAD they are build products, not per-instance data.
         # Mark every enabled transform's declared axis so the frontend
         # keeps it out of instance saves and CSV sync.
-        if ORIGINAL_PATH is not None:
+        if state.ORIGINAL_PATH is not None:
             try:
                 injected_tags = set()
                 for stage in ("font", "source"):
-                    for t, _params in _transforms.registry.active(ORIGINAL_PATH, stage=stage):
+                    for t, _params in _transforms.registry.active(state.ORIGINAL_PATH, stage=stage):
                         tag = getattr(t.spec, "injected_axis_tag", None)
                         if tag:
                             injected_tags.add(tag.lower())
@@ -956,13 +883,13 @@ def get_axes():
         #   - transform-injected axes (SPAC): treated as parametric sliders
         #     (has_master_coverage=True → draggable; not a control axis →
         #     sits with XTRA/XOPQ/YOPQ).
-        if VARIABLE_FONT_PATH is not None and Path(VARIABLE_FONT_PATH).exists():
+        if state.VARIABLE_FONT_PATH is not None and Path(state.VARIABLE_FONT_PATH).exists():
             try:
                 user_axis_tags = set()
                 csv_path = _get_avar2_csv_path()
                 if csv_path and csv_path.exists():
                     try:
-                        _, _, in_cols, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+                        _, _, in_cols, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
                         user_axis_tags = {
                             _csv_io.normalize_in_axis_name(c).lower() for c in in_cols
                         }
@@ -970,7 +897,7 @@ def get_axes():
                     except Exception:
                         user_axis_tags = set()
                 have = {str(a.get("tag", "")).lower() for a in axes}
-                built_axes = list(get_axes_from_built_font(VARIABLE_FONT_PATH))
+                built_axes = list(get_axes_from_built_font(state.VARIABLE_FONT_PATH))
                 # DEFAULT overlay for axes the source already lists: the
                 # build relocates the parametric defaults to the ORIGIN
                 # row's location (the default-origin master), so the
@@ -1017,10 +944,10 @@ def get_axes():
 def _build_context():
     """Read-only build state handed to each transform's apply()."""
     return _transforms.BuildContext(
-        build_dir=BUILD_DIR,
-        source_path=ORIGINAL_PATH,
-        glyphs_path=GLYPHS_PATH,
-        family=(GLYPHS_PATH.stem if GLYPHS_PATH else "font"),
+        build_dir=state.BUILD_DIR,
+        source_path=state.ORIGINAL_PATH,
+        glyphs_path=state.GLYPHS_PATH,
+        family=(state.GLYPHS_PATH.stem if state.GLYPHS_PATH else "font"),
         log=lambda m: log.info(f"[transform] {m}"),
     )
 
@@ -1062,13 +989,12 @@ def _apply_transform_chain(vf_path):
     gracefully instead of pointing VARIABLE_FONT_PATH at a missing file.
     Per-transform failures are recorded in ``LAST_TRANSFORM_ERROR`` so the UI
     can surface an enabled-but-failing transform instead of a silent no-op."""
-    global LAST_TRANSFORM_ERROR
-    LAST_TRANSFORM_ERROR = None
-    if vf_path is None or ORIGINAL_PATH is None:
+    state.LAST_TRANSFORM_ERROR = None
+    if vf_path is None or state.ORIGINAL_PATH is None:
         return vf_path
     _transforms.discover()
     try:
-        chain = _transforms.active(ORIGINAL_PATH)
+        chain = _transforms.active(state.ORIGINAL_PATH)
     except Exception as e:
         log.info(f"transforms: could not resolve active chain: {e}")
         return vf_path
@@ -1103,7 +1029,7 @@ def _apply_transform_chain(vf_path):
     # earlier tuples first, so a re-run of the chain lands in the same place.
     try:
         out = Path(_kinetikern.inject.apply_to_font(
-            out, ORIGINAL_PATH, log=lambda m: log.info(m)))
+            out, state.ORIGINAL_PATH, log=lambda m: log.info(m)))
     except Exception as e:
         log.info(f"kinetikern: injection failed: {e}")
         errors.append(f"Kinetikern: {e}")
@@ -1125,7 +1051,7 @@ def _apply_transform_chain(vf_path):
             log.info(f"transform '{transform.spec.id}' failed: {e}")
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
-        LAST_TRANSFORM_ERROR = "; ".join(errors)
+        state.LAST_TRANSFORM_ERROR = "; ".join(errors)
     return _stamp_control_instance_values(out)
 
 
@@ -1137,10 +1063,10 @@ def _stamp_control_instance_values(vf_path):
     stamp (same as SPAC); the UI previews them via the hydrated
     coordinates instead. Runs after the transform chain because
     fix_instances regenerates the instance list."""
-    if vf_path is None or ORIGINAL_PATH is None:
+    if vf_path is None or state.ORIGINAL_PATH is None:
         return vf_path
     try:
-        values = _control_axes.instance_values(ORIGINAL_PATH)
+        values = _control_axes.instance_values(state.ORIGINAL_PATH)
     except Exception:
         values = {}
     if not values:
@@ -1202,12 +1128,12 @@ def _capture_shadow_drawings() -> int:
     before then. Untouched seeds are skipped by their stamps, so this is
     a cheap no-op after server-side regens. Returns layers captured.
     """
-    if ORIGINAL_PATH is None or GLYPHS_PATH is None:
+    if state.ORIGINAL_PATH is None or state.GLYPHS_PATH is None:
         return 0
-    if Path(GLYPHS_PATH).resolve() == Path(ORIGINAL_PATH).resolve():
+    if Path(state.GLYPHS_PATH).resolve() == Path(state.ORIGINAL_PATH).resolve():
         return 0  # no shadow in play — Fontra is editing the original itself
     with SIDECAR_LOCK:
-        return _control_axes.capture_outlines(ORIGINAL_PATH)
+        return _control_axes.capture_outlines(state.ORIGINAL_PATH)
 
 
 def _resolve_active_source() -> Optional[Path]:
@@ -1232,12 +1158,10 @@ def _resolve_active_source() -> Optional[Path]:
     overlapping resolves interleave the shadow/transformed writes.
     """
     with _RESOLVE_LOCK, _gc_paused():
-        global GLYPHS_PATH, LAST_GRADE_ERROR
-        global LAST_SOURCE_TRANSFORM_ERROR
-        if ORIGINAL_PATH is None:
-            return GLYPHS_PATH
-        LAST_GRADE_ERROR = None
-        LAST_SOURCE_TRANSFORM_ERROR = None
+        if state.ORIGINAL_PATH is None:
+            return state.GLYPHS_PATH
+        state.LAST_GRADE_ERROR = None
+        state.LAST_SOURCE_TRANSFORM_ERROR = None
 
         # 1) control-axis shadow (brace layers). regenerate_shadow returns None
         #    when the sidecar declares no control axes; a shadow with an axis but no
@@ -1245,14 +1169,14 @@ def _resolve_active_source() -> Optional[Path]:
         #    axis actually has layers.
         shadow = None
         try:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            shadow = _control_axes.regenerate_shadow(state.ORIGINAL_PATH)
             # Regenerating rewrites the watched source file — the caller triggers
             # the build itself, so suppress the watcher for it.
             _suppress_watcher()
         except Exception as exc:
             log.warning(f"Warning: shadow regeneration failed: {exc}")
         try:
-            any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
+            any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(state.ORIGINAL_PATH))
         except Exception:
             any_layers = False
 
@@ -1260,16 +1184,16 @@ def _resolve_active_source() -> Optional[Path]:
         #    there's no control shadow to build on, so re-runs never stack braces.
         any_grades = False
         try:
-            if _grade.list_graded_instances(ORIGINAL_PATH):
+            if _grade.list_graded_instances(state.ORIGINAL_PATH):
                 grade_shadow = _grade_shadow.apply_grades(
-                    ORIGINAL_PATH, _grade_instance_coords(), fresh_shadow=(shadow is None)
+                    state.ORIGINAL_PATH, _grade_instance_coords(), fresh_shadow=(shadow is None)
                 )
                 if grade_shadow is not None:
                     shadow = grade_shadow
                     any_grades = True
                     _suppress_watcher()
         except Exception as exc:
-            LAST_GRADE_ERROR = str(exc)
+            state.LAST_GRADE_ERROR = str(exc)
             log.warning(f"Warning: grade shadow generation failed: {exc}")
 
         # 3) source-stage transforms (round_corners), over a BUILD COPY of the
@@ -1285,18 +1209,18 @@ def _resolve_active_source() -> Optional[Path]:
         src_chain = []
         try:
             _transforms.discover()
-            src_chain = _transforms.active(ORIGINAL_PATH, stage="source")
+            src_chain = _transforms.active(state.ORIGINAL_PATH, stage="source")
             # Deterministic order regardless of sidecar entry order: slant
             # (10) before rounding (50), so rounds land on slanted drawings.
             src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
         except Exception as exc:
             log.info(f"transforms: could not resolve source-stage chain: {exc}")
-        if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
+        if src_chain and state.ORIGINAL_PATH.suffix.lower() == ".glyphs":
             current = None
             try:
-                base = shadow if shadow is not None else ORIGINAL_PATH
-                transformed = (_control_axes.shadow_dir_for(ORIGINAL_PATH)
-                               / "transformed" / ORIGINAL_PATH.name)
+                base = shadow if shadow is not None else state.ORIGINAL_PATH
+                transformed = (_control_axes.shadow_dir_for(state.ORIGINAL_PATH)
+                               / "transformed" / state.ORIGINAL_PATH.name)
                 transformed.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(base, transformed)
                 from glyphsLib import GSFont as _GSFont
@@ -1316,13 +1240,13 @@ def _resolve_active_source() -> Optional[Path]:
                 any_source = True
             except Exception as exc:
                 name = current.spec.id if current is not None else "source-stage transforms"
-                LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
+                state.LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
                 log.warning(f"Warning: source transform failed, building without it: "
-                      f"{LAST_SOURCE_TRANSFORM_ERROR}")
+                      f"{state.LAST_SOURCE_TRANSFORM_ERROR}")
 
-        GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
-            else ORIGINAL_PATH
-        return GLYPHS_PATH
+        state.GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
+            else state.ORIGINAL_PATH
+        return state.GLYPHS_PATH
 
 
 def _wait_for_save_to_settle(path: Path, settle: float = 0.5, timeout: float = 30.0) -> None:
@@ -1374,7 +1298,7 @@ def _classify_watched_path(src: Path) -> Optional[str]:
     transformed/ copy, so a Fontra save to shadow/<name> is neither source
     nor original and would go unseen (T0.9).
     """
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return None
     parts = src.parts
     if ".avar2-studio" in parts and "jobs" in parts[parts.index(".avar2-studio"):]:
@@ -1384,10 +1308,10 @@ def _classify_watched_path(src: Path) -> Optional[str]:
         # .glif writes re-queued a build per job, forever.
         return None
     resolved = src.resolve()
-    if resolved == Path(GLYPHS_PATH).resolve():
+    if resolved == Path(state.GLYPHS_PATH).resolve():
         return "source"
-    if ORIGINAL_PATH is not None:
-        original = Path(ORIGINAL_PATH)
+    if state.ORIGINAL_PATH is not None:
+        original = Path(state.ORIGINAL_PATH)
         if resolved == original.resolve():
             return "original"
         if resolved == _control_axes.shadow_path_for(original).resolve():
@@ -1395,7 +1319,7 @@ def _classify_watched_path(src: Path) -> Optional[str]:
         if resolved.parent == original.parent.resolve() and resolved.name in {
                 f"{original.stem}{suffix}" for suffix in _SIDECAR_SUFFIXES}:
             return "sidecar"
-    if str(GLYPHS_PATH).lower().endswith(".designspace") \
+    if str(state.GLYPHS_PATH).lower().endswith(".designspace") \
             and src.suffix.lower() in (".glif", ".plist"):
         return "glif"
     return None
@@ -1404,11 +1328,10 @@ def _classify_watched_path(src: Path) -> Optional[str]:
 def _run_shadow_regen_and_build():
     """Re-resolve the active build source (control + grade shadow) and rebuild.
     Runs on the debounce timer — never call directly from a request."""
-    global BACKGROUND_WORK, _REBUILD_TIMER
     with _REBUILD_TIMER_LOCK:
-        _REBUILD_TIMER = None
+        state._REBUILD_TIMER = None
     try:
-        if ORIGINAL_PATH is None:
+        if state.ORIGINAL_PATH is None:
             return
         _resolve_active_source()
         try:
@@ -1417,23 +1340,22 @@ def _run_shadow_regen_and_build():
             log.warning(f"Warning: rebuild after control-axis change failed: {exc}")
     finally:
         with _REBUILD_TIMER_LOCK:
-            BACKGROUND_WORK -= 1
+            state.BACKGROUND_WORK -= 1
 
 
 def schedule_shadow_rebuild():
     """Queue a debounced shadow regen + rebuild, coalescing a burst of layer
     edits into ONE job. Returns immediately so the request can answer straight
     away; /api/health reports building=true until the job finishes."""
-    global _REBUILD_TIMER, BACKGROUND_WORK
     with _REBUILD_TIMER_LOCK:
-        if _REBUILD_TIMER is not None:
+        if state._REBUILD_TIMER is not None:
             # Already queued — push it out; the pending job still counts as work.
-            _REBUILD_TIMER.cancel()
+            state._REBUILD_TIMER.cancel()
         else:
-            BACKGROUND_WORK += 1
-        _REBUILD_TIMER = threading.Timer(_REBUILD_DEBOUNCE_SECONDS, _run_shadow_regen_and_build)
-        _REBUILD_TIMER.daemon = True
-        _REBUILD_TIMER.start()
+            state.BACKGROUND_WORK += 1
+        state._REBUILD_TIMER = threading.Timer(_REBUILD_DEBOUNCE_SECONDS, _run_shadow_regen_and_build)
+        state._REBUILD_TIMER.daemon = True
+        state._REBUILD_TIMER.start()
 
 
 def trigger_build():
@@ -1455,8 +1377,6 @@ def _run_build():
     gftools is missing, or the user hasn't authored mappings yet) so the rows
     view always has *some* font to show.
     """
-    global VARIABLE_FONT_PATH, LAST_BUILD_TIME, BUILDING, USE_FONTC
-    global LAST_BUILD_STATUS, LAST_BUILD_ERROR, LAST_AVAR2_ERROR
 
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
     # GC paused for the whole pass: the avar2 pipeline (update_config,
@@ -1466,7 +1386,7 @@ def _run_build():
     with _gc_paused():
         avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
-        LAST_AVAR2_ERROR = None
+        state.LAST_AVAR2_ERROR = None
         log.info(f"Avar2 font built: {avar2_result['font_path']}")
         return True
 
@@ -1475,26 +1395,26 @@ def _run_build():
     # everything reports "ok" while the preview quietly loses its
     # user-facing axes.
     _avar2_details = str(avar2_result.get("details") or "").strip()
-    LAST_AVAR2_ERROR = (
+    state.LAST_AVAR2_ERROR = (
         f"{avar2_result.get('error')}"
         + (f": …{_avar2_details[-400:]}" if _avar2_details else "")
     )
     log.info(f"Avar2 build skipped/failed ({avar2_result.get('error')}); "
         f"falling back to plain variable-font build.")
 
-    BUILDING = True
+    state.BUILDING = True
     try:
-        log.info(f"Building font from {GLYPHS_PATH}...")
-        VARIABLE_FONT_PATH = _apply_transform_chain(
-            build_variable_font(GLYPHS_PATH, BUILD_DIR, use_fontc=USE_FONTC)
+        log.info(f"Building font from {state.GLYPHS_PATH}...")
+        state.VARIABLE_FONT_PATH = _apply_transform_chain(
+            build_variable_font(state.GLYPHS_PATH, state.BUILD_DIR, use_fontc=state.USE_FONTC)
         )
-        LAST_BUILD_TIME = time.time()
+        state.LAST_BUILD_TIME = time.time()
         # The fallback succeeded — a working font is being served, so the
         # stale-banner state from the avar2 failure has to be cleared,
         # otherwise the UI keeps showing "Build failed" indefinitely.
-        LAST_BUILD_STATUS = "ok"
-        LAST_BUILD_ERROR = None
-        log.info(f"Font built successfully: {VARIABLE_FONT_PATH}")
+        state.LAST_BUILD_STATUS = "ok"
+        state.LAST_BUILD_ERROR = None
+        log.info(f"Font built successfully: {state.VARIABLE_FONT_PATH}")
         return True
     except Exception as e:
         log.info(f"Build failed: {e}")
@@ -1512,7 +1432,7 @@ def _run_build():
         })
         return False
     finally:
-        BUILDING = False
+        state.BUILDING = False
 
 
 @app.route('/api/build', methods=['POST'])
@@ -1524,16 +1444,16 @@ def build_font():
         success = JOBS.wait_for_idle()
 
         if not success:
-            return jsonify({"error": LAST_BUILD_ERROR or "Build failed"}), 500
+            return jsonify({"error": state.LAST_BUILD_ERROR or "Build failed"}), 500
 
         # Get axes after building (for verification)
-        axes = get_axes_from_built_font(VARIABLE_FONT_PATH)
+        axes = get_axes_from_built_font(state.VARIABLE_FONT_PATH)
 
         return jsonify({
             "success": True,
-            "font_path": str(VARIABLE_FONT_PATH),
+            "font_path": str(state.VARIABLE_FONT_PATH),
             "axes": axes,
-            "build_time": LAST_BUILD_TIME
+            "build_time": state.LAST_BUILD_TIME
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1588,14 +1508,14 @@ def get_font():
     # whatever's there.
     if request.args.get('format') == 'woff2':
         sizes = JOBS.export_sizes()
-        if not (VARIABLE_FONT_PATH and sizes["woff2_exact"]):
+        if not (state.VARIABLE_FONT_PATH and sizes["woff2_exact"]):
             return jsonify({"error": "woff2 cache is stale or missing"}), 409
-        woff2 = Path(VARIABLE_FONT_PATH).with_suffix(".woff2")
+        woff2 = Path(state.VARIABLE_FONT_PATH).with_suffix(".woff2")
         return send_file(str(woff2), mimetype='font/woff2',
                          as_attachment=bool(request.args.get('download')),
                          download_name=woff2.name)
-    if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
-        font_path = VARIABLE_FONT_PATH
+    if state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists():
+        font_path = state.VARIABLE_FONT_PATH
     else:
         return jsonify({"error": "Variable font not built yet."}), 404
 
@@ -1656,8 +1576,8 @@ def get_text_width():
         # preferred path, but SPAC is deferred to v2 — falling back to
         # VARIABLE_FONT_PATH keeps the measurement consistent with the
         # preview and avoids regenerating UFOs every time the user types.
-        if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists():
-            font_path = VARIABLE_FONT_PATH
+        if state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists():
+            font_path = state.VARIABLE_FONT_PATH
         else:
             return jsonify({"error": "Variable font not built yet."}), 404
 
@@ -1825,7 +1745,7 @@ def create_instance():
     # UnboundLocalError instead of falling back.
     _excluded = _non_mapping_axis_tags()
     try:
-        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
         existing_source_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         # ``font`` is the TRANSFORMED SHADOW: subtract the injected and
         # control axes or they become CSV mapping columns below.
@@ -1884,11 +1804,11 @@ def create_instance():
         # same contract as update_instance.
         try:
             _ctl_tags = {str(a.get("tag", "")).lower()
-                         for a in _control_axes.list_axes(ORIGINAL_PATH)}
+                         for a in _control_axes.list_axes(state.ORIGINAL_PATH)}
             ctl_values = {t: v for t, v in coordinates.items()
                           if str(t).lower() in _ctl_tags}
             if ctl_values:
-                _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
+                _control_axes.set_instance_values(state.ORIGINAL_PATH, instance_name,
                                                   ctl_values)
         except Exception as exc:
             log.warning(f"Warning: could not save control-axis values: {exc}")
@@ -1974,7 +1894,7 @@ def update_instance(instance_name: str):
         or bool(data.get('csv_only'))
     )
 
-    font, _fmt = _source_font.load_source(GLYPHS_PATH)
+    font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
     source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
     is_source_instance = instance_name in source_instance_names
     # GLYPHS_PATH is the TRANSFORMED SHADOW — its axis list includes the
@@ -2004,7 +1924,7 @@ def update_instance(instance_name: str):
     # matching fvar instances.
     try:
         _ctl_tags = {str(a.get("tag", "")).lower()
-                     for a in _control_axes.list_axes(ORIGINAL_PATH)}
+                     for a in _control_axes.list_axes(state.ORIGINAL_PATH)}
     except Exception:
         _ctl_tags = set()
     control_values = {tag: value for tag, value in coordinates.items()
@@ -2012,13 +1932,12 @@ def update_instance(instance_name: str):
     if control_values:
         _suppress_watcher()
         try:
-            _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
+            _control_axes.set_instance_values(state.ORIGINAL_PATH, instance_name,
                                               control_values)
         except Exception as exc:
             log.warning(f"Warning: could not save control-axis values: {exc}")
 
-    global EDITING_INSTANCES
-    EDITING_INSTANCES.discard(instance_name)
+    state.EDITING_INSTANCES.discard(instance_name)
 
     # Source writeback is skipped if the caller asked for CSV-only.
     # It targets the ORIGINAL — the user's file, the one explicit write
@@ -2029,7 +1948,7 @@ def update_instance(instance_name: str):
     glyphs_updated = False
     if not csv_only_flag and is_source_instance and glyphs_coordinates:
         glyphs_updated = update_instance_in_glyphs(
-            ORIGINAL_PATH, _source_instance_name(instance_name), glyphs_coordinates)
+            state.ORIGINAL_PATH, _source_instance_name(instance_name), glyphs_coordinates)
         if not glyphs_updated:
             return jsonify({"error": f"Failed to update instance '{instance_name}' in source file"}), 500
         # The shadow now trails the original — regenerate it BEFORE the
@@ -2122,7 +2041,7 @@ def update_instance(instance_name: str):
         csv_path = _get_avar2_csv_path()
         if csv_path and csv_path.exists():
             try:
-                if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name},
+                if _csv_io.update_csv_from_glyphs(state.GLYPHS_PATH, csv_path, skip_instances={instance_name},
                                                   exclude_axes=_non_mapping_axis_tags()):
                     _update_csv_modification_time(csv_path)   # ours, not external
                     log.info("CSV synced after instance update")
@@ -2174,19 +2093,19 @@ def rename_instance(instance_name: str):
         return jsonify({"error": "New name is the same as current name"}), 400
 
     try:
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
         source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         is_source_instance = instance_name in source_instance_names
 
         if is_source_instance:
-            success = rename_instance_in_glyphs(GLYPHS_PATH, instance_name, new_name)
-            if success and ORIGINAL_PATH is not None:
+            success = rename_instance_in_glyphs(state.GLYPHS_PATH, instance_name, new_name)
+            if success and state.ORIGINAL_PATH is not None:
                 # The rename just edited the SHADOW, which is re-derived
                 # from the original on every regeneration — record it so
                 # regenerate_shadow re-applies it and the old name never
                 # resurrects.
                 try:
-                    _instance_aliases.record(ORIGINAL_PATH, instance_name, new_name)
+                    _instance_aliases.record(state.ORIGINAL_PATH, instance_name, new_name)
                 except Exception as alias_exc:
                     log.warning(f"Warning: could not persist instance rename: {alias_exc}")
         else:
@@ -2196,16 +2115,16 @@ def rename_instance(instance_name: str):
         if success:
             # Keep any grade attached to this instance across the rename.
             try:
-                _grade.rename_instance(ORIGINAL_PATH, instance_name, new_name)
+                _grade.rename_instance(state.ORIGINAL_PATH, instance_name, new_name)
             except Exception:
                 pass
             try:
-                _kinetikern.sidecar.rename_instance(ORIGINAL_PATH, instance_name, new_name)
+                _kinetikern.sidecar.rename_instance(state.ORIGINAL_PATH, instance_name, new_name)
             except Exception:
                 pass
             # Same for per-instance control-axis values.
             try:
-                _control_axes.rename_instance_values(ORIGINAL_PATH,
+                _control_axes.rename_instance_values(state.ORIGINAL_PATH,
                                                      instance_name, new_name)
             except Exception:
                 pass
@@ -2265,7 +2184,7 @@ def add_instance_to_source(instance_name: str):
         # Promotion writes the ORIGINAL (the user's file) — loading and
         # saving the shadow here would both lose the write on the next
         # regen AND risk leaking shadow artifacts if saved elsewhere.
-        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source(state.ORIGINAL_PATH)
         source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         if instance_name in source_instance_names:
             return jsonify({"error": f"Instance '{instance_name}' is already in the source file"}), 400
@@ -2302,13 +2221,13 @@ def add_instance_to_source(instance_name: str):
         if not found:
             return jsonify({"error": f"Instance '{instance_name}' not found in the studio"}), 404
 
-        ok = _source_font.add_instance_to_source(font, ORIGINAL_PATH, instance_name, coords)
+        ok = _source_font.add_instance_to_source(font, state.ORIGINAL_PATH, instance_name, coords)
         if not ok:
             return jsonify({"error": f"Failed to add '{instance_name}' to source file"}), 500
 
         # For .glyphs sources, also poke Glyphs.app to reload the document.
-        if _source_is_glyphs(ORIGINAL_PATH):
-            _force_reload_glyphs_document(ORIGINAL_PATH, font_object=font)
+        if _source_is_glyphs(state.ORIGINAL_PATH):
+            _force_reload_glyphs_document(state.ORIGINAL_PATH, font_object=font)
 
         # The shadow (and with it the instances listing) trails the
         # original until regenerated — resolve now so the origin flip
@@ -2375,10 +2294,10 @@ def _get_avar2_built_font_filename() -> Optional[str]:
                     return next(iter(fvar_instances.keys()))
             except Exception as e:
                 log.warning(f"Warning: failed to read built-font filename from {config_path}: {e}")
-    if GLYPHS_PATH:
-        family = GLYPHS_PATH.stem
+    if state.GLYPHS_PATH:
+        family = state.GLYPHS_PATH.stem
         try:
-            axes = get_axes_from_glyphs(GLYPHS_PATH)
+            axes = get_axes_from_glyphs(state.GLYPHS_PATH)
             tags = sorted(a["tag"] for a in axes if a.get("tag"))
         except Exception:
             tags = []
@@ -2389,13 +2308,13 @@ def _get_avar2_built_font_filename() -> Optional[str]:
 def _is_build_stale() -> bool:
     """CSV modified after the last build ⇒ the served font's avar2
     table no longer reflects the mappings. Cheap mtime compare."""
-    if LAST_BUILD_TIME is None:
+    if state.LAST_BUILD_TIME is None:
         return False
     try:
         csv_path = _get_avar2_csv_path() or _get_preview_csv_path()
         if not csv_path or not csv_path.exists():
             return False
-        return csv_path.stat().st_mtime > LAST_BUILD_TIME
+        return csv_path.stat().st_mtime > state.LAST_BUILD_TIME
     except Exception:
         return False
 
@@ -2422,7 +2341,7 @@ _BUILD_GATE_ALLOW_SUFFIX = ("/editing",)
 def _refuse_edits_while_source_is_broken():
     if request.method not in _BUILD_GATE_METHODS:
         return None
-    if LAST_BUILD_STATUS != "failed":
+    if state.LAST_BUILD_STATUS != "failed":
         return None
     path = request.path
     if path in _BUILD_GATE_ALLOW_EXACT or path.endswith(_BUILD_GATE_ALLOW_SUFFIX):
@@ -2431,7 +2350,7 @@ def _refuse_edits_while_source_is_broken():
         return None
     return jsonify({
         "error": "The source file does not compile, so the studio is paused.",
-        "detail": LAST_BUILD_ERROR,
+        "detail": state.LAST_BUILD_ERROR,
         "build_blocked": True,
         "hint": "Fix the source and save it (the studio rebuilds on save), or press Rebuild.",
     }), 409
@@ -2442,23 +2361,23 @@ def health():
     """Health check endpoint."""
     try:
         family_name = None
-        if GLYPHS_PATH:
-            family_name = get_font_family_name(GLYPHS_PATH) or GLYPHS_PATH.stem
+        if state.GLYPHS_PATH:
+            family_name = get_font_family_name(state.GLYPHS_PATH) or state.GLYPHS_PATH.stem
 
         return jsonify({
             "status": "ok",
             # Hosted shared-demo instance (AVAR2_STUDIO_DEMO=1): the
             # frontend shows the landing overlay + shared-session note.
             "demo": os.environ.get("AVAR2_STUDIO_DEMO") == "1",
-            "glyphs_path": str(GLYPHS_PATH) if GLYPHS_PATH else None,
+            "glyphs_path": str(state.GLYPHS_PATH) if state.GLYPHS_PATH else None,
             # original_path is the path the USER pointed at. glyphs_path
             # is the ACTIVE build/read path which becomes the shadow
             # whenever CONTROL AXES are declared. Frontend uses the
             # former as the "source identity" for swap detection so
             # declaring a control axis doesn't look like a swap.
-            "original_path": str(ORIGINAL_PATH) if ORIGINAL_PATH else None,
-            "source_format": SOURCE_FORMAT,
-            "font_built": VARIABLE_FONT_PATH.exists() if VARIABLE_FONT_PATH else False,
+            "original_path": str(state.ORIGINAL_PATH) if state.ORIGINAL_PATH else None,
+            "source_format": state.SOURCE_FORMAT,
+            "font_built": state.VARIABLE_FONT_PATH.exists() if state.VARIABLE_FONT_PATH else False,
             "family_name": family_name,
             "vf_family_id": f"{family_name}-VF" if family_name else None,
             # Report the ACTUAL served font's name (VARIABLE_FONT_PATH is what
@@ -2466,22 +2385,22 @@ def health():
             # name like ``…[SPAC].ttf`` matches the bytes. Fall back to the
             # avar2-dir derivation before the first build completes.
             "built_font_filename": (
-                VARIABLE_FONT_PATH.name if VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists()
+                state.VARIABLE_FONT_PATH.name if state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists()
                 else _get_avar2_built_font_filename()
             ),
-            "last_build_time": LAST_BUILD_TIME,
-            "last_build_status": LAST_BUILD_STATUS,
-            "last_build_error": LAST_BUILD_ERROR,
+            "last_build_time": state.LAST_BUILD_TIME,
+            "last_build_status": state.LAST_BUILD_STATUS,
+            "last_build_error": state.LAST_BUILD_ERROR,
             # {sidecar path: parse error} — a corrupt control sidecar reads as
             # empty but is never overwritten; the UI should say so.
             "sidecar_errors": _control_axes.load_errors(),
-            "transform_error": LAST_TRANSFORM_ERROR,
+            "transform_error": state.LAST_TRANSFORM_ERROR,
             # Non-null ⇒ the served font is the plain fallback build;
             # the avar2 build is failing for this reason.
-            "avar2_error": LAST_AVAR2_ERROR,
-            "grade_error": LAST_GRADE_ERROR,
-            "source_transform_error": LAST_SOURCE_TRANSFORM_ERROR,
-            "origin_warning": LAST_ORIGIN_WARNING,
+            "avar2_error": state.LAST_AVAR2_ERROR,
+            "grade_error": state.LAST_GRADE_ERROR,
+            "source_transform_error": state.LAST_SOURCE_TRANSFORM_ERROR,
+            "origin_warning": state.LAST_ORIGIN_WARNING,
             # True ⇒ the mappings CSV changed after the last build —
             # the served font's avar2 table is stale. Auto-saved
             # coordinate edits set this instead of rebuilding; the
@@ -2490,7 +2409,7 @@ def health():
             # Fold in background regen/rebuild work: the layer save returns
             # instantly, so the queue's state alone would read false while the
             # shadow is still regenerating and the preview is stale.
-            "building": JOBS.is_building() or BACKGROUND_WORK > 0,
+            "building": JOBS.is_building() or state.BACKGROUND_WORK > 0,
             "build_job": JOBS.status().get("running"),
         })
     except Exception as e:
@@ -2503,13 +2422,13 @@ def health():
 @app.route('/api/glyphs-file-status', methods=['GET'])
 def glyphs_file_status():
     """Check if Glyphs file has unsaved changes."""
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return jsonify({"has_unsaved_changes": False, "file_path": None})
     try:
-        has_unsaved = _check_glyphs_file_unsaved_changes(GLYPHS_PATH)
+        has_unsaved = _check_glyphs_file_unsaved_changes(state.GLYPHS_PATH)
         return jsonify({
             "has_unsaved_changes": has_unsaved,
-            "file_path": str(GLYPHS_PATH)
+            "file_path": str(state.GLYPHS_PATH)
         })
     except Exception as e:
         return jsonify({
@@ -2522,8 +2441,6 @@ def glyphs_file_status():
 # Avar2 API Endpoints
 # ============================================================================
 
-# Track CSV modification times for external edit detection
-_CSV_MODIFICATION_TIMES: Dict[str, float] = {}
 
 def _get_avar2_csv_path() -> Optional[Path]:
     """Get path to avar2-mappings.csv (relative to Glyphs file or explicit)."""
@@ -2533,13 +2450,12 @@ def _get_avar2_csv_path() -> Optional[Path]:
         return preview_csv
 
     # Fallback to explicit CSV path if set
-    global CSV_PATH
-    if CSV_PATH:
-        return CSV_PATH
+    if state.CSV_PATH:
+        return state.CSV_PATH
 
     # Default: look for avar2-mappings.csv in same directory as Glyphs file
-    if GLYPHS_PATH:
-        default_csv = GLYPHS_PATH.parent / "avar2-mappings.csv"
+    if state.GLYPHS_PATH:
+        default_csv = state.GLYPHS_PATH.parent / "avar2-mappings.csv"
         if default_csv.exists():
             return default_csv
 
@@ -2562,20 +2478,19 @@ def _get_preview_dir() -> Optional[Path]:
     here. The dir is created on demand. Designers should gitignore it; the
     sibling ``MyFont-avar.csv`` (outside this dir) is the authored artifact.
     """
-    global PREVIEW_DIR
-    if PREVIEW_DIR:
-        return PREVIEW_DIR
+    if state.PREVIEW_DIR:
+        return state.PREVIEW_DIR
 
     # Resolve against the ORIGINAL source, never GLYPHS_PATH: once a control
     # axis has brace layers GLYPHS_PATH points at the shadow, and deriving from
     # it nests a second .avar2-studio/ INSIDE the shadow dir.
-    base = ORIGINAL_PATH or GLYPHS_PATH
+    base = state.ORIGINAL_PATH or state.GLYPHS_PATH
     if not base:
         return None
 
     workdir = base.parent / ".avar2-studio"
     workdir.mkdir(parents=True, exist_ok=True)
-    PREVIEW_DIR = workdir
+    state.PREVIEW_DIR = workdir
     return workdir
 
 
@@ -2586,15 +2501,14 @@ def _get_preview_csv_path() -> Optional[Path]:
     directory. The CSV is the designer's authored artifact and is intentionally
     OUTSIDE the .avar2-studio workdir so it gets committed alongside the source.
     """
-    global PREVIEW_CSV_PATH
-    if PREVIEW_CSV_PATH:
-        return PREVIEW_CSV_PATH
+    if state.PREVIEW_CSV_PATH:
+        return state.PREVIEW_CSV_PATH
 
     # Resolve against the ORIGINAL source, never GLYPHS_PATH: once a control
     # axis has brace layers GLYPHS_PATH points at the shadow, which would put
     # the designer's authored CSV inside .avar2-studio/shadow/ and make every
     # /api/avar2/* lookup miss the real one next to the source.
-    base = ORIGINAL_PATH or GLYPHS_PATH
+    base = state.ORIGINAL_PATH or state.GLYPHS_PATH
     if not base:
         return None
 
@@ -2603,22 +2517,21 @@ def _get_preview_csv_path() -> Optional[Path]:
     # without loading the source.
     family_name = base.stem
     csv_path = base.parent / f"{family_name}-avar.csv"
-    PREVIEW_CSV_PATH = csv_path
+    state.PREVIEW_CSV_PATH = csv_path
     return csv_path
 
 
 def _get_preview_config_path() -> Optional[Path]:
     """Get path to the gftools-builder config inside the .avar2-studio workdir."""
-    global PREVIEW_CONFIG_PATH
-    if PREVIEW_CONFIG_PATH:
-        return PREVIEW_CONFIG_PATH
+    if state.PREVIEW_CONFIG_PATH:
+        return state.PREVIEW_CONFIG_PATH
 
     workdir = _get_preview_dir()
     if not workdir:
         return None
 
     config_path = workdir / "config.yaml"
-    PREVIEW_CONFIG_PATH = config_path
+    state.PREVIEW_CONFIG_PATH = config_path
     return config_path
 
 
@@ -2646,12 +2559,12 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
     if csv_path.exists():
         return csv_path
 
-    if not GLYPHS_PATH or not GLYPHS_PATH.exists():
+    if not state.GLYPHS_PATH or not state.GLYPHS_PATH.exists():
         return None
 
     try:
         import csv
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
         # All source axes get a column. SPAC support is deferred — even
         # if the source declares a SPAC axis it's treated as just
         # another parametric column with no special handling.
@@ -2716,15 +2629,15 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
         except Exception:
             return config_path
 
-    if not GLYPHS_PATH or not GLYPHS_PATH.exists():
+    if not state.GLYPHS_PATH or not state.GLYPHS_PATH.exists():
         return None
 
     try:
         import yaml
-        font, _fmt = _source_font.load_source(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
 
         # Locked convention: family name from source file stem.
-        family_name = _source_font.get_family_name(font, GLYPHS_PATH)
+        family_name = _source_font.get_family_name(font, state.GLYPHS_PATH)
 
         axes = _source_font.get_axes(font)
         source_instances = _source_font.get_source_instances(font)
@@ -2748,7 +2661,7 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
             font_filename = f"{family_name}-VF.ttf"
 
         # Use absolute path for sources to avoid path issues
-        sources_path = str(GLYPHS_PATH.resolve())
+        sources_path = str(state.GLYPHS_PATH.resolve())
 
         # Only emit fvarInstances when the source declares instances.
         # An empty list crashes the gftools builder's strictyaml schema
@@ -2833,10 +2746,10 @@ def _derive_traditional_range(tag: str, rows: Optional[List[Dict]] = None,
     tag_upper = (tag or "").strip().upper()
 
     # 1. Transform-injected axes (SPAC): the transform owns the fvar extent.
-    if ORIGINAL_PATH is not None:
+    if state.ORIGINAL_PATH is not None:
         try:
             _transforms.discover()
-            for transform, params in _transforms.active(ORIGINAL_PATH):
+            for transform, params in _transforms.active(state.ORIGINAL_PATH):
                 if (transform.spec.injected_axis_tag or "").upper() != tag_upper:
                     continue
                 lo, hi = params.get("min"), params.get("max")
@@ -2922,9 +2835,9 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
         metadata = {}
 
     # Get parametric axes from the source file and add to metadata if missing.
-    if GLYPHS_PATH and GLYPHS_PATH.exists():
+    if state.GLYPHS_PATH and state.GLYPHS_PATH.exists():
         try:
-            font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+            font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
             metadata_updated = False
 
             for axis in _source_font.get_axes(font):
@@ -3001,11 +2914,11 @@ def _secondary_axis_tags() -> set:
     csv_io.update_csv_from_glyphs.
     """
     try:
-        if ORIGINAL_PATH is None:
+        if state.ORIGINAL_PATH is None:
             return set()
         return {
             str(ax.get("tag") or "").upper()
-            for ax in (_control_axes.list_axes(ORIGINAL_PATH) or [])
+            for ax in (_control_axes.list_axes(state.ORIGINAL_PATH) or [])
             if ax.get("tag")
         }
     except Exception:
@@ -3039,11 +2952,11 @@ def _check_csv_external_edit(csv_path: Path) -> bool:
     csv_str = str(csv_path)
     current_mtime = csv_path.stat().st_mtime if csv_path.exists() else 0
 
-    if csv_str in _CSV_MODIFICATION_TIMES:
-        if current_mtime > _CSV_MODIFICATION_TIMES[csv_str]:
+    if csv_str in state._CSV_MODIFICATION_TIMES:
+        if current_mtime > state._CSV_MODIFICATION_TIMES[csv_str]:
             return True
 
-    _CSV_MODIFICATION_TIMES[csv_str] = current_mtime
+    state._CSV_MODIFICATION_TIMES[csv_str] = current_mtime
     return False
 
 
@@ -3051,7 +2964,7 @@ def _update_csv_modification_time(csv_path: Path) -> None:
     """Update tracked modification time after we write to CSV."""
     csv_str = str(csv_path)
     if csv_path.exists():
-        _CSV_MODIFICATION_TIMES[csv_str] = csv_path.stat().st_mtime
+        state._CSV_MODIFICATION_TIMES[csv_str] = csv_path.stat().st_mtime
 
 
 def _validate_axis_tag(tag: str) -> tuple[bool, Optional[str]]:
@@ -3073,11 +2986,11 @@ def _get_glyphs_axis_tags() -> set:
     Name kept as ``_get_glyphs_axis_tags`` for git-blame stability; works on
     both .glyphs and .designspace via the source_font dispatcher.
     """
-    if not GLYPHS_PATH or not GLYPHS_PATH.exists():
+    if not state.GLYPHS_PATH or not state.GLYPHS_PATH.exists():
         return set()
 
     try:
-        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
         return {axis["tag"].lower() for axis in _source_font.get_axes(font)}
     except Exception as e:
         log.error(f"Error reading axes from source file: {e}")
@@ -3091,7 +3004,7 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
     try:
         # Use normalized read function
 
-        rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
 
         if not fieldnames:
             return False
@@ -3152,7 +3065,7 @@ def get_avar2_instances():
         # Import matching function
 
         # Get matches
-        matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
+        matches = _csv_io.match_instances(state.GLYPHS_PATH, csv_path)
 
         # Add missing instances to CSV — unless an existing row already
         # sits at the instance's exact parametric location. A RENAMED row
@@ -3160,7 +3073,7 @@ def get_avar2_instances():
         # name (the studio never writes the original): re-adding by name
         # would resurrect the old instance as a coordinate duplicate on
         # every refresh after a rename.
-        rows, _fns, _in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        rows, _fns, _in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
         existing_locs = []
         for row in rows:
             loc = {}
@@ -3201,7 +3114,7 @@ def get_avar2_instances():
 
         # If we added instances, reload matches
         if added_count > 0:
-            matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
+            matches = _csv_io.match_instances(state.GLYPHS_PATH, csv_path)
 
         # And keep renamed instances out of the LISTING too: a source
         # instance whose location an existing row holds is that row, not
@@ -3253,10 +3166,10 @@ def glyph_coverage():
           ]
         }
     """
-    if GLYPHS_PATH is None:
+    if state.GLYPHS_PATH is None:
         return jsonify({"axes": []})
     try:
-        font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
         coverage = _glyph_coverage.compute_coverage(font)
 
         # Pair the coverage data with axis names / display info from the
@@ -3305,7 +3218,7 @@ def glyph_coverage():
         # edit / delete affordances.
         try:
             total = next(iter(coverage.values()), {}).get("total_glyphs", 0) if coverage else 0
-            sidecar_path = ORIGINAL_PATH if ORIGINAL_PATH is not None else GLYPHS_PATH
+            sidecar_path = state.ORIGINAL_PATH if state.ORIGINAL_PATH is not None else state.GLYPHS_PATH
             by_tag = {str(a["tag"]).lower(): a for a in out}
             sidecar_axes = list(_control_axes.list_axes(sidecar_path))
             # Resolve each studio layer's parametric location to its master
@@ -3320,7 +3233,7 @@ def glyph_coverage():
                         if str(getattr(fax, "axisTag", "")).lower() in sidecar_tags
                     }
                     corner_of = _control_axes.corner_name_resolver(
-                        font, control_idx, ORIGINAL_PATH
+                        font, control_idx, state.ORIGINAL_PATH
                     )
                 except Exception as corner_exc:
                     log.warning(f"Warning: corner-name resolution unavailable: {corner_exc}")
@@ -3412,11 +3325,8 @@ def glyph_coverage():
 # ----------------------------------------------------------------------
 
 
-# Cached TTFont for /api/mapped-location — reparsing the built font per
-# slider tick would dwarf the actual avar evaluation. Keyed on
-# (path, mtime) so rebuilds invalidate naturally.
+# Guards state._MAPPED_FONT_CACHE.
 _MAPPED_FONT_LOCK = threading.Lock()
-_MAPPED_FONT_CACHE: Dict[str, object] = {"key": None, "font": None}
 
 
 @app.route('/api/mapped-location', methods=['GET'])
@@ -3431,7 +3341,7 @@ def mapped_location():
     mapping model, so what the sliders show is exactly what the font
     does. Fonts without an avar table just echo the input location.
     """
-    if VARIABLE_FONT_PATH is None or not VARIABLE_FONT_PATH.exists():
+    if state.VARIABLE_FONT_PATH is None or not state.VARIABLE_FONT_PATH.exists():
         return jsonify({"error": "No built font"}), 404
     try:
         coords = json.loads(request.args.get("coordinates", "{}")) or {}
@@ -3452,11 +3362,11 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     from fontTools.varLib.models import normalizeLocation
 
     with _MAPPED_FONT_LOCK:
-        key = (str(VARIABLE_FONT_PATH), VARIABLE_FONT_PATH.stat().st_mtime)
-        if _MAPPED_FONT_CACHE["key"] != key:
-            _MAPPED_FONT_CACHE["font"] = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
-            _MAPPED_FONT_CACHE["key"] = key
-        tt = _MAPPED_FONT_CACHE["font"]
+        key = (str(state.VARIABLE_FONT_PATH), state.VARIABLE_FONT_PATH.stat().st_mtime)
+        if state._MAPPED_FONT_CACHE["key"] != key:
+            state._MAPPED_FONT_CACHE["font"] = TTFont(str(state.VARIABLE_FONT_PATH), lazy=True)
+            state._MAPPED_FONT_CACHE["key"] = key
+        tt = state._MAPPED_FONT_CACHE["font"]
 
         axes = {
             a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
@@ -3506,7 +3416,7 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
         src_dir = export_dir / "sources"
         src_dir.mkdir(parents=True, exist_ok=True)
 
-        source_path = Path(source_path) if source_path is not None else GLYPHS_PATH
+        source_path = Path(source_path) if source_path is not None else state.GLYPHS_PATH
         if str(source_path).lower().endswith(".glyphs"):
             gsfont = glyphsLib.GSFont(str(source_path))
             nonexport = {str(g.name) for g in gsfont.glyphs
@@ -3844,7 +3754,7 @@ def export_font():
     Returns 202 + job id; the client polls ``/api/build/status`` and
     fetches ``/api/export/<job id>/download`` when done.
     """
-    if VARIABLE_FONT_PATH is None or not VARIABLE_FONT_PATH.exists():
+    if state.VARIABLE_FONT_PATH is None or not state.VARIABLE_FONT_PATH.exists():
         return jsonify({"error": "No built font"}), 404
     body = request.get_json(silent=True) or {}
     hidden = body.get("hidden_axes") or []
@@ -3854,7 +3764,7 @@ def export_font():
         return jsonify({"error": "format must be ttf or woff2"}), 400
 
     if default_location:
-        tt = TTFont(str(VARIABLE_FONT_PATH), lazy=True)
+        tt = TTFont(str(state.VARIABLE_FONT_PATH), lazy=True)
         fvar_tags = {str(a.axisTag) for a in tt["fvar"].axes}
         tt.close()
         requested = {}
@@ -3878,13 +3788,13 @@ def export_font():
 def list_transforms():
     """Return the available transforms merged with this project's enabled
     state + params."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"transforms": []})
     try:
         _transforms.discover()
         return jsonify({
-            "transforms": _transforms.available(ORIGINAL_PATH),
-            "sidecar_path": str(_transforms.sidecar_path_for(ORIGINAL_PATH)),
+            "transforms": _transforms.available(state.ORIGINAL_PATH),
+            "sidecar_path": str(_transforms.sidecar_path_for(state.ORIGINAL_PATH)),
         })
     except Exception as e:
         log.error(f"Error listing transforms: {e}")
@@ -3904,7 +3814,7 @@ def update_transforms():
     schema. Persists to the sidecar, then rebuilds so the preview + axes
     reflect the new chain (transforms are VF post-processors — no shadow
     rewrite needed)."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     entries = data.get("transforms")
@@ -3914,7 +3824,7 @@ def update_transforms():
         _transforms.discover()
         previous = {}
         try:
-            previous = {t.get("id"): t for t in _transforms.available(ORIGINAL_PATH)}
+            previous = {t.get("id"): t for t in _transforms.available(state.ORIGINAL_PATH)}
         except Exception as prev_exc:
             log.info(f"transforms: could not read previous state: {prev_exc}")
         # Guardrail: a transform whose engine reads specific axes
@@ -3935,7 +3845,7 @@ def update_transforms():
                         f"{', '.join(missing)} — this source doesn't declare "
                         f"{'them' if len(missing) > 1 else 'it'}.")}), 400
         try:
-            stored = _transforms.set_active(ORIGINAL_PATH, entries)
+            stored = _transforms.set_active(state.ORIGINAL_PATH, entries)
         except ValueError as ve:
             # Invalid config (e.g. SPAC min >= max) — reject with feedback
             # instead of persisting an enabled-but-doomed transform.
@@ -3990,7 +3900,7 @@ def update_transforms():
             "success": True,
             "transforms": stored,
             "build_ok": bool(build_ok),
-            "transform_error": LAST_TRANSFORM_ERROR,
+            "transform_error": state.LAST_TRANSFORM_ERROR,
         })
     except Exception as e:
         log.error(f"Error updating transforms: {e}")
@@ -4019,7 +3929,7 @@ def _grade_instance_coords():
     (the original bug) found no coords and every grade was skipped."""
     coords = {}
     try:
-        font, _fmt = _source_font.load_source_cached(ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source_cached(state.ORIGINAL_PATH)
         for inst in _source_font.get_source_instances(font):
             coords[inst["name"]] = dict(inst.get("coordinates", {}))
     except Exception:
@@ -4052,7 +3962,7 @@ def _grade_param_ranges():
     """(min, max) per parametric tag, or {} when the source can't be read."""
     ranges = {}
     try:
-        axes = _source_font.get_axes(_source_font.load_source_cached(ORIGINAL_PATH)[0])
+        axes = _source_font.get_axes(_source_font.load_source_cached(state.ORIGINAL_PATH)[0])
         by_tag = {a["tag"].upper(): a for a in axes}
         for t in _grade.PARAM_TAGS:
             if t in by_tag:
@@ -4187,7 +4097,7 @@ def _grade_diagnostics(data, coords, param_ranges):
 
 def _grade_state_payload():
     """Grade sidecar + per-instance slider caps and diagnostics for the UI."""
-    data = _grade.load(ORIGINAL_PATH)
+    data = _grade.load(state.ORIGINAL_PATH)
     param_ranges = _grade_param_ranges()
     try:
         coords = _grade_instance_coords()
@@ -4203,14 +4113,14 @@ def _grade_state_payload():
     except Exception as exc:
         log.warning(f"Warning: grade diagnostics failed: {exc}")
         data["diagnostics"] = []
-    data["sidecar_path"] = str(_grade.sidecar_path_for(ORIGINAL_PATH))
+    data["sidecar_path"] = str(_grade.sidecar_path_for(state.ORIGINAL_PATH))
     return data
 
 
 @app.route('/api/transforms/grade', methods=['GET'])
 def get_grade():
     """Return the grade toggle, default, per-instance grades, and slider caps."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify(_grade._empty())
     try:
         return jsonify(_grade_state_payload())
@@ -4229,24 +4139,24 @@ def set_grade():
     All fields optional. ``intensity`` scales every authored grade% at once;
     ``clamp_to_headroom`` stops a grade thickening where the counters have no
     room to open. Rebuilds when the built font would change."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     try:
         rebuild = False
         if "enabled" in data:
-            _grade.set_enabled(ORIGINAL_PATH, bool(data["enabled"]))
+            _grade.set_enabled(state.ORIGINAL_PATH, bool(data["enabled"]))
             rebuild = True  # toggling adds/removes the GRAD axis
         if "default_pct" in data:
             # The default only seeds NEW grades; changing it never alters the
             # built font, so persist without a rebuild.
-            _grade.set_default_pct(ORIGINAL_PATH, data["default_pct"])
+            _grade.set_default_pct(state.ORIGINAL_PATH, data["default_pct"])
         if "intensity" in data:
             # Scales every authored grade%, so the built font changes.
-            _grade.set_intensity(ORIGINAL_PATH, data["intensity"])
+            _grade.set_intensity(state.ORIGINAL_PATH, data["intensity"])
             rebuild = True
         if "clamp_to_headroom" in data:
-            _grade.set_clamp_to_headroom(ORIGINAL_PATH, bool(data["clamp_to_headroom"]))
+            _grade.set_clamp_to_headroom(state.ORIGINAL_PATH, bool(data["clamp_to_headroom"]))
             rebuild = True
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -4259,11 +4169,11 @@ def set_grade():
 def set_instance_grade(instance_name: str):
     """Add or update a grade on one instance. Body ``{"pct": 0.25}`` — omit
     ``pct`` to use the global default. Rebuilds."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     try:
-        entry = _grade.set_instance_grade(ORIGINAL_PATH, instance_name, data.get("pct"))
+        entry = _grade.set_instance_grade(state.ORIGINAL_PATH, instance_name, data.get("pct"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     schedule_shadow_rebuild()
@@ -4273,9 +4183,9 @@ def set_instance_grade(instance_name: str):
 @app.route('/api/instances/<instance_name>/grade', methods=['DELETE'])
 def delete_instance_grade(instance_name: str):
     """Remove a grade from one instance. Rebuilds."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    removed = _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
+    removed = _grade.remove_instance_grade(state.ORIGINAL_PATH, instance_name)
     if removed:
         schedule_shadow_rebuild()
     return jsonify({"removed": removed})
@@ -4288,7 +4198,7 @@ def kinetikern_propose():
     at ``looseness`` (-1 tight … +1 loose; 0 is the engine's calibrated
     middle). Returns current and proposed sidebearings per encoded glyph.
     Nothing is written."""
-    if not (VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists()):
+    if not (state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists()):
         return jsonify({"error": "Variable font not built yet."}), 404
     if _kinetikern.engine_path() is None:
         return jsonify({"error": "Kinetikern2 engine not built (native/kinetikern2/README.md)."}), 503
@@ -4308,13 +4218,13 @@ def kinetikern_propose():
     except ValueError:
         return jsonify({"error": "looseness must be a number"}), 400
     try:
-        out = _kinetikern.propose(VARIABLE_FONT_PATH, location, looseness)
+        out = _kinetikern.propose(state.VARIABLE_FONT_PATH, location, looseness)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     out["instance"] = name
     # what the sidecar already holds for this instance, by glyph: the build
     # that carries it shows ``cur`` = baseline + applied
-    stored = _kinetikern.sidecar.find(ORIGINAL_PATH, name) if name else None
+    stored = _kinetikern.sidecar.find(state.ORIGINAL_PATH, name) if name else None
     applied = (stored or {}).get("deltas", {})
     source_names = _kinetikern_source_names() if applied else {}
     for g in out["glyphs"]:
@@ -4327,9 +4237,9 @@ def kinetikern_propose():
 def kinetikern_state():
     """The Kinetikern sidecar: every corrected instance with its looseness
     and per-glyph deltas (``sidecar.load``)."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    return jsonify(_kinetikern.sidecar.load(ORIGINAL_PATH))
+    return jsonify(_kinetikern.sidecar.load(state.ORIGINAL_PATH))
 
 
 def _kinetikern_apply_one(name: str, coords: Dict[str, float], looseness: float,
@@ -4339,8 +4249,8 @@ def _kinetikern_apply_one(name: str, coords: Dict[str, float], looseness: float,
     is the existing one plus the move the current build still needs; once
     that build carries the entry a re-apply changes nothing."""
     location = {t: coords[t] for t in _grade.PARAM_TAGS if t in coords}
-    out = _kinetikern.propose(VARIABLE_FONT_PATH, location, looseness)
-    existing = (_kinetikern.sidecar.find(ORIGINAL_PATH, name) or {}).get("deltas", {})
+    out = _kinetikern.propose(state.VARIABLE_FONT_PATH, location, looseness)
+    existing = (_kinetikern.sidecar.find(state.ORIGINAL_PATH, name) or {}).get("deltas", {})
     source_names = _kinetikern_source_names()
     deltas = {}
     for g in out["glyphs"]:
@@ -4352,14 +4262,14 @@ def _kinetikern_apply_one(name: str, coords: Dict[str, float], looseness: float,
         dr = g["new"]["rsb"] - g["cur"]["rsb"] + old[1]
         if dl or dr:
             deltas[glyph] = [dl, dr]
-    return _kinetikern.sidecar.set_entry(ORIGINAL_PATH, name, looseness, deltas, location=location)
+    return _kinetikern.sidecar.set_entry(state.ORIGINAL_PATH, name, looseness, deltas, location=location)
 
 
 def _kinetikern_source_names() -> Dict[int, str]:
     """{code point: source glyph name}. The bake works on the source, whose
     names fontc replaces with production names in the build (euro -> Euro)."""
     try:
-        font, fmt = _source_font.load_source_cached(ORIGINAL_PATH)
+        font, fmt = _source_font.load_source_cached(state.ORIGINAL_PATH)
     except Exception:
         return {}
     if "glyphs" not in str(fmt).lower():
@@ -4375,9 +4285,9 @@ def _kinetikern_source_names() -> Dict[int, str]:
 
 
 def _kinetikern_ready():
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    if not (VARIABLE_FONT_PATH and VARIABLE_FONT_PATH.exists()):
+    if not (state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists()):
         return jsonify({"error": "Variable font not built yet."}), 404
     if _kinetikern.engine_path() is None:
         return jsonify({"error": "Kinetikern2 engine not built (native/kinetikern2/README.md)."}), 503
@@ -4416,9 +4326,9 @@ def kinetikern_apply_instance(instance_name: str):
 @app.route('/api/kinetikern/instances/<instance_name>', methods=['DELETE'])
 def kinetikern_revert_instance(instance_name: str):
     """Drop one instance's correction. Rebuilds."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    removed = _kinetikern.sidecar.remove_entry(ORIGINAL_PATH, instance_name)
+    removed = _kinetikern.sidecar.remove_entry(state.ORIGINAL_PATH, instance_name)
     if removed:
         schedule_shadow_rebuild()
     return jsonify({"removed": removed})
@@ -4451,29 +4361,27 @@ def kinetikern_apply_all():
 # ----------------------------------------------------------------------
 
 
-_SOURCE_GLYPH_SIGS: "tuple" = (None, {})   # (source mtime_ns, {glyph: sig})
 
 
 def _source_glyph_sigs():
     """{glyph: master-geometry signature} for the ORIGINAL source, recomputed
     only when the file's mtime changes. /api/control-axes is polled, and a
     glyphsLib parse per poll would be the wrong price for a staleness flag."""
-    global _SOURCE_GLYPH_SIGS
-    if ORIGINAL_PATH is None or not ORIGINAL_PATH.exists():
+    if state.ORIGINAL_PATH is None or not state.ORIGINAL_PATH.exists():
         return None
     try:
-        mtime = ORIGINAL_PATH.stat().st_mtime_ns
+        mtime = state.ORIGINAL_PATH.stat().st_mtime_ns
     except OSError:
         return None
-    if _SOURCE_GLYPH_SIGS[0] == mtime:
-        return _SOURCE_GLYPH_SIGS[1]
+    if state._SOURCE_GLYPH_SIGS[0] == mtime:
+        return state._SOURCE_GLYPH_SIGS[1]
     try:
-        font, _fmt = _source_font.load_source(ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source(state.ORIGINAL_PATH)
         sigs = {g.name: _control_axes.glyph_masters_sig(font, g.name) for g in font.glyphs}
     except Exception as exc:
         log.warning(f"Warning: could not fingerprint source glyphs: {exc}")
         return None
-    _SOURCE_GLYPH_SIGS = (mtime, sigs)
+    state._SOURCE_GLYPH_SIGS = (mtime, sigs)
     return sigs
 
 
@@ -4485,9 +4393,9 @@ def _designspace_authoring_refusal():
     so edits made through these routes would silently degrade. Reads keep
     working and existing layers still build. Returns a 501 response, or
     None when the source is a .glyphs file."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return None
-    fmt = SOURCE_FORMAT or _source_font.detect_format(Path(ORIGINAL_PATH))
+    fmt = state.SOURCE_FORMAT or _source_font.detect_format(Path(state.ORIGINAL_PATH))
     if fmt == "designspace":
         return jsonify({
             "error": "Secondary parametric axes are authored on .glyphs sources only; "
@@ -4500,7 +4408,7 @@ def _designspace_authoring_refusal():
 @app.route('/api/control-axes', methods=['GET'])
 def list_control_axes():
     """Return the sidecar's control-axis declarations."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"axes": []})
     try:
         # Strip the captured drawings. They are large path dumps the UI never
@@ -4508,7 +4416,7 @@ def list_control_axes():
         # matters, because that is the hand work a re-seed would discard.
         sigs = _source_glyph_sigs()
         slim = []
-        for ax in _control_axes.list_axes(ORIGINAL_PATH):
+        for ax in _control_axes.list_axes(state.ORIGINAL_PATH):
             entry = dict(ax)
             layers = []
             for layer in (ax.get("layers") or []):
@@ -4531,7 +4439,7 @@ def list_control_axes():
             slim.append(entry)
         return jsonify({
             "axes": slim,
-            "sidecar_path": str(_control_axes.sidecar_path_for(ORIGINAL_PATH)),
+            "sidecar_path": str(_control_axes.sidecar_path_for(state.ORIGINAL_PATH)),
         })
     except Exception as e:
         log.error(f"Error listing control axes: {e}")
@@ -4556,7 +4464,7 @@ def create_control_axis():
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     # Both source formats author through a shadow now: .glyphs gets
     # brace layers inside a shadow copy, .designspace gets pooled
@@ -4564,7 +4472,7 @@ def create_control_axis():
     data = request.get_json(silent=True) or {}
     try:
         entry = _control_axes.add_axis(
-            ORIGINAL_PATH,
+            state.ORIGINAL_PATH,
             tag=data.get("tag", ""),
             display_name=data.get("display_name", ""),
             default=data.get("default", 0),
@@ -4576,7 +4484,7 @@ def create_control_axis():
         # Build stays pointed at the original — see _apply_source_path.
         shadow = None
         try:
-            shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
+            shadow = _control_axes.regenerate_shadow(state.ORIGINAL_PATH)
         except Exception as shadow_exc:
             log.warning(f"Warning: shadow regeneration after add failed: {shadow_exc}")
 
@@ -4617,7 +4525,6 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
     import subprocess
     import time
 
-    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT, FONTRA_SHADOW_MTIME
 
     content_root = content_root.resolve()
 
@@ -4635,12 +4542,12 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
     # through to restart so Fontra's backend reloads fresh glyph data
     # instead of serving its cache.
     if (
-        FONTRA_PROCESS is not None
-        and FONTRA_PROCESS.poll() is None
-        and FONTRA_CONTENT_ROOT == content_root
-        and (current_mtime is None or current_mtime == FONTRA_SHADOW_MTIME)
+        state.FONTRA_PROCESS is not None
+        and state.FONTRA_PROCESS.poll() is None
+        and state.FONTRA_CONTENT_ROOT == content_root
+        and (current_mtime is None or current_mtime == state.FONTRA_SHADOW_MTIME)
     ):
-        return FONTRA_PORT
+        return state.FONTRA_PORT
 
     # Different root, dead process, or the shadow was rewritten — kill
     # + restart.
@@ -4654,7 +4561,7 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
     cmd = [
         sys.executable,
         "-m", "avar2_studio._fontra_launch",
-        "--http-port", str(FONTRA_PORT),
+        "--http-port", str(state.FONTRA_PORT),
         "filesystem", str(content_root),
     ]
     proc = subprocess.Popen(
@@ -4676,39 +4583,38 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
             import socket
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.2)
-                if s.connect_ex(("127.0.0.1", FONTRA_PORT)) == 0:
+                if s.connect_ex(("127.0.0.1", state.FONTRA_PORT)) == 0:
                     break
         except OSError:
             pass
         time.sleep(0.25)
     else:
         _stop_fontra()
-        raise RuntimeError(f"fontra didn't bind 127.0.0.1:{FONTRA_PORT} within ~5s")
+        raise RuntimeError(f"fontra didn't bind 127.0.0.1:{state.FONTRA_PORT} within ~5s")
 
-    FONTRA_PROCESS = proc
-    FONTRA_CONTENT_ROOT = content_root
-    FONTRA_SHADOW_MTIME = current_mtime
-    log.info(f"Started Fontra on http://127.0.0.1:{FONTRA_PORT} (root={content_root})")
-    return FONTRA_PORT
+    state.FONTRA_PROCESS = proc
+    state.FONTRA_CONTENT_ROOT = content_root
+    state.FONTRA_SHADOW_MTIME = current_mtime
+    log.info(f"Started Fontra on http://127.0.0.1:{state.FONTRA_PORT} (root={content_root})")
+    return state.FONTRA_PORT
 
 
 def _stop_fontra() -> None:
     """Kill any running Fontra subprocess. Safe to call repeatedly."""
-    global FONTRA_PROCESS, FONTRA_CONTENT_ROOT
-    if FONTRA_PROCESS is None:
+    if state.FONTRA_PROCESS is None:
         return
     try:
-        if FONTRA_PROCESS.poll() is None:
-            FONTRA_PROCESS.terminate()
+        if state.FONTRA_PROCESS.poll() is None:
+            state.FONTRA_PROCESS.terminate()
             try:
-                FONTRA_PROCESS.wait(timeout=3)
+                state.FONTRA_PROCESS.wait(timeout=3)
             except Exception:
-                FONTRA_PROCESS.kill()
+                state.FONTRA_PROCESS.kill()
     except Exception as exc:
         log.warning(f"Warning: error stopping Fontra: {exc}")
     finally:
-        FONTRA_PROCESS = None
-        FONTRA_CONTENT_ROOT = None
+        state.FONTRA_PROCESS = None
+        state.FONTRA_CONTENT_ROOT = None
 
 
 # Make sure Fontra is cleaned up when the studio exits.
@@ -4763,7 +4669,7 @@ _atexit.register(_stop_fontra)
 
 
 def _fontra_focus_css() -> str:
-    show_nav = bool((FONTRA_EDITOR_SESSION or {}).get("studio"))
+    show_nav = bool((state.FONTRA_EDITOR_SESSION or {}).get("studio"))
     hidden = [
         "text-entry", "selection-info", "reference-font", "glyph-search",
         "selection-transformation", "glyph-note", "related-glyphs",
@@ -4875,13 +4781,13 @@ def _proxy_to_fontra(upstream_path: str):
     root-level runtime-fetch paths Fontra needs (/lang, /data,
     /images, /webfonts, /projectlist, /serverinfo, /api/*).
     """
-    if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
+    if state.FONTRA_PROCESS is None or state.FONTRA_PROCESS.poll() is not None:
         return jsonify({"error": "Fontra subprocess is not running"}), 503
 
     import urllib.error
     import urllib.request
 
-    upstream = f"http://127.0.0.1:{FONTRA_PORT}{upstream_path}"
+    upstream = f"http://127.0.0.1:{state.FONTRA_PORT}{upstream_path}"
     if request.query_string:
         upstream += "?" + request.query_string.decode("utf-8")
 
@@ -5007,13 +4913,13 @@ def fontra_ws_proxy(ws):
     ``ws://127.0.0.1:8001/websocket?...`` with the same query string
     and relay messages in both directions until either side hangs up.
     """
-    if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
+    if state.FONTRA_PROCESS is None or state.FONTRA_PROCESS.poll() is not None:
         ws.close()
         return
 
     import websocket as ws_client_lib  # websocket-client; pulled in by flask-sock indirectly
     qs = request.query_string.decode("utf-8")
-    upstream_url = f"ws://127.0.0.1:{FONTRA_PORT}/websocket"
+    upstream_url = f"ws://127.0.0.1:{state.FONTRA_PORT}/websocket"
     if qs:
         upstream_url += "?" + qs
 
@@ -5063,7 +4969,7 @@ def fontra_shim_config():
     """Session config for the shim injected into proxied Fontra
     pages. Must be registered before Fontra's /api catch-all so the
     specific rule wins."""
-    return jsonify(FONTRA_EDITOR_SESSION or {"studio": False})
+    return jsonify(state.FONTRA_EDITOR_SESSION or {"studio": False})
 
 
 @app.route('/api/control-axes/<tag>/open-editor', methods=['POST'])
@@ -5075,7 +4981,7 @@ def open_control_axis_in_editor(tag: str):
     Fontra opens the original source directly, flagged in the
     response as ``editing_original``.
     """
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
 
     # Route by the AXIS, not by global shadow existence. A studio
@@ -5088,20 +4994,20 @@ def open_control_axis_in_editor(tag: str):
     try:
         is_studio_axis = any(
             (ax.get("tag") or "").lower() == tag.lower()
-            for ax in _control_axes.list_axes(ORIGINAL_PATH)
+            for ax in _control_axes.list_axes(state.ORIGINAL_PATH)
         )
     except Exception:
         is_studio_axis = False
 
     if is_studio_axis:
-        if not _control_axes.shadow_exists(ORIGINAL_PATH):
+        if not _control_axes.shadow_exists(state.ORIGINAL_PATH):
             # No coverage / no shadow yet — there's nothing to edit.
             return jsonify({
                 "error": "No shadow file yet. Add coverage glyphs first so the studio can seed brace layers."
             }), 400
         # Studio-authored axes: Fontra edits the shadow copy; the
         # user's original source stays untouched.
-        target_path = _control_axes.shadow_path_for(ORIGINAL_PATH)
+        target_path = _control_axes.shadow_path_for(state.ORIGINAL_PATH)
         # The shadow/ dir contains only the shadow file, so serving
         # the directory exposes nothing else.
         content_root = target_path.parent
@@ -5113,7 +5019,7 @@ def open_control_axis_in_editor(tag: str):
         # the user's actual source; the frontend surfaces that. Pass
         # the FILE as the root (Fontra's single-file mode) so sibling
         # font projects in the same folder aren't exposed.
-        target_path = ORIGINAL_PATH
+        target_path = state.ORIGINAL_PATH
         content_root = target_path
         editing_original = True
 
@@ -5121,10 +5027,9 @@ def open_control_axis_in_editor(tag: str):
     # shim (which layers to show + batch-enable). Studio-axis sessions
     # expose the designspace-navigation panel trimmed to this axis's
     # studio layers; everything else keeps the bare-canvas UI.
-    global FONTRA_EDITOR_SESSION
     spec = next(
         (
-            ax for ax in (_control_axes.list_axes(ORIGINAL_PATH) or [])
+            ax for ax in (_control_axes.list_axes(state.ORIGINAL_PATH) or [])
             if (ax.get("tag") or "").lower() == tag.lower()
         ),
         None,
@@ -5133,7 +5038,7 @@ def open_control_axis_in_editor(tag: str):
     # it); recording it here lets the injected shim ask for THIS layer's
     # reference measurements without reaching into Fontra's scene state.
     body = request.get_json(silent=True) or {}
-    FONTRA_EDITOR_SESSION = {
+    state.FONTRA_EDITOR_SESSION = {
         "studio": bool(is_studio_axis and not editing_original),
         # Authored tag case (fvar tags are case-sensitive; the shim matches
         # layer labels printed in authored case).
@@ -5190,7 +5095,7 @@ def set_control_axis_layers(tag: str):
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     entries = data.get("layers")
@@ -5200,7 +5105,7 @@ def set_control_axis_layers(tag: str):
         # Whole-list replace. Prefer the delta endpoint for interactive edits —
         # this one overwrites whatever the caller didn't know about.
         with SIDECAR_LOCK:
-            stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
+            stored = _control_axes.set_layers(state.ORIGINAL_PATH, tag, entries)
         schedule_shadow_rebuild()
         return jsonify({"success": True, "tag": tag, "layers": stored})
     except ValueError as exc:
@@ -5228,7 +5133,7 @@ def patch_control_axis_layers(tag: str):
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     add = data.get("add") or []
@@ -5239,7 +5144,7 @@ def patch_control_axis_layers(tag: str):
         return jsonify({"error": "Nothing to do: provide 'add' and/or 'remove'."}), 400
     try:
         with SIDECAR_LOCK:
-            stored = _control_axes.apply_layer_delta(ORIGINAL_PATH, tag, add=add, remove=remove)
+            stored = _control_axes.apply_layer_delta(state.ORIGINAL_PATH, tag, add=add, remove=remove)
         schedule_shadow_rebuild()
         return jsonify({"success": True, "tag": tag, "layers": stored})
     except ValueError as exc:
@@ -5337,7 +5242,7 @@ def reseed_control_axis_layers(tag: str):
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     body = request.get_json(silent=True) or {}
     layers = body.get("layers")
@@ -5345,7 +5250,7 @@ def reseed_control_axis_layers(tag: str):
         return jsonify({"error": "layers must be a list of {glyph, location}"}), 400
     force = bool(body.get("force"))
     try:
-        result = _control_axes.reseed_layers(ORIGINAL_PATH, tag, layers, force)
+        result = _control_axes.reseed_layers(state.ORIGINAL_PATH, tag, layers, force)
     except KeyError:
         return jsonify({"error": f"control axis '{tag}' not found"}), 404
     except Exception as e:
@@ -5384,9 +5289,9 @@ def control_axis_reference_metrics(tag: str):
     Query: ``glyph`` (required), ``index`` (which layer, default 0),
     ``refs`` (comma-separated reference glyphs, default "H,N,O").
     """
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
-    if not (VARIABLE_FONT_PATH and Path(VARIABLE_FONT_PATH).exists()):
+    if not (state.VARIABLE_FONT_PATH and Path(state.VARIABLE_FONT_PATH).exists()):
         return jsonify({"error": "Font not built yet"}), 404
     glyph = (request.args.get("glyph") or "").strip()
     if not glyph:
@@ -5413,7 +5318,7 @@ def control_axis_reference_metrics(tag: str):
         except (ValueError, TypeError):
             return jsonify({"error": "location must be a JSON object of axis: value"}), 400
 
-    axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
+    axis = _control_axes.find_axis(state.ORIGINAL_PATH, tag)
     if axis is None:
         return jsonify({"error": f"No secondary axis '{tag}'"}), 404
     layers = [lyr for lyr in (axis.get("layers") or []) if lyr.get("glyph") == glyph]
@@ -5425,14 +5330,14 @@ def control_axis_reference_metrics(tag: str):
     from fontTools.varLib.instancer import instantiateVariableFont
 
     try:
-        font = TTFont(str(VARIABLE_FONT_PATH))
+        font = TTFont(str(state.VARIABLE_FONT_PATH))
         fvar_axes = {a.axisTag: a for a in font["fvar"].axes}
         if explicit_location is not None:
             # Normalize keys: the scene speaks axis NAMES (source space);
             # the sidecar and fvar speak tags. Accept both.
             name_to_tag = {}
             try:
-                src_font, _fmt = _source_font.load_source(GLYPHS_PATH)
+                src_font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
                 for ax in _source_font.get_axes(src_font):
                     name_to_tag[str(ax.get("name") or "").lower()] = str(ax.get("tag") or "")
                     name_to_tag[str(ax.get("tag") or "").lower()] = str(ax.get("tag") or "")
@@ -5458,7 +5363,7 @@ def control_axis_reference_metrics(tag: str):
         try:
             inst = instantiateVariableFont(font, location, inplace=False)
         except NotImplementedError:
-            font = TTFont(str(VARIABLE_FONT_PATH))
+            font = TTFont(str(state.VARIABLE_FONT_PATH))
             if "avar" in font:
                 del font["avar"]
             inst = instantiateVariableFont(font, location, inplace=False)
@@ -5502,16 +5407,15 @@ def update_control_axis(tag: str):
     layer's location dict. Any field left absent from the body is
     left unchanged. Regenerates the shadow after a successful edit
     so the preview reflects the new range immediately."""
-    global VARIABLE_FONT_PATH
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
     try:
         entry = _control_axes.update_axis(
-            ORIGINAL_PATH,
+            state.ORIGINAL_PATH,
             tag,
             display_name=data.get("display_name"),
             default=data.get("default"),
@@ -5549,14 +5453,13 @@ def delete_control_axis(tag: str):
     sidecar still has any axes, regenerate the shadow without the
     deleted one; if it's now empty, remove the shadow entirely so
     the build pipeline falls back to the original source."""
-    global GLYPHS_PATH, VARIABLE_FONT_PATH
     refusal = _designspace_authoring_refusal()
     if refusal is not None:
         return refusal
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:
-        removed = _control_axes.remove_axis(ORIGINAL_PATH, tag)
+        removed = _control_axes.remove_axis(state.ORIGINAL_PATH, tag)
         if not removed:
             return jsonify({"error": f"control axis '{tag}' not found"}), 404
 
@@ -5572,10 +5475,10 @@ def delete_control_axis(tag: str):
             # any grades — grade must survive deleting an unrelated control axis.
             _resolve_active_source()
             # Drop the shadow dir only when NEITHER feature still needs it.
-            if (GLYPHS_PATH == ORIGINAL_PATH
-                    and not _control_axes.list_axes(ORIGINAL_PATH)
-                    and not _grade.list_graded_instances(ORIGINAL_PATH)):
-                _control_axes.remove_shadow(ORIGINAL_PATH)
+            if (state.GLYPHS_PATH == state.ORIGINAL_PATH
+                    and not _control_axes.list_axes(state.ORIGINAL_PATH)
+                    and not _grade.list_graded_instances(state.ORIGINAL_PATH)):
+                _control_axes.remove_shadow(state.ORIGINAL_PATH)
             # See set_control_axis_layers: keep the last-good font on failure.
             try:
                 trigger_build()
@@ -5595,14 +5498,14 @@ def export_config_bundle():
     """Download the studio-authored configuration (control axes +
     brace-layer declarations, avar2 mappings CSV, transforms) as one
     portable JSON bundle. See config_port.py for the format."""
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:
         # build_export captures drawn outlines into the sidecar first, which
         # is a write next to the watched source — suppress the watcher so an
         # export does not look like a designer edit and trigger a rebuild.
         _suppress_watcher()
-        bundle = _config_port.build_export(ORIGINAL_PATH, _get_avar2_csv_path())
+        bundle = _config_port.build_export(state.ORIGINAL_PATH, _get_avar2_csv_path())
     except Exception as e:
         log.error(f"Error exporting config: {e}")
         return jsonify({"error": str(e)}), 500
@@ -5627,8 +5530,7 @@ def import_config_bundle():
     (control axes + transforms wholesale; the avar2 CSV only when the
     bundle carries one), then regenerates the shadow and rebuilds.
     """
-    global GLYPHS_PATH
-    if ORIGINAL_PATH is None:
+    if state.ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     body = request.get_json(silent=True) or {}
     bundle = body.get("bundle")
@@ -5636,7 +5538,7 @@ def import_config_bundle():
         return jsonify({"error": "POST JSON {bundle: {...}, dry_run: bool}"}), 400
     dry_run = bool(body.get("dry_run", True))
     try:
-        report = _config_port.validate_bundle(bundle, ORIGINAL_PATH)
+        report = _config_port.validate_bundle(bundle, state.ORIGINAL_PATH)
     except Exception as e:
         log.error(f"Error validating config bundle: {e}")
         return jsonify({"error": str(e)}), 500
@@ -5649,7 +5551,7 @@ def import_config_bundle():
             # else the conventional <stem>-avar.csv next to the ORIGINAL
             # (never the shadow — same rule as every sidecar).
             csv_dest = _get_avar2_csv_path() or _get_preview_csv_path()
-            report = _config_port.apply_bundle(bundle, ORIGINAL_PATH, csv_dest)
+            report = _config_port.apply_bundle(bundle, state.ORIGINAL_PATH, csv_dest)
         except Exception as e:
             log.error(f"Error applying config bundle: {e}")
             return jsonify({"error": str(e)}), 500
@@ -5659,10 +5561,10 @@ def import_config_bundle():
         # shadow only when neither needs it; keep the last-good font on failure.
         try:
             _resolve_active_source()
-            if (GLYPHS_PATH == ORIGINAL_PATH
-                    and not _control_axes.list_axes(ORIGINAL_PATH)
-                    and not _grade.list_graded_instances(ORIGINAL_PATH)):
-                _control_axes.remove_shadow(ORIGINAL_PATH)
+            if (state.GLYPHS_PATH == state.ORIGINAL_PATH
+                    and not _control_axes.list_axes(state.ORIGINAL_PATH)
+                    and not _grade.list_graded_instances(state.ORIGINAL_PATH)):
+                _control_axes.remove_shadow(state.ORIGINAL_PATH)
             try:
                 trigger_build()
             except Exception as build_exc:
@@ -5684,7 +5586,7 @@ def get_avar2_axes():
             }), 404
 
 
-        rows, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        rows, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
 
         # Normalize traditional axis names
         traditional_axes = [_csv_io.normalize_in_axis_name(col) for col in in_cols]
@@ -5694,9 +5596,9 @@ def get_avar2_axes():
 
         # Get parametric axes from the source file and populate metadata.
         glyphs_axes_info = {}
-        if GLYPHS_PATH and GLYPHS_PATH.exists():
+        if state.GLYPHS_PATH and state.GLYPHS_PATH.exists():
             try:
-                font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
+                font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
                 for axis in _source_font.get_axes(font):
                     tag = axis["tag"]
                     tag_upper = tag.upper()
@@ -5854,11 +5756,11 @@ def get_avar2_axes():
         # traditional/avar2 target), but it's neither parametric nor an
         # avar2 mapping input; it's driven by brace layers.
         control_tags_upper = set()
-        if ORIGINAL_PATH is not None:
+        if state.ORIGINAL_PATH is not None:
             try:
                 control_tags_upper = {
                     str(a.get("tag", "")).upper()
-                    for a in _control_axes.list_axes(ORIGINAL_PATH)
+                    for a in _control_axes.list_axes(state.ORIGINAL_PATH)
                     if a.get("tag")
                 }
             except Exception:
@@ -5894,8 +5796,7 @@ def get_avar2_axes():
 @app.route('/api/instance/<instance_name>/editing', methods=['POST'])
 def register_editing_instance(instance_name: str):
     """Register an instance as being edited (protect from sync)."""
-    global EDITING_INSTANCES
-    EDITING_INSTANCES.add(instance_name)
+    state.EDITING_INSTANCES.add(instance_name)
     return jsonify({"success": True, "message": f"Instance '{instance_name}' registered as editing"})
 
 @app.route('/api/instance/<instance_name>', methods=['DELETE'])
@@ -5921,27 +5822,26 @@ def delete_instance(instance_name: str):
     # holding unsaved edits in the Glyphs.app process. CSV-only deletes
     # don't touch the source, so the check doesn't apply.
     touches_source = not csv_only_flag  # both default and source_only touch source
-    if touches_source and _check_glyphs_file_unsaved_changes(GLYPHS_PATH):
+    if touches_source and _check_glyphs_file_unsaved_changes(state.GLYPHS_PATH):
         return jsonify({"error": "Glyphs file has unsaved changes. Please save the file first."}), 409
 
     try:
-        global EDITING_INSTANCES
-        EDITING_INSTANCES.discard(instance_name)
+        state.EDITING_INSTANCES.discard(instance_name)
 
         # A full delete (not a demote / csv-only) removes the instance
         # entirely, so drop any grade attached to it. Demote/csv-only keep
         # the instance around, so the grade stays.
         if not csv_only_flag and not source_only_flag:
             try:
-                _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
+                _grade.remove_instance_grade(state.ORIGINAL_PATH, instance_name)
             except Exception:
                 pass
             try:
-                _kinetikern.sidecar.remove_entry(ORIGINAL_PATH, instance_name)
+                _kinetikern.sidecar.remove_entry(state.ORIGINAL_PATH, instance_name)
             except Exception:
                 pass
             try:
-                _control_axes.remove_instance_values(ORIGINAL_PATH, instance_name)
+                _control_axes.remove_instance_values(state.ORIGINAL_PATH, instance_name)
             except Exception:
                 pass
 
@@ -5949,7 +5849,7 @@ def delete_instance(instance_name: str):
         # skips it (the row was never in the source).
         if touches_source:
             glyphs_deleted = delete_instance_in_glyphs(
-                ORIGINAL_PATH, _source_instance_name(instance_name))
+                state.ORIGINAL_PATH, _source_instance_name(instance_name))
             if not glyphs_deleted:
                 return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
             # Regenerate the shadow from the now-updated original so the
@@ -6005,8 +5905,7 @@ def delete_instance(instance_name: str):
 @app.route('/api/instance/<instance_name>/editing', methods=['DELETE'])
 def unregister_editing_instance(instance_name: str):
     """Unregister an instance from editing (allow sync)."""
-    global EDITING_INSTANCES
-    EDITING_INSTANCES.discard(instance_name)
+    state.EDITING_INSTANCES.discard(instance_name)
     return jsonify({"success": True, "message": f"Instance '{instance_name}' unregistered from editing"})
 
 @app.route('/api/avar2/axis', methods=['POST'])
@@ -6072,7 +5971,7 @@ def add_avar2_axis():
 
         # Read CSV using normalized function
 
-        rows, fieldnames, _, _, fieldname_mapping = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        rows, fieldnames, _, _, fieldname_mapping = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
 
         # Check if axis already exists (case-insensitive)
         if axis_name_normalized in fieldnames:
@@ -6149,7 +6048,7 @@ def update_avar2_axis(axis_name: str):
 
         # Check if this axis exists in Glyphs file (parametric axis) - cannot edit
 
-        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
 
         # Normalize axis_name to uppercase for lookup
         axis_name_normalized = axis_name.upper()
@@ -6298,7 +6197,7 @@ def delete_avar2_axis(axis_name: str):
                 "reload_required": True
             }), 409
 
-        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
         axis_name_normalized = axis_name.upper()
         if axis_name_normalized in out_cols:
             return jsonify({
@@ -6391,7 +6290,7 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
 
         # Read CSV using normalized function
 
-        rows, fieldnames, _, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
+        rows, fieldnames, _, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, state.GLYPHS_PATH)
 
         if axis_name_normalized not in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
@@ -6431,11 +6330,10 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
 
 def _record_build_failure(result: Dict) -> Dict:
     """Stamp the global last-build status as failed and return the dict."""
-    global LAST_BUILD_STATUS, LAST_BUILD_ERROR
-    LAST_BUILD_STATUS = "failed"
+    state.LAST_BUILD_STATUS = "failed"
     msg = result.get("error") or "build failed"
     detail = result.get("details")
-    LAST_BUILD_ERROR = f"{msg}: {detail}" if detail else msg
+    state.LAST_BUILD_ERROR = f"{msg}: {detail}" if detail else msg
     return result
 
 
@@ -6480,7 +6378,7 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
     shim (via env) and the in-process build (directly).
     """
     key = _declared_ranges_cache_key(default_overrides)
-    cached = _DECLARED_RANGES_CACHE.get(key) if key is not None else None
+    cached = state._DECLARED_RANGES_CACHE.get(key) if key is not None else None
     if cached is not None:
         return {t: list(v) for t, v in cached.items()}
     try:
@@ -6509,16 +6407,9 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
                 _lo, _, _hi = _ranges[_tag]
                 _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
     if key is not None:
-        _DECLARED_RANGES_CACHE.clear()
-        _DECLARED_RANGES_CACHE[key] = _ranges
+        state._DECLARED_RANGES_CACHE.clear()
+        state._DECLARED_RANGES_CACHE[key] = _ranges
     return _ranges
-
-
-# One computation per input version: a single build consults
-# _declared_axis_ranges from three sites (the shim env via _builder_env,
-# the default-row detection and the fvar-axes fix in _build_in_process),
-# each of which used to re-read axis-metadata.json + re-parse the source.
-_DECLARED_RANGES_CACHE: Dict[tuple, Dict[str, list]] = {}
 
 
 def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
@@ -6527,7 +6418,7 @@ def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
     make every such call share one key and hand back a stale result —
     so those calls compute without caching."""
     parts = []
-    for p in (_get_avar2_metadata_path(), GLYPHS_PATH):
+    for p in (_get_avar2_metadata_path(), state.GLYPHS_PATH):
         try:
             st = Path(p).stat()
         except (OSError, TypeError):
@@ -6623,15 +6514,14 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         # default location pops toward the nearest mapped stop the
         # moment a slider moves. Only meaningful when declared defaults
         # exist and at least one row maps a declared axis.
-        global LAST_ORIGIN_WARNING
-        LAST_ORIGIN_WARNING = None
+        state.LAST_ORIGIN_WARNING = None
         maps_declared_axis = any(
             any(tag in declared_for_defaults for tag in (m.get("in") or {}))
             for m in avar2_cfg_early)
         if declared_for_defaults and maps_declared_axis and not default_rows:
             defaults_desc = ", ".join(
                 f"{tag} {trip[1]:g}" for tag, trip in sorted(declared_for_defaults.items()))
-            LAST_ORIGIN_WARNING = (
+            state.LAST_ORIGIN_WARNING = (
                 f"No instance row sits at the axis defaults ({defaults_desc}) — the "
                 "font rests at the compiled origin, not at any authored style. Add a "
                 "row at the defaults (it becomes the ORIGIN row), or move an axis "
@@ -6715,7 +6605,7 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
               "table (build-time relocation off); mapped stops stay exact, "
               "the preview rests at the compiled origin")
         # (global LAST_ORIGIN_WARNING is declared earlier in this function.)
-        LAST_ORIGIN_WARNING = (
+        state.LAST_ORIGIN_WARNING = (
             "Build-time default relocation is off: the preview font rests at "
             "the compiled origin, not at the ORIGIN row's style. Every mapped "
             "stop is exact; use the export's \u201cset default\u201d to ship a font "
@@ -6782,10 +6672,8 @@ def _perform_avar2_build() -> Dict:
     Sets the BUILDING flag for its lifetime; raises nothing — all failures
     come back as a dict so callers can surface them however they want.
     """
-    global BUILDING, VARIABLE_FONT_PATH, LAST_BUILD_TIME
-    global LAST_BUILD_STATUS, LAST_BUILD_ERROR
 
-    if BUILDING:
+    if state.BUILDING:
         return {"success": False, "error": "Build already in progress"}
 
     preview_csv = _get_preview_csv_path()
@@ -6796,7 +6684,7 @@ def _perform_avar2_build() -> Dict:
     if not avar2_font_dir:
         return _record_build_failure({"success": False, "error": "Could not create avar2 font directory"})
 
-    BUILDING = True
+    state.BUILDING = True
     try:
         preview_config_path = _get_preview_config_path()
         if not preview_config_path or not preview_config_path.exists():
@@ -6816,7 +6704,7 @@ def _perform_avar2_build() -> Dict:
                 "details": str(e),
             })
         try:
-            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False, source_path=GLYPHS_PATH)
+            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False, source_path=state.GLYPHS_PATH)
         except Exception as e:
             return _record_build_failure({"success": False, "error": "Failed to update config", "details": str(e)})
 
@@ -6896,14 +6784,14 @@ def _perform_avar2_build() -> Dict:
         except OSError:
             pass
 
-        VARIABLE_FONT_PATH = _apply_transform_chain(font_file)
-        LAST_BUILD_TIME = time.time()
-        LAST_BUILD_STATUS = "ok"
-        LAST_BUILD_ERROR = None
-        return {"success": True, "font_path": str(VARIABLE_FONT_PATH)}
+        state.VARIABLE_FONT_PATH = _apply_transform_chain(font_file)
+        state.LAST_BUILD_TIME = time.time()
+        state.LAST_BUILD_STATUS = "ok"
+        state.LAST_BUILD_ERROR = None
+        return {"success": True, "font_path": str(state.VARIABLE_FONT_PATH)}
 
     finally:
-        BUILDING = False
+        state.BUILDING = False
 
 
 @app.route('/api/avar2-font', methods=['GET'])
@@ -7008,10 +6896,6 @@ def _apply_source_path(path: Path) -> None:
     re-bootstraps the CSV + config sidecars, and kicks off an
     auto-build. Raises ValueError / UnsupportedSourceFormat on bad input
     so callers (CLI + /api/load-source) can surface the failure."""
-    global GLYPHS_PATH, ORIGINAL_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, VARIABLE_FONT_PATH
-    global PREVIEW_DIR, PREVIEW_CSV_PATH, PREVIEW_CONFIG_PATH
-    global LAST_BUILD_TIME, LAST_BUILD_STATUS, LAST_BUILD_ERROR
-    global EDITING_INSTANCES
 
     resolved = path.resolve()
     if not resolved.exists():
@@ -7022,30 +6906,30 @@ def _apply_source_path(path: Path) -> None:
             "Point it at the sibling .designspace file."
         )
 
-    SOURCE_FORMAT = _source_font.detect_format(resolved)
-    ORIGINAL_PATH = resolved
+    state.SOURCE_FORMAT = _source_font.detect_format(resolved)
+    state.ORIGINAL_PATH = resolved
     # _resolve_active_source re-points GLYPHS_PATH at the shadow when a
     # studio feature needs it. See docs/ARCHITECTURE.md §3.
-    GLYPHS_PATH = resolved
+    state.GLYPHS_PATH = resolved
 
-    workdir = GLYPHS_PATH.parent / ".avar2-studio"
-    BUILD_DIR = workdir / "build"
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    workdir = state.GLYPHS_PATH.parent / ".avar2-studio"
+    state.BUILD_DIR = workdir / "build"
+    state.BUILD_DIR.mkdir(parents=True, exist_ok=True)
     # Reset every state global that's keyed to the previous source —
     # otherwise PREVIEW_DIR/PREVIEW_CSV_PATH/PREVIEW_CONFIG_PATH stay
     # pinned to the first load and every subsequent ``/api/avar2/*``
     # call reads the OLD font's mapping CSV + axis metadata. That's
     # how Roboto Delta's XOUC/YOUC/XTUC columns kept showing up after
     # the user swapped to Crispy.
-    VARIABLE_FONT_PATH = None
-    CSV_PATH = None
-    PREVIEW_DIR = None
-    PREVIEW_CSV_PATH = None
-    PREVIEW_CONFIG_PATH = None
-    LAST_BUILD_TIME = None
-    LAST_BUILD_STATUS = None
-    LAST_BUILD_ERROR = None
-    EDITING_INSTANCES = set()
+    state.VARIABLE_FONT_PATH = None
+    state.CSV_PATH = None
+    state.PREVIEW_DIR = None
+    state.PREVIEW_CSV_PATH = None
+    state.PREVIEW_CONFIG_PATH = None
+    state.LAST_BUILD_TIME = None
+    state.LAST_BUILD_STATUS = None
+    state.LAST_BUILD_ERROR = None
+    state.EDITING_INSTANCES = set()
 
     # Stop any Fontra subprocess pointed at the previous source's
     # shadow. It'll be re-spawned on demand when the user opens a
@@ -7071,7 +6955,7 @@ def _apply_source_path(path: Path) -> None:
     # start clean.
     JOBS.cancel_all()
 
-    log.info(f"Auto-building font from {GLYPHS_PATH}...")
+    log.info(f"Auto-building font from {state.GLYPHS_PATH}...")
     try:
         trigger_build()
     except Exception as exc:
@@ -7375,7 +7259,6 @@ def load_source():
 @_sidecar_locked
 def sync_csv_with_glyphs():
     """Sync CSV with the source file, skipping instances being edited."""
-    global EDITING_INSTANCES
 
     csv_path = _get_avar2_csv_path()
     if not csv_path or not csv_path.exists():
@@ -7383,9 +7266,9 @@ def sync_csv_with_glyphs():
 
     try:
         ok = _csv_io.update_csv_from_glyphs(
-            GLYPHS_PATH,
+            state.GLYPHS_PATH,
             csv_path,
-            skip_instances=set(EDITING_INSTANCES),
+            skip_instances=set(state.EDITING_INSTANCES),
             exclude_axes=_non_mapping_axis_tags(),
         )
         if ok:
@@ -7397,8 +7280,8 @@ def sync_csv_with_glyphs():
             # avar2 save.
             _update_csv_modification_time(csv_path)
             skipped_msg = (
-                f" (skipped {len(EDITING_INSTANCES)} editing instances)"
-                if EDITING_INSTANCES else ""
+                f" (skipped {len(state.EDITING_INSTANCES)} editing instances)"
+                if state.EDITING_INSTANCES else ""
             )
             log.info(f"CSV synced with source file{skipped_msg}")
         else:
@@ -7486,12 +7369,12 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
             if src_mtime is not None and src_mtime <= _sidecar_io.LAST_WRITES.get(key, 0.0):
                 return
         elif is_original:
-            if current_time < _SUPPRESS_ORIGINAL_UNTIL or (
+            if current_time < state._SUPPRESS_ORIGINAL_UNTIL or (
                     src_mtime is not None
-                    and src_mtime <= _SELF_WRITE_ORIGINAL_WATERMARK):
+                    and src_mtime <= state._SELF_WRITE_ORIGINAL_WATERMARK):
                 return
-        elif current_time < _SUPPRESS_WATCHDOG_UNTIL or (
-                src_mtime is not None and src_mtime <= _SELF_WRITE_WATERMARK):
+        elif current_time < state._SUPPRESS_WATCHDOG_UNTIL or (
+                src_mtime is not None and src_mtime <= state._SELF_WRITE_WATERMARK):
             return
 
         # A multi-second save fires several events as the file is written;
@@ -7576,7 +7459,6 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
 
 
 def main():
-    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, OBSERVER
 
     parser = argparse.ArgumentParser(description="avar2-studio server")
     parser.add_argument(
@@ -7644,8 +7526,7 @@ def main():
               ".avar2-studio/build/ next to the source file.")
         sys.exit(2)
 
-    global USE_FONTC
-    USE_FONTC = not args.no_fontc  # Use fontc unless --no-fontc is specified
+    state.USE_FONTC = not args.no_fontc  # Use fontc unless --no-fontc is specified
 
     glyphs_arg = args.glyphs or args.glyphs_flag
     if glyphs_arg:
@@ -7669,12 +7550,12 @@ def main():
             "Use the Load Font dropdown in the UI to pick an example or upload a .glyphs file.")
 
     log.info(f"Starting server on {args.host}:{args.port}")
-    log.info(f"Compiler: {'fontc (with fontmake fallback)' if USE_FONTC else 'fontmake only'}")
-    if GLYPHS_PATH:
-        log.info(f"Glyphs file: {GLYPHS_PATH}")
-        log.info(f"Build directory: {BUILD_DIR}")
-        if CSV_PATH:
-            log.info(f"CSV file: {CSV_PATH}")
+    log.info(f"Compiler: {'fontc (with fontmake fallback)' if state.USE_FONTC else 'fontmake only'}")
+    if state.GLYPHS_PATH:
+        log.info(f"Glyphs file: {state.GLYPHS_PATH}")
+        log.info(f"Build directory: {state.BUILD_DIR}")
+        if state.CSV_PATH:
+            log.info(f"CSV file: {state.CSV_PATH}")
         else:
             csv_path = _get_avar2_csv_path()
             if csv_path:
@@ -7690,26 +7571,25 @@ def main():
         log.info(f"Preview config: {preview_config}")
 
     # Set up real-time file watching using watchdog
-    global _SYNC_CSV_HOOK
-    _SYNC_CSV_HOOK = sync_csv_with_glyphs
+    state._SYNC_CSV_HOOK = sync_csv_with_glyphs
 
-    if WATCHDOG_AVAILABLE and GLYPHS_PATH is not None:
+    if WATCHDOG_AVAILABLE and state.GLYPHS_PATH is not None:
         event_handler = GlyphsFileHandler()
         observer = Observer()
         # .designspace shadows need recursion: Fontra writes .glif
         # files inside the pooled UFO directories.
         observer.schedule(
             event_handler,
-            path=str(GLYPHS_PATH.parent),
-            recursive=GLYPHS_PATH.suffix.lower() == ".designspace",
+            path=str(state.GLYPHS_PATH.parent),
+            recursive=state.GLYPHS_PATH.suffix.lower() == ".designspace",
         )
         # Watch the ORIGINAL's directory too when the build source is the
         # shadow — they live in different directories, and edits to the real
         # file are the ones the designer actually makes.
         try:
-            if ORIGINAL_PATH is not None:
-                orig_dir = Path(ORIGINAL_PATH).parent.resolve()
-                if orig_dir != GLYPHS_PATH.parent.resolve():
+            if state.ORIGINAL_PATH is not None:
+                orig_dir = Path(state.ORIGINAL_PATH).parent.resolve()
+                if orig_dir != state.GLYPHS_PATH.parent.resolve():
                     observer.schedule(event_handler, path=str(orig_dir), recursive=False)
         except Exception as exc:
             log.warning(f"Warning: could not watch the original source: {exc}")
@@ -7719,32 +7599,31 @@ def main():
         # transformed/ only — never sees (T0.9). When transforms are off
         # GLYPHS_PATH IS the shadow and its dir is already watched.
         try:
-            if (ORIGINAL_PATH is not None
-                    and Path(GLYPHS_PATH).resolve() != Path(ORIGINAL_PATH).resolve()):
-                shadow_dir = _control_axes.shadow_dir_for(ORIGINAL_PATH)
+            if (state.ORIGINAL_PATH is not None
+                    and Path(state.GLYPHS_PATH).resolve() != Path(state.ORIGINAL_PATH).resolve()):
+                shadow_dir = _control_axes.shadow_dir_for(state.ORIGINAL_PATH)
                 if shadow_dir.exists() \
-                        and shadow_dir.resolve() != Path(GLYPHS_PATH).parent.resolve():
+                        and shadow_dir.resolve() != Path(state.GLYPHS_PATH).parent.resolve():
                     observer.schedule(event_handler, path=str(shadow_dir), recursive=False)
         except Exception as exc:
             log.warning(f"Warning: could not watch the shadow dir: {exc}")
         observer.start()
-        OBSERVER = observer
-        log.info(f"Real-time file watching enabled: watching {GLYPHS_PATH}")
-    elif GLYPHS_PATH is None:
+        state.OBSERVER = observer
+        log.info(f"Real-time file watching enabled: watching {state.GLYPHS_PATH}")
+    elif state.GLYPHS_PATH is None:
         pass  # blind launch — watcher attaches when a source is loaded later (TODO)
     else:
         log.warning("Warning: watchdog not available, falling back to periodic checking")
         # Fallback to periodic checking
         PERIODIC_CHECK_INTERVAL = 15
         def check_and_rebuild_periodically():
-            global VARIABLE_FONT_PATH, LAST_BUILD_TIME
             if JOBS.is_building():
                 return
             try:
-                if GLYPHS_PATH is None or not GLYPHS_PATH.exists():
+                if state.GLYPHS_PATH is None or not state.GLYPHS_PATH.exists():
                     return
-                current_mtime = GLYPHS_PATH.stat().st_mtime
-                if LAST_BUILD_TIME is None or current_mtime > LAST_BUILD_TIME:
+                current_mtime = state.GLYPHS_PATH.stat().st_mtime
+                if state.LAST_BUILD_TIME is None or current_mtime > state.LAST_BUILD_TIME:
                     sync_csv_with_glyphs()
                     trigger_build()
             except Exception as e:
@@ -7770,9 +7649,9 @@ def main():
     try:
         app.run(host=args.host, port=args.port, debug=debug)
     finally:
-        if OBSERVER:
-            OBSERVER.stop()
-            OBSERVER.join()
+        if state.OBSERVER:
+            state.OBSERVER.stop()
+            state.OBSERVER.join()
 
 
 if __name__ == "__main__":

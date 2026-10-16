@@ -20,7 +20,7 @@ import yaml
 from fontTools.ttLib import TTFont
 from fontTools.varLib.models import normalizeLocation
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 REPO = Path(__file__).resolve().parents[1]
 CRISPY_MINI = REPO / "examples/crispy-mini/sources/CrispyMini.glyphs"
@@ -117,20 +117,20 @@ def test_missing_default_row_sets_the_origin_warning(tmp_path, monkeypatch):
     # succeed AND set the loud warning naming the defaults.
     out = _build(tmp_path, monkeypatch, MAPPINGS[1:])  # drop the default row
     assert out.exists()
-    assert server.LAST_ORIGIN_WARNING is not None
-    assert "wght 400" in server.LAST_ORIGIN_WARNING
-    assert "ORIGIN row" in server.LAST_ORIGIN_WARNING
+    assert state.LAST_ORIGIN_WARNING is not None
+    assert "wght 400" in state.LAST_ORIGIN_WARNING
+    assert "ORIGIN row" in state.LAST_ORIGIN_WARNING
 
     # And a build WITH a default row clears it (relocation is on by
     # default again: the off-mode's excluded ORIGIN row made every
     # mapping tent collapse toward the corner across the whole default
     # neighborhood — a valley, not a point dip).
     _build(tmp_path, monkeypatch, MAPPINGS, sub="c")
-    assert server.LAST_ORIGIN_WARNING is None
+    assert state.LAST_ORIGIN_WARNING is None
     # The opt-out keeps the informational variant.
     monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "0")
     _build(tmp_path, monkeypatch, MAPPINGS, sub="d")
-    assert "relocation is off" in (server.LAST_ORIGIN_WARNING or "")
+    assert "relocation is off" in (state.LAST_ORIGIN_WARNING or "")
 
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")

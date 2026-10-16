@@ -14,24 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from avar2_studio import build_jobs
+from avar2_studio import build_jobs, state
 
 STUB = Path(__file__).parent / "stub_build_worker.py"
 
 
 class StubServer:
-    """The slice of server-module state the queue touches."""
+    """The queue's method surface; the value state it used to carry is
+    monkeypatched onto ``state`` by the fixture."""
 
     def __init__(self, tmp_path):
-        self.ORIGINAL_PATH = tmp_path / "Mini.glyphs"
-        self.ORIGINAL_PATH.write_text("familyName = Mini;")
-        (tmp_path / "Mini-avar.csv").write_text("Instance Name,wght\nRegular,400\n")
-        self.GLYPHS_PATH = self.ORIGINAL_PATH
-        self.USE_FONTC = True
-        self.VARIABLE_FONT_PATH = None
-        self.LAST_BUILD_STATUS = None
-        self.LAST_BUILD_ERROR = None
-        self._SYNC_CSV_HOOK = None
         self._preview = tmp_path / ".avar2-studio"
 
     def _get_preview_dir(self):
@@ -45,7 +37,21 @@ class StubServer:
 
 
 @pytest.fixture
-def queue(tmp_path):
+def stub_state(tmp_path, monkeypatch):
+    """Filesystem + ``state`` values the queue's staging/promotion reads."""
+    original = tmp_path / "Mini.glyphs"
+    original.write_text("familyName = Mini;")
+    (tmp_path / "Mini-avar.csv").write_text("Instance Name,wght\nRegular,400\n")
+    for name, value in (
+            ("ORIGINAL_PATH", original), ("GLYPHS_PATH", original),
+            ("USE_FONTC", True), ("VARIABLE_FONT_PATH", None),
+            ("LAST_BUILD_STATUS", None), ("LAST_BUILD_ERROR", None),
+            ("LAST_BUILD_TIME", None), ("_SYNC_CSV_HOOK", None)):
+        monkeypatch.setattr(state, name, value)
+
+
+@pytest.fixture
+def queue(tmp_path, stub_state):
     q = build_jobs.JobQueue(StubServer(tmp_path),
                             worker_cmd=[sys.executable, str(STUB)])
     yield q
@@ -64,11 +70,11 @@ def test_a_build_job_stages_runs_and_promotes(queue):
     queue.request_build()
     assert queue.wait_for_idle(timeout=30)
     server = queue.server
-    assert server.LAST_BUILD_STATUS == "ok"
-    assert server.VARIABLE_FONT_PATH is not None
-    assert server.VARIABLE_FONT_PATH.exists()
-    assert server.VARIABLE_FONT_PATH.parent == server._get_avar2_font_dir()
-    assert server.VARIABLE_FONT_PATH.read_bytes() == b"faux-font"
+    assert state.LAST_BUILD_STATUS == "ok"
+    assert state.VARIABLE_FONT_PATH is not None
+    assert state.VARIABLE_FONT_PATH.exists()
+    assert state.VARIABLE_FONT_PATH.parent == server._get_avar2_font_dir()
+    assert state.VARIABLE_FONT_PATH.read_bytes() == b"faux-font"
     # the build's own outcome is recorded as the last BUILD result
     assert queue._last_build_ok is True
 
@@ -105,7 +111,7 @@ def test_a_midbuild_save_resolves_before_syncing(queue, monkeypatch):
     monkeypatch.setenv("STUB_WORKER_SLEEP", "2")
     server = queue.server
     server._resolve_active_source = lambda: calls.append("resolve")
-    server._SYNC_CSV_HOOK = lambda: calls.append("csv")
+    monkeypatch.setattr(state, "_SYNC_CSV_HOOK", lambda: calls.append("csv"))
     queue.request_build()
     assert _wait_for(queue, lambda: queue.status()["running"], 10)
     queue.request_build(source_refresh="original")   # the watcher's mid-build save
@@ -125,26 +131,26 @@ def test_cancel_a_running_build(queue, monkeypatch):
     # A cancel is not a broken source: the previous build status is
     # untouched, so the build gate (LAST_BUILD_STATUS == "failed") stays
     # in whatever state it was — here, never-set.
-    assert queue.server.LAST_BUILD_STATUS != "failed"
-    assert queue.server.LAST_BUILD_STATUS is None
-    assert queue.server.LAST_BUILD_ERROR is None
+    assert state.LAST_BUILD_STATUS != "failed"
+    assert state.LAST_BUILD_STATUS is None
+    assert state.LAST_BUILD_ERROR is None
     # and the queue recovers
     monkeypatch.setenv("STUB_WORKER_MODE", "ok")
     queue.request_build()
     assert queue.wait_for_idle(timeout=30)
-    assert queue.server.LAST_BUILD_STATUS == "ok"
+    assert state.LAST_BUILD_STATUS == "ok"
 
 
 def test_a_dead_worker_is_a_clean_failure(queue, monkeypatch):
     monkeypatch.setenv("STUB_WORKER_MODE", "die")
     queue.request_build()
     assert not queue.wait_for_idle(timeout=30)
-    assert queue.server.LAST_BUILD_STATUS == "failed"
-    assert "worker died" in (queue.server.LAST_BUILD_ERROR or "")
-    assert queue.server.VARIABLE_FONT_PATH is None, "a dead worker must not touch the served font"
+    assert state.LAST_BUILD_STATUS == "failed"
+    assert "worker died" in (state.LAST_BUILD_ERROR or "")
+    assert state.VARIABLE_FONT_PATH is None, "a dead worker must not touch the served font"
 
 
-def test_a_broken_worker_command_does_not_wedge_the_queue(tmp_path):
+def test_a_broken_worker_command_does_not_wedge_the_queue(tmp_path, stub_state):
     """If spawning the worker itself raises, the supervisor must survive and
     serve the next job — a dead supervisor is the wedge this rework removes."""
     q = build_jobs.JobQueue(StubServer(tmp_path),
@@ -157,7 +163,7 @@ def test_a_broken_worker_command_does_not_wedge_the_queue(tmp_path):
     q._worker_cmd = [sys.executable, str(STUB)]
     q.request_build()
     assert q.wait_for_idle(timeout=30)
-    assert q.server.LAST_BUILD_STATUS == "ok"
+    assert state.LAST_BUILD_STATUS == "ok"
 
 
 def test_an_export_job_produces_a_downloadable_artifact(queue):
@@ -186,10 +192,10 @@ def test_a_successful_build_queues_woff2_compression(queue, monkeypatch):
     monkeypatch.setenv("STUB_WORKER_RUNS", runs)
     queue.request_build()
     assert queue.wait_for_idle(timeout=30)
-    woff2 = queue.server.VARIABLE_FONT_PATH.with_suffix(".woff2")
+    woff2 = state.VARIABLE_FONT_PATH.with_suffix(".woff2")
     assert _wait_for(queue, lambda: woff2.exists(), 30)
     assert woff2.read_bytes() == b"faux-woff2"
-    key = json.loads(queue.server.VARIABLE_FONT_PATH.with_suffix(".woff2.json").read_text())
+    key = json.loads(state.VARIABLE_FONT_PATH.with_suffix(".woff2.json").read_text())
     assert key["woff2_bytes"] == 10
     # and the sizes endpoint now reports it as exact
     sizes = queue.export_sizes()

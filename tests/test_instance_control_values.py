@@ -36,6 +36,7 @@ def _write_sidecar(source: Path):
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     import avar2_studio.server as server
+    from avar2_studio import state
     importlib.reload(server)
 
     glyphs = FIXTURES / "WasmTest.glyphs"
@@ -52,8 +53,8 @@ def client(tmp_path, monkeypatch):
         w.writerow(["Alpha", "100.0"])
         w.writerow(["Beta", "400.0"])
 
-    monkeypatch.setattr(server, "GLYPHS_PATH", source)
-    monkeypatch.setattr(server, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", source)
     monkeypatch.setattr(server, "_get_preview_csv_path", lambda: csv_path)
     monkeypatch.setattr(server, "_get_avar2_csv_path", lambda: csv_path)
     monkeypatch.setattr(server, "_check_csv_external_edit", lambda p: False)
@@ -109,6 +110,7 @@ def test_values_survive_layer_edits_and_follow_renames(tmp_path):
 
 def test_build_stamps_fvar_instances(tmp_path, monkeypatch):
     import avar2_studio.server as server
+    from avar2_studio import state
 
     source = tmp_path / "T.glyphs"
     source.write_text("{}")
@@ -133,7 +135,7 @@ def test_build_stamps_fvar_instances(tmp_path, monkeypatch):
     vf = tmp_path / "t.ttf"
     fb.save(str(vf))
 
-    monkeypatch.setattr(server, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", source)
     assert server._stamp_control_instance_values(vf) == vf
 
     from fontTools.ttLib import TTFont

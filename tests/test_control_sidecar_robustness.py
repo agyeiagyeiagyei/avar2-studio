@@ -5,7 +5,7 @@ import json
 import pytest
 
 import avar2_studio.server as server
-from avar2_studio import control_axes
+from avar2_studio import control_axes, state
 
 
 def _write(source, payload):
@@ -57,8 +57,8 @@ def test_a_corrupt_sidecar_is_reported_and_never_overwritten(crispy_source):
 def test_health_surfaces_sidecar_errors(crispy_source, monkeypatch):
     sidecar = _write(crispy_source, "not json")
     control_axes.load(crispy_source)
-    monkeypatch.setattr(server, "ORIGINAL_PATH", crispy_source)
-    monkeypatch.setattr(server, "GLYPHS_PATH", crispy_source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", crispy_source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", crispy_source)
     server.app.config["TESTING"] = True
     body = server.app.test_client().get("/api/health").get_json()
     assert str(sidecar) in body["sidecar_errors"]
