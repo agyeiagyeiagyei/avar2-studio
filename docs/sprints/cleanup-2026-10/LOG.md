@@ -195,3 +195,19 @@ results, and what is inferred vs verified.
 - Tests [verified]: tests/test_capture_on_fontra_save.py — capture
   moves paths + source_sig into the sidecar; editing-original guard
   no-op; no-source no-op. 3 passed; server.py py_compile + import OK.
+
+## Hand-off — Tier 0 (round 1)
+
+- Full suite in the worktree [verified]:
+  `PYTHONPATH=$PWD/src PATH=<repo>/.venv/bin:$PATH <repo>/.venv/bin/python -m pytest tests/ -q`
+  → **446 passed, 8 skipped in 31.16–31.38 s**. The 8 skips are the
+  pre-existing `REPO/.venv/bin/fontc` hard-codes (audit §6: relocation ×3,
+  kinetikern ×3 +engine, kinetikern_inject ×2) — REPO resolves to the
+  worktree, which has no `.venv`; they ran in the main-checkout baseline.
+  All new Tier-0 tests run and pass (staging, real-worker e2e, gate ×2,
+  seeds ×2, carry ×3, ordering, capture ×3).
+- ruff / frontend gates: not yet applicable (T1.20/T1.29 add them).
+- Tier-0 acceptance probes: each item's check is in its section above;
+  T0.2's fresh-clone install and T0.3's fail-without-fix e2e included.
+- Not done by rule: the audit's "run capture_outlines once on Crispy"
+  (would write the designer's live sidecar) — left for the user.
