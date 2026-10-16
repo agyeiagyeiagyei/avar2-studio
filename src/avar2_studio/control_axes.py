@@ -1870,6 +1870,23 @@ def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]
         print(f"Warning: failed to read previous shadow for outline preservation: {exc}", file=sys.stderr)
         return {}
 
+    # Keys are full axis vectors. A brace created before an axis was
+    # appended (e.g. GRAD composed onto the control shadow) carries a
+    # shorter coordinates list — pad with the default master's values,
+    # the same convention regenerate_shadow uses when extending masters.
+    # Without this the keys never match full-length lookups and every
+    # drawing on such a layer is silently lost to capture AND regen.
+    n_axes = len(font.axes)
+    master_axes = list(getattr(font.masters[0], "axes", None) or []) if font.masters else []
+
+    def _full(loc: tuple) -> tuple:
+        if len(loc) >= n_axes:
+            return loc[:n_axes]
+        return loc + tuple(
+            float(master_axes[i]) if i < len(master_axes) else 0.0
+            for i in range(len(loc), n_axes)
+        )
+
     out: Dict[tuple, Dict[str, object]] = {}
     for glyph in font.glyphs:
         for layer in glyph.layers:
@@ -1892,7 +1909,7 @@ def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]
                     continue
             except (TypeError, ValueError):
                 continue
-            out[(glyph.name, loc)] = {
+            out[(glyph.name, _full(loc))] = {
                 "paths": list(layer.paths) if layer.paths else [],
                 "components": list(layer.components) if layer.components else [],
                 "anchors": list(layer.anchors) if layer.anchors else [],

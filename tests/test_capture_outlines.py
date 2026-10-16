@@ -194,3 +194,34 @@ def test_component_outlines_round_trip_with_transform(crispy_source):
     assert control_axes.capture_outlines(crispy_source) == 0
     stored = control_axes.list_axes(crispy_source)[0]["layers"][0]
     assert stored["outline"]["components"][0]["transform"] == transform
+
+
+def test_capture_matches_layers_written_before_an_axis_was_added(crispy_source):
+    """A brace created before GRAD (or a new control axis) was appended
+    carries a shorter coordinates vector than the shadow's axis count. The
+    raw-tuple keys then never match the full-length lookups and capture
+    silently writes 0 layers — on Crispy, every control layer was in this
+    state. Extraction pads short vectors with the default master's values."""
+    control_axes.add_axis(crispy_source, "ymod", "Horizontal correction", 0, 0, 100)
+    control_axes.apply_layer_delta(
+        crispy_source, "ymod",
+        add=[{"glyph": "e", "location": {"ymod": 100, "XOPQ": 500}}])
+    shadow = control_axes.regenerate_shadow(crispy_source)
+    drawn = _draw_into(shadow, "e")
+    assert drawn is not None
+
+    # Grade composition appends GRAD to the shadow without extending the
+    # existing brace layers' coordinates — the production drift.
+    (crispy_source.parent / "CrispyMini-grade.json").write_text(
+        '{"version": 1, "enabled": true, "default_pct": 0.25, "intensity": 1.0,'
+        ' "clamp_to_headroom": true, "instances": [{"name": "Mid", "pct": 0.25}]}')
+    from avar2_studio import grade_shadow
+    assert grade_shadow.apply_grades(
+        crispy_source, {"Mid": {"XTRA": 1712.0, "XOPQ": 509.0, "YOPQ": 232.0}},
+        fresh_shadow=False) is not None
+
+    assert control_axes.capture_outlines(crispy_source) == 1
+    stored = control_axes.list_axes(crispy_source)[0]["layers"][0]
+    flat = [(round(n[0], 2), round(n[1], 2))
+            for p in stored["outline"]["paths"] for n in p["nodes"]]
+    assert flat == drawn
