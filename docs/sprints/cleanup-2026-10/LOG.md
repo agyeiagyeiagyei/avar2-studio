@@ -717,3 +717,43 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   absence log; T1.32 pkg/ verified absent from the worktree; T1.33 marker
   registered; T1.34 six merged branches pruned; T1.35 BLOCKED — 0.1.0 is
   not on PyPI (404), nothing to tag; T1.36 git gc), docs (T1.37–T1.39).
+
+## Round 4 — executor: the verifier (the other agent is tied up; user instruction 2026-10-16)
+
+From here the verifier executes and self-verifies with the same evidence
+bar; findings rounds still get written so a second reviewer can re-check.
+
+## T1.8 — fix: never memoize under an unversioned key
+
+- Root cause [verified, round 3]: `_declared_ranges_cache_key` appended
+  `None` for a missing/unset path, so every call with no source bound
+  shared the key `((None, None), ())` and got the first computation.
+- Fix: a missing on-disk version returns no key → compute without
+  caching; versioned parts use `st_mtime_ns`. Memo semantics unchanged
+  otherwise (one load per input version, callers get copies).
+- Tests [verified]: new `test_no_caching_without_a_versioned_source`
+  (two different metadata dicts under an unbound source → two different
+  results, nothing cached). Ordering repro
+  `pytest tests/test_declared_ranges_cache.py tests/test_avar2_default_relocation.py`
+  (fontc-gated tests enabled via a `.venv` link in the worktree):
+  **5 passed** in both orders; with the pre-fix `server.py` stashed back:
+  **2 failed** (the new test + `test_two_default_rows_fail_loudly`).
+
+## T1.22 — fix: the last copy leak
+
+- `App.jsx` reseed confirm: "This rewrites the sidecar…" → "This updates
+  the studio's saved layers…". Grep for user-facing "sidecar" in
+  JSX/TSX: none. `npm run lint` 0 errors, `typecheck` clean.
+
+## T0.11 — follow-up: one `.venv` ignore line
+
+- Correction: `.gitignore` already ignored `.venv/` (line 13); the
+  round-1 "untracked `.venv`" observation came from the verifier's own
+  `.venv` SYMLINK in a scratch clone (a `/`-suffixed pattern matches
+  directories only). The duplicate line added for T0.11 is removed and
+  the one entry is now `.venv` (covers a symlink too — useful for
+  worktrees that link a venv in so the `REPO/.venv/bin/fontc` test
+  hard-codes resolve). `git check-ignore .venv` passes for both forms.
+
+- Full suite after the three changes [verified]: **484 passed, 0 skipped
+  in 54.9 s** (fontc-gated tests included); `ruff check src tests` clean.
