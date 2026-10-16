@@ -1148,3 +1148,8 @@ bar; findings rounds still get written so a second reviewer can re-check.
   natural build's gvar tuple count ≤ the relocated one's; env default +
   `0` both honored when no parameter is passed. 2 passed. fontc via the
   interpreter-sibling idiom (worktree-safe).
+
+## T3.4 — SKIPPED by user decision (2026-10-17)
+- The single-shim-shared-with-fontra-embed unification is deferred; the
+  desktop shim stays as the lintable package file (T2.4) until a
+  fontra-embed-coordinated pass is worth doing.
