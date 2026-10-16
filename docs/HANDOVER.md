@@ -496,6 +496,69 @@ e2e 27's "ROND 100 moves points" and all of e2e 28):
   pytest suite never does. If a transform writes positions, round-trip
   one save through fontc in its test.
 
+### Kinetikern (per-instance spacing, October 2026)
+
+`src/avar2_studio/kinetikern/`: `bridge.py` is Kinetikern2's ctypes bridge
+vendored verbatim, `punctuation.py` + `.json` its conventions table,
+`__init__.py` the loader + `propose()`, `sidecar.py` the
+`<stem>-kinetikern.json` I/O, `inject.py` the bake. The engine source lives
+in `native/kinetikern2/` (upstream `engine/` at the commit in
+`UPSTREAM_COMMIT`); `engine_path()` finds `target/release/libkinetikern2.dylib`
+or `$AVAR2_KK2_DYLIB`. Routes: `GET /api/kinetikern` (sidecar),
+`GET /api/kinetikern/propose` (`instance=` or `coordinates=`, `looseness=`),
+`PUT/DELETE /api/kinetikern/instances/<name>` (body `looseness`, optional
+`location` for a custom spot), `PUT /api/kinetikern/all`. Tab:
+`frontend/src/components/KinetikernTab.jsx`.
+
+- **propose() instantiates the served font** at the parametric location
+  (other axes at default) with fontTools, feeds the glyf outlines to the
+  engine, Pass 1 only (`coupling=0`, `skip_pass2`). Sidebearings are read
+  from **hmtx**, not glyf bounds: a phantom-point variation (SPAC, a
+  Kinetikern tuple) moves hmtx and leaves the outline where it was, and the
+  contours handed to the engine are shifted to where they render.
+- **Deltas, keyed by SOURCE glyph name** (fontc compiles production names:
+  `euro` → `Euro`); the route maps by code point both ways. Apply stores
+  `existing + (engine target − current build)`; once the build carries the
+  entry a re-apply changes nothing, so a double apply between builds
+  self-corrects on the next one.
+- **Why not brace layers in the shadow.** Measured on Crispy: the
+  build-time default relocation (fontTools instancer) multiplies every
+  glyph's gvar tuples ~15× (H: 55 → 838) and the preview font sits a few
+  KB under gvar's 64 KB per-glyph tuple-header ceiling. A sparse master
+  at an instance location, with its slant/rounding twins, is shredded the
+  same way (+150 tuples per glyph per instance) and the avar2 build fails
+  with `int too big to convert` on `font.save()`. The validated source-level
+  mechanism (decomposed composites, off-plane braces shifted by the field)
+  was dropped for that reason.
+- **The bake is a font-stage step** at the top of `_apply_transform_chain`
+  (after compile + relocation + avar2, BEFORE SPAC): one tuple per corrected
+  instance per glyph that moves phantom point 1 by −left and point 2 by
+  +right; `add_HVAR` afterwards. Composites need nothing (a component
+  ignores its base's phantoms); `USE_MY_METRICS` composites are skipped.
+  Supports/deltas from a fontTools `VariationModel` over the corrected
+  locations, so every instance is exact and the field blends between.
+  `strip()` removes earlier Kinetikern tuples first (phantom-only, on the
+  parametric axes), so a re-run of the chain is idempotent.
+- **Budget.** At the injection point the worst Crispy glyph (`g`) is at
+  ~44 KB of headers; all 30 instances fit (~1.4 KB more). After SPAC's
+  native injector the same glyph is at ~63 KB and only 18 would fit, which
+  is why the order matters. The native injector re-encodes and keeps the
+  tuples (checked: error ≤ 1 unit). An overflow raises inside the chain and
+  is reported as a transform error; the font builds without corrections.
+- **Two traps found the hard way.** (1) Normalized locations are quantized
+  to F2Dot14 before the model: a coordinate that rounds to the default must
+  BE the default, because a stored peak of 0 means "axis not involved"
+  and a model that still saw a 1e-8 region there put a −900-unit delta on
+  it (dollar came out with advance 0). (2) A correction at the default
+  location is the model's base value and goes in as a tuple with no axes
+  (applies everywhere); the other tuples are solved relative to it.
+- **Job staging:** `build_jobs.SIDECAR_SUFFIXES` must list
+  `-kinetikern.json`, or the worker builds without it (the first live run
+  did exactly that).
+- **Verify:** `tests/test_kinetikern*.py` (CrispyMini through fontc), and
+  on Crispy: apply to all, wait for the rebuild, then `propose` on several
+  instances must report a remaining mean of 0 and `|new − cur| ≤ 2`.
+
 ## 4. Known issues / sharp edges (ranked)
 
 0. **A `glyph_model` call perturbs later `measure_at` results in the

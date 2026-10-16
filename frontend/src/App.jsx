@@ -6,7 +6,7 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import InstanceRows from './components/InstanceRows';
 import PreviewTab from './components/PreviewTab';
-import SpaceTab from './components/SpaceTab';
+import KinetikernTab from './components/KinetikernTab';
 import TesterTab from './components/TesterTab';
 import FontraEditorModal from './components/FontraEditorModal';
 import DeleteInstanceModal from './components/DeleteInstanceModal';
@@ -192,9 +192,7 @@ function App() {
   const [instanceToDelete, setInstanceToDelete] = useState(null);
   const [avar2FontUrl, setAvar2FontUrl] = useState(null);
   const [avar2FontLoaded, setAvar2FontLoaded] = useState(false);
-  const [coverage, setCoverage] = useState([]);
-  const [coveragePins, setCoveragePins] = useState([]);
-  const [jumpLocation, setJumpLocation] = useState(null);
+  const [jumpLocation] = useState(null);
   // Load initial data
   useEffect(() => {
     loadData();
@@ -415,21 +413,18 @@ function App() {
         }
       }
       
-      const [instancesData, axesData, mastersData, transformsData, gradeData, coverageData] = await Promise.all([
+      const [instancesData, axesData, mastersData, transformsData, gradeData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
         api.getMasters().catch(() => ({ masters: [] })),
         api.getTransforms().catch(() => ({ transforms: [] })),
         api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, intensity: 1, clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] })),
-        api.getCoverage ? api.getCoverage().catch(() => ({ findings: [] })) : Promise.resolve({ findings: [] }),
       ]);
 
       setInstances(instancesData.instances);
       setMasters(mastersData.masters || []);
       setAxes(axesData.axes || []);
       setTransforms(transformsData.transforms || []);
-      setCoverage(coverageData.findings || []);
-      setCoveragePins(coverageData.pins || []);
       setGrade({
         enabled: !!gradeData.enabled,
         default_pct: gradeData.default_pct ?? 0.25,
@@ -2309,8 +2304,6 @@ function App() {
         isUploadDataset={isUploadDataset()}
         hideRebuild={staticMode && !isUploadDataset()}
         allowImportInStatic={isUploadDataset()}
-        coverageFindings={coverage}
-        onShowCoverage={() => setMainTab('space')}
       />
 
       <DeleteInstanceModal
@@ -2399,10 +2392,10 @@ function App() {
           </button>
           <button
             type="button"
-            className={`main-tab${mainTab === 'space' ? ' active' : ''}`}
-            onClick={() => setMainTab('space')}
+            className={`main-tab${mainTab === 'kinetikern' ? ' active' : ''}`}
+            onClick={() => setMainTab('kinetikern')}
           >
-            Space
+            Kinetikern
           </button>
           <button
             type="button"
@@ -2413,32 +2406,19 @@ function App() {
           </button>
         </div>
         <div className={`build-scope${building ? ' is-building' : ''}`}>
-        {mainTab === 'space' ? (
-          <SpaceTab
+        {mainTab === 'kinetikern' ? (
+          <KinetikernTab
+            instances={instances}
             axes={axes}
-            coverageFindings={coverage}
-            coveragePins={coveragePins}
-            fontUrl={fontUrl}
             vfFamilyId={vfFamilyId}
-            onPinCorner={async (loc) => {
-              // Errors (e.g. untrendable-corner refusals) surface inline
-              // in the Space tab's pinAt — don't catch here.
-              const res = await api.pinCorner(loc);
-              await loadData();
-              return res; // pinAt reads .synthesized for the notice
-            }}
-            onClampOutOfRange={api.clampOutOfRange ? async () => {
-              await api.clampOutOfRange();
-              await loadData();
-            } : undefined}
-            onAddMappingRow={api.addMappingRow ? async (loc) => {
-              await api.addMappingRow(loc);
-              await loadData();
-              await loadAvar2Data();
-            } : undefined}
-            onJumpToLocation={(loc) => { setJumpLocation(loc); setMainTab('preview'); }}
+            fontLoaded={fontLoaded}
+            building={building}
+            sampleText={sampleText}
+            onSampleTextChange={setSampleText}
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
           />
-                ) : mainTab === 'tester' ? (
+        ) : mainTab === 'tester' ? (
           <TesterTab
             axes={axes}
             vfFamilyId={vfFamilyId}

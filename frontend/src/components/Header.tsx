@@ -73,18 +73,6 @@ interface HeaderProps {
   // Static demo with an uploaded source: config import becomes
   // available (bundles apply in-browser via the static provider).
   allowImportInStatic?: boolean;
-  // Coverage audit findings (uploads only — see coverage.js). The
-  // header shows only the count badge; the findings list and its
-  // actions live in the Space tab.
-  coverageFindings?: CoverageFinding[];
-  onShowCoverage?: () => void;
-}
-
-interface CoverageFinding {
-  severity: 'fail' | 'info';
-  type: 'uncovered-corner' | 'out-of-range-source' | 'collapse' | 'inert-sweep';
-  location?: Record<string, number> | null;
-  detail: string;
 }
 
 // Grade transform — source-level (adds a GRAD axis); toggle + global default
@@ -130,7 +118,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                  transformsDirty = {}, onApplyTransform,
                  grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onShowCoverage, isUploadDataset = false }: HeaderProps) {
+                 isUploadDataset = false }: HeaderProps) {
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -575,15 +563,6 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               })}
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
-        {coverageFindings.length > 0 && onShowCoverage && (
-          <button
-            className="btn btn-load-font"
-            onClick={onShowCoverage}
-            title="Design-space coverage: missing corners, out-of-range sources, collapses. Opens the Space tab."
-          >
-            Coverage <span className="count-flag">{coverageFindings.length}</span>
-          </button>
         )}
         {familyName && (
           <div className="config-dropdown" ref={configRef}>

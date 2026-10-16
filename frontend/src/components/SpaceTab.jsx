@@ -137,19 +137,48 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   };
 
   const W = 760, H = 520;
+  // Masters/braces align to the axes with master coverage (the gvar
+  // peaks' order); the cube's picker offers EVERY fvar axis — avar2-mapped
+  // user axes included (sources pin at the user axes' defaults).
   const paramAxes = (axes || []).filter(a => a.has_master_coverage !== false);
-  const tags = paramAxes.map(a => a.tag);
-  const ranges = paramAxes.map(a => [a.min, a.max]);
+  const paramTags = paramAxes.map(a => a.tag);
+  const allAxes = axes || [];
+  const tags = allAxes.map(a => a.tag);
+  const ranges = allAxes.map(a => [a.min, a.max]);
   const locKey = (loc) => loc.map(v => Math.round(v * 100) / 100).join(',');
-  const proj = projectors(ranges, az, el, wAngle, W, H);
 
-  const corners = useMemo(() => {
+  // The axis picker: the cube shows the picked axes (any number — extras
+  // chain into the ⇧drag spin) and pins the rest at their defaults. Past
+  // 3-axis space a full-dimension projection reads as a knot; picking is
+  // what scales.
+  const [pick, setPick] = useState(() => tags.slice(0, Math.min(3, tags.length)));
+  useEffect(() => {
+    setPick(prev => {
+      const valid = prev.filter(t => tags.includes(t));
+      if (valid.length >= Math.min(3, tags.length)) return valid;
+      return [...valid, ...tags.filter(t => !valid.includes(t))].slice(0, Math.min(3, tags.length));
+    });
+  }, [tags.join(',')]);
+  const togglePick = (t) => setPick(prev =>
+    prev.includes(t)
+      ? (prev.length > 3 ? prev.filter(x => x !== t) : prev)
+      : [...prev, t]);
+  const viewRanges = pick.map(t => ranges[tags.indexOf(t)]);
+  const restrict = (loc) => pick.map(t => loc[tags.indexOf(t)]);
+  const proj1 = projectors(viewRanges, az, el, wAngle, W, H);
+  const proj = (loc) => proj1(restrict(loc));
+  // Corners of the picked subspace, in FULL axis order (unpicked axes at
+  // default) so ghost/pin/probe matching stays index-aligned.
+  const viewCorners = useMemo(() => {
     const out = [];
-    for (let i = 0; i < (1 << tags.length); i++) {
-      out.push(tags.map((_, j) => ((i >> j) & 1 ? ranges[j][1] : ranges[j][0])));
+    for (let i = 0; i < (1 << pick.length); i++) {
+      out.push(tags.map((t, j) => {
+        const k = pick.indexOf(t);
+        return k >= 0 ? (i >> k) & 1 ? ranges[j][1] : ranges[j][0] : allAxes[j].default;
+      }));
     }
     return out;
-  }, [axes]);
+  }, [pick, axes]);
 
   const ghostLocs = useMemo(() =>
     (coverageFindings || [])
@@ -181,7 +210,9 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
 
   // Masters + braces from the gvar regions (peaks shared by most
   // glyphs are masters; the rest are brace/intermediate sources,
-  // tracked with their glyph names for the hover preview).
+  // tracked with their glyph names for the hover preview). The gvar
+  // peaks align to the master-coverage (parametric) axes; locs are
+  // extended to full fvar order with the user axes at their defaults.
   const { masters, braces } = useMemo(() => {
     if (!bytes || tags.length < 3) return { masters: [], braces: [] };
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -193,7 +224,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         { offset: view.getUint32(r + 8) };
     }
     if (!dir.gvar) return { masters: [], braces: [] };
-    const tuples = gvarRegions(view, dir.gvar, tags.length);
+    const tuples = gvarRegions(view, dir.gvar, paramTags.length);
     const usage = new Map(); // peakKey -> Set of glyph names
     for (const t of tuples) {
       const key = [...t.peaks].map(v => v.toFixed(3)).join(',');
@@ -204,20 +235,26 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     const masters = [], braces = [];
     for (const [key, glyphs] of usage) {
       const peak = key.split(',').map(Number);
-      const loc = peak.map((v, i) => {
+      const locParam = peak.map((v, i) => {
         const a = paramAxes[i];
         return v >= 0 ? a.default + v * (a.max - a.default) : a.default + v * (a.default - a.min);
       });
-      const outOfRange = loc.some((v, i) => v < ranges[i][0] || v > ranges[i][1]);
+      const loc = allAxes.map(a => {
+        const k = paramTags.indexOf(a.tag);
+        return k >= 0 ? locParam[k] : a.default;
+      });
+      const outOfRange = locParam.some((v, i) => v < paramAxes[i].min || v > paramAxes[i].max);
       (glyphs.size >= glyphCount * 0.5 ? masters : braces).push({ loc, glyphs: [...glyphs], outOfRange });
     }
     return { masters, braces };
   }, [bytes, axes, glyphNames]);
 
-  // Health: outline area at corners + masters (one worker round-trip).
+  // Health: outline area at the VIEW corners + masters (one worker
+  // round-trip). Skipped when the pick explodes the corner count.
   useEffect(() => {
     if (!bytes || !tags.length) return;
-    const locs = [...corners, ...masters.map(m => m.loc)].map(loc =>
+    if (viewCorners.length > 64) { setHealth({}); return; }
+    const locs = [...viewCorners, ...masters.map(m => m.loc)].map(loc =>
       Object.fromEntries(tags.map((t, i) => [t, loc[i]])));
     measureAt(bytes, ['a', 'e', 'o', 'g'], locs)
       .then(areas => {
@@ -226,13 +263,13 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         setHealth(map);
       })
       .catch(() => {});
-  }, [bytes, corners, masters]);
+  }, [bytes, viewCorners, masters]);
 
   const healthOf = (loc) => health[locKey(loc)];
 
   // Depth of a location in the current view (0 = farthest, 1 = nearest)
   // — used to fade DOM markers so the figure reads as 3D.
-  const cornerZs = corners.map(c => proj(c)[2]);
+  const cornerZs = viewCorners.map(c => proj(c)[2]);
   const zmin = Math.min(...cornerZs), zmax = Math.max(...cornerZs);
   const depthT = (loc) => {
     const z = proj(loc)[2];
@@ -247,19 +284,19 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     ctx.clearRect(0, 0, W, H);
     // Depth cueing: normalize the projected Z over the corners so far
     // wires/markers can fade and thin.
-    const zs = corners.map(c => proj(c)[2]);
+    const zs = viewCorners.map(c => proj(c)[2]);
     const zmin = Math.min(...zs), zmax = Math.max(...zs);
     const depthT = (z) => (zmax === zmin ? 1 : (z - zmin) / (zmax - zmin));
     // Hypercube edges: corner bitmasks differing in exactly one bit.
     const EDGES = [];
-    for (let i = 0; i < (1 << tags.length); i++) {
-      for (let j = 0; j < tags.length; j++) {
-        const k = i ^ (1 << j);
-        if (i < k) EDGES.push([i, k]);
+    for (let i = 0; i < viewCorners.length; i++) {
+      for (let j = i + 1; j < viewCorners.length; j++) {
+        const diff = viewCorners[i].filter((v, k) => v !== viewCorners[j][k]).length;
+        if (diff === 1) EDGES.push([i, j]);
       }
     }
     for (const [u, v] of EDGES) {
-      const p = proj(corners[u]), q = proj(corners[v]);
+      const p = proj(viewCorners[u]), q = proj(viewCorners[v]);
       const t = (depthT(p[2]) + depthT(q[2])) / 2;
       ctx.strokeStyle = `rgba(113, 113, 122, ${0.18 + 0.55 * t})`;
       ctx.lineWidth = 0.9 + 1.1 * t;
@@ -281,7 +318,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
     }
     const items = [];
     masters.forEach(m => items.push({ p: proj(m.loc), kind: 'master' }));
-    const dflt = paramAxes.map(a => a.default);
+    const dflt = allAxes.map(a => a.default);
     items.push({ p: proj(dflt), kind: 'default' });
     items.sort((a, b) => a.p[2] - b.p[2]);
     for (const it of items) {
@@ -300,7 +337,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   if (tags.length < 3) {
     return (
       <div className="space-tab-empty">
-        The Space view needs a font with three parametric axes (this one has {tags.length}).
+        The Space view needs a font with at least three axes (this one has {tags.length}).
       </div>
     );
   }
@@ -348,6 +385,20 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
   return (
     <div className="space-tab">
       <div className="space-cube-wrap">
+        {/* the axis picker: any axes — the cube shows 3, extras chain
+            into the ⇧drag spin; the rest pin at their defaults */}
+        <div className="space-pick-rail">
+          <span className="space-pick-label"
+                title="Masters and brace layers live on the parametric axes; on avar2-mapped axes they pin at the default">axes</span>
+          {tags.map(t => (
+            <button key={t}
+                    className={`space-axis-chip${pick.includes(t) ? ' on' : ''}`}
+                    title={pick.includes(t) ? 'Remove from the cube' : 'Add to the cube (a 4th+ spins with ⇧drag)'}
+                    onClick={() => togglePick(t)}>
+              {t}
+            </button>
+          ))}
+        </div>
         <canvas
           ref={canvasRef}
           width={W}
@@ -373,7 +424,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         </button>
         {/* named instances (teal diamonds) */}
         {(meta?.instances || []).map((inst, i) => {
-          const loc = tags.map(t => inst.coordinates[t] ?? paramAxes[tags.indexOf(t)].default);
+          const loc = tags.map(t => inst.coordinates[t] ?? allAxes[tags.indexOf(t)].default);
           const [x, y] = proj(loc);
           return (
             <div
@@ -401,9 +452,9 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
         })}
         {/* axis labels — DOM so they sit above the chips at any orbit;
             click homes the view square-on to that axis */}
-        {tags.map((t, i) => {
-          const ext = tags.map((_, j) =>
-            i === j ? ranges[j][1] + 0.14 * (ranges[j][1] - ranges[j][0]) : ranges[j][0]);
+        {pick.map((t, i) => {
+          const ext = tags.map((t2, j) =>
+            t2 === t ? ranges[j][1] + 0.14 * (ranges[j][1] - ranges[j][0]) : allAxes[j].default);
           const [x, y] = proj(ext);
           return (
             <span
@@ -416,7 +467,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
           );
         })}
         {/* corner chips (live specimens; ghost = red, pinned = labelled) */}
-        {corners.map((loc) => {
+        {viewCorners.map((loc) => {
           const [x, y] = proj(loc);
           const key = locKey(loc);
           const ghost = isGhost(loc);
@@ -479,7 +530,7 @@ function SpaceTab({ axes, coverageFindings = [], coveragePins, fontUrl, vfFamily
           <span><i className="dot instance" /> instance</span>
           <span><i className="dot default" /> default</span>
           <span><i className="dot ghost" /> ghost corner</span>
-          <span className="dim">drag to orbit{tags.length > 3 ? ' · ⇧drag spins the 4th axis' : ''} · hover braces to preview · axis labels home the view · dbl-click resets</span>
+          <span className="dim">drag to orbit{pick.length > 3 ? ' · ⇧drag spins the 4th axis' : ''} · hover braces to preview · axis labels home the view · dbl-click resets</span>
         </div>
         {coverageFindings.length > 0 && (
           <div className="space-findings">

@@ -249,7 +249,7 @@
 }
 .space-reset-view {
   position: absolute;
-  top: 10px;
+  top: 42px;   /* clear of the axis-pick rail */
   left: 10px;
   z-index: 4;
   font-size: 11px;
@@ -277,4 +277,39 @@
   padding: 8px 10px;
   cursor: pointer;
   max-width: 460px;
+}
+
+/* ---- axis picker (which axes the cube shows) ---- */
+.space-pick-rail {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.space-pick-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--zinc-400, #a1a1aa);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.space-axis-chip {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--zinc-200, #e4e4e7);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--zinc-500, #71717a);
+  cursor: pointer;
+}
+.space-axis-chip.on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.space-axis-chip:disabled {
+  opacity: 0.35;
+  cursor: default;
 }

@@ -109,6 +109,7 @@ the source's stem, so it can be committed with it:
 | `MyFont-control.json` | yes | secondary parametric axes: applicable glyphs, layer locations, drawn outlines | the SECONDARY PARAMETRIC AXES panel and the outline editor |
 | `MyFont-transforms.json` | yes | which transforms are on, with their parameters | the Transforms menu |
 | `MyFont-grade.json` | yes | grade on/off, default %, intensity, headroom clamp, per-style anchors (`.glyphs` sources only) | the Grade toggle and the `G` badges |
+| `MyFont-kinetikern.json` | yes | per-style spacing corrections: the looseness each style was spaced at and how far each glyph's sides moved | the Kinetikern tab |
 | `.avar2-studio/` | no, gitignore it | `build/`, `shadow/`, `config.yaml`, `backups/` (the last 20 of each sidecar), `axis-metadata.json` (display names and ranges of the axes you declare) | the studio |
 
 Studio axis authoring never edits your source: once studio-authored
@@ -245,6 +246,31 @@ you grade a few anchors, not every style.
 [docs/grade.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/grade.md).
 
 ![A style's grade popover: the percentage, its headroom, remove and save](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/grade-badge-popover.png)
+
+### Kinetikern
+
+Space a style with [Kinetikern2](https://github.com/bghryct/kinetikern2)'s
+engine (Mirko Velimirovic, MIT): Pass 1 of its kinetic equilibrium over
+glyph triplets, with its punctuation and figures conventions on, run on the
+built font at that style. The **Kinetikern** tab lists every style the way
+the plugin lists masters; pick one, set the looseness (0 is the engine's
+calibrated middle), and compare the built font (before) with the proposal
+(after) over the shared sample text. **Apply** stores the result for that
+style as per-glyph side deltas in `MyFont-kinetikern.json` and rebuilds;
+**Revert** drops it; **Apply to all…** spaces every style at one looseness
+in one go, which keeps the family consistent. A **Custom…** entry spaces any
+parametric location. Kerning is not part of this pass.
+
+Corrections are baked into the compiled font as one small variation tuple
+per corrected style per glyph (phantom points only, so outlines never move
+and composites stay rigid), after the default relocation and before SPAC;
+they also ride exports. They are relative to whatever the masters
+interpolate to, so a later recalibration of the masters carries them along.
+
+The engine is a Rust library the studio loads through ctypes; build it once
+with `cd native/kinetikern2 && cargo build --release` (Rust 1.74+, see
+`native/kinetikern2/README.md`). Without it the tab reports that the engine
+is not built and everything else keeps working.
 
 ### Build transforms
 

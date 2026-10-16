@@ -172,3 +172,17 @@ def test_a_successful_build_queues_woff2_compression(queue, monkeypatch):
     sizes = queue.export_sizes()
     assert sizes["woff2_exact"] is True
     assert sizes["woff2_bytes"] == 10
+
+
+def test_stage_copies_every_sidecar(queue, tmp_path):
+    """The worker re-derives the build copy from the staged snapshot, so a
+    sidecar left behind is a feature silently missing from the build."""
+    for suffix in build_jobs.SIDECAR_SUFFIXES:
+        p = tmp_path / ("Mini" + suffix)
+        if not p.exists():
+            p.write_text("{}")
+    job = {"kind": "build"}
+    queue._stage(job)
+    staged = {p.name for p in (job["dir"] / "src").iterdir()}
+    assert "Mini-kinetikern.json" in staged
+    assert all(("Mini" + suffix) in staged for suffix in build_jobs.SIDECAR_SUFFIXES)

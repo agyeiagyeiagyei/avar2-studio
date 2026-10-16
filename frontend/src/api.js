@@ -652,4 +652,66 @@ export const api = {
     }
     return parseJSON(response);
   },
+
+  // --- Kinetikern: per-instance spacing (sidecar + engine proposals) ---
+  async getKinetikern() {
+    const response = await fetch(`${API_BASE}/kinetikern`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Kinetikern state: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async proposeKinetikern({ instance, coordinates, looseness }) {
+    const params = new URLSearchParams();
+    if (instance) params.set('instance', instance);
+    if (coordinates) params.set('coordinates', JSON.stringify(coordinates));
+    params.set('looseness', String(looseness ?? 0));
+    const response = await fetch(`${API_BASE}/kinetikern/propose?${params}`);
+    if (!response.ok) {
+      // A server started before Kinetikern existed answers 404, or 503 from
+      // the Fontra fallthrough; say what that means instead of echoing it.
+      if (response.status === 404 || response.status === 503) {
+        throw new Error('This studio server does not have Kinetikern yet — restart the studio to load it.');
+      }
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern proposal failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async applyKinetikern(name, looseness, location) {
+    const response = await fetch(`${API_BASE}/kinetikern/instances/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(location ? { looseness, location } : { looseness }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern apply failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async revertKinetikern(name) {
+    const response = await fetch(`${API_BASE}/kinetikern/instances/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern revert failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async applyKinetikernAll(looseness) {
+    const response = await fetch(`${API_BASE}/kinetikern/all`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ looseness }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern apply-all failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
 };

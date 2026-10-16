@@ -31,7 +31,7 @@ from pathlib import Path
 
 #: Source-set sidecars staged into every job snapshot (siblings of the
 #: original source), plus the small preview-dir files builds/exports read.
-SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json")
+SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json")
 PREVIEW_FILES = ("axis-metadata.json", "instance-renames.json", "config.yaml")
 LEGACY_CSV = "avar2-mappings.csv"
 

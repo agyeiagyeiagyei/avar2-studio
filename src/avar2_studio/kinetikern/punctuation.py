@@ -1,0 +1,281 @@
+# encoding: utf-8
+# Vendored from Kinetikern2 (https://github.com/bghryct/kinetikern2, MIT, (c) 2026 Mirko Velimirovic):
+# plugin/Kinetikern2.glyphsPlugin/Contents/Resources/kk2_punctuation.py at 7c42a12. Changes: imports (the bridge
+# is a sibling module; kk2_harness.CASE_SUFFIXES inlined), the table's file name, and no fallback to the
+# harness's older mark list (punctuation.json carries its own).
+"""
+kk2_punctuation — punctuation by convention (the window's Punctuation switch).
+
+Kinetikern2 reads every glyph by its shape, and punctuation is where that
+reading and designers part most: measured against 1,594 Google Fonts
+families, pairs with a punctuation mark sit about 1.7 times further from
+their designers than pairs of letters. Two things account for most of it:
+
+- each mark's sides: designers space a period, a hyphen, quotes or a
+  parenthesis by conventions of their own, relative to the letters around
+  them, that the shapes alone do not give;
+- kerning, mark by mark: designers tuck a period or a comma well under a T,
+  V, Y or r (about 0.7 of what the shapes suggest), but hardly kern a
+  hyphen, a dash or a quote (about a third), and kern two marks side by
+  side hardly at all.
+
+With the switch on, the engine moves each punctuation side in Pass 1 by a
+blend of the model's own reading of the mark and the font's letter rhythm
+(c + m·s/50 + r·ρ/50 units per 1000 em: s the side's sidebearing as the model
+sets it, ρ the median sidebearing of the lowercase), learned for text,
+display and handwriting faces; and Pass 2 kerns each side of a mark with its
+own share (the table's "kern"), a pair the product of its two facing sides',
+every other mark or symbol "kern_scale" per side. Metrics keys, auto-aligned
+composites, frozen glyphs and kept joins keep their rules, as everywhere.
+
+The table (kk2_punctuation.json) is learned by tools/kk2_punctuation_learn.py
+from Spacing QA's measurements; Spacing QA uses the same table.
+"""
+
+from __future__ import division, print_function, unicode_literals
+
+import json
+import os
+
+from . import bridge as kb
+CASE_SUFFIXES = ("case",)  # kk2_harness.CASE_SUFFIXES
+
+TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "punctuation.json")
+NAN = float("nan")
+
+_table = None
+_by_code = None
+_cache = {}
+
+# A character Unicode makes canonically the same as a mark (a one-character decomposition) is that mark under
+# another code point: the Greek question mark is a semicolon, the ano teleia a middle dot.
+CANONICAL_TWINS = {0x037E: 0x003B, 0x0387: 0x00B7}
+# Proportional lining figures under a suffix (one.lf, one.pnum), as a font has them when its default figures are
+# tabular or oldstyle: the shapes the figures' conventions were learned on. Oldstyle and tabular forms keep theirs.
+LINING_SUFFIXES = ("lf", "pnum", "plf")
+# Superscripts, subscripts and ordinals (the table's small_forms) go with the figures: the Figures switch. A
+# figure's superscript or subscript under a suffix (one.sups, one.sinf) takes its encoded form's conventions. A set
+# of them that shares one width (at least 3, as a tabular design has) keeps its widths: the conventions leave it.
+FIGURE_NAMES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+SUPERIORS = tuple(n + "superior" for n in FIGURE_NAMES)
+INFERIORS = tuple(n + "inferior" for n in FIGURE_NAMES)
+SUPS_SUFFIXES = ("sups", "superior")
+SINF_SUFFIXES = ("sinf", "subs", "inferior")
+
+
+def table():
+    """The learned conventions (kk2_punctuation.json), read once."""
+    global _table
+    if _table is None:
+        with open(TABLE_PATH) as f:
+            _table = json.load(f)
+    return _table
+
+
+def by_code():
+    """{code point: mark} of every mark the table knows: its `marks` (each
+    mark's characters), else the GF Latin Kernel's punctuation (an older
+    table); plus the marks' canonical twins (CANONICAL_TWINS)."""
+    global _by_code
+    if _by_code is None:
+        marks = table().get("marks")
+        if marks:
+            _by_code = dict((int(cp), name) for name, cps in marks.items() for cp in cps)
+        else:
+            _by_code = {}  # an older table without marks: nothing known
+        for cp, twin in CANONICAL_TWINS.items():
+            if twin in _by_code and cp not in _by_code:
+                _by_code[cp] = _by_code[twin]
+    return _by_code
+
+
+def figure_marks():
+    """The figures the table has conventions for (figures by convention)."""
+    return frozenset(table().get("figures", ()))
+
+
+def small_marks():
+    """The superscripts, subscripts and ordinals the table has conventions for (the Figures switch)."""
+    return frozenset(table().get("small_forms", ()))
+
+
+def has_figures():
+    return available() and bool(figure_marks())
+
+
+def resolve(mark):
+    """The mark whose conventions `mark` follows: itself, or its twin when too
+    few families have it to learn its own (the table's `aliases`)."""
+    return table().get("aliases", {}).get(mark, mark) if mark is not None else None
+
+
+def available():
+    return os.path.exists(TABLE_PATH)
+
+
+def style_of(style):
+    """The table's style for a harness style key ("text", "display", "handwriting")."""
+    styles = table().get("styles", {})
+    return style if style in styles else "text"
+
+
+def mark_of(snap, i):
+    """The table's mark of glyph i: by its code point; .case punctuation by
+    its base mark, proportional lining figures (one.lf) by their figure, and
+    a figure's superscript or subscript form (one.sups) by the encoded one."""
+    name = snap.names[i]
+    info = snap.infos.get(name)
+    if info is None or info.empty:
+        return None
+    codes = by_code()
+    k = codes.get(info.unicode) if info.unicode is not None else None
+    if k is not None:
+        return k
+    parts = name.split(".")
+    if len(parts) > 1 and parts[-1] in CASE_SUFFIXES:
+        base = snap.infos.get(parts[0])
+        if base is not None and base.unicode is not None:
+            return codes.get(base.unicode)
+    if len(parts) == 2 and parts[1] in LINING_SUFFIXES:
+        base = snap.infos.get(parts[0])
+        k = codes.get(base.unicode) if base is not None and base.unicode is not None else None
+        if k is not None and resolve(k) in figure_marks():
+            return k
+    if len(parts) == 2 and (parts[1] in SUPS_SUFFIXES or parts[1] in SINF_SUFFIXES):
+        base = snap.infos.get(parts[0])
+        k = codes.get(base.unicode) if base is not None and base.unicode is not None else None
+        if k in FIGURE_NAMES:
+            small = (SUPERIORS if parts[1] in SUPS_SUFFIXES else INFERIORS)[FIGURE_NAMES.index(k)]
+            if small in small_marks():
+                return small
+    return None
+
+
+def _tabular_suffixes(snap, figs):
+    """The suffixes of LINING_SUFFIXES whose figures (at least 5 of them) all
+    share one width: tabular whatever their name, so their widths stay."""
+    widths = {}
+    for i, name in enumerate(snap.names):
+        parts = name.split(".")
+        if len(parts) == 2 and parts[1] in LINING_SUFFIXES:
+            k = mark_of(snap, i)
+            if k is not None and resolve(k) in figs:
+                widths.setdefault(parts[1], []).append(int(round(snap.infos[name].width)))
+    return frozenset(s for s, w in widths.items() if len(w) >= 5 and len(set(w)) == 1)
+
+
+def _one_width_sets(snap):
+    """The glyphs of a superscript or subscript set that shares one width (at
+    least 3 of them: a tabular design, whose widths stay). The encoded forms
+    are one set, those under each suffix another."""
+    sets = {}
+    for i, name in enumerate(snap.names):
+        k = mark_of(snap, i)
+        if k in SUPERIORS or k in INFERIORS:
+            info = snap.infos[name]
+            key = (k in SUPERIORS, None if info.unicode is not None else name.partition(".")[2])
+            sets.setdefault(key, []).append((i, int(round(info.width))))
+    out = set()
+    for members in sets.values():
+        if len(members) >= 3 and len(set(w for _i, w in members)) == 1:
+            out.update(i for i, _w in members)
+    return out
+
+
+def share_of(mark):
+    """The kerning shares (left, right) of a mark of the table (its twin's for
+    an alias), or None."""
+    k = table().get("kern", {}).get(resolve(mark)) if mark is not None else None
+    if not k or len(k) != 2 or any(v is None for v in k):
+        return None
+    return (float(k[0]), float(k[1]))
+
+
+def engine_arg(snap, style, punctuation=True, figures=True):
+    """(coefficients, shares, kern scale, follow) for kk2_bridge.Engine.solve:
+    per glyph of the snapshot, 6 coefficients (c, m, r of its left side, then
+    its right side; NaN c = no convention), 2 kerning shares (left, right;
+    NaN = kern scale) and the glyph whose sides it takes (a mark's case form,
+    `parenleft.case`, follows its base mark as designers space it; NONE: its
+    own), cached per snapshot, style and switches. `punctuation`: the
+    punctuation's and symbols' conventions, shares and case forms (off: kern
+    scale 1, every mark kerned in full); `figures`: the figures' and their
+    small forms' (superscripts, subscripts, ordinals)."""
+    key = (id(snap), getattr(snap, "generation", 0), style, bool(punctuation), bool(figures))
+    hit = _cache.get(key)
+    if hit is not None:
+        return hit
+    t = table()
+    marks = t.get("styles", {}).get(style_of(style), {})
+    none = (NAN, 0.0, 0.0, NAN, 0.0, 0.0)
+    coefs = []
+    shares = []
+    figs = figure_marks()
+    smalls = small_marks()
+    follow = []
+    tabular = _tabular_suffixes(snap, figs)
+    one_width = _one_width_sets(snap) if smalls else frozenset()
+    for i in range(len(snap.names)):
+        name = snap.names[i]
+        parts = name.split(".")
+        base = snap.index.get(parts[0]) if punctuation and len(parts) == 2 and parts[1] in CASE_SUFFIXES else None
+        bm = mark_of(snap, base) if base is not None and base != i else None
+        follow.append(base if bm is not None and resolve(bm) not in figs else kb.NONE)
+        k = mark_of(snap, i)
+        if k is not None and len(parts) == 2 and parts[1] in tabular:
+            k = None  # figures under a suffix that all share one width: tabular whatever the name, kept
+        if i in one_width:
+            k = None  # superscripts or subscripts that share one width: kept
+        on = k is not None and (figures if resolve(k) in figs or k in smalls else punctuation)
+        shares.append((share_of(k) or (NAN, NAN)) if on else (NAN, NAN))
+        c = marks.get(resolve(k)) if on else None
+        if not c:
+            coefs.append(none)
+            continue
+        row = []
+        for side in c:
+            if side and all(v is not None for v in side):
+                row.extend(float(v) for v in side)
+            else:
+                row.extend((NAN, 0.0, 0.0))
+        coefs.append(tuple(row))
+    arg = (coefs, shares, float(t.get("kern_scale", 1.0)) if punctuation else 1.0, follow)
+    if len(_cache) > 16:
+        _cache.clear()
+    _cache[key] = arg
+    return arg
+
+
+# The word space designers set for an n of a given advance: the median and middle half of space / n advance at
+# Regular, measured on Google Fonts (2026-10-11; text faces 1,040 families, display 405, handwriting 148).
+# Kinetikern2 does not set the space (it has no outline): the window only says where the font's sits.
+WORD_SPACE = {"text": (0.421, 0.395, 0.467), "display": (0.442, 0.361, 0.508), "handwriting": (0.573, 0.474, 0.699)}
+WORD_SPACE_WHO = {"text": "text faces'", "display": "display faces'", "handwriting": "handwriting's"}
+
+
+def word_space_note(space, n_advance, style):
+    """A line for the window: the font's word space (font units) against
+    what designers of its kind set for an n of `n_advance`; None without
+    either."""
+    if not space or not n_advance or space <= 0 or n_advance <= 0:
+        return None
+    k, lo, hi = WORD_SPACE.get(style, WORD_SPACE["text"])
+    who = WORD_SPACE_WHO.get(style, WORD_SPACE_WHO["text"])
+    span = "most %d–%d" % (round(lo * n_advance), round(hi * n_advance))
+    if lo * n_advance <= space <= hi * n_advance:
+        return "word space %d, as %s designers set it for an n this wide (%s)" % (round(space), who, span)
+    return "word space %d: %s designers set about %d for an n this wide (%s)" % (
+        round(space), who, round(k * n_advance), span)
+
+
+STYLE_PHRASES = {"text": "text faces' conventions", "display": "display faces' conventions",
+                 "handwriting": "handwriting's conventions"}
+
+
+def describe(style):
+    """A line for the window: what the switch follows."""
+    phrase = STYLE_PHRASES.get(style_of(style), STYLE_PHRASES["text"])
+    period = share_of("period")
+    if period is None:
+        return phrase
+    return "%s, a period kerned %d %%" % (phrase, round(100 * period[0]))

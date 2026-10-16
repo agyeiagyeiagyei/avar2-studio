@@ -62,3 +62,4 @@ wasm/fontc-web/target/
 # clone: hatchling force-includes it, and `pip install git+…` on a fresh
 # checkout fails metadata generation when it is missing.
 !src/avar2_studio/static/.gitkeep
+native/kinetikern2/target/
