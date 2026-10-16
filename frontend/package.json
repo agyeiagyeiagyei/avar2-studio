@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs"
+    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs && node e2e/export-poll.spec.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

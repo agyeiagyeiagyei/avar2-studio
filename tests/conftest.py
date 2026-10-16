@@ -97,6 +97,8 @@ def _no_real_build_jobs(monkeypatch, request):
             return "export-fake"
         def export_artifact(self, job_id):
             return None
+        def job_status(self, job_id):
+            return None
 
     fake = _FakeJobs()
     monkeypatch.setattr(server, "JOBS", fake)

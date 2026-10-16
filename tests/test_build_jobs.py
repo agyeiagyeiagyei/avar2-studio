@@ -255,3 +255,82 @@ def test_wait_for_idle_returns_the_current_builds_outcome(queue, monkeypatch):
     t.join(timeout=30)
     assert outcome == [False], \
         f"wait_for_idle must report the CURRENT build's failure, got {outcome}"
+
+
+def test_two_exports_finishing_inside_one_poll_window_resolve_by_id(queue):
+    """The export poll used to key on status()["last"], which names only the
+    NEWEST finished job: when two exports finished between two client polls
+    the first one vanished and its client spun until the 20-minute timeout.
+    job_status(id) answers for every recent job."""
+    queue.request_build()   # exports need a built font staged
+    assert queue.wait_for_idle(timeout=30)
+    first = queue.submit_export(hidden_axes=[], default_location=None)
+    second = queue.submit_export(hidden_axes=["XOPQ"], default_location=None)
+    assert first != second
+    assert queue.wait_for_idle(timeout=30)   # both done before we look once
+    assert _wait_for(queue, lambda: queue.export_artifact(second), 30)
+    # the old signal only knows the second job
+    assert queue.status()["last"]["job_id"] == second
+    # the per-job signal knows both, with their artifacts promoted
+    for job_id in (first, second):
+        st = queue.job_status(job_id)
+        assert st["state"] == "finished", st
+        assert st["kind"] == "export"
+        assert st["success"] is True
+        assert st["cancelled"] is False
+        assert st["artifact_ready"] is True
+        assert queue.export_artifact(job_id) is not None
+    assert queue.job_status("export-never-submitted") is None
+
+
+def test_job_status_walks_queued_running_finished(queue, monkeypatch):
+    monkeypatch.setenv("STUB_WORKER_MODE", "sleep")
+    monkeypatch.setenv("STUB_WORKER_SLEEP", "1.5")
+    queue.request_build()   # the build runs first (sleeping) and stages a font
+    assert _wait_for(queue, lambda: queue.status()["running"], 10)
+    build_id = queue.status()["running"]["job_id"]
+    assert queue.job_status(build_id)["state"] == "running"
+    job_id = queue.submit_export(hidden_axes=[], default_location=None)
+    assert queue.job_status(job_id) == {"job_id": job_id, "kind": "export",
+                                        "state": "queued"}
+    assert _wait_for(queue, lambda: queue.job_status(job_id)["state"] == "running", 30)
+    running = queue.job_status(job_id)
+    assert running["kind"] == "export"
+    assert "elapsed" in running
+    assert _wait_for(queue, lambda: queue.job_status(job_id)["state"] == "finished", 30)
+    done = queue.job_status(job_id)
+    assert done["success"] is True and done["artifact_ready"] is True
+    finished_build = queue.job_status(build_id)
+    assert finished_build["state"] == "finished" and finished_build["kind"] == "build"
+    assert finished_build["artifact_ready"] is False   # builds promote to the preview, not an export
+
+
+def test_a_cancelled_queued_export_reports_a_terminal_state(queue, monkeypatch):
+    """A queued export that is cancelled never runs, so _finish never sees
+    it — the client polling its id must still get finished+cancelled, not
+    an unknown-job 404."""
+    monkeypatch.setenv("STUB_WORKER_MODE", "sleep")
+    monkeypatch.setenv("STUB_WORKER_SLEEP", "1.5")
+    queue.request_build()
+    assert _wait_for(queue, lambda: queue.status()["running"], 10)
+    job_id = queue.submit_export(hidden_axes=[], default_location=None)
+    assert queue.job_status(job_id)["state"] == "queued"
+    assert queue.cancel(job_id)
+    st = queue.job_status(job_id)
+    assert st["state"] == "finished"
+    assert st["success"] is False
+    assert st["cancelled"] is True
+    assert st["artifact_ready"] is False
+    assert queue.wait_for_idle(timeout=30)
+    assert queue.export_artifact(job_id) is None
+
+
+def test_recent_results_are_bounded(queue):
+    for i in range(build_jobs.KEEP_RESULTS + 10):
+        with queue._lock:
+            queue._record_result({"job_id": f"export-{i}", "kind": "export", "success": True})
+    assert len(queue._results) == build_jobs.KEEP_RESULTS
+    assert queue.job_status("export-0") is None            # evicted, oldest first
+    assert queue.job_status("export-9") is None
+    assert queue.job_status("export-10")["state"] == "finished"
+    assert queue.job_status(f"export-{build_jobs.KEEP_RESULTS + 9}")["state"] == "finished"

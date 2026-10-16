@@ -8,7 +8,27 @@
 // broke any non-default port. VITE_API_URL still wins so the
 // dev-server + backend-on-5001 split workflow keeps working (the dev
 // server also proxies /api — see vite.config.js).
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// ``?.``: import.meta.env is undefined outside Vite (the node-only specs
+// under e2e/ import this module); Vite still inlines the value.
+const API_BASE = import.meta.env?.VITE_API_URL || '/api';
+
+const EXPORT_TIMEOUT_MS = 20 * 60 * 1000;
+
+// AbortSignal plumbing for the export poll: fetch rejects with a DOMException
+// named AbortError when its signal fires; sleep() does the same so a Cancel
+// mid-wait returns at once instead of after the poll interval.
+const abortError = () => new DOMException('Export cancelled', 'AbortError');
+const isAbort = (err) => !!err && err.name === 'AbortError';
+const throwIfAborted = (signal) => { if (signal && signal.aborted) throw abortError(); };
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  throwIfAborted(signal);
+  const onAbort = () => { clearTimeout(timer); reject(abortError()); };
+  const timer = setTimeout(() => {
+    if (signal) signal.removeEventListener('abort', onAbort);
+    resolve();
+  }, ms);
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+});
 
 // Helper to parse JSON response with error handling
 async function parseJSON(response) {
@@ -553,51 +573,77 @@ export const api = {
     return parseJSON(response);
   },
 
-  async exportFont(options) {
+  async exportFont(options, { signal } = {}) {
     // POST /api/export-font — the export runs as a QUEUED JOB (build worker,
     // see docs/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll
-    // the job queue until the artifact is ready, then download it. Options:
-    // {hidden_axes: [tags], default_location: {tag: value} | null,
-    //  format: "ttf" | "woff2"}.
+    // THAT job's status until its artifact is ready, then download it.
+    // Options: {hidden_axes: [tags], default_location: {tag: value} | null,
+    //  format: "ttf" | "woff2"}. An AbortSignal stops the poll, cancels the
+    // job server-side and rejects with an AbortError.
+    throwIfAborted(signal);
     const response = await fetch(`${API_BASE}/export-font`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options),
+      signal,
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({}));
       throw new Error(err.error || `Export failed: ${response.status}`);
     }
     const { job_id } = await parseJSON(response);
-    // Poll the queue until THIS job's result lands. Exports are full builds
-    // when a default location is involved — budget 20 minutes.
-    const deadline = Date.now() + 20 * 60 * 1000;
-    for (;;) {
-      const status = await this.getBuildStatus();
-      const last = status && status.last;
-      if (last && last.job_id === job_id) {
-        if (!last.success) {
-          throw new Error(last.error || 'Export failed');
+    const cancelJob = () => this.cancelBuild(job_id).catch(() => {});
+    // Exports are full builds when a default location is involved — budget
+    // 20 minutes, then give up loudly (and drop the job: nobody will
+    // download it).
+    const deadline = Date.now() + EXPORT_TIMEOUT_MS;
+    try {
+      for (;;) {
+        const status = await this.getBuildJob(job_id, { signal });
+        if (status.state === 'finished') {
+          if (status.cancelled) throw new Error('The export was cancelled before it finished.');
+          if (!status.success) throw new Error(status.error || 'Export failed');
+          break;
         }
-        break;
+        if (Date.now() > deadline) {
+          await cancelJob();
+          throw new Error(`Export timed out after ${EXPORT_TIMEOUT_MS / 60000} minutes — the build worker is still busy. Try again once the studio is idle.`);
+        }
+        await sleep(1000, signal);
       }
-      if (Date.now() > deadline) {
-        throw new Error('Export timed out — the job queue is busy');
+      const dl = await fetch(`${API_BASE}/export/${job_id}/download`, { signal });
+      if (!dl.ok) {
+        const err = await parseJSON(dl).catch(() => ({}));
+        throw new Error(err.error || `Export download failed: ${dl.status}`);
       }
-      await new Promise(r => setTimeout(r, 1000));
+      return await dl.blob();
+    } catch (err) {
+      if (isAbort(err)) {
+        await cancelJob();
+        throw abortError();
+      }
+      throw err;
     }
-    const dl = await fetch(`${API_BASE}/export/${job_id}/download`);
-    if (!dl.ok) {
-      const err = await parseJSON(dl).catch(() => ({}));
-      throw new Error(err.error || `Export download failed: ${dl.status}`);
-    }
-    return dl.blob();
   },
 
   async getBuildStatus() {
     const response = await fetch(`${API_BASE}/build/status`);
     if (!response.ok) {
       throw new Error(`Build status failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async getBuildJob(jobId, { signal } = {}) {
+    // One job's state by id: {state: queued|running|finished, success,
+    // cancelled, error, artifact_ready}. 404 = the studio no longer knows
+    // the job (restarted, or long since evicted).
+    const response = await fetch(`${API_BASE}/build/${encodeURIComponent(jobId)}`, { signal });
+    if (response.status === 404) {
+      throw new Error('The studio no longer knows this export job — was it restarted? Try the export again.');
+    }
+    if (!response.ok) {
+      throw new Error(`Build job status failed: ${response.status}`);
     }
     return parseJSON(response);
   },

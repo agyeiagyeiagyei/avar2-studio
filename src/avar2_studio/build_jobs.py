@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 #: Source-set sidecars staged into every job snapshot (siblings of the
@@ -42,6 +43,10 @@ ENV_KEYS = ("AVAR2_RELOCATE_BUILD_DEFAULT", "AVAR2_STUDIO_GFTOOLS_BUILDER",
 #: Export artifacts kept on disk for download; older ones are reaped.
 KEEP_EXPORTS = 5
 
+#: Finished-job results kept for ``job_status`` lookups by id. ``_last_result``
+#: alone lost any job that finished inside one client poll window.
+KEEP_RESULTS = 50
+
 
 class JobQueue:
     def __init__(self, server, worker_cmd=None):
@@ -55,6 +60,7 @@ class JobQueue:
         self._pending_compress = None
         self._running = None         # job dict with proc attached
         self._last_result = None
+        self._results = OrderedDict()  # job id → result, newest last, bounded
         self._last_build_ok = None   # last BUILD job's success, for waiters
         self._supervisor = threading.Thread(target=self._supervise, daemon=True,
                                             name="build-jobs")
@@ -108,6 +114,11 @@ class JobQueue:
                 for job in list(q):
                     if self._job_id(job) == job_id:
                         q.remove(job)
+                        # Never ran, so _finish never records it: a client
+                        # polling by id must still see a terminal state.
+                        self._record_result({"job_id": job_id, "kind": job["kind"],
+                                             "success": False, "cancelled": True,
+                                             "error": "cancelled"})
                         return True
             running = self._running
             if running is None or self._job_id(running) != job_id:
@@ -161,6 +172,44 @@ class JobQueue:
             last = self._last_result
         return {"running": running, "queued": queued, "last": last,
                 "sizes": self.export_sizes()}
+
+    def job_status(self, job_id):
+        """One job's state by id: ``queued`` / ``running`` / ``finished``
+        (+ ``success``, ``cancelled``, ``error``, ``artifact_ready``), or
+        None when the id is unknown (never submitted, or evicted after
+        KEEP_RESULTS newer results). Finished is checked first: _finish
+        records the result before _running clears, and a recorded result
+        means the artifact is already promoted."""
+        with self._lock:
+            result = self._results.get(job_id)
+            if result is not None:
+                return {"job_id": job_id, "kind": result.get("kind"),
+                        "state": "finished",
+                        "success": bool(result.get("success")),
+                        "cancelled": bool(result.get("cancelled")),
+                        "error": result.get("error"),
+                        "artifact_ready": (result.get("kind") == "export"
+                                           and bool(result.get("success"))
+                                           and self.export_artifact(job_id) is not None)}
+            running = self._running
+            if running is not None and self._job_id(running) == job_id:
+                return {"job_id": job_id, "kind": running["kind"], "state": "running",
+                        "elapsed": round(time.time() - running.get("started", time.time()), 1),
+                        "phase": self._read_phase(running)}
+            for job in self._pending_exports:
+                if self._job_id(job) == job_id:
+                    return {"job_id": job_id, "kind": job["kind"], "state": "queued"}
+        return None
+
+    def _record_result(self, result):
+        """Caller holds ``_lock``. Bounded: the oldest result goes first."""
+        jid = result.get("job_id")
+        if jid is None:
+            return
+        self._results[jid] = result
+        self._results.move_to_end(jid)
+        while len(self._results) > KEEP_RESULTS:
+            self._results.popitem(last=False)
 
     def export_sizes(self):
         """TTF exact; WOFF2 exact when the cache matches the current build,
@@ -333,7 +382,9 @@ class JobQueue:
             self._last_build_ok = bool(result.get("success"))
             if result.get("success"):
                 self._maybe_compress()
-        self._last_result = result
+        with self._lock:
+            self._last_result = result
+            self._record_result(result)
         if job.get("dir"):
             shutil.rmtree(job["dir"], ignore_errors=True)
 
