@@ -575,3 +575,8 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   (`{name} ({tag})`), font-size sliders ×3, the Kinetikern looseness
   slider, the Sidebar mapping slider (`axisLabel`), and the four
   AddBraceLocationModal pin/correction sliders. Build + lint exit 0.
+
+## T1.25 — dismissable error banner
+- The generic error banner had no close control (the only way out was a
+  reload). It now has a × button (`aria-label="Dismiss error"`,
+  `setError(null)`) with a small style rule. Build/lint/typecheck 0.

@@ -2320,6 +2320,14 @@ function App() {
       {error && (
         <div className="error-banner">
           Error: {error}
+          <button
+            type="button"
+            className="error-banner-dismiss"
+            aria-label="Dismiss error"
+            onClick={() => setError(null)}
+          >
+            ×
+          </button>
         </div>
       )}
 

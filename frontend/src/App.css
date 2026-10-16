@@ -21,6 +21,17 @@
   border-bottom: 1px solid var(--red-200);
 }
 
+.error-banner-dismiss {
+  float: right;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: inherit;
+}
+
 .main-content {
   display: flex;
   flex-direction: column;
