@@ -631,7 +631,7 @@ function App() {
       const ok = window.confirm(
         `Replace the hand-drawn outline on ${names}?\n\n` +
         `Re-seeding recomputes the layer from the current masters and discards the drawing. ` +
-        `This rewrites the sidecar and can't be undone from here.`
+        `This updates the studio's saved layers and can't be undone from here.`
       );
       if (!ok) return;
     }
