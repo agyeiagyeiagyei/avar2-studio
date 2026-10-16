@@ -215,7 +215,24 @@ dead-code work.
 
 ---
 
-## Standing instructions (apply to every round) — added 2026-10-16
+## Standing instructions (apply to every round) — revised 2026-10-16
+
+**Protocol change (user instruction, 2026-10-16): checkpoints do not
+stop the sprint.** The approved scope is the whole remaining backlog in
+PLAN.md order. Push a checkpoint every ~15 commits or at a tier boundary
+(`STATE: checkpoint`), keep working, and at the next checkpoint pull and
+fix any newly FAILED items before new work. `STATE:
+ready-for-verification` is reserved for the end of the backlog. The
+verifier's approval is expressed as the absence of FAILED items, plus the
+`APPROVED:` line in STATUS.md, which now reads "everything remaining".
+
+**User decisions recorded 2026-10-16:** T1.16 — fixed by the verifier in
+`~/Documents/fontra-embed` (`embed-font.js` forwards `location`; local
+commit, not yet deployed) — close it as VERIFIED-elsewhere. T1.35 — the
+user will publish 0.1.0 separately; no sprint action, leave README and
+`pyproject` as they are. T1.17 — the user confirms SpaceTab was meant to
+go entirely.
+
 
 1. **Scope is the whole audit.** The sprint runs until every item in
    `PLAN.md` — all of §9: Tier 0, Tier 1, Tier 2 (including the docs
