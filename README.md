@@ -15,7 +15,7 @@ optional **post-build transforms** onto every build, and — with
 [Fontra](https://github.com/fontra/fontra) installed alongside — draw
 those glyphs' brace layers in an embedded editor.
 
-![avar2-studio — the Instances tab, each instance rendering live in the built font](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/instances-overview.png)
+![avar2-studio — the Instances tab, each instance rendering live in the built font](docs/images/app-overview.png)
 
 ## Try it in the browser
 
@@ -47,7 +47,6 @@ What the browser cannot do, compared with the installed app:
   (Fontra client as a separate GPL sub-project, driven over postMessage);
   drawings stay source-level in the control-axis sidecar
 
-![The Load Font menu: bundled examples, upload, forget](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/load-font-menu.png)
 
 ## Install
 
@@ -94,7 +93,7 @@ Link them into Glyphs once, from the same install:
 avar2-studio install-glyphs-plugins    # then restart Glyphs
 ```
 
-[src/avar2_studio/glyphs/README.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/src/avar2_studio/glyphs/README.md)
+[src/avar2_studio/glyphs/README.md](src/avar2_studio/glyphs/README.md)
 documents the menu and each tool.
 
 ## Your files
@@ -151,10 +150,10 @@ The **Instances** tab is the authoring surface: create named instances
 and tune each one's parametric coordinates with the sidebar sliders;
 each row renders live in the built font. Give an instance user-axis
 coordinates under **AVAR2 MAPPINGS** and it becomes an avar2 mapping.
-[docs/authoring-instances.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/authoring-instances.md) walks the
+[docs/authoring-instances.md](docs/authoring-instances.md) walks the
 full workflow.
 
-![The Instances sidebar: sample text, core and secondary parametric axes, and the avar2 mappings of the selected style](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/instances-sidebar-mappings.png)
+![The Instances sidebar: sample text, core and secondary parametric axes, and the avar2 mappings of the selected style](docs/images/sidebar-axes.png)
 
 - **CORE / PARAMETRIC AXES** deform every glyph in the font;
   **SECONDARY PARAMETRIC AXES** deform only chosen glyphs (`scoped`
@@ -187,14 +186,14 @@ designspace.
   in the HUD.
 - Everything lands in the `-control.json` sidecar, drawings included.
 
-![The lcwd axis expanded: its applicable glyphs, their layers, and a correction layer computed as if at another XOPQ](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/secondary-axes-layers.png)
+![The lcwd axis expanded: its applicable glyphs, their layers, and a correction layer computed as if at another XOPQ](docs/images/correction-layers.png)
 
-![At the ultra corner, engaging lcwd narrows the lowercase only; the capitals do not move](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/preview-lcwd.gif)
+![At the ultra corner, engaging lcwd narrows the lowercase only; the capitals do not move](docs/images/wght-heavy-lcwd.gif)
 
-![Embedded Fontra editor: drawing a brace layer against a reference font, with live measurements. Installed app with Fontra only; not yet in the browser demo](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/fontra-reference.png)
+![Embedded Fontra editor: drawing a brace layer against a reference font, with live measurements. Installed app with Fontra only; not yet in the browser demo](docs/images/fontra-reference.png)
 
 Deep-dive:
-[docs/secondary-parametric-axes.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/secondary-parametric-axes.md).
+[docs/secondary-parametric-axes.md](docs/secondary-parametric-axes.md).
 
 ### Preview & export
 
@@ -203,9 +202,8 @@ would: type directly in the specimen, move any fvar axis. Moving a
 user axis reflects the computed avar2 mapping onto the parametric
 sliders.
 
-![The Preview tab at a mapped location: user axes, secondary axes, transform axes, and the parametric sliders following the mapping](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/preview-user-axes.png)
+![The Preview tab at a mapped location: user axes, secondary axes, transform axes, and the parametric sliders following the mapping](docs/images/preview-sliders.gif)
 
-![Sweeping wght drives the parametric sliders through the avar2 mapping](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/preview-wght-sweep.gif)
 
 A note on rendering engines, as of September 2026: the exported font's
 avar2 works wherever avar2 is implemented, and HarfBuzz-based stacks
@@ -219,23 +217,7 @@ exported font, or **set a default** — pick an axis combination and the
 export interpolates a master there and makes it the font's origin (the
 source file is never touched).
 
-![Export dialog: mark axes hidden, set the default location](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/export-modal.png)
-
-### Space tab
-
-The **Space** tab shows the designspace as an orbitable Noordzij cube —
-N-dimensional, so a fourth master-covered axis renders as a tesseract
-you can spin. Masters, brace layers and instances appear as points in
-the axis box, and corner chips render live specimens at their exact
-locations: red when a corner has no source coverage (a ghost), with
-one-click pinning that **synthesizes the corner by extrapolation** when
-no sweep reaches it (and refuses inline, with the reason, when it
-can't). The findings rail lists the same audit — missing corners,
-out-of-range sources, collapses — with the fixes alongside. Crispy has
-no master at its wide, heavy, high-contrast corner, so it shows as a
-ghost with a `Pin` button and a `Missing corner` finding.
-
-![The Space tab: the designspace as an orbitable cube with live corner specimens, a ghost corner, and the coverage findings](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/space-tab-missing-corner.png)
+![Export dialog: mark axes hidden, set the default location](docs/images/export-modal.png)
 
 ### Grade
 
@@ -243,9 +225,8 @@ Darken or lighten a style **without changing its advance widths**.
 Turn **Grade** on in the Transforms menu, then click a style's **`G`**
 badge to set its %; grades interpolate between the styles you set, so
 you grade a few anchors, not every style.
-[docs/grade.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/grade.md).
+[docs/grade.md](docs/grade.md).
 
-![A style's grade popover: the percentage, its headroom, remove and save](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/grade-badge-popover.png)
 
 ### Kinetikern
 
@@ -312,7 +293,7 @@ Write your own: drop a `.py` subclassing `Transform` into
 `~/.avar2-studio/transforms/` and it appears in the menu on the next
 launch.
 
-![The Transforms menu: grade settings, then the post-build transforms with their parameters](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/transforms-menu.png)
+![The Transforms menu: grade settings, then the post-build transforms with their parameters](docs/images/transforms-menu.png)
 
 ### Configuration export / import
 
@@ -325,7 +306,6 @@ mappings section is empty leaves your CSV as it is. **Download
 workspace (.zip)…** packs the source, every sidecar and the current
 build into one archive that opens here or in the browser demo.
 
-![The Import configuration dialog with its validation summary](https://raw.githubusercontent.com/agyeiagyeiagyei/avar2-studio/main/docs/images/config-import-modal.png)
 
 ### Glyphs plugins
 
@@ -340,7 +320,7 @@ metric-driving axis values must share metrics), **Slant Master** (an
 italic master sheared from a master or instance, width-matched to a
 reference) and **Width Matcher** (a new master width-matched to a
 reference). Each is described in
-[src/avar2_studio/glyphs/README.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/src/avar2_studio/glyphs/README.md).
+[src/avar2_studio/glyphs/README.md](src/avar2_studio/glyphs/README.md).
 
 ## Command line
 
@@ -416,18 +396,18 @@ without it answers 503 "Frontend bundle not present". The examples in
 - `site/` and `netlify.toml` are the standalone project page (Netlify),
   not part of the package.
 
-New to the codebase? [docs/HANDOVER.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/HANDOVER.md) covers the
+New to the codebase? [docs/HANDOVER.md](docs/HANDOVER.md) covers the
 architecture, environment traps, and known issues.
 
 ## Related docs
 
-- [docs/authoring-instances.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/authoring-instances.md) — instances and mappings, step by step
-- [docs/secondary-parametric-axes.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/secondary-parametric-axes.md) — glyph-scoped axes, brace and correction layers
-- [docs/grade.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/grade.md) — how grade works
-- [docs/design-notes.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/design-notes.md) — design record behind secondary axes
-- [docs/migration-github-pages.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/migration-github-pages.md) — design record of the browser build
-- [docs/HANDOVER.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/docs/HANDOVER.md) — project state and undocumented knowledge
-- [examples/README.md](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/examples/README.md) — the bundled example projects
+- [docs/authoring-instances.md](docs/authoring-instances.md) — instances and mappings, step by step
+- [docs/secondary-parametric-axes.md](docs/secondary-parametric-axes.md) — glyph-scoped axes, brace and correction layers
+- [docs/grade.md](docs/grade.md) — how grade works
+- [docs/design-notes.md](docs/design-notes.md) — design record behind secondary axes
+- [docs/migration-github-pages.md](docs/migration-github-pages.md) — design record of the browser build
+- [docs/HANDOVER.md](docs/HANDOVER.md) — project state and undocumented knowledge
+- [examples/README.md](examples/README.md) — the bundled example projects
 
 ## Roadmap
 
@@ -441,4 +421,4 @@ architecture, environment traps, and known issues.
 
 ## License
 
-Apache-2.0. See [LICENSE](https://github.com/agyeiagyeiagyei/avar2-studio/blob/main/LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

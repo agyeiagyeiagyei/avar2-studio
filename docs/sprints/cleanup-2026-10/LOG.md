@@ -670,3 +670,19 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   after `git gc`: 92 loose, 4,562 in-pack, 31.2 MB pack. The 7.45 MB
   wasm blob history persists in the pack — that's T3.7 (history rewrite
   needs explicit user approval).
+
+## Tier 1 — docs group
+
+## T1.37 — README images/links
+- All 13 image refs were `raw.githubusercontent.com/.../main/docs/images/`
+  and 10 of those files never existed. Repointed 8 to the images that DO
+  exist (verified by reading each image and matching its content to the
+  caption: app-overview→instances-overview, sidebar-axes→instances-sidebar,
+  correction-layers→secondary-axes-layers, wght-heavy-lcwd→preview-lcwd,
+  fontra-reference, preview-sliders→preview-user-axes, export-modal,
+  transforms-menu), all as RELATIVE paths; dropped the 4 refs whose
+  screenshots were never taken (load-font-menu, preview-wght-sweep,
+  grade-badge-popover, config-import-modal — already tracked in
+  docs/readme-screenshots.md); removed the Space-tab section (the tab was
+  removed in T1.17). All `blob/main` links → relative. Verified: every
+  referenced file exists; every relative doc/image link resolves.
