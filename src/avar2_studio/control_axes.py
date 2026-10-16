@@ -517,7 +517,7 @@ def _normalise(data: Dict) -> Dict:
             continue
         min_v = float(ax.get("min", -1000))
         max_v = float(ax.get("max", 1000))
-        tag = (ax.get("tag") or "").strip().lower()
+        tag = (ax.get("tag") or "").strip()
 
         # Migrate legacy schema if needed.
         layers = ax.get("layers")
@@ -663,7 +663,7 @@ def _validate_tag(tag: str) -> str:
         raise ValueError(f"tag must be exactly 4 characters (got '{stripped}', {len(stripped)} chars)")
     if not all(33 <= ord(c) <= 126 for c in stripped):
         raise ValueError(f"tag must be ASCII-printable (got '{stripped}')")
-    return stripped.lower()
+    return stripped
 
 
 # --------------------------------------------------------------------------
@@ -872,14 +872,14 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     new_control_axes: List[Dict] = []
 
     for spec in axes_to_add:
-        tag = (spec.get("tag") or "").strip().lower()
+        tag = (spec.get("tag") or "").strip()
         if not tag:
             continue
-        if tag in existing_tags:
+        if tag.lower() in existing_tags:
             # Pre-existing source axis — find its index for brace
             # layer indexing.
             for i, src_ax in enumerate(font.axes):
-                if str(getattr(src_ax, "axisTag", "")).lower() == tag:
+                if str(getattr(src_ax, "axisTag", "")).lower() == tag.lower():
                     axis_index_by_tag[tag] = i
                     break
             continue
@@ -889,7 +889,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
         new_axis.name = spec.get("display_name") or tag
         font.axes.append(new_axis)
         axis_index_by_tag[tag] = len(font.axes) - 1
-        existing_tags.add(tag)
+        existing_tags.add(tag.lower())
 
         default_value = float(spec.get("default", 0))
         new_control_axes.append({
@@ -970,7 +970,9 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
     full_axis_index_by_tag: Dict[str, int] = {}
     for i, ax in enumerate(font.axes):
         full_axis_index_by_tag[str(getattr(ax, "axisTag", "")).lower()] = i
-    tag_by_index = {i: t for t, i in full_axis_index_by_tag.items()}
+    # Labels print the AUTHORED tag case ("YMOD 100", not "ymod 100");
+    # the lowercased keys above stay for case-insensitive matching.
+    tag_by_index = {i: str(getattr(ax, "axisTag", "")) for i, ax in enumerate(font.axes)}
 
     # A brace layer is a full point: a parametric location × the
     # control-axis value. Label it by the master corner or named instance
@@ -1399,7 +1401,7 @@ def _regenerate_shadow_designspace(
     existing_tags = {str(a.tag or "").lower() for a in doc.axes}
     control_axes: List[Dict] = []
     for spec in axes_to_add:
-        tag = (spec.get("tag") or "").strip().lower()
+        tag = (spec.get("tag") or "").strip()
         if not tag:
             continue
         entry = {
@@ -1409,7 +1411,7 @@ def _regenerate_shadow_designspace(
             "layers": list(spec.get("layers") or []),
         }
         control_axes.append(entry)
-        if tag in existing_tags:
+        if tag.lower() in existing_tags:
             continue
         ax = AxisDescriptor()
         ax.tag = tag
@@ -1420,7 +1422,7 @@ def _regenerate_shadow_designspace(
         ax.maximum = max(lo, hi, entry["default"])
         ax.default = entry["default"]
         doc.addAxis(ax)
-        existing_tags.add(tag)
+        existing_tags.add(tag.lower())
 
     axis_name_by_tag = {str(a.tag or "").lower(): a.name for a in doc.axes}
     axis_default_by_name = {a.name: float(a.default or 0) for a in doc.axes}
@@ -1463,7 +1465,7 @@ def _regenerate_shadow_designspace(
     # Parametric (non-control) part of each pool location, for
     # natural-shape seeding. Control tags aren't in the ORIGINAL doc,
     # so the Instantiator location holds parametric pins only.
-    control_tags = {e["tag"] for e in control_axes}
+    control_tags = {e["tag"].lower() for e in control_axes}
     generator = None
     seed_cache: Dict[tuple, object] = {}
 
