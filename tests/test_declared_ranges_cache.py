@@ -37,3 +37,25 @@ def test_declared_axis_ranges_memoized_per_input_version(monkeypatch, tmp_path):
         assert len(calls) == 3
     finally:
         server._DECLARED_RANGES_CACHE.clear()
+
+
+def test_no_caching_without_a_versioned_source(monkeypatch):
+    """Round-3 finding: with no source bound the key collapsed to
+    ((None, None), ()) and the first computation leaked into every later
+    call (reproduced across test_avar2_default_relocation). Unversioned
+    inputs must compute every time."""
+    monkeypatch.setattr(server, "GLYPHS_PATH", None)
+    monkeypatch.setattr(server, "_get_avar2_metadata_path", lambda: None)
+    server._DECLARED_RANGES_CACHE.clear()
+    try:
+        monkeypatch.setattr(server, "_load_axis_metadata", lambda: dict(META))
+        first = server._declared_axis_ranges()
+        other = {"OPSZ": {"registered_tag": "opsz", "min": 8, "max": 144,
+                          "default": 72, "is_parametric": False}}
+        monkeypatch.setattr(server, "_load_axis_metadata", lambda: other)
+        second = server._declared_axis_ranges()
+        assert first == {"wght": [100.0, 400.0, 900.0]}
+        assert second == {"opsz": [8.0, 72.0, 144.0]}, "stale ranges leaked across calls"
+        assert not server._DECLARED_RANGES_CACHE, "nothing may be cached under an unversioned key"
+    finally:
+        server._DECLARED_RANGES_CACHE.clear()

@@ -6931,7 +6931,7 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
     shim (via env) and the in-process build (directly).
     """
     key = _declared_ranges_cache_key(default_overrides)
-    cached = _DECLARED_RANGES_CACHE.get(key)
+    cached = _DECLARED_RANGES_CACHE.get(key) if key is not None else None
     if cached is not None:
         return {t: list(v) for t, v in cached.items()}
     try:
@@ -6959,8 +6959,9 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
             if _tag in _ranges:
                 _lo, _, _hi = _ranges[_tag]
                 _ranges[_tag] = [_lo, max(_lo, min(_hi, float(_val))), _hi]
-    _DECLARED_RANGES_CACHE.clear()
-    _DECLARED_RANGES_CACHE[key] = _ranges
+    if key is not None:
+        _DECLARED_RANGES_CACHE.clear()
+        _DECLARED_RANGES_CACHE[key] = _ranges
     return _ranges
 
 
@@ -6971,14 +6972,18 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
 _DECLARED_RANGES_CACHE: Dict[tuple, Dict[str, list]] = {}
 
 
-def _declared_ranges_cache_key(default_overrides) -> tuple:
+def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
+    """Version key for the memo, or None when an input has no on-disk
+    version (no source bound yet, metadata path unset): a None part would
+    make every such call share one key and hand back a stale result —
+    so those calls compute without caching."""
     parts = []
     for p in (_get_avar2_metadata_path(), GLYPHS_PATH):
         try:
             st = Path(p).stat()
-            parts.append((str(p), st.st_mtime, st.st_size))
         except (OSError, TypeError):
-            parts.append(None)
+            return None
+        parts.append((str(p), st.st_mtime_ns, st.st_size))
     ov = tuple(sorted((str(k), float(v)) for k, v in (default_overrides or {}).items()))
     return (tuple(parts), ov)
 
