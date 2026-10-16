@@ -509,3 +509,49 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   static HUD always measures at the opening layer. The fix belongs to
   the fontra-embed repo, which this sprint's branch/verifier cannot
   cover. Needs the user's decision (fix there, or vendor the file).
+
+## Tier 1 — frontend group
+
+## T1.17 — SpaceTab removed (user decision)
+- The Kinetikern WIP had both improved SpaceTab (axis picker) AND
+  orphaned it (tab slot → Kinetikern). Asked the user: **remove it**.
+  Deleted SpaceTab.jsx/.css (927 lines). `coverage.js`/`pinCorner`/
+  `clampOutOfRange` stay — static-api.js (the Pages demo) uses them.
+  Now-dead but NOT removed (noted, not in scope): the live-mode api.js
+  methods pinCorner/clampOutOfRange/addMappingRow and their server
+  routes.
+
+## T1.18 — HeaderProps
+- `transformsDirty`/`onApplyTransform` were destructured but not in the
+  interface → tsc errors. Declared. `tsc --noEmit` exits 0.
+
+## T1.19 — eslint error-free
+- 4 no-irregular-whitespace: intentional BOM literals → `\uFEFF` escapes
+  (static-api.js ×4, mappings-csv.js ×1; semantics identical).
+- 427 no-undef: `js.configs.recommended` applied to `e2e/*.mjs` with no
+  node/browser globals — added an e2e block (`globals.node` +
+  `globals.browser`: Playwright specs evaluate page code).
+- 1 no-unused-vars: a dead `removeGrade` helper in grade-live.spec.mjs —
+  deleted (genuinely unused; no indirect callers).
+- eslint now exits 0 (52 warnings = the config's accepted baseline).
+
+## T1.20 — lint/typecheck/test:unit scripts + CI
+- package.json scripts: `lint` (eslint .), `typecheck` (tsc --noEmit),
+  `test:unit` (the three node-only specs: avar2-eval [self-skips without
+  its fixture], grade-model, avar2-lint). Wired into pages.yml (before
+  the vite build) and release.yml (before the frontend build).
+- Found while enabling: grade-model.spec's two crispy-demo oracle values
+  were stale (1.99/0.84) — the CURRENT Python oracle answers 0.0 for
+  both (headroom clamp: no room to grade at the ceiling/floor).
+  Regenerated the expectations with a comment. [verified: ran
+  `grade.max_pct_for` against the current Python]
+- release.yml still carries a stale CRA comment about CI=true — noted,
+  not touched (cosmetic).
+
+## T1.21 — orphans + 2 deps
+- Deleted Avar2Preview.jsx/.css, UpdateButton.jsx/.css, ui/button.tsx
+  (no importers — grep-verified); uninstalled @radix-ui/react-slot and
+  class-variance-authority (used only by ui/button.tsx). ui/dialog.tsx
+  and ui/dropdown-menu.tsx stay (live users).
+- Gates after all five items [verified]: lint 0, typecheck 0,
+  test:unit 0, vite build 0; python suite 472 passed, 8 skipped.
