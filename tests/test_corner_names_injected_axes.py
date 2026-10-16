@@ -14,7 +14,7 @@ from types import SimpleNamespace as NS
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from avar2_studio import control_axes as ca  # noqa: E402
+from avar2_studio import control_axes as ca
 
 
 def _font(with_grad):

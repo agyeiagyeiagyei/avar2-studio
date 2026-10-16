@@ -264,4 +264,4 @@ def propose(vf_path, location, looseness=0.0, style="text", threads=0):
     }
 
 
-from . import inject, sidecar  # noqa: E402,F401  (the sidecar and the font-stage injection)
+from . import inject, sidecar  # noqa: F401  (the sidecar and the font-stage injection)

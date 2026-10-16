@@ -2,7 +2,7 @@
 section empties instead of emitting `in: null` (which crashed builds)."""
 import yaml
 
-from avar2_studio.build.config_generator import generate_avar2_yaml_string, RowMapping
+from avar2_studio.build.config_generator import RowMapping, generate_avar2_yaml_string
 
 
 def _row(name, in_axes, out_axes):

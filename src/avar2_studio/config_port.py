@@ -38,13 +38,12 @@ from __future__ import annotations
 import copy
 import csv
 import io
-import json
 import re
 import sys as _sys
 from datetime import datetime, timezone
 from importlib import metadata as _importlib_metadata
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from . import control_axes as _control_axes
 from . import csv_io as _csv_io
@@ -95,7 +94,7 @@ def build_export(source_path: Path, csv_path: Optional[Path],
             if n:
                 print(f"Captured {n} drawn brace layer(s) into the sidecar "
                       f"before export", file=_sys.stderr)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # An export that loses drawings is bad; one that refuses to run
             # is worse. Warn and carry on with whatever the sidecar holds.
             print(f"Warning: could not capture drawn outlines for export: {exc}",

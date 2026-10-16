@@ -12,7 +12,6 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import pytest
 from glyphsLib import GSFont
 from glyphsLib.classes import GSAxis, GSFontMaster, GSLayer
 

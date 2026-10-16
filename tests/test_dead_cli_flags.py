@@ -6,7 +6,6 @@ globals nothing reads. Both now exit non-zero with a clear message.
 """
 import subprocess
 import sys
-from pathlib import Path
 
 
 def _run(args):

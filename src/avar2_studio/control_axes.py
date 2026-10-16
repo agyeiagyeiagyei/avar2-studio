@@ -51,7 +51,6 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
 _SCHEMA_VERSION = 1
 
 
@@ -222,7 +221,7 @@ def add_axis(
         min_f = float(min_value)
         max_f = float(max_value)
     except (TypeError, ValueError):
-        raise ValueError("default, min, and max must be numeric")
+        raise ValueError("default, min, and max must be numeric") from None
     if not (min_f < max_f):
         raise ValueError(f"min ({min_f}) must be strictly less than max ({max_f})")
     if not (min_f <= default_f <= max_f):
@@ -291,7 +290,7 @@ def update_axis(
         try:
             return float(v)
         except (TypeError, ValueError):
-            raise ValueError(f"{label} must be numeric")
+            raise ValueError(f"{label} must be numeric") from None
 
     new_min = _num(min_value, "min") if min_value is not None else float(entry["min"])
     new_max = _num(max_value, "max") if max_value is not None else float(entry["max"])
@@ -791,7 +790,7 @@ def corner_name_maps(font, control_axis_indices, original_path=None):
                     except (KeyError, TypeError, ValueError):
                         continue
                     instances.setdefault(_key(values), name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Warning: could not read instance corners from {avar_csv}: {exc}",
                   file=sys.stderr)
 
@@ -1085,9 +1084,9 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
         for m in font.masters:
             ml = next(
                 (
-                    l for l in glyph.layers
-                    if l.associatedMasterId == m.id
-                    and not (dict(getattr(l, "attributes", None) or {}).get("coordinates"))
+                    layer for layer in glyph.layers
+                    if layer.associatedMasterId == m.id
+                    and not (dict(getattr(layer, "attributes", None) or {}).get("coordinates"))
                 ),
                 None,
             )
@@ -1189,7 +1188,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
         # De-duplicate seed jobs — same (glyph, location) added by
         # multiple paths only needs writing once.
         seen_jobs: set = set()
-        for glyph_name, location, pinned, seed_location, stored_outline in seed_jobs:
+        for glyph_name, location, _pinned, seed_location, stored_outline in seed_jobs:
             job_key = (glyph_name, tuple(location))
             if job_key in seen_jobs:
                 continue
@@ -1202,7 +1201,7 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
                 )
                 continue
             default_layer = next(
-                (l for l in glyph.layers if l.associatedMasterId == default_master_id),
+                (layer for layer in glyph.layers if layer.associatedMasterId == default_master_id),
                 None,
             )
             if default_layer is None:
@@ -1213,9 +1212,9 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # between an auto-seed and an extra_location that happen
             # to land at the same point).
             if any(
-                list(dict(getattr(l, "attributes", None) or {}).get("coordinates") or [])
+                list(dict(getattr(layer, "attributes", None) or {}).get("coordinates") or [])
                 == location
-                for l in glyph.layers
+                for layer in glyph.layers
             ):
                 continue
 
@@ -1405,12 +1404,12 @@ def _regenerate_shadow_designspace(
     brace's parametric location via fontmake's Instantiator, falling
     back to a copy of the default source's glyph.
     """
+    import ufoLib2
     from fontTools.designspaceLib import (
         AxisDescriptor,
         DesignSpaceDocument,
         SourceDescriptor,
     )
-    import ufoLib2
 
     shadow_dir = shadow_dir_for(original_path)
     shadow_path = shadow_path_for(original_path)
@@ -1548,7 +1547,7 @@ def _regenerate_shadow_designspace(
 
     # ---- 4. Create / reconcile pooled UFOs + sources ----------------
     wanted_ufo_names = set()
-    for key, pool in sorted(pools.items()):
+    for _key, pool in sorted(pools.items()):
         pins = pool["pins"]
         ufo_name = f"{studio_prefix}{_studio_ufo_slug(pins)}.ufo"
         wanted_ufo_names.add(ufo_name)
@@ -1669,7 +1668,7 @@ def _restamp_seeds(shadow_path: Path, seeded_keys) -> None:
 
     try:
         font = GSFont(str(shadow_path))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Warning: could not re-stamp seeds: {exc}", file=_sys.stderr)
         return
     master_ids = {m.id for m in font.masters}

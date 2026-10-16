@@ -128,7 +128,8 @@ def test_build_stamps_fvar_instances(tmp_path, monkeypatch):
         instances=[dict(location={"ymod": 0.0}, stylename="Alpha"),
                    dict(location={"ymod": 0.0}, stylename="Beta")],
     )
-    fb.setupOS2(); fb.setupPost()
+    fb.setupOS2()
+    fb.setupPost()
     vf = tmp_path / "t.ttf"
     fb.save(str(vf))
 

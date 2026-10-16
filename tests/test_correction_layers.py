@@ -70,11 +70,11 @@ def test_target_layer_is_seeded_at_the_target_location(crispy_source):
     assert shadow is not None
     font, braces = _brace_layers(shadow, "e")
     tag_index = [a.axisTag for a in font.axes].index("crbr")
-    plain = next(l for c, l in braces.items() if c[tag_index] == 100.0)
-    corrected = next(l for c, l in braces.items() if c[tag_index] == -100.0)
+    plain = next(layer for c, layer in braces.items() if c[tag_index] == 100.0)
+    corrected = next(layer for c, layer in braces.items() if c[tag_index] == -100.0)
     assert _nodes(corrected) == _nodes(plain)
     assert abs(float(corrected.width) - float(plain.width)) < 1e-6
-    default_layer = next(l for l in font.glyphs["e"].layers if l.layerId == font.masters[0].id)
+    default_layer = next(layer for layer in font.glyphs["e"].layers if layer.layerId == font.masters[0].id)
     assert _nodes(corrected) != _nodes(default_layer)
     # The Fontra source label says what the computed view is.
     assert "as if XOPQ1016" in (corrected.userData.get("xyz.fontra.source-name") or "")
@@ -92,8 +92,8 @@ def test_target_on_the_control_axis_itself_is_ignored(crispy_source):
     font, braces = _brace_layers(shadow, "e")
     # CrispyMini has source brace layers of its own on 'e' — pick ours.
     tag_index = [a.axisTag for a in font.axes].index("crbr")
-    layer = next(l for c, l in braces.items() if c[tag_index] == 100.0)
-    default_layer = next(l for l in font.glyphs["e"].layers if l.layerId == font.masters[0].id)
+    layer = next(lyr for c, lyr in braces.items() if c[tag_index] == 100.0)
+    default_layer = next(layer for layer in font.glyphs["e"].layers if layer.layerId == font.masters[0].id)
     # At the default parametric location the seed IS the default master.
     assert _nodes(layer) == _nodes(default_layer)
     assert "as if" not in (layer.userData.get("xyz.fontra.source-name") or "")

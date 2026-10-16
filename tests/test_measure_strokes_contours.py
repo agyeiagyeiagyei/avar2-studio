@@ -16,10 +16,16 @@ def _font_with_H(tmp_path):
     # bar y=[460,540] spanning between them. Advance 700.
     pen = TTGlyphPen(None)
     for x0, x1 in ((100, 200), (500, 600)):
-        pen.moveTo((x0, 0)); pen.lineTo((x1, 0))
-        pen.lineTo((x1, 1000)); pen.lineTo((x0, 1000)); pen.closePath()
-    pen.moveTo((200, 460)); pen.lineTo((500, 460))
-    pen.lineTo((500, 540)); pen.lineTo((200, 540)); pen.closePath()
+        pen.moveTo((x0, 0))
+        pen.lineTo((x1, 0))
+        pen.lineTo((x1, 1000))
+        pen.lineTo((x0, 1000))
+        pen.closePath()
+    pen.moveTo((200, 460))
+    pen.lineTo((500, 460))
+    pen.lineTo((500, 540))
+    pen.lineTo((200, 540))
+    pen.closePath()
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder([".notdef", "H"])
     fb.setupCharacterMap({0x48: "H"})
@@ -27,7 +33,8 @@ def _font_with_H(tmp_path):
     fb.setupHorizontalMetrics({".notdef": (500, 0), "H": (700, 100)})
     fb.setupHorizontalHeader(ascent=800, descent=-200)
     fb.setupNameTable({"familyName": "T", "styleName": "R"})
-    fb.setupOS2(); fb.setupPost()
+    fb.setupOS2()
+    fb.setupPost()
     path = tmp_path / "t.ttf"
     fb.save(str(path))
     return path

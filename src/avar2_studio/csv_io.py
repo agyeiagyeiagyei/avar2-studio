@@ -297,7 +297,7 @@ def update_csv_from_glyphs(
                 for ax in _source_font.get_axes(font):
                     tag = str(ax.get("tag") or "")
                     defaults[tag.upper()] = ax.get("default", 0)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"Warning: could not read axis defaults for backfill: {e}",
                       file=sys.stderr)
             for row in csv_rows:

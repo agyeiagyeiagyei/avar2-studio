@@ -18,8 +18,8 @@ these tests pin the routing decision, not the editor.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 

@@ -56,8 +56,8 @@ from GlyphsApp import *
 from GlyphsApp.plugins import *
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import width_spacing  # noqa: E402
-from width_spacing import SPACING_MODES, SPACING_REF_SB  # noqa: E402
+import width_spacing
+from width_spacing import SPACING_MODES, SPACING_REF_SB
 
 try:
     from vanilla import (

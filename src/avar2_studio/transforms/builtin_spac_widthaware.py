@@ -53,7 +53,7 @@ from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
-from .builtin_spac import _spac_output_name, _instance_spac_overrides
+from .builtin_spac import _instance_spac_overrides, _spac_output_name
 
 
 def _native_injector():

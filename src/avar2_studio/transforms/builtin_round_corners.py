@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import BuildContext, ParamSpec, Transform, TransformSpec
 from . import corner_rounding
+from .base import BuildContext, ParamSpec, Transform, TransformSpec
 
 
 class RoundCornersTransform(Transform):
@@ -81,7 +81,7 @@ class RoundCornersTransform(Transform):
             try:
                 num = float(pct)
             except (TypeError, ValueError):
-                raise ValueError(f"per-style rounding for '{name}' must be a number")
+                raise ValueError(f"per-style rounding for '{name}' must be a number") from None
             if not 0 <= num <= 100:
                 raise ValueError(f"per-style rounding for '{name}' must be 0-100")
         over = params.get("master_overrides") or {}
@@ -100,7 +100,7 @@ class RoundCornersTransform(Transform):
                 try:
                     num = float(val)
                 except (TypeError, ValueError):
-                    raise ValueError("override for '%s': %s must be a number" % (name, key))
+                    raise ValueError("override for '%s': %s must be a number" % (name, key)) from None
                 if not 0 <= num <= 10000:
                     raise ValueError("override for '%s': %s must be between 0 and 10000 units"
                                      % (name, key))
@@ -143,7 +143,7 @@ class RoundCornersTransform(Transform):
         from .. import control_axes
         try:
             targets = corner_rounding.control_targets(control_axes.load(ctx.source_path))
-        except Exception:  # noqa: BLE001 — a broken sidecar must not block the build
+        except Exception:
             targets = {}
         # Rounding IS the axis: sharp/rounded twins on ROND 0-100,
         # default 0. Styles dial their own position via apply().

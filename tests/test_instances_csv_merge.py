@@ -8,7 +8,6 @@ displayed coordinates, mapping columns (WGHT/OPSZ…) stay display-only,
 blank cells leave the source value standing, and the pristine source
 set rides along as ``source_coordinates`` for the sync dot."""
 
-from pathlib import Path
 
 import pytest
 

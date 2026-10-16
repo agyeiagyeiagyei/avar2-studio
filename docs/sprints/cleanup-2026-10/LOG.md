@@ -580,3 +580,36 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - The generic error banner had no close control (the only way out was a
   reload). It now has a × button (`aria-label="Dismiss error"`,
   `setError(null)`) with a small style rule. Build/lint/typecheck 0.
+
+## Tier 1 — rust/tests/process group
+
+## T1.26–T1.28 — cargo oracle paths + vacuous oracle
+- T1.26: the 14 hard-coded `/Users/agyei/.../.venv/bin/python` defaults in
+  12 test files now derive the repo venv from CARGO_MANIFEST_DIR, falling
+  back to `python3` when the venv doesn't exist (fresh clones, CI).
+- T1.27: oracle OUTPUTS moved from /tmp to `<crate>/target/tmp/` (created
+  per test fn). The /tmp INPUT fixture defaults (spike/oracle fonts) stay
+  — deterministic generation is T2.9.
+- T1.28: correction_oracle is `#[ignore]`d with a reason (needs a
+  fixture font that isn't in the repo; CORRECTION_FONT env still runs it
+  explicitly); the dead Claude-scratchpad default path removed.
+
+## T1.29 — ruff baseline + triage
+- `pip install -e .[dev]` re-synced the venv (ruff 0.17.1). New
+  `[tool.ruff]` baseline in pyproject: select E4/E7/E9/F/B/I001/RUF100/W;
+  ignore E402 (guarded optional imports) + E501 (existing long-line
+  style) + B905 (zip strict — 40 parallel-list sites, behavior already
+  correct; comment in config); per-file-ignores F403/F405 for
+  src/avar2_studio/glyphs/** (star imports are the Glyphs plugin idiom).
+- 342 autofixes (RUF100 stale noqs, I001 import sorts, F401 dead imports,
+  F541) + manual triage by a coder subagent, verified by me after:
+  F841 dead assignments ×10, E702 semicolons ×20, E741 ambiguous `l`
+  renames ×18, B007 ×7, B904 (from None / from e by whether the chain
+  aids debugging) ×13, E722 bare except ×1, E731 lambda→def ×6; B023
+  closure left with noqa + justification comment (immediate-call, not
+  deferred). All 20 remaining W293/W291 were whitespace inside docstring/
+  AppleScript literals — content-free, stripped.
+- Deviation the subagent flagged honestly: the baseline I quoted (453)
+  was stale; it proved no-change via a stash round-trip (472 both ways).
+- Verified by me independently: `ruff check src tests` exit 0;
+  `pytest tests/ -q` 472 passed, 8 skipped.

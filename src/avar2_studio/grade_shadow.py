@@ -34,8 +34,8 @@ from typing import Dict, List, Optional, Tuple
 
 from fontTools.varLib.models import VariationModel, normalizeLocation, supportScalar
 
-from . import grade as _grade
 from . import control_axes as _control_axes
+from . import grade as _grade
 
 
 def apply_grades(
@@ -60,7 +60,7 @@ def apply_grades(
         return None  # .designspace grade deferred
 
     from glyphsLib import GSFont
-    from glyphsLib.classes import GSAxis, GSCustomParameter, GSLayer, GSPath, GSNode, GSComponent
+    from glyphsLib.classes import GSAxis, GSComponent, GSCustomParameter, GSLayer, GSNode, GSPath
     from glyphsLib.types import Point, Transform
 
     shadow_path = _control_axes.shadow_path_for(original_path)
@@ -132,10 +132,9 @@ def apply_grades(
     # --- per-glyph interpolator over masters + parametric curve braces -----
     def build_interpolator(glyph):
         entries = []  # (pnorm_loc, layer)
-        mids = {m.id for m in masters}
         for m in masters:
-            L = next((l for l in glyph.layers if l.associatedMasterId == m.id
-                      and not (dict(getattr(l, "attributes", None) or {}).get("coordinates"))), None)
+            L = next((layer for layer in glyph.layers if layer.associatedMasterId == m.id
+                      and not (dict(getattr(layer, "attributes", None) or {}).get("coordinates"))), None)
             if L is None:
                 return None
             entries.append((pnorm(list(getattr(m, "axes", None) or [])), L))
@@ -170,7 +169,8 @@ def apply_grades(
 
         def eval_at(loc):
             sc = [supportScalar(loc, sup) for sup in model.supports]
-            dot = lambda d: sum(a * b for a, b in zip(d, sc))
+            def dot(d):
+                return sum(a * b for a, b in zip(d, sc))
             lay = GSLayer()
             for pi, (closed, pm) in enumerate(meta):
                 p = GSPath()

@@ -98,5 +98,5 @@ def test_brace_layers_are_ordered_alphabetically_by_label(tmp_path):
         ],
     )
     layers = _brace_layers(control_axes.regenerate_shadow(src))
-    names = [l.userData.get("xyz.fontra.source-name") for l in layers]
+    names = [layer.userData.get("xyz.fontra.source-name") for layer in layers]
     assert names == ["Narrow Heavy 12", "Ultra Wide Thin 12", "XTRA94-XOPQ2-YOPQ2"]

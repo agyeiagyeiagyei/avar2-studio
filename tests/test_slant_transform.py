@@ -7,13 +7,19 @@ import pytest
 from fontTools.fontBuilder import FontBuilder
 from fontTools.ttLib.tables._g_l_y_f import Glyph
 from glyphsLib.classes import (
-    GSAnchor, GSAxis, GSComponent, GSFont, GSFontMaster, GSGlyph, GSLayer,
-    GSNode, GSPath,
+    GSAnchor,
+    GSAxis,
+    GSComponent,
+    GSFont,
+    GSFontMaster,
+    GSGlyph,
+    GSLayer,
+    GSNode,
+    GSPath,
 )
 
-from avar2_studio.transforms import BuildContext
+from avar2_studio.transforms import BuildContext, slanting
 from avar2_studio.transforms.builtin_slant import SlantTransform
-from avar2_studio.transforms import slanting
 
 PARAMS = {"narrow_angle": 11.0, "wide_angle": 6.0}
 
@@ -38,7 +44,8 @@ def layer_for(master_id, paths, width):
 def slant_fixture():
     font = GSFont()
     font.axes = []
-    ax = GSAxis(); ax.name, ax.axisTag = "X-Transparency", "XTRA"
+    ax = GSAxis()
+    ax.name, ax.axisTag = "X-Transparency", "XTRA"
     font.axes.append(ax)
     narrow, wide = GSFontMaster(), GSFontMaster()
     narrow.name, narrow.axes, narrow.xHeight = "Narrow", [100], 500

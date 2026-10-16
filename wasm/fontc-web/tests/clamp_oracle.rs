@@ -165,7 +165,10 @@ fn stranded_tuple_counts(gvar: &[u8]) -> (usize, usize) {
 fn clamp_drops_stranded_sources() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
     let source_path = manifest.join("tests/fixtures/StrandedMini.glyphs");
     let source = std::fs::read_to_string(&source_path).expect("read StrandedMini.glyphs");
     let before = fontc_web::compile_glyphs(source).expect("fontc compile");
@@ -204,14 +207,15 @@ fn clamp_drops_stranded_sources() {
     );
 
     // (c) Anti-mangling cross-check against the fontmake build.
-    std::fs::write("/tmp/clamp-before.ttf", &before).expect("write before");
-    std::fs::write("/tmp/clamp-after.ttf", &after).expect("write after");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    std::fs::write(format!("{}/target/tmp/clamp-before.ttf", env!("CARGO_MANIFEST_DIR")), &before).expect("write before");
+    std::fs::write(format!("{}/target/tmp/clamp-after.ttf", env!("CARGO_MANIFEST_DIR")), &after).expect("write after");
     let comparator = manifest.join("spike/compare_clamp.py");
     let status = Command::new(&python)
         .arg(comparator)
         .arg(&source_path)
-        .arg("/tmp/clamp-before.ttf")
-        .arg("/tmp/clamp-after.ttf")
+        .arg(format!("{}/target/tmp/clamp-before.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/clamp-after.ttf", env!("CARGO_MANIFEST_DIR")))
         .status()
         .expect("run comparator");
     assert!(status.success(), "clamp oracle comparison failed");

@@ -31,7 +31,6 @@ from typing import Dict, List, Optional
 from fontTools.designspaceLib import DesignSpaceDocument
 from glyphsLib.classes import GSFont
 
-
 # --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------

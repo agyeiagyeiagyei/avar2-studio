@@ -12,13 +12,20 @@ from pathlib import Path
 import pytest
 from glyphsLib import GSFont
 from glyphsLib.classes import (
-    GSAxis, GSFont as GSFontCls, GSFontMaster, GSGlyph, GSInstance, GSLayer,
-    GSNode, GSPath,
+    GSAxis,
+    GSFontMaster,
+    GSGlyph,
+    GSInstance,
+    GSLayer,
+    GSNode,
+    GSPath,
+)
+from glyphsLib.classes import (
+    GSFont as GSFontCls,
 )
 
-from avar2_studio.transforms import BuildContext, registry
+from avar2_studio.transforms import BuildContext, corner_rounding, registry
 from avar2_studio.transforms import config as transforms_config
-from avar2_studio.transforms import corner_rounding
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 CRISPY_MINI = EXAMPLES / "crispy-mini" / "sources" / "CrispyMini.glyphs"
@@ -251,6 +258,7 @@ def test_a_new_source_axis_column_is_backfilled_with_its_default(tmp_path):
     cells in a parametric column abort the whole avar2 build, so every
     row gets the axis default — a zero avar2 delta, changing nothing."""
     import shutil as _shutil
+
     from avar2_studio import csv_io
     src = tmp_path / "CrispyMini.glyphs"
     _shutil.copy2(CRISPY_MINI, src)
@@ -260,7 +268,6 @@ def test_a_new_source_axis_column_is_backfilled_with_its_default(tmp_path):
     font.axes.append(axis)
     for m in font.masters:
         m.axes = list(m.axes) + [0]
-    inst_names = []
     from glyphsLib.classes import GSInstance
     inst = GSInstance()
     inst.name = "Mid"
@@ -290,9 +297,11 @@ def test_a_shallow_bend_takes_a_shallower_round():
     the arc used to swing across the outline. t is capped at 2*r."""
     font = GSFontCls()
     font.axes = []
-    ax = GSAxis(); ax.name, ax.axisTag = "X-Opacity", "XOPQ"
+    ax = GSAxis()
+    ax.name, ax.axisTag = "X-Opacity", "XOPQ"
     font.axes.append(ax)
-    m = GSFontMaster(); m.name, m.axes = "Bold", [1000]
+    m = GSFontMaster()
+    m.name, m.axes = "Bold", [1000]
     font.masters.append(m)
     glyph = GSGlyph("bend")
     font.glyphs.append(glyph)
@@ -320,9 +329,11 @@ def test_a_corner_buried_in_an_overlap_stays_put():
     back from the junction and the counter shows through."""
     font = GSFontCls()
     font.axes = []
-    ax = GSAxis(); ax.name, ax.axisTag = "X-Opacity", "XOPQ"
+    ax = GSAxis()
+    ax.name, ax.axisTag = "X-Opacity", "XOPQ"
     font.axes.append(ax)
-    m = GSFontMaster(); m.name, m.axes = "Bold", [1000]
+    m = GSFontMaster()
+    m.name, m.axes = "Bold", [1000]
     font.masters.append(m)
     glyph = GSGlyph("leg")
     font.glyphs.append(glyph)
@@ -355,9 +366,11 @@ def xopq_font(*paths, width=600.0):
     """One master at XOPQ 1000 (no XTRA), one glyph from ``paths``."""
     font = GSFontCls()
     font.axes = []
-    ax = GSAxis(); ax.name, ax.axisTag = "X-Opacity", "XOPQ"
+    ax = GSAxis()
+    ax.name, ax.axisTag = "X-Opacity", "XOPQ"
     font.axes.append(ax)
-    m = GSFontMaster(); m.name, m.axes = "Bold", [1000]
+    m = GSFontMaster()
+    m.name, m.axes = "Bold", [1000]
     font.masters.append(m)
     glyph = GSGlyph("test")
     font.glyphs.append(glyph)
@@ -586,7 +599,8 @@ def italic_twin_font():
     font = GSFontCls()
     font.axes = []
     for name, tag in (("X-Transparency", "XTRA"), ("X-Opacity", "XOPQ"), ("Italic", "ital")):
-        ax = GSAxis(); ax.name, ax.axisTag = name, tag
+        ax = GSAxis()
+        ax.name, ax.axisTag = name, tag
         font.axes.append(ax)
     up, it = GSFontMaster(), GSFontMaster()
     up.name, up.axes = "Bold", [100, 1000, 0]

@@ -26,13 +26,14 @@ import tempfile
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import yaml  # PyYAML
 
 from .. import source_font as _source_font
+
 try:
-    import ruamel.yaml
+    import ruamel.yaml  # noqa: F401  (availability probe — HAS_RUAMEL gates its use)
     HAS_RUAMEL = True
 except ImportError:
     HAS_RUAMEL = False
@@ -62,7 +63,7 @@ def _parse_decimal(raw: str, *, context: str) -> Decimal:
     try:
         return Decimal(s)
     except InvalidOperation:
-        raise ValueError(f"Non-numeric value '{raw}' for {context}")
+        raise ValueError(f"Non-numeric value '{raw}' for {context}") from None
 
 
 def _normalize_in_axis_name(col: str) -> str:
@@ -128,7 +129,7 @@ def validate_csv_structure(
 
         fieldnames = [h.strip() for h in reader.fieldnames]
         name_col = "Instance Name"
-        
+
         if name_col not in fieldnames:
             raise ValueError(f"CSV must include a '{name_col}' column. Found: {fieldnames}")
 
@@ -150,7 +151,7 @@ def validate_csv_structure(
                 col_upper = c.upper()
                 if col_upper in traditional_axes or col_upper.endswith("-E"):
                     in_cols.append(c)
-        
+
         # No traditional columns is NOT an error: such a CSV maps instance
         # names straight onto parametric axes, which only makes sense for a
         # font whose fvar axes ARE those parametric axes. in_axes stay
@@ -217,7 +218,7 @@ def read_csv_mappings(
 
             # No traditional axis is universally required; if a row's in_axes
             # is empty the mapping is degenerate and gets skipped elsewhere.
-            
+
             # Contrast is optional - only include if present in CSV
             # Don't add cntr to in_axes if not in CSV
 
@@ -324,7 +325,7 @@ def extract_axis_values_from_csv(csv_path: Path) -> Dict[str, List[int]]:
         if not column_keys:
             return {}
 
-        for col, key in column_keys.items():
+        for _col, key in column_keys.items():
             accumulators[key] = set()
 
         for row in reader:
@@ -372,7 +373,7 @@ def generate_stat_section(axis_values: Dict[str, List[int]], font_key: str) -> D
     stat_data = {
         font_key: []
     }
-    
+
     # Add Optical Size axis only if there's variation (more than one value)
     if "opsz" in axis_values and len(axis_values["opsz"]) > 1:
         stat_data[font_key].append({
@@ -666,7 +667,7 @@ def generate_avar2_yaml_string(
     skip_opsz_if_no_variation: bool = True,
 ) -> str:
     """Generate avar2 section as YAML string (preserves comments and formatting).
-    
+
     If skip_opsz_if_no_variation is True, removes opsz from in_axes if all mappings
     have the same opsz value.
     """
@@ -684,19 +685,7 @@ def generate_avar2_yaml_string(
         # stale section from an earlier CSV.
         return f"avar2:\n  {font_key}: []\n"
     _dedupe_check(mappings)
-    
-    # Check for opsz variation if requested
-    if skip_opsz_if_no_variation:
-        opsz_values = {m.in_axes.get("opsz") for m in mappings if "opsz" in m.in_axes}
-        if len(opsz_values) <= 1:
-            # Remove opsz from all mappings
-            for m in mappings:
-                if "opsz" in m.in_axes:
-                    # Create new dict without opsz
-                    new_in_axes = {k: v for k, v in m.in_axes.items() if k != "opsz"}
-                    # Replace the in_axes (RowMapping is frozen, so we need to recreate)
-                    # Actually, we can't modify frozen dataclass, so we'll filter during output
-    
+
     mappings = sorted(mappings, key=_sort_key)
 
     lines: List[str] = []
@@ -756,7 +745,7 @@ def validate_avar2_yaml(avar2_yaml: str, font_key: str) -> None:
     try:
         data = yaml.safe_load(avar2_yaml)
     except yaml.YAMLError as e:
-        raise ValueError(f"Generated avar2 YAML is invalid: {e}")
+        raise ValueError(f"Generated avar2 YAML is invalid: {e}") from e
 
     if not isinstance(data, dict) or "avar2" not in data:
         raise ValueError("Generated avar2 YAML missing 'avar2' key")
@@ -781,7 +770,7 @@ def load_config(config_path: Path) -> Dict:
     try:
         data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
-        raise ValueError(f"Failed to parse config.yaml: {e}")
+        raise ValueError(f"Failed to parse config.yaml: {e}") from e
 
     if not isinstance(data, dict):
         raise ValueError("config.yaml did not parse to a mapping/dict")
@@ -821,10 +810,10 @@ def merge_config(
     # Parse avar2 YAML to validate structure, but we'll use the string for output
     avar2_parsed = yaml.safe_load(avar2_yaml)
     config["avar2"] = avar2_parsed["avar2"]
-    
+
     # Note: spacingAxis section is preserved as-is and never updated automatically
     # The spacingAxis min/max values should be set manually in the config file
-    
+
     # If contrast was added, update fvarInstances to include cntr: 0
     if add_contrast:
         fvar_instances = config.get("fvarInstances", {})
@@ -858,7 +847,7 @@ def validate_merged_config(config: Dict, font_key: str, require_stat: bool = Tru
     try:
         yaml.dump(config, default_flow_style=False)
     except Exception as e:
-        raise ValueError(f"Config cannot be serialized to YAML: {e}")
+        raise ValueError(f"Config cannot be serialized to YAML: {e}") from e
 
 
 def write_config(
@@ -868,7 +857,7 @@ def write_config(
     backup: bool = True,
 ) -> None:
     """Write config.yaml, replacing stat and avar2 sections.
-    
+
     Uses a hybrid approach: writes most of config as YAML, but injects
     the pre-formatted avar2 YAML string to preserve comments.
     """
@@ -899,14 +888,14 @@ def write_config(
 
     for i, line in enumerate(original_lines):
         stripped = line.strip()
-        
+
         # Detect stat section
         if stripped == "stat:" or stripped.startswith("stat:"):
             stat_start_idx = i
             in_stat = True
             stat_indent = len(line) - len(line.lstrip())
             continue
-        
+
         # Detect fvarInstances section
         if stripped == "fvarInstances:" or stripped.startswith("fvarInstances:"):
             fvar_instances_start_idx = i
@@ -916,7 +905,7 @@ def write_config(
                 stat_end_idx = i
                 in_stat = False
             continue
-        
+
         # Detect avar2 section
         if stripped == "avar2:" or stripped.startswith("avar2:"):
             avar2_start_idx = i
@@ -929,7 +918,7 @@ def write_config(
                 fvar_instances_end_idx = i
                 in_fvar_instances = False
             continue
-        
+
         # Detect end of sections (top-level key)
         if in_stat or in_avar2 or in_fvar_instances:
             if not line.strip():  # Blank line, continue
@@ -960,13 +949,13 @@ def write_config(
 
     # Determine which sections need to be updated
     # Order: spacingAxis, fvarInstances, stat, avar2 (in file order)
-    
+
     # Find spacingAxis section
     spacing_axis_start_idx = None
     spacing_axis_end_idx = None
     in_spacing_axis = False
     spacing_axis_indent = None
-    
+
     for i, line in enumerate(original_lines):
         stripped = line.strip()
         if stripped == "spacingAxis:" or stripped.startswith("spacingAxis:"):
@@ -984,18 +973,18 @@ def write_config(
                     in_spacing_axis = False
     if in_spacing_axis:
         spacing_axis_end_idx = len(original_lines)
-    
+
     # Find the first section that needs updating (excluding spacingAxis for now)
     first_update_idx = None
     for idx in [fvar_instances_start_idx, stat_start_idx, avar2_start_idx]:
         if idx is not None and (first_update_idx is None or idx < first_update_idx):
             first_update_idx = idx
-    
+
     # Part before first section to update (but handle spacingAxis separately)
     if spacing_axis_start_idx is not None and "spacingAxis" in config:
         # Write everything before spacingAxis
         new_lines.extend(original_lines[:spacing_axis_start_idx])
-        
+
         # Write updated spacingAxis
         spacing_yaml_lines = yaml.dump(
             {"spacingAxis": config["spacingAxis"]},
@@ -1005,7 +994,7 @@ def write_config(
         ).strip().splitlines()
         new_lines.extend(spacing_yaml_lines)
         new_lines.append("")
-        
+
         # Skip original spacingAxis section, continue from after it
         if spacing_axis_end_idx is not None:
             # Find next section after spacingAxis
@@ -1031,7 +1020,7 @@ def write_config(
         ).strip().splitlines()
         new_lines.extend(fvar_yaml_lines)
         new_lines.append("")
-        
+
         # Add lines between fvarInstances and next section (if any)
         if fvar_instances_end_idx is not None:
             # Determine next section
@@ -1040,14 +1029,14 @@ def write_config(
                 next_section_start = stat_start_idx
             elif avar2_start_idx is not None and avar2_start_idx > fvar_instances_end_idx:
                 next_section_start = avar2_start_idx
-            
+
             if next_section_start is not None:
                 between_lines = original_lines[fvar_instances_end_idx:next_section_start]
                 # Filter out excessive blank lines
                 for line in between_lines:
                     if line.strip() or (new_lines and new_lines[-1].strip()):
                         new_lines.append(line)
-    
+
     # Insert stat section (add if missing, replace if exists)
     if stat_start_idx is not None:
         # Replace existing stat section
@@ -1085,7 +1074,7 @@ def write_config(
         if stat_end_idx is not None and avar2_start_idx > stat_end_idx:
             # Skip blank lines between sections
             between = original_lines[stat_end_idx:avar2_start_idx]
-            new_lines.extend([l for l in between if l.strip() or not new_lines or new_lines[-1].strip()])
+            new_lines.extend([line for line in between if line.strip() or not new_lines or new_lines[-1].strip()])
     elif "stat" in config and stat_start_idx is None and avar2_start_idx is not None and fvar_instances_end_idx is not None:
         # STAT was just added, handle spacing between fvarInstances and avar2
         # Skip blank lines between fvarInstances and avar2 (STAT is now in between)
@@ -1152,35 +1141,35 @@ except ImportError:
 
 
 def expand_csv_with_opsz(
-    csv_path: Path, 
+    csv_path: Path,
     opsz_config_path: Optional[Path] = None,
     output_path: Optional[Path] = None
 ) -> Path:
     """
     Expand CSV with MinOPSZ and MaxOPSZ rows based on opsz.yaml configuration.
-    
+
     For each base row (OPSZ=48), creates 2 additional rows:
     - MinOPSZ (OPSZ=12): Adjusted XOPQ/YOPQ/XTRA with -MinOPSZ suffix
     - MaxOPSZ (OPSZ=72): Adjusted XOPQ/YOPQ/XTRA with -MaxOPSZ suffix
-    
+
     Returns path to expanded CSV.
     """
     if opsz_config_path is None:
         opsz_config_path = csv_path.parent / "opsz.yaml"
-    
+
     if not opsz_config_path.exists():
         raise FileNotFoundError(f"opsz.yaml not found at {opsz_config_path}")
-    
+
     # Load opsz config
     with opsz_config_path.open('r') as f:
         config = yaml.safe_load(f)
-    
+
     base_opsz = config['base_opsz']
     min_opsz = config['min_opsz']
     max_opsz = config['max_opsz']
     weight_points = sorted(config['weight_adjustments'], key=lambda x: x['weight'])
     xtra_condensed = config['xtra_adjustments']['condensed_widths']
-    
+
     def interpolate_multiplier(weight: int, axis: str) -> Tuple[float, float]:
         """Interpolate multiplier for given weight and axis."""
         if weight <= weight_points[0]['weight']:
@@ -1193,7 +1182,7 @@ def expand_csv_with_opsz(
                 weight_points[-1]['min_opsz_multipliers'][axis],
                 weight_points[-1]['max_opsz_multipliers'][axis]
             )
-        
+
         for i in range(len(weight_points) - 1):
             w1, w2 = weight_points[i]['weight'], weight_points[i+1]['weight']
             if w1 <= weight <= w2:
@@ -1205,24 +1194,24 @@ def expand_csv_with_opsz(
                 min_mult = min_m1 + (min_m2 - min_m1) * t
                 max_mult = max_m1 + (max_m2 - max_m1) * t
                 return min_mult, max_mult
-        
+
         return 1.0, 1.0
-    
+
     # Determine output path
     if output_path is None:
         # Use temporary file if no output path specified
         output_path = Path(tempfile.mktemp(suffix='.csv', prefix='avar2-mappings_with_opsz_'))
-    
+
     rows = []
     with csv_path.open('r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames)
         for row in reader:
             rows.append(row)
-    
+
     # Generate new rows
     new_rows = []
-    
+
     for row in rows:
         # Check for missing required values first
         wght_str = row.get('WGHT', '').strip()
@@ -1232,7 +1221,7 @@ def expand_csv_with_opsz(
             # These rows will remain in the original CSV and won't be expanded
             # (They can't be used for opsz generation without WGHT/WDTH)
             continue
-        
+
         # Only generate opsz rows if this row has the base opsz
         # Handle empty string or missing OPSZ value
         opsz_value = row.get('OPSZ', '') or str(base_opsz)
@@ -1242,29 +1231,29 @@ def expand_csv_with_opsz(
             # Keep non-base-opsz rows as-is
             new_rows.append(row.copy())
             continue
-        
+
         # Keep base row (OPSZ=base_opsz)
         base_row = row.copy()
         # Ensure SPAC is set for base row (0 for base OPSZ)
         if 'SPAC' in base_row:
             base_row['SPAC'] = base_row.get('SPAC', '').strip() or '0'
         new_rows.append(base_row)
-        
+
         wght = int(wght_str)
         wdth = int(wdth_str)
         base_xopq = float(row.get('XOPQ', '0') or '0')
         base_yopq = float(row.get('YOPQ', '0') or '0')
         base_xtra = float(row.get('XTRA', '0') or '0')
         instance_name = row.get('Instance Name', '')
-        
+
         # Get multipliers
         min_xopq_mult, max_xopq_mult = interpolate_multiplier(wght, 'xopq')
         min_yopq_mult, max_yopq_mult = interpolate_multiplier(wght, 'yopq')
-        
+
         # Apply XTRA adjustments for condensed
         min_xtra_mult = xtra_condensed['min_opsz_multiplier'] if wdth < 100 else 1.0
         max_xtra_mult = xtra_condensed['max_opsz_multiplier'] if wdth < 100 else 1.0
-        
+
         # Calculate adjusted values
         min_xopq = base_xopq * min_xopq_mult
         max_xopq = base_xopq * max_xopq_mult
@@ -1272,7 +1261,7 @@ def expand_csv_with_opsz(
         max_yopq = base_yopq * max_yopq_mult
         min_xtra = base_xtra * min_xtra_mult
         max_xtra = base_xtra * max_xtra_mult
-        
+
         # Create MinOPSZ row
         min_row = row.copy()
         min_row['Instance Name'] = f"{instance_name}-MinOPSZ"
@@ -1286,7 +1275,7 @@ def expand_csv_with_opsz(
         else:
             min_row['SPAC'] = '20'
         new_rows.append(min_row)
-        
+
         # Create MaxOPSZ row
         max_row = row.copy()
         max_row['Instance Name'] = f"{instance_name}-MaxOPSZ"
@@ -1300,13 +1289,13 @@ def expand_csv_with_opsz(
         else:
             max_row['SPAC'] = '-20'
         new_rows.append(max_row)
-    
+
     # Write output
     with output_path.open('w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(new_rows)
-    
+
     return output_path
 
 
@@ -1392,10 +1381,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Step 2: Read CSV mappings (with optional contrast/opsz expansion)
         print("Step 2: Reading CSV mappings...", file=sys.stderr)
         csv_to_use = args.csv
-        
+
         # Check opsz variation before expansion (for avar2 generation later)
         has_opsz_variation_before = check_opsz_variation(csv_to_use)
-        
+
         if args.add_opsz:
             print("  Expanding CSV with opsz variations...", file=sys.stderr)
             # Determine output path based on flag
@@ -1407,8 +1396,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.save_opsz_csv:
                 print(f"  ✓ Expanded CSV written to: {csv_to_use}", file=sys.stderr)
             else:
-                print(f"  ✓ Expanded CSV generated (temporary file)", file=sys.stderr)
-        
+                print("  ✓ Expanded CSV generated (temporary file)", file=sys.stderr)
+
         if args.add_contrast:
             print("  Expanding CSV with contrast variations...", file=sys.stderr)
             csv_to_use = expand_csv_with_contrast(
@@ -1421,7 +1410,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 positive_offset=Decimal("30"),    # Moderate offset for positive side
             )
             print(f"  ✓ Expanded CSV written to: {csv_to_use}", file=sys.stderr)
-        
+
         # The compiled parametric font's axis tags, from the config's
         # fvarInstances coordinates: the authoritative out: set. Columns
         # beyond it (WGHT/OPSZ/ital/any custom user axis) are mapping
@@ -1431,12 +1420,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             for insts in (load_config(args.config).get("fvarInstances") or {}).values():
                 for inst in insts or []:
                     parametric_tags.update((inst.get("coordinates") or {}).keys())
-        except Exception as exc:  # noqa: BLE001 — fall back to the legacy split
+        except Exception as exc:
             print(f"  (could not derive parametric axes from config: {exc})",
                   file=sys.stderr)
         mappings = read_csv_mappings(csv_to_use, parametric_tags or None)
         print(f"  ✓ Read {len(mappings)} mappings", file=sys.stderr)
-        
+
         # Store path for cleanup if temporary file was used
         temp_opsz_file = None
         if args.add_opsz and not args.save_opsz_csv:
@@ -1611,7 +1600,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Check if opsz has variation (after expansions)
         has_opsz_variation_after = check_opsz_variation(csv_to_use)
         avar2_yaml = generate_avar2_yaml_string(
-            mappings, 
+            mappings,
             font_key,
             include_group_headers=True,
             skip_opsz_if_no_variation=not has_opsz_variation_after
@@ -1628,7 +1617,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Step 7: Merge into config
         print("Step 7: Merging sections into config...", file=sys.stderr)
         merged_config, avar2_yaml_final = merge_config(
-            config, stat_data, avar2_yaml, font_key, 
+            config, stat_data, avar2_yaml, font_key,
             add_contrast=args.add_contrast,
             csv_path=csv_to_use
         )
@@ -1650,14 +1639,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  ✓ Config written: {args.config}", file=sys.stderr)
 
         print("\n✓ All steps completed successfully!", file=sys.stderr)
-        
+
         # Clean up temporary opsz file if it was created
         if 'temp_opsz_file' in locals() and temp_opsz_file and temp_opsz_file.exists():
             try:
                 temp_opsz_file.unlink()
             except Exception:
                 pass  # Ignore cleanup errors
-        
+
         return 0
 
     except Exception as e:

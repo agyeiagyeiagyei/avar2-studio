@@ -13,7 +13,6 @@ instancer, ranges kept), so the row compiles as a true identity and
 the other rows anchor exactly."""
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest

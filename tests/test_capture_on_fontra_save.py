@@ -5,10 +5,10 @@ The watcher's Fontra-save branches call ``server._capture_shadow_drawings``
 ``main()`` and verified by reading (watcher extraction is T3.10).
 """
 import pytest
+from test_capture_outlines import _draw_into
 
 import avar2_studio.server as server
 from avar2_studio import control_axes
-from test_capture_outlines import _draw_into
 
 
 @pytest.fixture

@@ -14,7 +14,10 @@ use std::process::Command;
 fn pin_synthesis_and_refusal() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
     let source_path = manifest.join("../../frontend/e2e/fixtures/Crispy-test.glyphs");
     let source = std::fs::read_to_string(&source_path).expect("read Crispy-test.glyphs");
     let before = fontc_web::compile_glyphs(source).expect("fontc compile");

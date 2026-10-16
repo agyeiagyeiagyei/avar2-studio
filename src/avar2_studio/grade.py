@@ -35,7 +35,6 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-
 _SCHEMA_VERSION = 1
 
 # --- OpenType GRAD axis (registered grade axis) ---------------------------
@@ -406,7 +405,7 @@ def _validate_pct(pct) -> float:
     try:
         v = float(pct)
     except (TypeError, ValueError):
-        raise ValueError("grade% must be numeric")
+        raise ValueError("grade% must be numeric") from None
     if v < 0:
         raise ValueError("grade% must be non-negative")
     return v

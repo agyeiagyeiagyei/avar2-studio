@@ -5,7 +5,6 @@ row's location, but /api/axes read defaults from the SOURCE — so the
 Preview tab's sliders (and anything pinning axisDefaults) kept resting
 at the raw compile origin (the hairline), hiding the relocation."""
 
-from pathlib import Path
 
 import pytest
 from fontTools.fontBuilder import FontBuilder

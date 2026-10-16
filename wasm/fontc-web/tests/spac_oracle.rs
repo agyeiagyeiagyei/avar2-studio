@@ -40,7 +40,10 @@ fn spac_matches_studio_oracle() {
         .into_owned()
     });
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");

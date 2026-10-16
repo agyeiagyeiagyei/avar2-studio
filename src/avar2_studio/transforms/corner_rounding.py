@@ -335,6 +335,7 @@ def extend_for_axis(font, tag, name, end_value, twin_suffix):
     {original master id: twin master}."""
     import copy
     import uuid
+
     from glyphsLib.classes import GSAxis
 
     ax = GSAxis()
@@ -443,6 +444,7 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
         twin_master = _extend_for_axis(font, axis_max)
     # glyphsLib is imported lazily, as everywhere else in this package.
     import uuid
+
     from glyphsLib.classes import GSNode
 
     for glyph in font.glyphs:
@@ -480,10 +482,12 @@ def round_font(font, params: dict, targets=None, log=None, axis_max=None) -> dic
                     continue
                 rond_twins[id(L)] = twin
 
+        # Called only within the loop iteration that defines it (never
+        # deferred), so the loop-variable capture is same-iteration and safe.
         def _keep_twins():
-            for twin in rond_twins.values():
-                glyph.layers.append(twin)
-            stats["twins"] += len(rond_twins)
+            for twin in rond_twins.values():  # noqa: B023
+                glyph.layers.append(twin)  # noqa: B023
+            stats["twins"] += len(rond_twins)  # noqa: B023
 
         ref_structure = _structure(master_layers[0])
         if any(_structure(L) != ref_structure for L in master_layers[1:]):

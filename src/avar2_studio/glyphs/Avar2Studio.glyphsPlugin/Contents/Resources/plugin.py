@@ -24,12 +24,12 @@ import traceback
 import objc
 from AppKit import NSApplicationWillTerminateNotification, NSMenu, NSMenuItem, NSOffState, NSOnState
 from Foundation import NSNotificationCenter
-from PyObjCTools import AppHelper
-from GlyphsApp import Glyphs, WINDOW_MENU
+from GlyphsApp import WINDOW_MENU, Glyphs
 from GlyphsApp.plugins import GeneralPlugin
+from PyObjCTools import AppHelper
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import studio_launcher  # noqa: E402
+import studio_launcher
 
 # (menu title, principal class of the bundle)
 REPORTERS = (

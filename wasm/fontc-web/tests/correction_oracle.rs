@@ -67,15 +67,15 @@ print(json.dumps(out))
 "#;
 
 #[test]
+#[ignore = "needs a correction-fixture font that isn't in the repo — set CORRECTION_FONT to run it explicitly"]
 fn correction_layers_render_at_their_target() {
-    let font_path = std::env::var("CORRECTION_FONT").unwrap_or_else(|_| {
-        "/private/tmp/claude-501/-Users-agyei-Documents-Crispy/\
-         6f7067c1-8fc9-43cd-a8d7-e9eea399785b/scratchpad/demo2-build/font.ttf"
-            .replace(char::is_whitespace, "")
-    });
+    let font_path = std::env::var("CORRECTION_FONT").unwrap_or_default();
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
-    if !std::path::Path::new(&font_path).exists() {
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
+    if font_path.is_empty() || !std::path::Path::new(&font_path).exists() {
         eprintln!("skipping: no font at {font_path} (set CORRECTION_FONT)");
         return;
     }
@@ -83,11 +83,12 @@ fn correction_layers_render_at_their_target() {
     let font_bytes = std::fs::read(&font_path).expect("read demo font");
     let corrected = fontc_web::apply_control_axes(font_bytes, CORRECTION_JSON)
         .expect("apply_control_axes with a correction target");
-    std::fs::write("/tmp/correction-out.ttf", &corrected).expect("write corrected font");
-    std::fs::write("/tmp/correction-check.py", CHECK_PY).expect("write checker");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    std::fs::write(format!("{}/target/tmp/correction-out.ttf", env!("CARGO_MANIFEST_DIR")), &corrected).expect("write corrected font");
+    std::fs::write(format!("{}/target/tmp/correction-check.py", env!("CARGO_MANIFEST_DIR")), CHECK_PY).expect("write checker");
 
     let out = Command::new(&python)
-        .args(["/tmp/correction-check.py", "/tmp/correction-out.ttf", &font_path])
+        .args([format!("{}/target/tmp/correction-check.py", env!("CARGO_MANIFEST_DIR")), format!("{}/target/tmp/correction-out.ttf", env!("CARGO_MANIFEST_DIR")), font_path.clone()])
         .output()
         .expect("run fontTools checker");
     assert!(

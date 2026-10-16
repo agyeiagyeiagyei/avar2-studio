@@ -9,8 +9,6 @@ itself is exercised by the live probe (sprint LOG, round 2).
 import threading
 import time
 
-import pytest
-
 import avar2_studio.server as server
 
 

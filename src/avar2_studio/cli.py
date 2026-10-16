@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import sys
 
-
 _HELP = """\
 Usage:
   avar2-studio /path/to/MyFont.glyphs [options]
@@ -95,7 +94,7 @@ def _build(argv) -> int:
     from . import server
     try:
         server._apply_source_path(args.source)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"error: could not load {args.source}: {exc}", file=sys.stderr)
         return 2
 

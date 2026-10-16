@@ -178,7 +178,7 @@ class JobQueue:
                 if k.get("ttf_size") == ttf_size and k.get("ttf_mtime") == font.stat().st_mtime:
                     return {"ttf_bytes": ttf_size, "woff2_bytes": cache.stat().st_size,
                             "woff2_exact": True}
-            except Exception:  # noqa: BLE001 — a corrupt key just re-estimates
+            except Exception:
                 pass
         ratio = None
         if cache.exists() and key.exists():
@@ -186,7 +186,7 @@ class JobQueue:
                 k = json.loads(key.read_text())
                 if k.get("source_bytes"):
                     ratio = k["woff2_bytes"] / k["source_bytes"]
-            except Exception:  # noqa: BLE001
+            except Exception:
                 ratio = None
         est = round(ttf_size * (ratio if ratio else 0.08))
         return {"ttf_bytes": ttf_size, "woff2_bytes": est, "woff2_exact": False}
@@ -212,7 +212,7 @@ class JobQueue:
                     break
                 try:
                     self._run_one(job)
-                except Exception as exc:  # noqa: BLE001 — a job must NEVER
+                except Exception as exc:
                     # kill the supervisor: that's the wedge this rework exists
                     # to remove. Clear running, record the failure, move on.
                     import traceback
@@ -262,7 +262,7 @@ class JobQueue:
                 if hook is not None:
                     hook()
             self._stage(job)
-        except Exception as exc:  # noqa: BLE001 — a staging failure is a result too
+        except Exception as exc:
             with self._lock:
                 self._running = None
             self._finish(job, {"job_id": jid, "kind": job["kind"], "success": False,
@@ -308,7 +308,7 @@ class JobQueue:
         result_path = job["dir"] / "result.json"
         try:
             return json.loads(result_path.read_text())
-        except Exception:  # noqa: BLE001 — no result = the worker died
+        except Exception:
             if job.get("cancelled"):
                 return {"job_id": self._job_id(job), "kind": job["kind"],
                         "success": False, "cancelled": True, "error": "cancelled"}
@@ -325,7 +325,7 @@ class JobQueue:
         if result.get("success"):
             try:
                 self._promote(job, result)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result = dict(result, success=False,
                               error=f"could not promote the artifact: {exc}")
         if job["kind"] == "build":
@@ -434,7 +434,6 @@ class JobQueue:
         can fetch the served font at any moment, and a truncate-and-copy
         window hands it a torn font that fails to parse — the preview falls
         back to the system font until the next build."""
-        preview = Path(self.server._get_preview_dir())
         if job["kind"] == "build":
             built = result.get("built_font")
             if not built or not Path(built).exists():
@@ -515,7 +514,7 @@ class JobQueue:
                 entry = json.loads(line)
                 if "phase" in entry:
                     return entry["phase"]
-        except Exception:  # noqa: BLE001 — a partial line while writing
+        except Exception:
             return None
         return None
 

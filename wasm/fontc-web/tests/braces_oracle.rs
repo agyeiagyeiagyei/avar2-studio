@@ -41,7 +41,10 @@ fn braces_match_fonttools_oracle() {
         .into_owned()
     });
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
@@ -54,20 +57,21 @@ fn braces_match_fonttools_oracle() {
     let full = fontc_web::apply_control_axes(full, CONTROL_JSON).expect("pipeline control");
     let full = fontc_web::apply_grade(full, GRADE_JSON, COORDS_JSON).expect("pipeline grade");
 
-    std::fs::write("/tmp/braces-control.ttf", &control).expect("write control output");
-    std::fs::write("/tmp/braces-grade.ttf", &grade).expect("write grade output");
-    std::fs::write("/tmp/braces-full.ttf", &full).expect("write full output");
-    std::fs::write("/tmp/braces-control.json", CONTROL_JSON).expect("write control json");
-    std::fs::write("/tmp/braces-grade.json", GRADE_JSON).expect("write grade json");
-    std::fs::write("/tmp/braces-coords.json", COORDS_JSON).expect("write coords json");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    std::fs::write(format!("{}/target/tmp/braces-control.ttf", env!("CARGO_MANIFEST_DIR")), &control).expect("write control output");
+    std::fs::write(format!("{}/target/tmp/braces-grade.ttf", env!("CARGO_MANIFEST_DIR")), &grade).expect("write grade output");
+    std::fs::write(format!("{}/target/tmp/braces-full.ttf", env!("CARGO_MANIFEST_DIR")), &full).expect("write full output");
+    std::fs::write(format!("{}/target/tmp/braces-control.json", env!("CARGO_MANIFEST_DIR")), CONTROL_JSON).expect("write control json");
+    std::fs::write(format!("{}/target/tmp/braces-grade.json", env!("CARGO_MANIFEST_DIR")), GRADE_JSON).expect("write grade json");
+    std::fs::write(format!("{}/target/tmp/braces-coords.json", env!("CARGO_MANIFEST_DIR")), COORDS_JSON).expect("write coords json");
 
     let comparator = manifest.join("spike/compare_braces.py");
     let status = Command::new(&python)
         .arg(comparator)
         .arg(&font_path)
-        .arg("/tmp/braces-control.ttf")
-        .arg("/tmp/braces-grade.ttf")
-        .arg("/tmp/braces-full.ttf")
+        .arg(format!("{}/target/tmp/braces-control.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/braces-grade.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/braces-full.ttf", env!("CARGO_MANIFEST_DIR")))
         .status()
         .expect("run comparator");
     assert!(status.success(), "oracle comparison failed");

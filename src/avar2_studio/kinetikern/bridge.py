@@ -19,8 +19,7 @@ from __future__ import division, print_function, unicode_literals
 import ctypes
 import os
 import struct
-from ctypes import (POINTER, Structure, byref, c_char_p, c_double, c_float, c_uint8, c_uint32, c_uint64, c_void_p,
-                    sizeof)
+from ctypes import POINTER, Structure, byref, c_char_p, c_double, c_float, c_uint8, c_uint32, c_uint64, c_void_p, sizeof
 
 ABI_VERSION = 1
 DYLIB_NAME = "libkinetikern2.dylib"
@@ -555,7 +554,8 @@ class Engine(object):
         del keep, arr
         if count == 0xFFFFFFFF:
             raise EngineError(self.last_error())
-        band = lambda y0, y1: (y0, y1) if y0 == y0 and y1 == y1 else None
+        def band(y0, y1):
+            return (y0, y1) if y0 == y0 and y1 == y1 else None
         return [(band(o.left_y0, o.left_y1), band(o.right_y0, o.right_y1)) for o in out[:n]]
 
     def detect_decorated(self, packer, units_per_em, kinds, current=()):
@@ -870,7 +870,8 @@ class Engine(object):
         st = KK2MeasureStats()
         self.lib.kk2_measure(context.ptr, result.ptr, ctypes.addressof(cur), n, mptr, mlen, 1 if scope_scripts else 0,
                              ctypes.addressof(loose), ctypes.addressof(tight), int(cap), byref(st))
-        row = lambda p: (p.left, p.right, p.current, p.model, p.residual)
+        def row(p):
+            return (p.left, p.right, p.current, p.model, p.residual)
         stats = {"pairs": st.pairs, "offset": st.offset, "mae": st.mae, "rms": st.rms}
         return (stats, [row(loose[k]) for k in range(st.loosest_count)],
                 [row(tight[k]) for k in range(st.tightest_count)])
@@ -1049,7 +1050,7 @@ class Result(object):
         if not self.entry_count:
             return iter(())
         mv = memoryview(self.entries_raw).cast("B")
-        return ((k, l, r, v, imp) for (l, r, v, imp, k, _x) in _ENTRY.iter_unpack(mv))
+        return ((k, left, r, v, imp) for (left, r, v, imp, k, _x) in _ENTRY.iter_unpack(mv))
 
     def value(self, left, right):
         """Kerning of glyph indices (left, right) with entry precedence; NaN

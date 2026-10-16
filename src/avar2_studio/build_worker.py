@@ -132,7 +132,7 @@ def main(spec_path):
                    "compress": _run_compress_job}[spec["kind"]]
         result.update(handler(server, spec, progress))
         _apply_result(server, result)
-    except Exception as exc:  # noqa: BLE001 — the supervisor needs it structured
+    except Exception as exc:
         result["success"] = False
         result["error"] = str(exc)
         result["details"] = traceback.format_exc()[-2000:]

@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from fontTools.designspaceLib import (
-    AxisDescriptor,
     DesignSpaceDocument,
     InstanceDescriptor,
 )
-from glyphsLib import GSFont, load as _glyphs_load
+from glyphsLib import GSFont
+from glyphsLib import load as _glyphs_load
 
 
 def save_font_atomically(font: GSFont, path: Path) -> None:

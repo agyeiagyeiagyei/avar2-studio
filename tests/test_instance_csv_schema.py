@@ -10,7 +10,6 @@ ROND as uppercase mapping columns (back-filling every row with shadow
 user fvar axes alongside the real ones, and later failed with 'LCWD'."""
 
 import csv as csv_mod
-from pathlib import Path
 
 import pytest
 

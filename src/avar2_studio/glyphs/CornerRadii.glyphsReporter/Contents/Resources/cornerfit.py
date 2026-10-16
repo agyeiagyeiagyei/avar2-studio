@@ -224,7 +224,7 @@ def _path_depths(paths):
     probe point against all other paths."""
     rings = [[_pt(nd) for nd in p.nodes if _kind(nd) in _ONCURVE] for p in paths]
     probes = []
-    for i, ring in enumerate(rings):
+    for _i, ring in enumerate(rings):
         if not ring:
             probes.append(None)
             continue

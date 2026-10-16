@@ -26,13 +26,17 @@ fn avar2_matches_gftools_oracle() {
     let oracle_path =
         std::env::var("AVAR2_ORACLE").unwrap_or_else(|_| "/tmp/av2-oracle.ttf".to_string());
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
     let out = fontc_web::add_avar2(font_bytes, &csv, None, None).expect("add_avar2");
 
-    let rust_out = "/tmp/av2-rust.ttf";
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    let rust_out = format!("{}/target/tmp/av2-rust.ttf", env!("CARGO_MANIFEST_DIR"));
     std::fs::write(rust_out, &out).expect("write rust output");
 
     let comparator = manifest.join("spike/compare_avar2.py");

@@ -19,7 +19,6 @@ import json
 import os
 import shutil
 import subprocess
-import io
 import sys
 import tempfile
 import threading
@@ -33,15 +32,15 @@ except ImportError:
     print("Warning: PyYAML not found. Install with: pip install pyyaml", file=sys.stderr)
     yaml = None
 
-from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context
-from werkzeug.utils import secure_filename
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
+from werkzeug.utils import secure_filename
 
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
@@ -52,22 +51,22 @@ except ImportError:
     print("Install with: pip install watchdog", file=sys.stderr)
 
 try:
-    from glyphsLib import GSFont, load
+    from glyphsLib import GSFont
 except ImportError:
     print("Error: glyphsLib not found. Install with: pip install glyphsLib", file=sys.stderr)
     sys.exit(1)
 
-from . import source_font as _source_font
+from . import build_jobs as _build_jobs
+from . import config_port as _config_port
+from . import control_axes as _control_axes
 from . import csv_io as _csv_io
 from . import glyph_coverage as _glyph_coverage
-from . import control_axes as _control_axes
-from . import instance_aliases as _instance_aliases
-from . import config_port as _config_port
-from . import transforms as _transforms
 from . import grade as _grade
-from . import kinetikern as _kinetikern
 from . import grade_shadow as _grade_shadow
-from . import build_jobs as _build_jobs
+from . import instance_aliases as _instance_aliases
+from . import kinetikern as _kinetikern
+from . import source_font as _source_font
+from . import transforms as _transforms
 from .source_font import UnsupportedSourceFormat
 
 app = Flask(__name__, static_folder=None)
@@ -84,6 +83,7 @@ CORS(app)  # Enable CORS for React frontend (used during dev when the
 # Fontra same-origin via the proxy, we have to forward ws traffic
 # too.
 from flask_sock import Sock
+
 sock = Sock(app)
 
 # Directory of the bundled React build that gets shipped inside the
@@ -295,23 +295,23 @@ JOBS = _build_jobs.JobQueue(sys.modules[__name__])
 def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
     """
     Check if Glyphs file is open in Glyphs.app and has unsaved changes.
-    
+
     Returns True if file has unsaved changes, False otherwise.
     """
     if sys.platform != 'darwin':
         # Only works on macOS with Glyphs.app
         return False
-    
+
     try:
         abs_path = glyphs_path.resolve()
-        
+
         applescript = f'''
         tell application "Glyphs"
             try
                 set docPath to POSIX file "{abs_path}" as alias
                 set openDocs to documents whose path is (docPath as string)
                 set docCount to count of openDocs
-                
+
                 if docCount > 0 then
                     repeat with aDoc in openDocs
                         tell aDoc
@@ -327,7 +327,7 @@ def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
             end try
         end tell
         '''
-        
+
         result = subprocess.run(
             ['osascript', '-e', applescript],
             capture_output=True,
@@ -335,7 +335,7 @@ def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
             timeout=5,
             check=False
         )
-        
+
         if result.returncode == 0:
             return result.stdout.strip().lower() == 'true'
         return False
@@ -346,18 +346,18 @@ def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
 
 def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
     """
-    Force Glyphs.app to reload the document by saving unsaved changes, 
+    Force Glyphs.app to reload the document by saving unsaved changes,
     then closing and reopening all windows of the document.
-    
+
     This ensures the document reflects external changes without save conflicts.
-    
+
     Flow:
     1. Save any unsaved changes in Glyphs.app (preserves user work)
     2. Re-save our changes (since Glyphs.app may have overwritten them)
     3. Close all windows of the document
     4. Wait briefly for close to complete
     5. Reopen the document
-    
+
     Args:
         glyphs_path: Path to the Glyphs file
         font_object: Optional font object to re-save after Glyphs.app saves
@@ -372,12 +372,12 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
         # Touch the file to update its modification time
         current_time = time.time()
         os.utime(glyphs_path, (current_time, current_time))
-        
+
         # On macOS, use AppleScript to handle save/close/reopen
         if sys.platform == 'darwin':
             try:
                 abs_path = glyphs_path.resolve()
-                
+
                 # Step 1: Save any unsaved changes in Glyphs.app
                 # Step 2: Re-save our changes (reload from disk and save)
                 # Step 3: Close all windows of the document
@@ -389,7 +389,7 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                         set docPath to POSIX file "{abs_path}" as alias
                         set openDocs to documents whose path is (docPath as string)
                         set docCount to count of openDocs
-                        
+
                         if docCount > 0 then
                             -- Step 1: Save any unsaved changes in all open windows
                             -- Reference documents from the openDocs list
@@ -400,7 +400,7 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                                     end if
                                 end tell
                             end repeat
-                            
+
                             -- Step 2: Close all windows of this document
                             -- Close all documents from the openDocs list
                             repeat with aDoc in openDocs
@@ -408,17 +408,17 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                                     close saving no
                                 end tell
                             end repeat
-                            
+
                             -- Step 3: Wait for close to complete
                             delay 0.5
-                            
+
                             -- Step 4: Reopen the document
                             open docPath
                         end if
                     end try
                 end tell
                 '''
-                
+
                 # Run AppleScript with longer timeout for save/close/reopen operations
                 result = subprocess.run(
                     ['osascript', '-e', applescript],
@@ -426,7 +426,7 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                     timeout=10,
                     check=False
                 )
-                
+
                 # After Glyphs.app saves, we need to re-save our changes
                 # (since Glyphs.app may have overwritten them with its in-memory state)
                 if result.returncode == 0 and font_object is not None:
@@ -434,7 +434,7 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                     time.sleep(0.3)
                     # Re-save our changes
                     font_object.save(str(glyphs_path))
-                    print(f"Re-saved changes after Glyphs.app save", file=sys.stderr)
+                    print("Re-saved changes after Glyphs.app save", file=sys.stderr)
                 elif result.returncode == 0:
                     # If no font object provided, reload from disk and save
                     # This ensures our changes are preserved
@@ -442,8 +442,8 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                     from glyphsLib import load
                     font = load(str(glyphs_path))
                     font.save(str(glyphs_path))
-                    print(f"Re-saved changes after Glyphs.app save", file=sys.stderr)
-                    
+                    print("Re-saved changes after Glyphs.app save", file=sys.stderr)
+
             except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
                 # AppleScript failed - log but don't fail
                 print(f"Warning: Could not force reload Glyphs document: {e}", file=sys.stderr)
@@ -491,16 +491,16 @@ def get_axes_from_glyphs(glyphs_path: Path) -> List[Dict]:
 def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = True) -> Path:
     """
     Build variable font from Glyphs file using fontc (with fontmake fallback).
-    
+
     Args:
         glyphs_path: Path to Glyphs file
         output_dir: Directory to output the font
         use_fontc: If True, try fontc first, fallback to fontmake on failure
-    
+
     Returns path to the built variable font TTF.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Try fontc first if enabled
     if use_fontc:
         # Use fontc from PATH (pip-installed)
@@ -514,7 +514,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
                 "--output-file", str(output_file),
                 str(glyphs_path)
             ]
-            
+
             print(f"Building variable font with fontc: {' '.join(cmd)}", file=sys.stderr)
             result = subprocess.run(
                 cmd,
@@ -522,7 +522,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
                 text=True,
                 cwd=glyphs_path.parent
             )
-            
+
             if result.returncode == 0 and output_file.exists():
                 print("✅ fontc compilation successful", file=sys.stderr)
                 return output_file
@@ -530,8 +530,8 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
                 error_msg = result.stderr or result.stdout or "Unknown error"
                 print(f"fontc failed, falling back to fontmake: {error_msg}", file=sys.stderr)
         else:
-            print(f"fontc not found in PATH, using fontmake", file=sys.stderr)
-    
+            print("fontc not found in PATH, using fontmake", file=sys.stderr)
+
     # Fallback to fontmake
     cmd = [
         "fontmake",
@@ -539,7 +539,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
         "-g", str(glyphs_path),
         "--output-dir", str(output_dir)
     ]
-    
+
     print(f"Building variable font with fontmake: {' '.join(cmd)}", file=sys.stderr)
     result = subprocess.run(
         cmd,
@@ -547,7 +547,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
         text=True,
         cwd=glyphs_path.parent
     )
-    
+
     if result.returncode != 0:
         error_msg = result.stderr or result.stdout or "Unknown error"
         print(f"fontmake failed with exit code {result.returncode}", file=sys.stderr)
@@ -555,13 +555,13 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
         if result.stdout:
             print(f"fontmake stdout: {result.stdout}", file=sys.stderr)
         raise RuntimeError(f"fontmake failed: {error_msg}")
-    
+
     # Find the generated variable font
     # fontmake may create files directly in output_dir or in a subdirectory
     variable_fonts = list(output_dir.rglob("*.ttf"))
     if not variable_fonts:
         raise RuntimeError(f"No variable font found in {output_dir}")
-    
+
     # Return the first variable font found
     # (In practice, there should be only one)
     return variable_fonts[0]
@@ -571,7 +571,7 @@ def get_axes_from_built_font(font_path: Path) -> List[Dict]:
     """
     Extract axes from built variable font (for verification).
     This is used after building to confirm the axes match the Glyphs file.
-    
+
     Returns list of axis dicts with:
     - tag: axis tag
     - name: axis name
@@ -580,20 +580,19 @@ def get_axes_from_built_font(font_path: Path) -> List[Dict]:
     - default: default value
     """
     font = TTFont(str(font_path))
-    
+
     if "fvar" not in font:
         return []
-    
+
     fvar = font["fvar"]
     axes = []
-    
+
     for axis in fvar.axes:
         tag = axis.axisTag
-        
+
         # Get axis name from STAT table if available
         name = tag  # Default to tag
         if "STAT" in font:
-            stat = font["STAT"]
             # Try to find axis name in STAT table
             # This is simplified - STAT table parsing is complex
             # For now, use common axis names
@@ -622,7 +621,7 @@ def get_axes_from_built_font(font_path: Path) -> List[Dict]:
             # overlay in get_axes() for transform-injected axes like SPAC.
             "has_master_coverage": True,
         })
-    
+
     return axes
 
 
@@ -675,7 +674,7 @@ def _source_instance_name(display_name: str) -> str:
     it silently finds nothing."""
     try:
         aliases = _instance_aliases.load(ORIGINAL_PATH) if ORIGINAL_PATH else {}
-    except Exception:  # noqa: BLE001
+    except Exception:
         return display_name
     for old, new in aliases.items():
         if new == display_name:
@@ -687,7 +686,7 @@ def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates
     """
     Update instance coordinates in Glyphs file.
     Modifies instance.axes values directly.
-    
+
     Returns True if update was successful, False otherwise.
     """
     try:
@@ -753,7 +752,7 @@ def get_instances():
         try:
             source_axis_tags = {str(ax.get("tag", ""))
                                 for ax in get_axes_from_glyphs(GLYPHS_PATH)}
-        except Exception:  # noqa: BLE001
+        except Exception:
             source_axis_tags = set()
         csv_path = _get_preview_csv_path()
         csv_order: Dict[str, int] = {}
@@ -809,7 +808,7 @@ def get_instances():
         # source divergence check (it compares key sets).
         try:
             ctl_values = _control_axes.instance_values(ORIGINAL_PATH)
-        except Exception:  # noqa: BLE001
+        except Exception:
             ctl_values = {}
         if ctl_values:
             for inst in instances:
@@ -1102,7 +1101,7 @@ def _apply_transform_chain(vf_path):
     _transforms.discover()
     try:
         chain = _transforms.active(ORIGINAL_PATH)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"transforms: could not resolve active chain: {e}", file=sys.stderr)
         return vf_path
     out = Path(vf_path)
@@ -1125,7 +1124,7 @@ def _apply_transform_chain(vf_path):
     if injected_tags:
         try:
             out = Path(_strip_injected_axes(out, injected_tags))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"transforms: could not strip prior injected axes: {e}", file=sys.stderr)
     # Kinetikern's per-instance spacing goes in first, straight after the
     # compile and the default relocation: phantom-point tuples on the
@@ -1136,7 +1135,7 @@ def _apply_transform_chain(vf_path):
     try:
         out = Path(_kinetikern.inject.apply_to_font(
             out, ORIGINAL_PATH, log=lambda m: print(m, file=sys.stderr)))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"kinetikern: injection failed: {e}", file=sys.stderr)
         errors.append(f"Kinetikern: {e}")
     # Source-stage transforms' font-stage apply() (round_corners' ROND
@@ -1153,7 +1152,7 @@ def _apply_transform_chain(vf_path):
                 out = Path(result)
             elif result is not None:
                 raise RuntimeError(f"returned a path that does not exist: {result}")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"transform '{transform.spec.id}' failed: {e}", file=sys.stderr)
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
@@ -1173,7 +1172,7 @@ def _stamp_control_instance_values(vf_path):
         return vf_path
     try:
         values = _control_axes.instance_values(ORIGINAL_PATH)
-    except Exception:  # noqa: BLE001
+    except Exception:
         values = {}
     if not values:
         return vf_path
@@ -1201,7 +1200,7 @@ def _stamp_control_instance_values(vf_path):
             print(f"control axes: stamped {stamped} per-instance value(s) "
                   f"onto fvar instances", file=sys.stderr)
         font.close()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"control axes: instance stamping failed: {exc}", file=sys.stderr)
     return vf_path
 
@@ -1288,11 +1287,11 @@ def _resolve_active_source() -> Optional[Path]:
             # Regenerating rewrites the watched source file — the caller triggers
             # the build itself, so suppress the watcher for it.
             _suppress_watcher()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
         try:
             any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
-        except Exception:  # noqa: BLE001
+        except Exception:
             any_layers = False
 
         # 2) grade braces, composed onto the SAME shadow. fresh_shadow only when
@@ -1307,7 +1306,7 @@ def _resolve_active_source() -> Optional[Path]:
                     shadow = grade_shadow
                     any_grades = True
                     _suppress_watcher()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             LAST_GRADE_ERROR = str(exc)
             print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
 
@@ -1329,7 +1328,7 @@ def _resolve_active_source() -> Optional[Path]:
             # Deterministic order regardless of sidecar entry order: slant
             # (10) before rounding (50), so rounds land on slanted drawings.
             src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
         if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
             current = None
@@ -1354,7 +1353,7 @@ def _resolve_active_source() -> Optional[Path]:
                 _suppress_watcher()
                 shadow = transformed
                 any_source = True
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 name = current.spec.id if current is not None else "source-stage transforms"
                 LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
                 print(f"Warning: source transform failed, building without it: "
@@ -1439,7 +1438,7 @@ def _run_shadow_regen_and_build():
         _resolve_active_source()
         try:
             trigger_build()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Warning: rebuild after control-axis change failed: {exc}", file=sys.stderr)
     finally:
         with _REBUILD_TIMER_LOCK:
@@ -1616,7 +1615,7 @@ def get_font():
         font_path = VARIABLE_FONT_PATH
     else:
         return jsonify({"error": "Variable font not built yet."}), 404
-    
+
     # ?download=1 → attachment. The Preview tab's Download button is a
     # plain anchor at this URL; with the inline-with-filename disposition
     # the anchor's download attribute never triggered a save, so the
@@ -1642,12 +1641,12 @@ def get_font():
 def get_text_width():
     """
     Measure advance width of text at specific variable font coordinates.
-    
+
     Query parameters:
     - text: Text string to measure (default: sample text)
     - coordinates: JSON object with axis coordinates (e.g., {"XTRA": 627.0, "XOPQ": 187.672})
     - font_size_rem: Font size in rem units (default: 2.0)
-    
+
     Returns:
     - width_pixels: Total advance width in pixels
     - width_font_units: Total advance width in font units
@@ -1655,20 +1654,20 @@ def get_text_width():
     - upm: Units per em from font
     """
     try:
-        import tempfile
         import os
-        
+        import tempfile
+
         # Get parameters
         text = request.args.get('text', 'The Quick Brown Fox Jumps Over The Lazy Dog 0123456789 &!')
         font_size_rem = float(request.args.get('font_size_rem', 2.0))
-        
+
         # Parse coordinates from JSON string
         coordinates_json = request.args.get('coordinates', '{}')
         try:
             coordinates = json.loads(coordinates_json)
         except json.JSONDecodeError:
             return jsonify({"error": "Invalid coordinates JSON"}), 400
-        
+
         # Measure against whatever the avar2 build produced (the same font
         # the preview is rendering). SPAC-axis lookup used to run here as a
         # preferred path, but SPAC is deferred to v2 — falling back to
@@ -1678,13 +1677,13 @@ def get_text_width():
             font_path = VARIABLE_FONT_PATH
         else:
             return jsonify({"error": "Variable font not built yet."}), 404
-        
+
         # Load font
         font = TTFont(str(font_path))
-        
+
         # Get UPM (units per em)
         upm = font['head'].unitsPerEm
-        
+
         # Check if font has fvar table (variable font)
         if 'fvar' not in font:
             # Use font as-is for non-variable fonts
@@ -1694,7 +1693,7 @@ def get_text_width():
             fvar = font['fvar']
             # Map lowercase input tags to original fvar axis tags
             axis_tag_map = {axis.axisTag.lower(): axis.axisTag for axis in fvar.axes}
-            
+
             # Build location dictionary for instancer
             # Use original axis tag case from fvar table
             location = {}
@@ -1704,16 +1703,16 @@ def get_text_width():
                     # Use original case from fvar table
                     original_tag = axis_tag_map[tag_lower]
                     location[original_tag] = float(value)
-            
+
             # Set other axes to their defaults from fvar table
             for axis in fvar.axes:
                 if axis.axisTag not in location:
                     location[axis.axisTag] = axis.defaultValue
-            
+
             # Create a temporary instance font
             with tempfile.NamedTemporaryFile(suffix='.ttf', delete=False) as tmp_file:
                 tmp_path = tmp_file.name
-            
+
             try:
                 # Instantiate the font at the specified location
                 instance_font = instancer.instantiateVariableFont(font, location)
@@ -1728,17 +1727,18 @@ def get_text_width():
                 if os.path.exists(tmp_path):
                     try:
                         os.unlink(tmp_path)
-                    except:
+                    except Exception:
                         pass
-        
+
         # Shape the text with uharfbuzz against the instantiated font.
         # This applies kerning (GPOS) and substitutions (GSUB) the same way
         # a browser shaper does, so the displayed Width matches the laid-out
         # width — not just the sum of raw hmtx advances. The per-glyph
         # breakdown also falls out of the same shape() call, which is what
         # the grade-master delta view needs.
-        import uharfbuzz as hb
         from io import BytesIO
+
+        import uharfbuzz as hb
 
         font_buffer = BytesIO()
         instance_font.save(font_buffer)
@@ -1797,7 +1797,7 @@ def get_text_width():
             "font_size_pixels": font_size_pixels,
             "per_glyph": per_glyph,
         })
-    
+
     except Exception as e:
         print(f"Error measuring text width: {e}", file=sys.stderr)
         import traceback
@@ -1874,7 +1874,6 @@ def create_instance():
         # supply a value, NOT to 0. wght=0 is outside the [100, 900] axis
         # range and would silently corrupt the row; defaulting to the
         # source's own declared default value keeps the row valid.
-        axis_defaults = {axis["tag"].upper(): axis["default"] for axis in source_axes}
 
         # Evolve the CSV schema: if the source declares an axis the CSV
         # header doesn't list yet, append it. This handles the case where
@@ -1907,7 +1906,7 @@ def create_instance():
             if ctl_values:
                 _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
                                                   ctl_values)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Warning: could not save control-axis values: {exc}",
                   file=sys.stderr)
 
@@ -1948,7 +1947,6 @@ def create_instance():
             writer.writerows(rows)
         _update_csv_modification_time(csv_path)
         print(f"Created studio-only instance '{instance_name}' in CSV", file=sys.stderr)
-        success = True
     except Exception as e:
         print(f"Error creating studio-only instance in CSV: {e}", file=sys.stderr)
         import traceback
@@ -2022,7 +2020,7 @@ def update_instance(instance_name: str):
     try:
         _ctl_tags = {str(a.get("tag", "")).lower()
                      for a in _control_axes.list_axes(ORIGINAL_PATH)}
-    except Exception:  # noqa: BLE001
+    except Exception:
         _ctl_tags = set()
     control_values = {tag: value for tag, value in coordinates.items()
                       if str(tag).lower() in _ctl_tags}
@@ -2031,7 +2029,7 @@ def update_instance(instance_name: str):
         try:
             _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
                                               control_values)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Warning: could not save control-axis values: {exc}",
                   file=sys.stderr)
 
@@ -2131,7 +2129,7 @@ def update_instance(instance_name: str):
                 print(f"Warning: Could not update CSV: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc(file=sys.stderr)
-    
+
     # Sync CSV to pick up source-file coord changes (skip the in-flight
     # edit; that row was already updated above). Skip the sync entirely
     # for csv-only edits — we just wrote the user's edit to CSV and
@@ -2146,7 +2144,7 @@ def update_instance(instance_name: str):
                     print("CSV synced after instance update", file=sys.stderr)
             except Exception as e:
                 print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
-    
+
     if csv_only_flag:
         # NO rebuild for auto-saved coordinate edits. The instance
         # rows preview through font-variation-settings on the
@@ -2161,7 +2159,7 @@ def update_instance(instance_name: str):
         # Explicit source writeback: rebuild immediately (non-blocking —
         # trigger_build submits to the job queue).
         trigger_build()
-    
+
     message_parts = []
     if glyphs_updated:
         message_parts.append(f"Updated instance '{instance_name}' in source file")
@@ -2186,7 +2184,7 @@ def rename_instance(instance_name: str):
     new_name = data['new_name'].strip()
     if not new_name:
         return jsonify({"error": "New instance name cannot be empty"}), 400
-    
+
     if new_name == instance_name:
         return jsonify({"error": "New name is the same as current name"}), 400
 
@@ -2204,7 +2202,7 @@ def rename_instance(instance_name: str):
                 # resurrects.
                 try:
                     _instance_aliases.record(ORIGINAL_PATH, instance_name, new_name)
-                except Exception as alias_exc:  # noqa: BLE001
+                except Exception as alias_exc:
                     print(f"Warning: could not persist instance rename: {alias_exc}", file=sys.stderr)
         else:
             # Studio-only: rename happens in CSV only, below.
@@ -2214,17 +2212,17 @@ def rename_instance(instance_name: str):
             # Keep any grade attached to this instance across the rename.
             try:
                 _grade.rename_instance(ORIGINAL_PATH, instance_name, new_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             try:
                 _kinetikern.sidecar.rename_instance(ORIGINAL_PATH, instance_name, new_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             # Same for per-instance control-axis values.
             try:
                 _control_axes.rename_instance_values(ORIGINAL_PATH,
                                                      instance_name, new_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             # Update preview CSV if it exists
             csv_path = _get_preview_csv_path()
@@ -2239,17 +2237,17 @@ def rename_instance(instance_name: str):
                             if row.get("Instance Name", "").strip() == instance_name:
                                 row["Instance Name"] = new_name
                             rows.append(row)
-                    
+
                     # Write updated CSV
                     _csv_io.backup_sidecar(csv_path)
                     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
-                    
+
                     # Update modification time cache
                     _update_csv_modification_time(csv_path)
-                    
+
                     print(f"Renamed instance '{instance_name}' to '{new_name}' in preview CSV", file=sys.stderr)
                 except Exception as e:
                     print(f"Warning: Could not update instance name in preview CSV: {e}", file=sys.stderr)
@@ -2546,18 +2544,18 @@ def _get_avar2_csv_path() -> Optional[Path]:
     preview_csv = _get_preview_csv_path()
     if preview_csv and preview_csv.exists():
         return preview_csv
-    
+
     # Fallback to explicit CSV path if set
     global CSV_PATH
     if CSV_PATH:
         return CSV_PATH
-    
+
     # Default: look for avar2-mappings.csv in same directory as Glyphs file
     if GLYPHS_PATH:
         default_csv = GLYPHS_PATH.parent / "avar2-mappings.csv"
         if default_csv.exists():
             return default_csv
-    
+
     return None
 
 
@@ -2660,10 +2658,10 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
     # If CSV exists, leave it alone.
     if csv_path.exists():
         return csv_path
-    
+
     if not GLYPHS_PATH or not GLYPHS_PATH.exists():
         return None
-    
+
     try:
         import csv
         font, _fmt = _source_font.load_source(GLYPHS_PATH)
@@ -2708,7 +2706,7 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
     config_path = _get_preview_config_path()
     if not config_path:
         return None
-    
+
     # Don't overwrite existing config — except to repair the empty-
     # fvarInstances case: an instance-less source produced ``ttf: []``,
     # which the gftools builder's schema rejects (failing every avar2
@@ -2730,10 +2728,10 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
                 return config_path
         except Exception:
             return config_path
-    
+
     if not GLYPHS_PATH or not GLYPHS_PATH.exists():
         return None
-    
+
     try:
         import yaml
         font, _fmt = _source_font.load_source(GLYPHS_PATH)
@@ -2761,7 +2759,7 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
             font_filename = f"{family_name}[{','.join(parametric_tags)}].ttf"
         else:
             font_filename = f"{family_name}-VF.ttf"
-        
+
         # Use absolute path for sources to avoid path issues
         sources_path = str(GLYPHS_PATH.resolve())
 
@@ -2776,18 +2774,18 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
         }
         if fvar_instances:
             config["fvarInstances"] = {font_filename: fvar_instances}
-        
+
         # Write config
         with config_path.open("w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        
+
         print(f"Initialized preview config: {config_path}", file=sys.stderr)
         return config_path
     except Exception as e:
         print(f"Error initializing preview config: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-    
+
     return None
 
 
@@ -2929,7 +2927,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
         except Exception as e:
             print(f"Error creating axis metadata file: {e}", file=sys.stderr)
             return {}
-    
+
     # Load existing metadata
     try:
         with metadata_path.open("r", encoding="utf-8") as f:
@@ -2937,7 +2935,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     except Exception as e:
         print(f"Error loading axis metadata: {e}", file=sys.stderr)
         metadata = {}
-    
+
     # Get parametric axes from the source file and add to metadata if missing.
     if GLYPHS_PATH and GLYPHS_PATH.exists():
         try:
@@ -2984,13 +2982,13 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
                     if metadata[axis_tag_upper].get("display_name") == axis_tag_upper:
                         metadata[axis_tag_upper]["display_name"] = axis_name
                         metadata_updated = True
-            
+
             # Save updated metadata if we added any parametric axes
             if metadata_updated:
                 _save_axis_metadata(metadata)
         except Exception as e:
             print(f"Error reading axes from Glyphs file for metadata: {e}", file=sys.stderr)
-    
+
     return metadata
 
 
@@ -2999,7 +2997,7 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
     metadata_path = _get_avar2_metadata_path()
     if not metadata_path:
         return False
-    
+
     try:
         _csv_io.backup_sidecar(metadata_path)
         with metadata_path.open("w", encoding="utf-8") as f:
@@ -3045,7 +3043,7 @@ def _non_mapping_axis_tags() -> set:
             tag = getattr(t.spec, "injected_axis_tag", None)
             if tag:
                 tags.add(str(tag).upper())
-    except Exception:  # noqa: BLE001 — a broken user transform must not block saves
+    except Exception:
         pass
     return tags
 
@@ -3054,11 +3052,11 @@ def _check_csv_external_edit(csv_path: Path) -> bool:
     """Check if CSV was modified externally. Returns True if modified externally."""
     csv_str = str(csv_path)
     current_mtime = csv_path.stat().st_mtime if csv_path.exists() else 0
-    
+
     if csv_str in _CSV_MODIFICATION_TIMES:
         if current_mtime > _CSV_MODIFICATION_TIMES[csv_str]:
             return True
-    
+
     _CSV_MODIFICATION_TIMES[csv_str] = current_mtime
     return False
 
@@ -3105,15 +3103,15 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
     import csv
     try:
         # Use normalized read function
-        
+
         rows, fieldnames, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
+
         if not fieldnames:
             return False
-        
+
         # Create new row with instance name
         new_row = {"Instance Name": instance_name}
-        
+
         # Initialize all columns (use normalized fieldnames)
         for col in fieldnames:
             if col == "Instance Name":
@@ -3136,17 +3134,17 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
             else:
                 # Other columns: blank
                 new_row[col] = ""
-        
+
         # Add new row
         rows.append(new_row)
-        
+
         # Write updated CSV (use normalized fieldnames)
         _csv_io.backup_sidecar(csv_path)
         with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
-        
+
         return True
     except Exception as e:
         print(f"Error adding instance to CSV: {e}", file=sys.stderr)
@@ -3163,15 +3161,12 @@ def get_avar2_instances():
                 "error": "avar2-mappings.csv not found",
                 "suggestion": "Set CSV path or place avar2-mappings.csv in same directory as Glyphs file"
             }), 404
-        
+
         # Import matching function
-        
-        # Get Glyphs instances
-        glyphs_instances = _csv_io.get_glyphs_instances(GLYPHS_PATH)
-        
+
         # Get matches
         matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
-        
+
         # Add missing instances to CSV — unless an existing row already
         # sits at the instance's exact parametric location. A RENAMED row
         # keeps its coordinates, and the source still carries the old
@@ -3216,7 +3211,7 @@ def get_avar2_instances():
                     continue
                 if _add_missing_instance_to_csv(instance_name, glyphs_coords, csv_path):
                     added_count += 1
-        
+
         # If we added instances, reload matches
         if added_count > 0:
             matches = _csv_io.match_instances(GLYPHS_PATH, csv_path)
@@ -3340,7 +3335,7 @@ def glyph_coverage():
                     corner_of = _control_axes.corner_name_resolver(
                         font, control_idx, ORIGINAL_PATH
                     )
-                except Exception as corner_exc:  # noqa: BLE001
+                except Exception as corner_exc:
                     print(f"Warning: corner-name resolution unavailable: {corner_exc}", file=sys.stderr)
             for ax in sidecar_axes:
                 tag_lower = (ax.get("tag") or "").lower()
@@ -3519,7 +3514,7 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
         import glyphsLib
         import ufoLib2
         from fontmake.instantiator import Instantiator
-        from fontTools.designspaceLib import SourceDescriptor, InstanceDescriptor
+        from fontTools.designspaceLib import InstanceDescriptor, SourceDescriptor
 
         src_dir = export_dir / "sources"
         src_dir.mkdir(parents=True, exist_ok=True)
@@ -3780,7 +3775,7 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                        for k, v in requested.items()):
                     mapped = {str(t): float(v) for t, v in (m.get("out") or {}).items()}
                     break
-        except Exception as exc:  # noqa: BLE001 — fall back to the table
+        except Exception as exc:
             print(f"export: authored-row lookup failed ({exc}); using the built table",
                   file=sys.stderr)
         if mapped is None:
@@ -3945,7 +3940,7 @@ def update_transforms():
         previous = {}
         try:
             previous = {t.get("id"): t for t in _transforms.available(ORIGINAL_PATH)}
-        except Exception as prev_exc:  # noqa: BLE001
+        except Exception as prev_exc:
             print(f"transforms: could not read previous state: {prev_exc}", file=sys.stderr)
         # Guardrail: a transform whose engine reads specific axes
         # (round_corners' XOPQ/XTRA radius formula) is refused on a
@@ -4052,7 +4047,7 @@ def _grade_instance_coords():
         font, _fmt = _source_font.load_source_cached(ORIGINAL_PATH)
         for inst in _source_font.get_source_instances(font):
             coords[inst["name"]] = dict(inst.get("coordinates", {}))
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     try:
         csv_path = _get_preview_csv_path()
@@ -4073,7 +4068,7 @@ def _grade_instance_coords():
                                 c[tag] = float(v)
                             except (TypeError, ValueError):
                                 pass
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return coords
 
@@ -4087,7 +4082,7 @@ def _grade_param_ranges():
         for t in _grade.PARAM_TAGS:
             if t in by_tag:
                 ranges[t] = (by_tag[t]["min"], by_tag[t]["max"])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
     return ranges
 
@@ -4225,12 +4220,12 @@ def _grade_state_payload():
             name: _grade.max_pct_for(coords[name], param_ranges)
             for name in coords if param_ranges
         }
-    except Exception:  # noqa: BLE001
+    except Exception:
         coords, caps = {}, {}
     data["max_pct"] = caps
     try:
         data["diagnostics"] = _grade_diagnostics(data, coords, param_ranges)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Warning: grade diagnostics failed: {exc}", file=sys.stderr)
         data["diagnostics"] = []
     data["sidecar_path"] = str(_grade.sidecar_path_for(ORIGINAL_PATH))
@@ -4244,7 +4239,7 @@ def get_grade():
         return jsonify(_grade._empty())
     try:
         return jsonify(_grade_state_payload())
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"Error reading grade: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
@@ -4390,7 +4385,7 @@ def _kinetikern_source_names() -> Dict[int, str]:
     names fontc replaces with production names in the build (euro -> Euro)."""
     try:
         font, fmt = _source_font.load_source_cached(ORIGINAL_PATH)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
     if "glyphs" not in str(fmt).lower():
         return {}
@@ -4506,7 +4501,7 @@ def _source_glyph_sigs():
     try:
         font, _fmt = _source_font.load_source(ORIGINAL_PATH)
         sigs = {g.name: _control_axes.glyph_masters_sig(font, g.name) for g in font.glyphs}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Warning: could not fingerprint source glyphs: {exc}", file=sys.stderr)
         return None
     _SOURCE_GLYPH_SIGS = (mtime, sigs)
@@ -4726,6 +4721,7 @@ def _stop_fontra() -> None:
 
 # Make sure Fontra is cleaned up when the studio exits.
 import atexit as _atexit
+
 _atexit.register(_stop_fontra)
 
 
@@ -4874,7 +4870,7 @@ _FONTRA_STUDIO_SHIM_JS = """
     const keys = [cfg.axis_name, cfg.tag].filter(Boolean);
     // Case-insensitive and regex-escaped: labels print the AUTHORED tag
     // case, and a tag drift on either side must never silently unmatch.
-    const tagEsc = String(cfg.tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tagEsc = String(cfg.tag).replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
     const labelRe = new RegExp('(^|[\\\\s,])' + tagEsc + '\\\\s+-?[\\\\d.]+', 'i');
     // The selected glyph's raw sources — their SPARSE locations keep
     // the authored pins verbatim, unlike the panel items' dense (all
@@ -5350,8 +5346,8 @@ def _proxy_to_fontra(upstream_path: str):
     if FONTRA_PROCESS is None or FONTRA_PROCESS.poll() is not None:
         return jsonify({"error": "Fontra subprocess is not running"}), 503
 
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     upstream = f"http://127.0.0.1:{FONTRA_PORT}{upstream_path}"
     if request.query_string:
@@ -5811,7 +5807,7 @@ def reseed_control_axis_layers(tag: str):
         result = _control_axes.reseed_layers(ORIGINAL_PATH, tag, layers, force)
     except KeyError:
         return jsonify({"error": f"control axis '{tag}' not found"}), 404
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"Error re-seeding control axis layers: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
@@ -5879,7 +5875,7 @@ def control_axis_reference_metrics(tag: str):
     axis = _control_axes.find_axis(ORIGINAL_PATH, tag)
     if axis is None:
         return jsonify({"error": f"No secondary axis '{tag}'"}), 404
-    layers = [l for l in (axis.get("layers") or []) if l.get("glyph") == glyph]
+    layers = [lyr for lyr in (axis.get("layers") or []) if lyr.get("glyph") == glyph]
     if not layers and explicit_location is None:
         return jsonify({"error": f"'{glyph}' has no layers on '{tag}'"}), 404
     layer = layers[min(index, len(layers) - 1)] if layers else {}
@@ -5899,7 +5895,7 @@ def control_axis_reference_metrics(tag: str):
                 for ax in _source_font.get_axes(src_font):
                     name_to_tag[str(ax.get("name") or "").lower()] = str(ax.get("tag") or "")
                     name_to_tag[str(ax.get("tag") or "").lower()] = str(ax.get("tag") or "")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             for a_tag in fvar_axes:
                 name_to_tag.setdefault(a_tag.lower(), a_tag)
@@ -6142,16 +6138,16 @@ def get_avar2_axes():
             return jsonify({
                 "error": "avar2-mappings.csv not found"
             }), 404
-        
-        
+
+
         rows, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
 
         # Normalize traditional axis names
         traditional_axes = [_csv_io.normalize_in_axis_name(col) for col in in_cols]
-        
+
         # Load metadata
         metadata = _load_axis_metadata()
-        
+
         # Get parametric axes from the source file and populate metadata.
         glyphs_axes_info = {}
         if GLYPHS_PATH and GLYPHS_PATH.exists():
@@ -6172,12 +6168,12 @@ def get_avar2_axes():
                     }
             except Exception as e:
                 print(f"Warning: Could not read axes from source file: {e}", file=sys.stderr)
-        
+
         # Build axes with metadata
         # If axis doesn't exist in metadata, create default entry and save it
         axes_with_metadata = {}
         metadata_updated = False
-        
+
         # First, populate parametric axes from Glyphs file (these are in out_cols)
         for col in out_cols:
             col_upper = col.upper()
@@ -6226,7 +6222,7 @@ def get_avar2_axes():
                     }
                     metadata_updated = True
                 axes_with_metadata[col_upper] = metadata[col_upper]
-        
+
         # Then, handle traditional axes (not in Glyphs file)
         # Map of normalized tags to default display names
         default_display_names = {
@@ -6239,7 +6235,7 @@ def get_avar2_axes():
             "slnt": "Slant",
             "ital": "Italic"
         }
-        
+
         for col in in_cols:
             if col not in metadata:
                 # Create default entry for traditional axis (not in Glyphs file)
@@ -6270,13 +6266,13 @@ def get_avar2_axes():
                 if metadata[col].get("is_parametric") != desired_flag:
                     metadata[col]["is_parametric"] = desired_flag
                     metadata_updated = True
-                
+
                 # Update display_name if it's still the column name (tag) - migrate to proper display name
                 normalized_tag = _csv_io.normalize_in_axis_name(col)
                 if metadata[col].get("display_name") == col and normalized_tag.lower() in default_display_names:
                     metadata[col]["display_name"] = default_display_names[normalized_tag.lower()]
                     metadata_updated = True
-            
+
             axes_with_metadata[col] = metadata[col]
 
         # Repair traditional axes still stuck on the placeholder extent —
@@ -6393,15 +6389,15 @@ def delete_instance(instance_name: str):
         if not csv_only_flag and not source_only_flag:
             try:
                 _grade.remove_instance_grade(ORIGINAL_PATH, instance_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             try:
                 _kinetikern.sidecar.remove_entry(ORIGINAL_PATH, instance_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             try:
                 _control_axes.remove_instance_values(ORIGINAL_PATH, instance_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         # Source-file delete fires for default + source_only. CSV-only
@@ -6431,14 +6427,14 @@ def delete_instance(instance_name: str):
                         # Skip the instance being deleted
                         if row.get("Instance Name", "").strip() != instance_name:
                             rows.append(row)
-                
+
                 # Write updated CSV (without deleted instance)
                 _csv_io.backup_sidecar(csv_path)
                 with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(rows)
-                
+
                 # Update modification time cache
                 _update_csv_modification_time(csv_path)
                 print(f"Removed instance '{instance_name}' from preview CSV", file=sys.stderr)
@@ -6475,47 +6471,47 @@ def add_avar2_axis():
         csv_path = _get_avar2_csv_path()
         if not csv_path or not csv_path.exists():
             return jsonify({"error": "avar2-mappings.csv not found"}), 404
-        
+
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
                 "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
-        
+
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
-        
+
         axis_name = data.get("axis_name")  # CSV column header (e.g., "WGHT")
         display_name = data.get("display_name", axis_name)  # Display name (e.g., "Weight")
         registered_tag = data.get("registered_tag", "").lower()  # OpenType tag (e.g., "wght")
         default_value = data.get("default_value", 0)
         min_value = data.get("min", -1000)
         max_value = data.get("max", 1000)
-        
+
         # Validate inputs
         if not axis_name:
             return jsonify({"error": "axis_name is required"}), 400
-        
+
         is_valid, error_msg = _validate_axis_tag(registered_tag)
         if not is_valid:
             return jsonify({"error": f"Invalid registered tag: {error_msg}"}), 400
-        
+
         # Check if tag exists in Glyphs file (parametric axes) - cannot add traditional axis with same tag
         glyphs_axis_tags = _get_glyphs_axis_tags()
         if registered_tag.lower() in glyphs_axis_tags:
             return jsonify({
                 "error": f"Registered tag '{registered_tag}' already exists in Glyphs file as a parametric axis. Traditional axes cannot use tags that exist in the Glyphs file."
             }), 400
-        
+
         if min_value < -1000 or min_value > 1000:
             return jsonify({"error": "min must be between -1000 and 1000"}), 400
         if max_value < -1000 or max_value > 1000:
             return jsonify({"error": "max must be between -1000 and 1000"}), 400
         if min_value >= max_value:
             return jsonify({"error": "min must be less than max"}), 400
-        
+
         # Normalized up front: the duplicate-tag check below compares against
         # it, and it used to be assigned only after that loop — a
         # use-before-assignment that stayed hidden until the font had axis
@@ -6527,15 +6523,15 @@ def add_avar2_axis():
         for existing_axis, existing_meta in metadata.items():
             if existing_meta.get("registered_tag") == registered_tag and existing_axis != axis_name_normalized:
                 return jsonify({"error": f"Registered tag '{registered_tag}' already used by axis '{existing_axis}'"}), 400
-        
+
         # Read CSV using normalized function
-        
+
         rows, fieldnames, _, _, fieldname_mapping = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
 
         # Check if axis already exists (case-insensitive)
         if axis_name_normalized in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' already exists"}), 400
-        
+
         # Add new column to CSV (use normalized name). Existing rows get
         # a BLANK cell, not the axis default: the designer hasn't
         # authored a mapping value for them yet, and a stamped number
@@ -6546,7 +6542,7 @@ def add_avar2_axis():
         fieldnames.append(axis_name_normalized)
         for row in rows:
             row[axis_name_normalized] = ""
-        
+
         # Write updated CSV (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
@@ -6554,16 +6550,16 @@ def add_avar2_axis():
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
-        
+
         _update_csv_modification_time(csv_path)
-        
+
         # Save metadata (use normalized name)
         # Check if this is a parametric axis (shouldn't happen, but be safe)
         is_parametric = False
         glyphs_axis_tags = _get_glyphs_axis_tags()
         if registered_tag.lower() in glyphs_axis_tags:
             is_parametric = True
-        
+
         metadata[axis_name_normalized] = {
             "display_name": display_name,
             "registered_tag": registered_tag,
@@ -6577,7 +6573,7 @@ def add_avar2_axis():
             "max": max_value
         }
         _save_axis_metadata(metadata)
-        
+
         return jsonify({
             "success": True,
             "axis_name": axis_name_normalized,
@@ -6596,62 +6592,62 @@ def update_avar2_axis(axis_name: str):
         csv_path = _get_avar2_csv_path()
         if not csv_path or not csv_path.exists():
             return jsonify({"error": "avar2-mappings.csv not found"}), 404
-        
+
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
                 "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
-        
+
         # Check if this axis exists in Glyphs file (parametric axis) - cannot edit
-        
+
         _, _, in_cols, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
+
         # Normalize axis_name to uppercase for lookup
         axis_name_normalized = axis_name.upper()
-        
+
         # If axis is in parametric axes (exists in Glyphs file), cannot edit
         if axis_name_normalized in out_cols:
             return jsonify({
                 "error": f"Cannot edit axis '{axis_name}' - it exists in the Glyphs file as a parametric axis. Parametric axes are managed in the Glyphs file, not in avar2 mappings."
             }), 403
-        
+
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
-        
+
         new_display_name = data.get("display_name")
         new_registered_tag = data.get("registered_tag", "").lower()
         new_min = data.get("min")
         new_max = data.get("max")
-        
+
         # Normalize axis_name to uppercase for lookup
         axis_name_normalized = axis_name.upper()
-        
+
         # Load metadata
         metadata = _load_axis_metadata()
         if axis_name_normalized not in metadata:
             return jsonify({"error": f"Axis '{axis_name}' not found in metadata"}), 404
-        
+
         # Validate registered tag if provided
         if new_registered_tag:
             is_valid, error_msg = _validate_axis_tag(new_registered_tag)
             if not is_valid:
                 return jsonify({"error": f"Invalid registered tag: {error_msg}"}), 400
-            
+
             # Check if tag exists in Glyphs file (parametric axes) - cannot use same tag
             glyphs_axis_tags = _get_glyphs_axis_tags()
             if new_registered_tag.lower() in glyphs_axis_tags:
                 return jsonify({
                     "error": f"Registered tag '{new_registered_tag}' already exists in Glyphs file as a parametric axis. Traditional axes cannot use tags that exist in the Glyphs file."
                 }), 400
-            
+
             # Check for duplicate tags in existing metadata
             for existing_axis, existing_meta in metadata.items():
                 if existing_axis != axis_name_normalized and existing_meta.get("registered_tag") == new_registered_tag:
                     return jsonify({"error": f"Registered tag '{new_registered_tag}' already used by axis '{existing_axis}'"}), 400
-        
+
         # Validate min/max if provided
         if new_min is not None:
             if new_min < -1000 or new_min > 1000:
@@ -6665,7 +6661,7 @@ def update_avar2_axis(axis_name: str):
         if new_default is not None and new_min is not None and new_max is not None:
             if not (new_min <= new_default <= new_max):
                 return jsonify({"error": "default must be between min and max"}), 400
-        
+
         # Read CSV
         import csv
         rows = []
@@ -6675,10 +6671,10 @@ def update_avar2_axis(axis_name: str):
             fieldnames = list(reader.fieldnames) if reader.fieldnames else []
             for row in reader:
                 rows.append(row)
-        
+
         if axis_name not in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
-        
+
         # Update metadata (use normalized name)
         if axis_name_normalized not in metadata:
             # Create metadata entry if it doesn't exist
@@ -6688,12 +6684,11 @@ def update_avar2_axis(axis_name: str):
                 "min": -1000,
                 "max": 1000
             }
-        
+
         current_meta = metadata[axis_name_normalized]
         if new_display_name:
             current_meta["display_name"] = new_display_name
         if new_registered_tag:
-            old_tag = current_meta.get("registered_tag")
             current_meta["registered_tag"] = new_registered_tag
         if new_min is not None:
             current_meta["min"] = new_min
@@ -6704,17 +6699,17 @@ def update_avar2_axis(axis_name: str):
             # declared ranges — where the axis RESTS, and the one
             # location avar2 cannot remap.
             current_meta["default"] = new_default
-        
+
         # Ensure is_parametric flag is preserved (don't allow changing it via edit)
         # It should already be set correctly from initialization
-        
+
         # If axis_name was different case, update metadata key
         if axis_name_normalized != axis_name and axis_name in metadata:
             del metadata[axis_name]
-        
+
         metadata[axis_name_normalized] = current_meta
         _save_axis_metadata(metadata)
-        
+
         # Write CSV back (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
@@ -6722,9 +6717,9 @@ def update_avar2_axis(axis_name: str):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
-        
+
         _update_csv_modification_time(csv_path)
-        
+
         return jsonify({
             "success": True,
             "axis_name": axis_name_normalized,
@@ -6792,7 +6787,7 @@ def delete_avar2_axis(axis_name: str):
         build_ok = False
         try:
             build_ok = trigger_build()
-        except Exception as build_exc:  # noqa: BLE001
+        except Exception as build_exc:
             print(f"Warning: rebuild after axis delete failed: {build_exc}", file=sys.stderr)
         return jsonify({"success": True, "deleted": axis_name_normalized,
                         "build_ok": bool(build_ok)})
@@ -6809,31 +6804,31 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
         csv_path = _get_avar2_csv_path()
         if not csv_path or not csv_path.exists():
             return jsonify({"error": "avar2-mappings.csv not found"}), 404
-        
+
         # Check for external edits
         if _check_csv_external_edit(csv_path):
             return jsonify({
                 "error": "The studio's saved data changed outside this window. Please reload.",
                 "reload_required": True
             }), 409
-        
+
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
-        
+
         new_value = data.get("value")
         if new_value is None:
             return jsonify({"error": "value is required"}), 400
-        
+
         # Validate value is numeric
         try:
             float_value = float(new_value)
         except (ValueError, TypeError):
             return jsonify({"error": "value must be a number"}), 400
-        
+
         # Normalize axis_name to uppercase for lookup
         axis_name_normalized = axis_name.upper()
-        
+
         # Load metadata to check range
         metadata = _load_axis_metadata()
         if axis_name_normalized in metadata:
@@ -6844,14 +6839,14 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
                 return jsonify({
                     "error": f"Value {float_value} is outside allowed range [{min_val}, {max_val}]"
                 }), 400
-        
+
         # Read CSV using normalized function
-        
+
         rows, fieldnames, _, _, _ = _csv_io.read_csv_mappings_with_axes(csv_path, GLYPHS_PATH)
-        
+
         if axis_name_normalized not in fieldnames:
             return jsonify({"error": f"Axis '{axis_name}' not found in the studio data"}), 404
-        
+
         # Find and update the instance
         instance_found = False
         for row in rows:
@@ -6859,10 +6854,10 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
                 row[axis_name_normalized] = str(float_value)
                 instance_found = True
                 break
-        
+
         if not instance_found:
             return jsonify({"error": f"Instance '{instance_name}' not found in the studio"}), 404
-        
+
         # Write updated CSV (use normalized fieldnames)
         import csv
         _csv_io.backup_sidecar(csv_path)
@@ -6870,9 +6865,9 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
-        
+
         _update_csv_modification_time(csv_path)
-        
+
         return jsonify({
             "success": True,
             "instance_name": instance_name,
@@ -6941,7 +6936,7 @@ def _declared_axis_ranges(default_overrides: Optional[Dict[str, float]] = None) 
         return {t: list(v) for t, v in cached.items()}
     try:
         _meta = _load_axis_metadata() or {}
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
     _ranges: Dict[str, list] = {}
     for _col, _m in _meta.items():
@@ -7016,9 +7011,9 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     import yaml
     from fontTools.ttLib import TTFont as _TTFont
     from gftools.fix import fix_font
-    from gftools.stat import gen_stat_tables_from_config
     from gftools.scripts import gen_avar2 as _gen_avar2
     from gftools.scripts.gen_fvar_instances import gen_fvar_instances
+    from gftools.stat import gen_stat_tables_from_config
 
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     sources = config.get("sources") or []
@@ -7128,14 +7123,16 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # 2. fix  (gftools-fix-font -o out in)
     font = _TTFont(str(out))
     font = fix_font(font)
-    font.save(str(out)); font.close()
+    font.save(str(out))
+    font.close()
 
     # 3. STAT  (gftools-gen-stat --inplace --src <stat section>)
     stat_cfg = (config.get("stat") or {}).get(name)
     if stat_cfg:
         font = _TTFont(str(out))
         gen_stat_tables_from_config(stat_cfg, [font])
-        font.save(str(out)); font.close()
+        font.save(str(out))
+        font.close()
 
     # 3.5. Default relocation (see the method NOTE in step 0.5): move
     # the parametric fvar defaults to the default row's out location on
@@ -7194,9 +7191,9 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         # path's "set default" still rests shipped fonts on this row.
         dropped = {id(m) for m in default_rows}
         avar2_cfg = [m for m in avar2_cfg_early if id(m) not in dropped]
-        print(f"  avar2: default-location row(s) excluded from the preview "
-              f"table (build-time relocation off); mapped stops stay exact, "
-              f"the preview rests at the compiled origin", file=sys.stderr)
+        print("  avar2: default-location row(s) excluded from the preview "
+              "table (build-time relocation off); mapped stops stay exact, "
+              "the preview rests at the compiled origin", file=sys.stderr)
         # (global LAST_ORIGIN_WARNING is declared earlier in this function.)
         LAST_ORIGIN_WARNING = (
             "Build-time default relocation is off: the preview font rests at "
@@ -7228,7 +7225,8 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         try:
             font = _TTFont(str(out))
             _gen_avar2.gen_avar2_mapping(font, avar2_cfg)
-            font.save(str(out)); font.close()
+            font.save(str(out))
+            font.close()
         finally:
             _gen_avar2.gen_fvar_axes = _orig
 
@@ -7243,7 +7241,8 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         font = _TTFont(str(out))
         with contextlib.redirect_stdout(io.StringIO()):
             gen_fvar_instances(font, inst_cfg)
-        font.save(str(out)); font.close()
+        font.save(str(out))
+        font.close()
 
     return out
 
@@ -7324,7 +7323,7 @@ def _perform_avar2_build() -> Dict:
         else:
             try:
                 _build_in_process(config_to_update, workdir, fontc_path)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return _record_build_failure({
                     "success": False,
                     "error": "Font build failed",
@@ -7408,7 +7407,7 @@ def get_avar2_font():
             font_file = candidates[0]
         else:
             return jsonify({"error": "Avar2 font not built yet"}), 404
-    
+
     return send_file(
         str(font_file),
         mimetype="font/ttf",
@@ -7589,10 +7588,9 @@ def _load_project_zip(upload):
     designer continues where they left off. Existing workspace studio
     data is preserved unless the archive carries a replacement —
     which is backed up first, same as every sidecar write."""
-    import shutil
-    import tempfile
-    import zipfile
     import re as _re
+    import shutil
+    import zipfile
 
     tmp = Path(tempfile.mkdtemp(prefix="avar2-upload-"))
     try:
@@ -7912,7 +7910,7 @@ def main():
              "Off by default because the reloader can kill in-flight "
              "gftools subprocesses."
     )
-    
+
     args = parser.parse_args()
 
     # --csv / --build-dir are dead: the worker builds a staged snapshot
@@ -7953,7 +7951,7 @@ def main():
             "Use the Load Font dropdown in the UI to pick an example or upload a .glyphs file.",
             file=sys.stderr,
         )
-    
+
     print(f"Starting server on {args.host}:{args.port}", file=sys.stderr)
     print(f"Compiler: {'fontc (with fontmake fallback)' if USE_FONTC else 'fontmake only'}", file=sys.stderr)
     if GLYPHS_PATH:
@@ -7966,15 +7964,15 @@ def main():
             if csv_path:
                 print(f"CSV file (auto-detected): {csv_path}", file=sys.stderr)
             else:
-                print(f"CSV file: not found (avar2 endpoints will be unavailable)", file=sys.stderr)
-    
+                print("CSV file: not found (avar2 endpoints will be unavailable)", file=sys.stderr)
+
     preview_csv = _get_preview_csv_path()
     if preview_csv:
         print(f"Preview CSV: {preview_csv}", file=sys.stderr)
     preview_config = _get_preview_config_path()
     if preview_config:
         print(f"Preview config: {preview_config}", file=sys.stderr)
-    
+
     # Set up real-time file watching using watchdog
     def sync_csv_with_glyphs():
         """Sync CSV with the source file, skipping instances being edited."""
@@ -8008,13 +8006,13 @@ def main():
                 print("Warning: CSV sync returned no-op", file=sys.stderr)
         except Exception as e:
             print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
-    
+
     global _SYNC_CSV_HOOK
     _SYNC_CSV_HOOK = sync_csv_with_glyphs
 
     class GlyphsFileHandler(FileSystemEventHandler):
         """Watchdog handler for real-time Glyphs file changes."""
-        
+
         def __init__(self):
             # Per-PATH: a Glyphs save is a write + rename (two events, ms
             # apart) and must fold to one build; but the server's own shadow
@@ -8026,7 +8024,7 @@ def main():
             # fires several events as the file is written.
             self.settled_mtime: Dict[str, float] = {}
             self.debounce_interval = 0.5  # seconds
-        
+
         def on_modified(self, event):
             """Handle file modification events."""
             if event.is_directory:
@@ -8047,7 +8045,6 @@ def main():
             is_source = event_kind == "source"
             is_original = event_kind == "original"
             is_shadow = event_kind == "shadow"
-            is_glif = event_kind == "glif"
 
             # Debounce rapid saves
             current_time = time.time()
@@ -8129,7 +8126,7 @@ def main():
                     _resolve_source_after_save(src)
                     sync_csv_with_glyphs()
                 elif is_source or is_shadow:
-                    print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                    print("\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
                     # A Fontra save writes the SHADOW: pull hand-drawn brace
                     # outlines into the sidecar first, so drawings are durable
                     # even if the shadow is later regenerated away. Untouched
@@ -8144,11 +8141,11 @@ def main():
                     # Sync CSV first (skips editing instances)
                     sync_csv_with_glyphs()
                 else:
-                    print(f"\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
+                    print("\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
                 trigger_build()
             except Exception as e:
                 print(f"Error handling file change: {e}", file=sys.stderr)
-    
+
     # Set up file watcher if watchdog is available AND we have a source
     # loaded. Blind launches skip watching — the source will be loaded
     # via /api/load-source, but a runtime-swappable file watcher is
@@ -8194,7 +8191,7 @@ def main():
     elif GLYPHS_PATH is None:
         pass  # blind launch — watcher attaches when a source is loaded later (TODO)
     else:
-        print(f"Warning: watchdog not available, falling back to periodic checking", file=sys.stderr)
+        print("Warning: watchdog not available, falling back to periodic checking", file=sys.stderr)
         # Fallback to periodic checking
         PERIODIC_CHECK_INTERVAL = 15
         def check_and_rebuild_periodically():
@@ -8210,7 +8207,7 @@ def main():
                     trigger_build()
             except Exception as e:
                 print(f"Error in periodic check: {e}", file=sys.stderr)
-        
+
         def start_periodic_checker():
             def periodic_loop():
                 while True:
@@ -8219,9 +8216,9 @@ def main():
             checker_thread = threading.Thread(target=periodic_loop, daemon=True)
             checker_thread.start()
             print(f"Periodic file checking enabled: checking every {PERIODIC_CHECK_INTERVAL} seconds", file=sys.stderr)
-        
+
         start_periodic_checker()
-    
+
     # Debug mode is off by default. Flask's reloader watches files and
     # restarts the process on change — fine during dev, but it can kill
     # a running gftools subprocess (the avar2 build's intermediate files

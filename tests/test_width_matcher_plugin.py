@@ -224,7 +224,8 @@ class Instance:
         out.glyphs = Glyphs_()
         for g in font.glyphs:
             A, B = g.layers[a.id], g.layers[b.id]
-            mix = lambda u, v: u + (v - u) * t
+            def mix(u, v):
+                return u + (v - u) * t
             if g.unavailable:
                 continue
             L = A._clone()
@@ -294,7 +295,7 @@ class Font:
         for name, axis, scale, push in zip(names, (0.0, 100.0, 50.0), (1.0, 3.0, 2.0), (0.0, 0.0, 35.0)):
             master = Master(name, [axis])
             self.masters.append(master)
-            for (gname, draw), g in zip(DRAWN, self.glyphs):
+            for (_gname, draw), g in zip(DRAWN, self.glyphs):
                 paths, comps, anchors, width = draw(scale)
                 L = Layer(paths, comps, anchors, width + (2 * push if paths or comps else 0), master.id)
                 if push and paths:

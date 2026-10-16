@@ -118,7 +118,7 @@ def check_glyphslib() -> CheckResult:
             fix="pip install glyphsLib    # (should have come with avar2-studio's deps)",
         )
     try:
-        import glyphsLib  # noqa: F401
+        import glyphsLib
         version = getattr(glyphsLib, "__version__", "version unknown")
     except Exception as e:
         return CheckResult(

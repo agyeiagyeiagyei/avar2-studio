@@ -20,7 +20,10 @@ fn round_corners_matches_the_desktop_engine() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_path = manifest.join("../../examples/crispy-mini/sources/CrispyMini.glyphs");
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
 
     let source = std::fs::read_to_string(&source_path).expect("read CrispyMini");
 
@@ -69,7 +72,10 @@ fn round_corners_matches_the_desktop_engine_on_folded_counters() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_path = manifest.join("tests/fixtures/FoldedMini.glyphs");
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
 
     let source = std::fs::read_to_string(&source_path).expect("read FoldedMini");
 

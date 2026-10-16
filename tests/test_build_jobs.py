@@ -87,7 +87,7 @@ def test_build_requests_coalesce(queue, monkeypatch):
     monkeypatch.setenv("STUB_WORKER_SLEEP", "0.01")
     assert queue.wait_for_idle(timeout=30)
     time.sleep(0.5)
-    lines = [l for l in Path(runs).read_text().split() if l == "build"]
+    lines = [line for line in Path(runs).read_text().split() if line == "build"]
     assert lines == ["build", "build"], f"three requests during a build coalesce to one rebuild, got {lines}"
 
 

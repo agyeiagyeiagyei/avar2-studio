@@ -37,8 +37,8 @@ from GlyphsApp import *
 from GlyphsApp.plugins import *
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import slant_math  # noqa: E402
-import slant_paths  # noqa: E402
+import slant_math
+import slant_paths
 
 try:
     from vanilla import (

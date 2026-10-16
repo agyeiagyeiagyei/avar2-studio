@@ -7,9 +7,9 @@ differs from the default master, and the old rule froze every seed the
 moment a master moved (the audit's probe, exec summary #2).
 """
 import glyphsLib
+from test_capture_outlines import _brace, _draw_into, _nodes
 
 from avar2_studio import control_axes
-from test_capture_outlines import _brace, _draw_into, _nodes
 
 
 def _shift_masters(source_path, glyph_name, dx=37.0):

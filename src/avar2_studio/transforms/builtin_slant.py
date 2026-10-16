@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import BuildContext, ParamSpec, Transform, TransformSpec
 from . import slanting
+from .base import BuildContext, ParamSpec, Transform, TransformSpec
 
 
 def is_slant_exempt(style_name: str) -> bool:
@@ -70,7 +70,7 @@ class SlantTransform(Transform):
             try:
                 num = float(pct)
             except (TypeError, ValueError):
-                raise ValueError(f"per-style slant for '{name}' must be a number")
+                raise ValueError(f"per-style slant for '{name}' must be a number") from None
             if not 0 <= num <= 100:
                 raise ValueError(f"per-style slant for '{name}' must be 0-100")
         angles = params.get("master_angles") or {}
@@ -82,7 +82,7 @@ class SlantTransform(Transform):
             try:
                 num = float(deg)
             except (TypeError, ValueError):
-                raise ValueError(f"angle for '{name}' must be a number")
+                raise ValueError(f"angle for '{name}' must be a number") from None
             if not 0 <= num <= 45:
                 raise ValueError(f"angle for '{name}' must be 0-45 degrees")
 

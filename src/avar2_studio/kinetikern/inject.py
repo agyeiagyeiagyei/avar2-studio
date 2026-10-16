@@ -74,7 +74,7 @@ def strip(font: TTFont) -> int:
     parametric axes), so applying the chain twice lands in the same place
     as once. Returns the number removed."""
     removed = 0
-    for name, variations in font["gvar"].variations.items():
+    for _name, variations in font["gvar"].variations.items():
         keep = []
         for tv in variations:
             outline = tv.coordinates[:-4]
@@ -141,7 +141,7 @@ def instance_locations(source_path: Path) -> Dict[str, Dict[str, float]]:
         font, _fmt = _source_font.load_source_cached(source_path)
         for inst in _source_font.get_source_instances(font):
             coords[inst["name"]] = {str(k).upper(): float(v) for k, v in dict(inst.get("coordinates", {})).items()}
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     csv_path = source_path.parent / f"{source_path.stem}-avar.csv"
     if csv_path.exists():
@@ -168,7 +168,7 @@ def _compiled_names(font: TTFont, source_path: Path) -> Dict[str, str]:
     out = {}
     try:
         src, fmt = _source_font.load_source_cached(source_path)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return out
     if "glyphs" not in str(fmt).lower():
         return out

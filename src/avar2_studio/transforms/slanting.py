@@ -86,7 +86,7 @@ def _angle_model(font, masters, angles_by_id):
         vals.append(angles_by_id[str(m.id)])
     tags = [t for _i, t in plane]
     origin = order[0]
-    spans = [(min(l[j] for l in order), max(l[j] for l in order)) for j in range(len(tags))]
+    spans = [(min(loc[j] for loc in order), max(loc[j] for loc in order)) for j in range(len(tags))]
 
     def norm(j, v):
         d = v - origin[j]

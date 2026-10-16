@@ -7,7 +7,6 @@ snapshot; when the snapshot omits the shadow (the T0.3 bug), regen
 rebuilds the brace from the sidecar alone and the drawing is gone from
 the built font.
 """
-import shutil
 import sys
 import time
 from pathlib import Path

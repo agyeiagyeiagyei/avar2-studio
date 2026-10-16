@@ -10,8 +10,6 @@ nothing unless the report is clean.
 
 from __future__ import annotations
 
-import pytest
-
 from avar2_studio import config_port, control_axes
 from avar2_studio.transforms import config as tx_config
 from avar2_studio.transforms import registry

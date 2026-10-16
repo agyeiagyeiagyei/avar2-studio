@@ -80,7 +80,7 @@ def discover(force: bool = False) -> None:
         for py in sorted(d.glob("*.py")):
             try:
                 _load_script(py)
-            except Exception as e:  # noqa: BLE001 — never let a bad script break startup
+            except Exception as e:
                 print(f"transforms: failed to load {py.name}: {e}", file=sys.stderr)
 
     _discovered = True
