@@ -91,3 +91,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Glyphs plugins use `from GlyphsApp import *` as the platform idiom.
 "src/avar2_studio/glyphs/**" = ["F403", "F405"]
+
+[tool.pytest.ini_options]
+markers = [
+    "real_jobs: the test runs the real build-job queue/worker (conftest's stub stays off)",
+]

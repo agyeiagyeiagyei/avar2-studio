@@ -642,3 +642,12 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   absence and the consequence via `ctx.log`. Test [verified]:
   test_spac_fallback_log.py — the absence message fires before the
   fallback runs.
+
+## T1.32 — wasm/fontc-web/pkg/
+- Verified: untracked and gitignored; absent from the worktree — nothing
+  to commit. The stale copy lives only in the main checkout (untouched
+  per the sprint rules); noted for the user to delete.
+
+## T1.33 — real_jobs marker registered
+- The marker was documented and honored in conftest but unregistered.
+  Registered under [tool.pytest.ini_options]; `pytest --markers` lists it.
