@@ -370,3 +370,17 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   inside the workspace as one safe segment, normal upload unaffected.
   Pre-fix the destination escapes the workspace (stash-checked; the
   parent-location assertion fails).
+
+## T1.4 — get_json(silent=True) + 400s
+
+- The six sites (routes `/api/instance` POST, `/api/instance/<n>` PUT,
+  `/api/instance/<n>/rename` PUT, `/api/avar2/axis` POST,
+  `/api/avar2/axis/<n>` PUT, `/api/avar2/mapping/<i>/<a>` PUT) called
+  `request.get_json()` bare: a malformed body raised werkzeug's HTML 415
+  before the handlers' own `not data` 400s. All six now
+  `get_json(silent=True)`; their existing 400s answer. Also guarded the
+  two `.strip()` 500s (`name`/`new_name` must be strings → 400).
+- Test [verified]: tests/test_json_body_400s.py — invalid JSON to all six
+  → JSON 400 (or JSON 404 where a no-source guard runs first), never
+  415/500; non-string names → JSON 400. 8 passed; pre-fix 5 failed
+  (stash-checked: three 415s + two 500s).

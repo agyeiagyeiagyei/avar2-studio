@@ -1876,10 +1876,12 @@ def create_instance():
     ``POST /api/instance/<name>/add-to-source``. This keeps the source
     instance list from getting bloated by exploratory grid points.
     """
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or 'name' not in data or 'coordinates' not in data:
         return jsonify({"error": "Missing 'name' or 'coordinates' in request body"}), 400
 
+    if not isinstance(data['name'], str):
+        return jsonify({"error": "'name' must be a string"}), 400
     instance_name = data['name'].strip()
     if not instance_name:
         return jsonify({"error": "Instance name cannot be empty"}), 400
@@ -2037,7 +2039,7 @@ def update_instance(instance_name: str):
     path so source instances can be edited without touching .glyphs /
     .designspace.
     """
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or 'coordinates' not in data:
         return jsonify({"error": "Missing 'coordinates' in request body"}), 400
 
@@ -2242,10 +2244,12 @@ def update_instance(instance_name: str):
 @app.route('/api/instance/<instance_name>/rename', methods=['PUT'])
 def rename_instance(instance_name: str):
     """Rename an instance in the Glyphs file."""
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or 'new_name' not in data:
         return jsonify({"error": "Missing 'new_name' in request body"}), 400
-    
+
+    if not isinstance(data['new_name'], str):
+        return jsonify({"error": "'new_name' must be a string"}), 400
     new_name = data['new_name'].strip()
     if not new_name:
         return jsonify({"error": "New instance name cannot be empty"}), 400
@@ -6628,7 +6632,7 @@ def add_avar2_axis():
                 "reload_required": True
             }), 409
         
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
@@ -6762,7 +6766,7 @@ def update_avar2_axis(axis_name: str):
                 "error": f"Cannot edit axis '{axis_name}' - it exists in the Glyphs file as a parametric axis. Parametric axes are managed in the Glyphs file, not in avar2 mappings."
             }), 403
         
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
@@ -6962,7 +6966,7 @@ def update_avar2_mapping(instance_name: str, axis_name: str):
                 "reload_required": True
             }), 409
         
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
