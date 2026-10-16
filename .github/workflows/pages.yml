@@ -26,10 +26,8 @@ jobs:
           python-version: "3.11"
 
       # The staging script needs the package (its example registry) and
-      # the fontc binary pip installs with it. The mkdir: hatchling
-      # force-includes src/avar2_studio/static (gitignored), which fails
-      # metadata generation on a fresh clone.
-      - run: mkdir -p src/avar2_studio/static && pip install -e .
+      # the fontc binary pip installs with it.
+      - run: pip install -e .
 
       # Stages each bundled example as a project zip plus a pristine
       # fontc compile into frontend/public/static-demo/ (gitignored

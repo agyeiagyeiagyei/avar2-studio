@@ -18,8 +18,9 @@ frontend/node_modules/
 frontend/build/
 frontend/.eslintcache
 
-# Frontend bundle assembled by release CI — never commit
-src/avar2_studio/static/
+# Frontend bundle assembled by release CI — never commit. Contents only
+# (not the dir itself) so the .gitkeep exception at the bottom can apply.
+src/avar2_studio/static/*
 
 # Tool scratch
 .avar2-studio/
