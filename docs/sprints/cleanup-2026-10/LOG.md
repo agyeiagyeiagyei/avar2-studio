@@ -1103,3 +1103,15 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - server.py is 1,321 lines (from the audit's 8,180). Verified by me:
   full suite **512 passed / 3 skipped**, ruff clean, snapshot test
   green, no-flask import probe still OK.
+
+## T3.3 — control_axes/ package (subagent agent-8)
+- control_axes.py (1,983 lines) → `control_axes/` package: schema.py /
+  naming.py / outlines.py / shadow_glyphs.py / shadow_designspace.py,
+  `__init__.py` re-exporting all 65 module-level names — dir-count
+  parity 74=74 verified name-by-name. Bodies byte-identical except 23
+  sanctioned import/cross-module qualifications (machine-compared via
+  replay-diff). Internal calls are module-qualified; the designspace
+  dispatch stays lazy (no cycle). Docs rows updated (ARCHITECTURE,
+  SIDECARS).
+- Verified by me independently: 512 passed / 3 skipped, ruff clean,
+  no-flask import probe OK, name parity probe OK.

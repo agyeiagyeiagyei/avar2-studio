@@ -88,7 +88,7 @@ decision 0010).
 | `build/_shims/gftools-gen-avar2` | patched gen-avar2 for the external `gftools builder` path (fvar dedupe + declared ranges via `AVAR2_STUDIO_AXIS_RANGES`); the in-process build applies the same patch directly |
 | `source_font.py` | format dispatch (`.glyphs` via glyphsLib, `.designspace` via designspaceLib); `load_source_cached` (keyed on path, mtime, size — `.glyphs` only); `save_font_atomically`; axes, masters, instances and instance CRUD on the source |
 | `csv_io.py` | CSV readers, the parametric/user column split, source→CSV sync (`update_csv_from_glyphs`), `backup_sidecar`, `normalize_in_axis_name` |
-| `control_axes.py` | `-control.json` I/O and normalisation; layer delta / reseed; shadow regeneration for `.glyphs` and `.designspace`; seeds, virtual masters, seed signatures; `capture_outlines` / `_extract_brace_outlines` |
+| `control_axes/` | package re-exporting the old flat module's namespace: `schema.py` (`-control.json` I/O and normalisation; layer delta / reseed), `naming.py`, `outlines.py`, `shadow_glyphs.py` / `shadow_designspace.py` (shadow regeneration, seeds, virtual masters, seed signatures, `capture_outlines` / `_extract_brace_outlines`) |
 | `grade.py`, `grade_shadow.py` | `-grade.json` and the grade model (`grade_coords`, `max_pct_for`); GRAD braces + virtual masters composed onto the shadow |
 | `glyph_coverage.py` | per-axis coverage (`universal` / `scoped`), per-glyph layers with `location` (design) and `location_user` (user space, `null` when the map cannot be inverted), `glyph_chars` |
 | `config_port.py` | config bundle export (captures drawings first), validate, apply |

@@ -77,7 +77,7 @@ Ultra Wide Thin 144,2895.4,12.0,10.0,144.0,,200.0
 ## `<stem>-control.json`
 
 Secondary (control) axes: declarations, brace-layer locations, drawn
-outlines, per-instance values. `control_axes.py` is the owner.
+outlines, per-instance values. `control_axes/` (`schema.py`) is the owner.
 
 ```jsonc
 {
