@@ -394,7 +394,29 @@ def apply_layer_delta(source_path: Path, tag: str, add=None, remove=None) -> Lis
     current = _normalise_layers(target.get("layers") or [])
     remove_keys = {_layer_key(e) for e in _normalise_layers(remove or [])}
     kept = [e for e in current if _layer_key(e) not in remove_keys]
-    merged = _normalise_layers(kept + _normalise_layers(add or []))
+    removed = [e for e in current if _layer_key(e) in remove_keys]
+    added = _normalise_layers(add or [])
+    # Carry a captured drawing across a replace (remove + re-add at new
+    # coordinates): the desktop layers list is served WITHOUT outline/
+    # source_sig (they are large and the endpoint is polled), so the edit
+    # modal cannot carry them itself — without this, editing a drawn
+    # layer's coordinates silently discards the drawing. One-to-one per
+    # glyph, in request order; never onto a computed (target) entry.
+    donors: Dict[str, List[Dict]] = {}
+    for e in removed:
+        if e.get("outline"):
+            donors.setdefault(e["glyph"], []).append(e)
+    for a in added:
+        if a.get("outline") or a.get("target"):
+            continue
+        pool = donors.get(a["glyph"])
+        if not pool:
+            continue
+        donor = pool.pop(0)
+        a["outline"] = donor["outline"]
+        if donor.get("source_sig"):
+            a["source_sig"] = donor["source_sig"]
+    merged = _normalise_layers(kept + added)
     target["layers"] = merged
     _save(source_path, data)
     return merged

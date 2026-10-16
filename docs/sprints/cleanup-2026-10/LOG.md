@@ -124,3 +124,22 @@ results, and what is inferred vs verified.
 - Known limitation (pre-existing, logged not fixed): the sig covers
   paths+width only — a components/anchors-only edit to a seed still
   reads as untouched (same blind spot as `capture_outlines`).
+
+## T0.6 — modal edit keeps drawings
+
+- Mechanism [verified by reading both sides]: `list_control_axes`
+  (server.py:4502) strips `outline`/`source_sig`, serving
+  `has_outline`/`source_changed` instead; `LayersEditor.replaceLayer`'s
+  carry-over (`oldEntry.outline`) therefore always reads undefined and
+  the modal's remove+add delta arrives drawing-less.
+- Fix (root cause server-side, per the brief): `apply_layer_delta`
+  carries `outline`/`source_sig` from each removed stored entry to a
+  re-added entry of the same glyph that lacks them — one-to-one in
+  request order, never onto a `target` (computed) entry. Pure deletes
+  keep deleting (no add → no carry).
+- Tests [verified]: tests/test_layer_delta_carry.py — (1) endpoint: POST
+  /api/control-axes/ymod/layers/delta with a coordinate move; outline +
+  source_sig still in the sidecar at the new location AND in the
+  regenerated shadow. Fails pre-fix (stash-checked: KeyError on the
+  dropped outline). (2) no-donor delta is a clean no-op. (3) carry never
+  lands on a computed entry. 3 passed.
