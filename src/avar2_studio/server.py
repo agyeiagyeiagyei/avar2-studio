@@ -1078,12 +1078,13 @@ def _apply_transform_chain(vf_path):
     # the chain over a font that already carries that axis stacks a duplicate.
     # The chain is not always handed a fresh compile — the plain-VF fallback
     # runs it over whatever build_variable_font returned, so a run of failed
-    # builds could pile up several SPAC axes (observed: four, which makes an
-    # invalid font). Pin any previously-injected axis out first, so applying
+    # builds could pile up several SPAC axes (which makes an invalid font). Pin any previously-injected axis out first, so applying
     # the chain twice lands in the same place as applying it once.
     # Only FONT-stage injectors (SPAC) — a source-stage transform's axis
     # (round_corners' ROND) is built into the compile itself; stripping
     # it here would tear the axis out of every build.
+    # Ordering and budget: docs/ARCHITECTURE.md §4; Kinetikern before SPAC:
+    # docs/decisions/0004-kinetikern-font-stage-phantom-tuples.md.
     injected_tags = {
         t.spec.injected_axis_tag for t, _ in chain
         if getattr(t.spec, "injected_axis_tag", None)
@@ -1175,14 +1176,11 @@ def _stamp_control_instance_values(vf_path):
 
 @contextlib.contextmanager
 def _gc_paused():
-    """Pause CPython's cyclic GC for a build-critical section.
-
-    glyphsLib churns millions of temporaries; with a long-lived server
-    heap, every allocation spurt triggers full-heap collection passes
-    and the IDENTICAL source-transform chain measured 42 seconds in a
-    fresh process vs 8+ minutes after the heap had grown
-    (gc_collect_main dominating the sample). One collect at the end
-    reclaims everything the section leaked."""
+    """Pause CPython's cyclic GC for a build-critical section: glyphsLib
+    churns millions of temporaries and on a grown heap the collector
+    dominated the build. Never force a collect afterwards — it wedged a
+    build for 30+ minutes. See
+    docs/decisions/0003-worker-subprocess-finish-then-rebuild.md."""
     was_enabled = gc.isenabled()
     gc.disable()
     try:
@@ -1190,12 +1188,8 @@ def _gc_paused():
     finally:
         if was_enabled:
             gc.enable()
-        # NO forced full collect here: after a build the heap holds
-        # millions of dead objects, and one monolithic collect turned
-        # into a multi-minute munmap storm that wedged the build thread
-        # with BUILDING stuck true (observed: 30+ min of "Rebuilding"
-        # at idle CPU). Re-enabled incremental GC drains it gradually
-        # without blocking the world.
+        # No forced collect here (see the docstring); incremental GC
+        # drains the garbage without blocking the world.
 
 
 def _capture_shadow_drawings() -> int:
@@ -1284,8 +1278,7 @@ def _resolve_active_source() -> Optional[Path]:
         #    the canonical shadow itself: the shadow is regen's STATE, and its
         #    preserve-what-the-designer-drew pass would capture a transformed
         #    brace as a hand drawing and leak it into later untransformed
-        #    builds (measured: a rounded lcwd brace against sharp masters is
-        #    exactly fontc's "interpolation-incompatible paths"). A failure
+        #    builds (see docs/ARCHITECTURE.md §3). A failure
         #    keeps the un-transformed source and is surfaced — a silently
         #    sharp font must not pass as ok.
         any_source = False
@@ -1994,9 +1987,10 @@ def update_instance(instance_name: str):
     }
 
     # Per-instance CONTROL-axis values (ymod/lcwd) persist in the control
-    # sidecar — never as CSV columns (the CSV uppercases headers, so a
-    # ymod column mints a bogus YMOD user axis). /api/instances hydrates
-    # them back; the build stamps them onto matching fvar instances.
+    # sidecar, never as CSV columns (see
+    # docs/decisions/0008-per-instance-control-values-in-sidecar.md).
+    # /api/instances hydrates them back; the build stamps them onto
+    # matching fvar instances.
     try:
         _ctl_tags = {str(a.get("tag", "")).lower()
                      for a in _control_axes.list_axes(ORIGINAL_PATH)}
@@ -3014,7 +3008,8 @@ def _non_mapping_axis_tags() -> set:
     TRANSFORMED SHADOW, whose axis list includes all of these — so any
     CSV schema or row derivation from that font's axes must subtract
     this set, or the CSV mints bogus uppercase user axes that then
-    compile as real fvar axes (the LCWD/SLNT/YMOD/ROND column bug)."""
+    compile as real fvar axes (see
+    docs/decisions/0008-per-instance-control-values-in-sidecar.md)."""
     tags = set(_secondary_axis_tags())
     tags.add("GRAD")
     try:
@@ -3565,8 +3560,8 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
         # a correction pinned at the control axis's default (ymod rests
         # on its corrected end) over a master corner. fontc renders the
         # brace there, but fontmake's Instantiator refuses duplicate
-        # source locations outright ("Locations must be unique", first
-        # seen on glyph 'B'). Reproduce the compiled behavior: copy each
+        # source locations outright ("Locations must be unique"; see
+        # docs/decisions/0011-ymod-baked-corrections.md). Reproduce the compiled behavior: copy each
         # such brace glyph OVER the coincident master's glyph, then drop
         # the brace source.
         import copy as _copy
@@ -3622,8 +3617,7 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
         # pinned at their axis defaults over this spot) are already in
         # the interpolated origin — the instantiator returns the source
         # outline at an exact source location. Keeping them would hand
-        # fontc two sources at one location ("duplicate location",
-        # glyph 'multiply'). Sparse ones are dropped; a coincident FULL
+        # fontc two sources at one location ("duplicate location"). Sparse ones are dropped; a coincident FULL
         # master would mean the chosen default IS a master — fail loud.
         coincident = [src for src in ds.sources
                       if {k: float(v) for k, v in (src.location or {}).items()} == design_loc]
@@ -3722,16 +3716,10 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
         # renders this exact master.
         # The parametric location the export will REST at — the new
         # default master gets interpolated exactly here.
-        # The authored mapping rows come FIRST: with build-time
-        # relocation off, the preview font's table cannot express the
-        # default-location row (it is excluded as the un-storable
-        # base), so evaluating THAT table at the default input
-        # returns the compiled corner — and the export would rest on
-        # the wrong style (observed: "set default" at wght 400 aimed
-        # at the origin master and collided with its sources). An
-        # exact row match uses the authored out:; everything else
-        # (in-between locations) still evaluates the built table,
-        # which is exact away from the default input.
+        # An exact authored row (same axis set, equal values) wins over
+        # the built table: with relocation off the preview table cannot
+        # express the ORIGIN row. In-between locations still evaluate the
+        # built table. See docs/decisions/0007-export-set-default-relocation-direction.md.
         mapped = None
         try:
             import yaml as _yaml
@@ -3742,12 +3730,8 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
             for m in rows or []:
                 ins = m.get("in") or {}
                 # Same axis SET and equal values — a row that merely
-                # omits an axis must not match by default-filling, or
-                # the parametric-identity rows (in: XOPQ/XTRA/YOPQ)
-                # match any user request and the export rests on
-                # whichever row comes first (shipped once: the
-                # export landed on 1420/150/122 instead of the
-                # ORIGIN row).
+                # omits an axis must not match by default-filling (see
+                # docs/decisions/0007-export-set-default-relocation-direction.md).
                 if {str(k).lower() for k in ins} != req_keys:
                     continue
                 ins_ci = {str(k).lower(): float(v) for k, v in ins.items()}
@@ -4452,13 +4436,7 @@ def kinetikern_apply_all():
 
 
 # ----------------------------------------------------------------------
-# CONTROL AXES sidecar — v2 slice 1 (declaration only)
-#
-# These endpoints manage the per-source ``<basename>-control.json``
-# file: the canonical store for studio-declared control axes. The
-# shadow source file + brace-layer authoring + Fontra integration
-# arrive in later v2 slices; here we just persist the declarations
-# so the UI can show + manage them.
+# Control-axis routes. See docs/guides/secondary-parametric-axes.md.
 # ----------------------------------------------------------------------
 
 
@@ -5535,8 +5513,7 @@ def update_control_axis(tag: str):
             # transforms layered on the control shadow), and refreshing
             # only stage 1 left it stale — an axis-default edit then
             # rebuilt with the OLD default whenever grade/rounding was
-            # enabled (observed: ymod default stuck at 100 after the
-            # sidecar said 0).
+            # enabled. See docs/decisions/0011-ymod-baked-corrections.md.
             _resolve_active_source()
             # See set_control_axis_layers: keep the last-good font on failure.
             try:
@@ -6601,17 +6578,12 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / name
 
-    # 0.5. Default-origin master. A mapping row whose in: sits entirely
-    # at the user-axis defaults declares the intended DEFAULT appearance
-    # — and avar2 cannot remap the default location (fontTools'
-    # _add_avar silently used such a row as the model BASE, subtracting
-    # its out from every other row: the long-misdiagnosed understated-
-    # table bug). The fix is at the COMPILE level: interpolate a real
-    # master at that row's out location (the export path's machinery),
-    # stage a designspace resting on it, and compile THAT — the default
-    # row then lands as a true identity and gvar stays natural-size (an
-    # earlier binary instancer rebase was exact too, but split every
-    # region around the new origin: measured 57KB → 495KB on Crispy).
+    # 0.5. Default-origin master: a mapping row whose in: sits entirely at
+    # the user-axis defaults declares the resting appearance, which avar2
+    # cannot remap; step 3.5 relocates the fvar defaults to its out: before
+    # gen-avar2. See docs/decisions/0001-build-time-default-relocation.md
+    # (why relocation, not an inserted master: 0007) and
+    # tests/test_avar2_default_relocation.py.
     avar2_cfg_early = (config.get("avar2") or {}).get(name)
     compile_source = source
     default_rows = []
@@ -6663,21 +6635,6 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                 "multiple mapping rows sit at the axis defaults — only one may "
                 "define the resting state; their out locations: "
                 + "; ".join(str(m.get("out")) for m in default_rows))
-        # METHOD NOTE — why the instancer rebase (step 3.5) and not an
-        # inserted master: relocating the default to an interior point
-        # while preserving the font's rendering EVERYWHERE requires
-        # splitting the corner-anchored gvar regions around the new
-        # origin — that ~7x tuple growth (495KB vs 57KB on Crispy) is
-        # the intrinsic cost, not an inefficiency. Both "insert one
-        # interpolated master and recompile" routes were built and
-        # MEASURED: exact at master corners (0.0 units) but the
-        # re-solved model pins the field through the new center and
-        # deviates by hundreds of units BETWEEN masters (468u at an
-        # interior corner, 223u at an authored style row on the
-        # CrispyMini fixture) — it is a subtly different font, which
-        # would silently shift every calibrated style. The earlier
-        # designspace attempt's "lost YOPQ deltas" was this same math,
-        # not a glyphsLib conversion bug.
 
     # 1. compile — the only step that was ever fast
     cmd = [fontc_path, "-o", str(out), str(compile_source),
@@ -6700,23 +6657,14 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         font.save(str(out))
         font.close()
 
-    # 3.5. Default relocation (see the method NOTE in step 0.5): move
-    # the parametric fvar defaults to the default row's out location on
-    # the avar-free font — the row then compiles as a true identity in
-    # step 4 and every other row anchors to the real resting state.
-    #
-    # ON by default. The 2026-10 experiment that turned this off for the
-    # working font (the ~7x gvar growth compounds with rounding/slant
-    # twins; 9.1MB preview font) ran into harder physics: every avar2
-    # tent is anchored to zero at the INPUT default, so with the ORIGIN
-    # row excluded the whole NEIGHBORHOOD of the default input collapses
-    # toward the compiled corner — not a point dip but a valley across
-    # the default cross (observed: wght 399 mapped to XTRA 92 instead of
-    # ~663). A preview font that misrenders near its resting weight is
-    # worse than a large one. Shipped fonts stay small either way: the
-    # export's "set default" uses the interpolated-origin-master method
-    # (~0.67MB measured). AVAR2_RELOCATE_BUILD_DEFAULT=0 restores the
-    # small-but-valleyed working font if ever wanted.
+    # 3.5. Default relocation (see step 0.5): move the parametric fvar
+    # defaults to the default row's out location on the avar-free font —
+    # the row then compiles as a true identity in step 4 and every other
+    # row anchors to the real resting state. ON by default: with the ORIGIN
+    # row dropped every tent is zero-anchored at the input default and the
+    # neighbourhood collapses toward the compiled corner (the valley).
+    # AVAR2_RELOCATE_BUILD_DEFAULT=0 restores the small-but-valleyed font.
+    # See docs/decisions/0001-build-time-default-relocation.md.
     relocate_at_build = os.environ.get(
         "AVAR2_RELOCATE_BUILD_DEFAULT", "1").lower() in ("1", "true", "yes")
     if relocate_at_build and avar2_cfg_early and default_rows:
@@ -6746,15 +6694,10 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
     avar2_cfg = avar2_cfg_early
     if not relocate_at_build and default_rows:
-        # Without the relocation, the default-location row CANNOT be
-        # expressed: its input is the all-default location, which the
-        # VarStore treats as the base master and silently discards —
-        # and every other row's delta then anchors to it, skewing EVERY
-        # mapped stop by the discarded amount (measured: wght 900 landed
-        # 616/201/121 units short of its authored location). Drop the
-        # row from the preview table so the remaining stops are exact;
-        # the resting state becomes the compiled origin, and the export
-        # path's "set default" still rests shipped fonts on this row.
+        # The default-located row cannot be stored (it is the VarStore
+        # base); drop it so the other stops stay exact and the preview
+        # rests at the compiled origin. See
+        # docs/decisions/0001-build-time-default-relocation.md.
         dropped = {id(m) for m in default_rows}
         avar2_cfg = [m for m in avar2_cfg_early if id(m) not in dropped]
         log.info("  avar2: default-location row(s) excluded from the preview "
@@ -7070,12 +7013,8 @@ def _apply_source_path(path: Path) -> None:
 
     SOURCE_FORMAT = _source_font.detect_format(resolved)
     ORIGINAL_PATH = resolved
-    # GLYPHS_PATH currently always equals ORIGINAL_PATH — slice 2 keeps
-    # the build pipeline pointed at the original. The shadow .glyphs is
-    # still generated (so slice 3+ can consume it for brace-layer
-    # authoring) but until those layers exist the shadow and the
-    # original compile to identical fvars (fontc drops axes with no
-    # deltas). Slice 3 will conditionally swap to the shadow.
+    # _resolve_active_source re-points GLYPHS_PATH at the shadow when a
+    # studio feature needs it. See docs/ARCHITECTURE.md §3.
     GLYPHS_PATH = resolved
 
     workdir = GLYPHS_PATH.parent / ".avar2-studio"

@@ -82,9 +82,8 @@
       // source location — even when the pinned value IS the axis
       // default (the designer may deliberately rest the axis on the
       // corrected end, ymod default 100). Masters never carry the key.
-      // The old value!==default test on the dense location went blind
-      // the day the default moved onto the braces' own value: masters
-      // and braces all read "at default" and every row got hidden.
+      // Never value !== default: a baked axis rests at its corrected end.
+      // See docs/decisions/0011-ymod-baked-corrections.md.
       const src = (sources && typeof item.sourceIndex === 'number')
         ? sources[item.sourceIndex] : null;
       const sloc = (src && src.location) || null;

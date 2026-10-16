@@ -64,7 +64,7 @@ def _native_injector():
     re-encodes the whole table and overflows gvar's 64KB per-glyph
     header ceiling on twin-heavy fonts (slant x rounding x grade).
     Returns the binary's path, or None (callers fall back to fontTools).
-    Override with $AVAR2_SPAC_INJECT."""
+    Override with $AVAR2_SPAC_INJECT. See docs/guides/transforms.md."""
     import os
     env = os.environ.get("AVAR2_SPAC_INJECT")
     if env:

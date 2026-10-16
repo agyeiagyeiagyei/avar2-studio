@@ -37,7 +37,7 @@ Outline storage (model α) is wired end to end: the schema carries an
 outline ahead of the prior-shadow copy and any seed, and
 ``capture_outlines`` (shadow → sidecar) runs on config export, so a
 drawing survives ``.avar2-studio/`` being wiped and travels inside a
-config bundle. See docs/secondary-parametric-axes.md.
+config bundle. See docs/guides/secondary-parametric-axes.md and docs/SIDECARS.md.
 """
 
 from __future__ import annotations
@@ -154,9 +154,8 @@ def find_axis(source_path: Path, tag: str) -> Optional[Dict]:
 def instance_values(source_path: Path) -> Dict[str, Dict[str, float]]:
     """Per-instance control-axis values, ``{tag: {instance name: value}}``.
     The studio's per-row ymod/lcwd authoring — the control-axis analogue
-    of the CSV's SPAC column (a CSV column is not an option here: the
-    CSV uppercases headers, so a ``ymod`` column would mint a bogus
-    ``YMOD`` user axis — the LCWD/SLNT/YMOD column bug)."""
+    of the CSV's SPAC column — never a CSV column itself (see
+    docs/decisions/0008-per-instance-control-values-in-sidecar.md)."""
     return dict(load(source_path).get("instance_values") or {})
 
 
@@ -767,17 +766,10 @@ def _validate_tag(tag: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Shadow source file (v2 slice 2)
-#
-# The studio never writes to the original source. When the user declares
-# at least one control axis, we generate a SHADOW .glyphs file at
-# ``<original-dir>/.avar2-studio/shadow/<basename>`` derived from
-# ``original + sidecar``. The build pipeline points at the shadow when
-# it exists; otherwise it falls back to the original (so users who
-# never declare control axes pay no shadow cost).
-#
-# v2 scope is .glyphs only — .designspace shadow management is heavier
-# (per-location UFO masters) and deferred to v2.5 per the design doc.
+# Shadow source file: the studio never writes the original; with at least
+# one control axis it derives ``<original-dir>/.avar2-studio/shadow/<basename>``
+# from original + sidecar and builds from that. See
+# docs/guides/secondary-parametric-axes.md#source-format-scope.
 # --------------------------------------------------------------------------
 
 
@@ -1298,15 +1290,10 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             preserved = preserved_layers.get(
                 (glyph_name, tuple(float(v) for v in location))
             )
-            # Seed-vs-edit is decided by the seed signature stamped when
-            # the layer was seeded (_restamp_seeds): a preserved layer
-            # whose geometry still matches its stamp is an untouched seed
-            # and is re-interpolated, so seeds follow master edits. The old
-            # rule — "differs from the default master" — froze every seed,
-            # because a seed interpolates at its corner and so nearly
-            # always differs from the default master. Layers from before
-            # stamping fall back to that comparison (they stay frozen, as
-            # today, until a reseed stamps them).
+            # Seed-vs-edit by the seed signature (_restamp_seeds): a preserved
+            # layer still matching its stamp is re-interpolated, so seeds
+            # follow master edits; pre-stamp layers fall back to the
+            # default-master comparison. See tests/test_seed_follows_masters.py.
             if preserved is None:
                 preserved_is_edit = False
             elif preserved.get("seed_sig"):
@@ -1371,17 +1358,10 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             # userData["xyz.fontra.source-name"] over the positional
             # "{...}" name; the "{...}" name stays for glyphsLib brace
             # recognition.
-            # Stamp what we seeded. capture_outlines compares the layer's
-            # current geometry against this to tell a hand-drawn edit from an
-            # untouched seed — without it, capturing would freeze seeds into
-            # the sidecar and stop them re-interpolating when masters change.
-            # Only a SEEDED layer gets a stamp, and it is written after the
-            # save (see _restamp_seeds). Stamping a restored drawing or a
-            # preserved edit with its own geometry made it indistinguishable
-            # from an untouched seed, so capture_outlines skipped it and the
-            # drawing never reached the sidecar. Stamping before the save was
-            # wrong too: the persisted geometry differs from the in-memory
-            # values, so every seed came back looking hand-drawn.
+            # Only a freshly SEEDED layer gets a stamp, written after the save
+            # (_restamp_seeds): stamping restored or preserved layers, or
+            # stamping before the save, makes capture skip or freeze them.
+            # See tests/test_capture_outlines.py and tests/test_seed_follows_masters.py.
             if was_seeded:
                 seeded_keys.add((glyph_name, tuple(float(v) for v in location)))
 

@@ -335,11 +335,8 @@ def max_pct_for(base: Dict[str, float], param_ranges: Dict[str, Tuple[float, flo
     UI uses to bound the slider so a grade the parametric space can't deliver
     is simply unreachable. Returns a generous cap (2.0) when nothing binds.
 
-    A cap of exactly 0 is a REAL answer, not a missing one: an instance sitting
-    on the XTRA floor has no counter headroom, so no grade% is deliverable
-    there. Filtering it out (``c > 0``) silently advertised the next-loosest
-    axis's cap instead, which is how the widest/heaviest instances came to
-    offer grades that could only bleed into the counters.
+    A cap of exactly 0 is a real answer (no counter headroom), never
+    filtered out. See docs/guides/grade.md#caps-and-diagnostics.
     """
     o = base.get("XOPQ")
     if o is None or o <= 0:

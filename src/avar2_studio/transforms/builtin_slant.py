@@ -22,7 +22,8 @@ def is_slant_exempt(style_name: str) -> bool:
     percent model never stamps it — it keeps its own slnt coordinate
     (gftools' instance doubling pins the Italic set at the axis
     minimum, i.e. fully slanted). Mirrored by the wasm port
-    (fix.rs is_slant_exempt)."""
+    (fix.rs is_slant_exempt). See
+    docs/decisions/0006-slant-name-exemption-italic-doubling.md."""
     lower = style_name.lower()
     return "italic" in lower or "slanted" in lower
 

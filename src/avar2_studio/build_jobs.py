@@ -1,5 +1,5 @@
 """Build/export job queue — the server-side half of the worker rework
-(docs/WORKER_BUILD_PLAN.md).
+(docs/decisions/0003-worker-subprocess-finish-then-rebuild.md).
 
 One worker subprocess at a time runs builds, exports and WOFF2
 compression; the Flask process only stages snapshots, supervises, and

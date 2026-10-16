@@ -24,10 +24,7 @@ correction layer draws the outline "as if at" another parametric point,
 so its radius follows its TARGET's XOPQ and XTRA where the control
 sidecar declares them.
 
-Proven on XCrispy (18 masters) before it became a transform: identical
-node structure everywhere, advances untouched, fontc accepts the
-collapsed rounds, and the Corner Radii tool re-detects the radii it
-asked for.
+See docs/decisions/0005-rond-axis-per-style-percent-rendered-fill.md.
 """
 
 from __future__ import annotations

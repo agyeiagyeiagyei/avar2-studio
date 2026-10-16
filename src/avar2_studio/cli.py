@@ -98,7 +98,7 @@ def _build(argv) -> int:
         print(f"error: could not load {args.source}: {exc}", file=sys.stderr)
         return 2
 
-    # The build runs in a worker subprocess (docs/WORKER_BUILD_PLAN.md);
+    # The build runs in a worker subprocess (docs/decisions/0003-worker-subprocess-finish-then-rebuild.md);
     # wait for the queue to drain before reading the outcome globals.
     server.JOBS.wait_for_idle()
 

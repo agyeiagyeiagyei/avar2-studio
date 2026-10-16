@@ -1,6 +1,6 @@
 """Build worker — a fresh interpreter per job, so the Flask process never
 runs fontTools-heavy build code (the GIL-starvation fix; see
-docs/WORKER_BUILD_PLAN.md).
+docs/decisions/0003-worker-subprocess-finish-then-rebuild.md).
 
     python -m avar2_studio.build_worker <spec.json>
 

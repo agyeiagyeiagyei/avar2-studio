@@ -960,3 +960,34 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - [verified] compiles; ruff clean; full suite **505 passed**; the
   `[jobs] …` lines and every warning still reach stderr through the live
   handler (the capsys assertion in `test_watcher_save_flow` passes).
+
+## T2.16 — merged from branch `t2-docs` (executed by a subagent; pointers applied by the executor)
+
+- Docs restructure per audit §7: `docs/ARCHITECTURE.md`, `DEVELOPMENT.md`,
+  `SIDECARS.md`, `docs/guides/` (authoring, secondary axes rewritten,
+  grade expanded, kinetikern, transforms), `docs/decisions/0001–0012` +
+  index, `docs/archive/` (HANDOVER as HANDOVER-2026-10, WORKER_BUILD_PLAN,
+  debugging log, Pages migration, design-notes, screenshots brief),
+  README user-facing only, AGENTS.md 80 lines, `docs/README.md` map,
+  three unreferenced images pruned. Subagent checks: 139 links/images
+  resolve (2 pre-existing anchors in `examples/` READMEs remain), every
+  `os.environ` name documented, all 70 route decorators in ARCHITECTURE.
+- Code comments → pointers [verified: compiles, full suite 505 passed,
+  ruff clean]: the step-0.5 / METHOD NOTE / step-3.5 / no-reloc blocks
+  in `_build_in_process`, the export authored-row parentheticals, the
+  baked-correction narratives, `_gc_paused`, the strip and step-3 asides,
+  `update_control_axis`, `update_instance`, `_non_mapping_axis_tags`,
+  the stale "slice" comments and banners, control_axes' module/
+  instance_values/shadow-banner/stamp/seed comments, the shim's
+  isStudioItem story, inject.py's docstring, corner_rounding's
+  provenance, is_slant_exempt, `_native_injector`, grade.max_pct_for,
+  csv_io.backup_sidecar; stale doc paths in build_jobs/build_worker/cli/
+  lib.rs/pages.yml re-pointed. `observed:` markers in server.py: 0.
+  The two HTML goldens were regenerated (the shim text changed on
+  purpose). Left for the frontend merge: `api.js`, `static-api.js`,
+  `fontc-compile.js`, `ControlAxes.jsx` still cite the old doc paths.
+- Follow-ups: `fontra/shim.js` still carries its `<script>` wrapper
+  (so it is not standalone-lintable — move the tags into the injector);
+  `docs/decisions/0013-designspace-authoring.md` for T2.15; the two
+  `examples/` README anchors; the three chat-only decisions listed as
+  "Not yet recorded" in `docs/decisions/README.md`.

@@ -7,23 +7,11 @@ so the shift is exactly metrics (sidebearings and advance), composites stay
 rigid (a component ignores its base's phantoms), and nothing else in the
 font is touched. HVAR is rebuilt from the phantoms afterwards.
 
-This runs on the compiled font, after the studio's default relocation. A
-sparse master in the source would be split into dozens of tuples by that
-relocation (measured: 55 to 838 tuples per glyph without any brace), and the
-preview font already sits at gvar's 64 KB per-glyph header ceiling; one
-small tuple per instance per glyph stays well inside it.
-
-The supports and deltas come from fontTools' VariationModel over the
-corrected locations, exactly as a compiler treats sparse masters: every
-corrected instance comes out exact, the field blends in between, and
-beyond the outermost instance on an axis the correction holds (OpenType
-keeps a tuple's full value past its peak when no end coordinate is written).
-Locations are quantized to F2Dot14 first, so the model solves on exactly
-the regions the font stores: a coordinate that rounds to the default must
-be the default (a stored peak of 0 means "axis not involved", and a model
-that still saw a sliver of a region there would put a huge delta on it).
-A correction at the default location itself is the model's base value and
-goes in as a tuple with no axes, which applies everywhere.
+Runs on the compiled font after the default relocation and before SPAC;
+supports come from fontTools' VariationModel over the corrected locations,
+quantised to F2Dot14 first (a coordinate that rounds to the default must be
+the default); a correction at the default location is the base tuple. See
+docs/decisions/0004-kinetikern-font-stage-phantom-tuples.md.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# Deploy the static demo to GitHub Pages (see docs/migration-github-pages.md).
+# Deploy the static demo to GitHub Pages (see docs/ARCHITECTURE.md).
 # Modelled on fontspector's pages.yml: build artifacts in CI, deploy static.
 name: Deploy static demo to Pages
 

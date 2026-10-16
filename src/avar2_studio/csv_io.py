@@ -41,8 +41,7 @@ def backup_sidecar(path: Path, keep: int = 20) -> None:
     metadata, control/transforms JSON) under the project's
     ``.avar2-studio/backups/`` before a rewrite. Bounded to the last
     ``keep`` copies per filename. Never raises — a failed backup must
-    not block the write it protects. Two data-loss incidents in one
-    week bought this."""
+    not block the write it protects. See docs/SIDECARS.md."""
     try:
         p = Path(path)
         if not p.exists():

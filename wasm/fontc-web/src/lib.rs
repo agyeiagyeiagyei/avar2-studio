@@ -1,6 +1,6 @@
 //! fontc → WASM: compile a .glyphs source (as an in-memory string) to
 //! TTF bytes in the browser. Part of the avar2-studio GitHub Pages
-//! migration (docs/migration-github-pages.md, Phase 2).
+//! migration (docs/ARCHITECTURE.md, Phase 2).
 //!
 //! JS side: `compile_glyphs(source: string) -> Uint8Array` (throws on
 //! compiler error).
