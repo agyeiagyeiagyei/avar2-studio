@@ -4543,6 +4543,26 @@ def _source_glyph_sigs():
     return sigs
 
 
+
+def _designspace_authoring_refusal():
+    """Secondary-axis AUTHORING is .glyphs-only (sprint decision T2.15):
+    the designspace shadow regeneration ignores corrections (``target``)
+    and captured drawings, has no seed stamps and writes non-atomically,
+    so edits made through these routes would silently degrade. Reads keep
+    working and existing layers still build. Returns a 501 response, or
+    None when the source is a .glyphs file."""
+    if ORIGINAL_PATH is None:
+        return None
+    fmt = SOURCE_FORMAT or _source_font.detect_format(Path(ORIGINAL_PATH))
+    if fmt == "designspace":
+        return jsonify({
+            "error": "Secondary parametric axes are authored on .glyphs sources only; "
+                     "this project is a .designspace. Existing layers still build, "
+                     "but they can't be edited here.",
+            "source_format": "designspace",
+        }), 501
+    return None
+
 @app.route('/api/control-axes', methods=['GET'])
 def list_control_axes():
     """Return the sidecar's control-axis declarations."""
@@ -4599,6 +4619,9 @@ def create_control_axis():
     slices) moving it has no visual effect because every glyph sits
     at the axis default on every master.
     """
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     # Both source formats author through a shadow now: .glyphs gets
@@ -5690,6 +5713,9 @@ def set_control_axis_layers(tag: str):
     and triggers a rebuild. Switches the build path to the shadow
     when there's at least one layer; otherwise reverts to original.
     """
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -5725,6 +5751,9 @@ def patch_control_axis_layers(tag: str):
     Removals apply before additions, so a replace is remove+add. Serialized on
     SIDECAR_LOCK so concurrent edits can't interleave.
     """
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -5831,6 +5860,9 @@ def reseed_control_axis_layers(tag: str):
     holding one come back as 409 ``blocked`` unless ``force`` is set. There is
     no undo once the sidecar is written.
     """
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     body = request.get_json(silent=True) or {}
@@ -5997,6 +6029,9 @@ def update_control_axis(tag: str):
     left unchanged. Regenerates the shadow after a successful edit
     so the preview reflects the new range immediately."""
     global VARIABLE_FONT_PATH
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     data = request.get_json(silent=True) or {}
@@ -6042,6 +6077,9 @@ def delete_control_axis(tag: str):
     deleted one; if it's now empty, remove the shadow entirely so
     the build pipeline falls back to the original source."""
     global GLYPHS_PATH, VARIABLE_FONT_PATH
+    refusal = _designspace_authoring_refusal()
+    if refusal is not None:
+        return refusal
     if ORIGINAL_PATH is None:
         return jsonify({"error": "No source loaded"}), 400
     try:

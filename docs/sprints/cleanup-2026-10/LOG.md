@@ -861,3 +861,42 @@ bar; findings rounds still get written so a second reviewer can re-check.
   shadow → csv/build keep their paths; snapshot paths (`.glyphs`,
   `.glif`) under `jobs/` classify as None and trigger nothing; the
   handler imports without watchdog. Full suite green; ruff clean.
+
+## T2.9 — merged from branch `t2-ci` (executed by a subagent; verified by the executor)
+
+- `wasm/fontc-web/tests/common/mod.rs` generates the spike font in-test
+  from `examples/crispy-mini` (SOURCE_DATE_EPOCH pinned; deterministic
+  sha256 across runs) and the avar2 oracle through `spike/build_oracle.py`
+  under `target/tmp`; the four oracles that needed hand-made `/tmp` fonts
+  use it; `AVAR2_SPIKE_FONT`/`AVAR2_ORACLE` still override. Found on the
+  way: T1.27 had left `compare_braces.py`/`compare_spac.py` reading
+  `/tmp` — fixed (paths passed as argv). Still writing to `/tmp` and
+  carrying their own python derivation: measure, pin, pin_synth,
+  round_corners, slant oracles → follow-up item T2.17.
+- `.github/workflows/test.yml`: python (ubuntu+macos; venv at `.venv` so
+  the fontc-gated tests run; ruff + pytest), frontend (lint/typecheck/
+  test:unit/build), rust (cargo test with AVAR2_PYTHON, wasm32 compile
+  check on Linux, kinetikern2 dylib on macOS). Every step run locally by
+  the subagent in workflow order; GitHub Actions itself not run from here.
+- Executor verification [verified]: after the merge, with no
+  `/tmp/fontc-wasm-spike.ttf` / `/tmp/av2-oracle.ttf` present,
+  `cargo test --no-fail-fast` on the warm target → all 14 binaries ok,
+  `correction_oracle` ignored; `test.yml` loads (jobs python/frontend/rust).
+
+## T2.15 — designspace authoring: 501, by decision
+
+- Decision: secondary-axis AUTHORING stays .glyphs-only. Parity for the
+  designspace shadow (corrections via `target`, captured drawings, seed
+  stamps, atomic writes, aliases) is a large port with no current user;
+  the audit's alternative — refuse clearly — is implemented:
+  `_designspace_authoring_refusal()` answers **501** with a plain message
+  on `POST /api/control-axes`, `PUT …/layers`, `POST …/layers/delta`,
+  `POST …/reseed`, `PATCH …/<tag>`, `DELETE …/<tag>` when the source is a
+  .designspace. `GET /api/control-axes`, `open-editor` and
+  `reference-metrics` keep working, and existing sidecars still build.
+  Decision record: `docs/decisions/0013-designspace-authoring.md` (added
+  once the docs restructure branch lands, to avoid a docs/ conflict).
+- Tests [verified]: `tests/test_designspace_authoring_501.py` — all six
+  mutations → 501 mentioning "designspace", reads 200, no shadow and no
+  sidecar written; a .glyphs source is unaffected. Control-axis cluster
+  71 passed; ruff clean.
