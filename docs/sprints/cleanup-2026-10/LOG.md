@@ -950,3 +950,13 @@ bar; findings rounds still get written so a second reviewer can re-check.
   user-facing output stays `print`).
 - [verified] compiles; ruff clean; full suite **505 passed** (including
   the capsys assertion in `test_watcher_save_flow`).
+
+## T2.2 (part 2) — logging for server.py and build_jobs.py
+
+- Same AST rewriter: `server.py` 152 and `build_jobs.py` 2 stderr prints →
+  `log.info/warning/error`. No `print(..., file=sys.stderr)` remains
+  under `src/avar2_studio/` outside `cli.py`/`doctor.py` (user-facing CLI
+  output, kept as print) and the Glyphs plugins (their own runtime).
+- [verified] compiles; ruff clean; full suite **505 passed**; the
+  `[jobs] …` lines and every warning still reach stderr through the live
+  handler (the capsys assertion in `test_watcher_save_flow` passes).

@@ -29,8 +29,12 @@ import threading
 import time
 from pathlib import Path
 
+from .studio_log import get_logger
+
 #: Source-set sidecars staged into every job snapshot (siblings of the
 #: original source), plus the small preview-dir files builds/exports read.
+
+log = get_logger(__name__)
 SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json")
 PREVIEW_FILES = ("axis-metadata.json", "instance-renames.json", "config.yaml")
 LEGACY_CSV = "avar2-mappings.csv"
@@ -308,7 +312,7 @@ class JobQueue:
             start_new_session=True)  # own process group: cancel = killpg
         with self._lock:
             job["proc"] = proc
-        print(f"[jobs] {jid} started ({job['kind']})", file=sys.stderr)
+        log.info(f"[jobs] {jid} started ({job['kind']})")
         proc.wait()
         result = self._read_result(job)
         self._finish(job, result)
@@ -344,8 +348,8 @@ class JobQueue:
         jid = self._job_id(job)
         result.setdefault("job_id", jid)
         result.setdefault("kind", job["kind"])
-        print(f"[jobs] {jid} finished: success={result.get('success')} "
-              f"in {result.get('duration', '?')}s", file=sys.stderr)
+        log.info(f"[jobs] {jid} finished: success={result.get('success')} "
+              f"in {result.get('duration', '?')}s")
         if result.get("success"):
             try:
                 self._promote(job, result)

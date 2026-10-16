@@ -29,10 +29,13 @@ from pathlib import Path
 from string import Template
 from typing import Dict, List, Optional
 
+from .studio_log import get_logger
+
+log = get_logger(__name__)
 try:
     import yaml
 except ImportError:
-    print("Warning: PyYAML not found. Install with: pip install pyyaml", file=sys.stderr)
+    log.warning("Warning: PyYAML not found. Install with: pip install pyyaml")
     yaml = None
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
@@ -50,13 +53,13 @@ except ImportError:
     # Create dummy types for type hints when watchdog is not available
     Observer = None
     FileSystemEventHandler = None
-    print("Warning: watchdog not available. Auto-rebuild on file save disabled.", file=sys.stderr)
-    print("Install with: pip install watchdog", file=sys.stderr)
+    log.warning("Warning: watchdog not available. Auto-rebuild on file save disabled.")
+    log.info("Install with: pip install watchdog")
 
 try:
     from glyphsLib import GSFont
 except ImportError:
-    print("Error: glyphsLib not found. Install with: pip install glyphsLib", file=sys.stderr)
+    log.error("Error: glyphsLib not found. Install with: pip install glyphsLib")
     sys.exit(1)
 
 from . import build_jobs as _build_jobs
@@ -341,7 +344,7 @@ def _check_glyphs_file_unsaved_changes(glyphs_path: Path) -> bool:
             return result.stdout.strip().lower() == 'true'
         return False
     except Exception as e:
-        print(f"Warning: Could not check Glyphs file unsaved changes: {e}", file=sys.stderr)
+        log.warning(f"Warning: Could not check Glyphs file unsaved changes: {e}")
         return False
 
 
@@ -401,7 +404,7 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                     time.sleep(0.3)
                     # Re-save our changes
                     font_object.save(str(glyphs_path))
-                    print("Re-saved changes after Glyphs.app save", file=sys.stderr)
+                    log.info("Re-saved changes after Glyphs.app save")
                 elif result.returncode == 0:
                     # If no font object provided, reload from disk and save
                     # This ensures our changes are preserved
@@ -409,14 +412,14 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
                     from glyphsLib import load
                     font = load(str(glyphs_path))
                     font.save(str(glyphs_path))
-                    print("Re-saved changes after Glyphs.app save", file=sys.stderr)
+                    log.info("Re-saved changes after Glyphs.app save")
 
             except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
                 # AppleScript failed - log but don't fail
-                print(f"Warning: Could not force reload Glyphs document: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not force reload Glyphs document: {e}")
     except Exception as e:
         # Silently fail - file save already succeeded, this is just a notification
-        print(f"Warning: Could not force reload Glyphs document: {e}", file=sys.stderr)
+        log.warning(f"Warning: Could not force reload Glyphs document: {e}")
     finally:
         # Re-arm after the dance: the file's final mtime lands here, so the
         # watermark covers events delivered (or processed) late.
@@ -438,7 +441,7 @@ def get_instances_from_glyphs(glyphs_path: Path) -> List[Dict]:
             entry["origin"] = "source"
         return instances
     except Exception as e:
-        print(f"Error reading source file: {e}", file=sys.stderr)
+        log.error(f"Error reading source file: {e}")
         raise
 
 
@@ -451,7 +454,7 @@ def get_axes_from_glyphs(glyphs_path: Path) -> List[Dict]:
         font, _fmt = _source_font.load_source_cached(glyphs_path)
         return _source_font.get_axes(font)
     except Exception as e:
-        print(f"Error reading axes from source file: {e}", file=sys.stderr)
+        log.error(f"Error reading axes from source file: {e}")
         raise
 
 
@@ -482,7 +485,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
                 str(glyphs_path)
             ]
 
-            print(f"Building variable font with fontc: {' '.join(cmd)}", file=sys.stderr)
+            log.info(f"Building variable font with fontc: {' '.join(cmd)}")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -491,13 +494,13 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
             )
 
             if result.returncode == 0 and output_file.exists():
-                print("✅ fontc compilation successful", file=sys.stderr)
+                log.info("✅ fontc compilation successful")
                 return output_file
             else:
                 error_msg = result.stderr or result.stdout or "Unknown error"
-                print(f"fontc failed, falling back to fontmake: {error_msg}", file=sys.stderr)
+                log.info(f"fontc failed, falling back to fontmake: {error_msg}")
         else:
-            print("fontc not found in PATH, using fontmake", file=sys.stderr)
+            log.info("fontc not found in PATH, using fontmake")
 
     # Fallback to fontmake
     cmd = [
@@ -507,7 +510,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
         "--output-dir", str(output_dir)
     ]
 
-    print(f"Building variable font with fontmake: {' '.join(cmd)}", file=sys.stderr)
+    log.info(f"Building variable font with fontmake: {' '.join(cmd)}")
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -517,10 +520,10 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
 
     if result.returncode != 0:
         error_msg = result.stderr or result.stdout or "Unknown error"
-        print(f"fontmake failed with exit code {result.returncode}", file=sys.stderr)
-        print(f"fontmake stderr: {error_msg}", file=sys.stderr)
+        log.info(f"fontmake failed with exit code {result.returncode}")
+        log.info(f"fontmake stderr: {error_msg}")
         if result.stdout:
-            print(f"fontmake stdout: {result.stdout}", file=sys.stderr)
+            log.info(f"fontmake stdout: {result.stdout}")
         raise RuntimeError(f"fontmake failed: {error_msg}")
 
     # Find the generated variable font
@@ -609,7 +612,7 @@ def rename_instance_in_glyphs(glyphs_path: Path, old_name: str, new_name: str) -
     except ValueError:
         raise
     except Exception as e:
-        print(f"Error renaming instance in source file: {e}", file=sys.stderr)
+        log.error(f"Error renaming instance in source file: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -626,7 +629,7 @@ def delete_instance_in_glyphs(glyphs_path: Path, instance_name: str) -> bool:
             _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
     except Exception as e:
-        print(f"Error deleting instance from source file: {e}", file=sys.stderr)
+        log.error(f"Error deleting instance from source file: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -667,7 +670,7 @@ def update_instance_in_glyphs(glyphs_path: Path, instance_name: str, coordinates
             _force_reload_glyphs_document(glyphs_path, font_object=font)
         return True
     except Exception as e:
-        print(f"Error updating source file: {e}", file=sys.stderr)
+        log.error(f"Error updating source file: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -688,7 +691,7 @@ def get_masters():
         font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         return jsonify({"masters": _source_font.get_masters(font)})
     except Exception as e:
-        print(f"Error reading masters: {e}", file=sys.stderr)
+        log.error(f"Error reading masters: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -766,7 +769,7 @@ def get_instances():
                             "origin": "studio",
                         })
             except Exception as e:
-                print(f"Warning: Could not read studio-only rows from CSV: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not read studio-only rows from CSV: {e}")
 
         # Per-instance CONTROL-axis values hydrate from the control
         # sidecar so sliders and row previews come back after a reload.
@@ -832,7 +835,7 @@ def reorder_instances():
         _update_csv_modification_time(csv_path)
         return jsonify({"success": True})
     except Exception as e:
-        print(f"Error reordering instances: {e}", file=sys.stderr)
+        log.error(f"Error reordering instances: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -896,7 +899,7 @@ def get_axes():
                                 "is_control_axis": True,
                             })
             except Exception as overlay_exc:
-                print(f"Warning: control-axes overlay on /api/axes failed: {overlay_exc}", file=sys.stderr)
+                log.warning(f"Warning: control-axes overlay on /api/axes failed: {overlay_exc}")
 
         # GRADE axis overlay. GRAD lives in the shadow but its range comes from
         # VIRTUAL masters (no real master spans it), so get_axes_from_glyphs
@@ -921,7 +924,7 @@ def get_axes():
                     entry["transform_injected"] = True
                     entry["is_grade_axis"] = True
             except Exception as grade_exc:
-                print(f"Warning: grade overlay on /api/axes failed: {grade_exc}", file=sys.stderr)
+                log.warning(f"Warning: grade overlay on /api/axes failed: {grade_exc}")
 
         # TRANSFORM-AXES overlay. Transforms can add whole axes WITH twin
         # masters (round_corners' ROND), which reach this list through the
@@ -941,7 +944,7 @@ def get_axes():
                     if str(a.get("tag", "")).lower() in injected_tags:
                         a["transform_injected"] = True
             except Exception as inj_exc:
-                print(f"Warning: transform-axes overlay on /api/axes failed: {inj_exc}", file=sys.stderr)
+                log.warning(f"Warning: transform-axes overlay on /api/axes failed: {inj_exc}")
 
         # BUILT-FONT overlay. Post-build transforms (e.g. SPAC) inject fvar
         # axes that have no source master, so get_axes_from_glyphs can't see
@@ -1004,7 +1007,7 @@ def get_axes():
                         "transform_injected": not is_user_axis,
                     })
             except Exception as built_exc:
-                print(f"Warning: built-font overlay on /api/axes failed: {built_exc}", file=sys.stderr)
+                log.warning(f"Warning: built-font overlay on /api/axes failed: {built_exc}")
 
         return jsonify({"axes": axes})
     except Exception as e:
@@ -1018,7 +1021,7 @@ def _build_context():
         source_path=ORIGINAL_PATH,
         glyphs_path=GLYPHS_PATH,
         family=(GLYPHS_PATH.stem if GLYPHS_PATH else "font"),
-        log=lambda m: print(f"[transform] {m}", file=sys.stderr),
+        log=lambda m: log.info(f"[transform] {m}"),
     )
 
 
@@ -1044,11 +1047,8 @@ def _strip_injected_axes(vf_path: Path, tags: set) -> Path:
     inst = instantiateVariableFont(font, location, inplace=False)
     out = Path(vf_path)
     inst.save(str(out))
-    print(
-        f"transforms: stripped {len(doomed)} previously-injected "
-        f"{'axis' if len(doomed) == 1 else 'axes'} ({', '.join(doomed)}) before re-applying",
-        file=sys.stderr,
-    )
+    log.info(f"transforms: stripped {len(doomed)} previously-injected "
+        f"{'axis' if len(doomed) == 1 else 'axes'} ({', '.join(doomed)}) before re-applying")
     return out
 
 
@@ -1070,7 +1070,7 @@ def _apply_transform_chain(vf_path):
     try:
         chain = _transforms.active(ORIGINAL_PATH)
     except Exception as e:
-        print(f"transforms: could not resolve active chain: {e}", file=sys.stderr)
+        log.info(f"transforms: could not resolve active chain: {e}")
         return vf_path
     out = Path(vf_path)
     errors = []
@@ -1093,7 +1093,7 @@ def _apply_transform_chain(vf_path):
         try:
             out = Path(_strip_injected_axes(out, injected_tags))
         except Exception as e:
-            print(f"transforms: could not strip prior injected axes: {e}", file=sys.stderr)
+            log.info(f"transforms: could not strip prior injected axes: {e}")
     # Kinetikern's per-instance spacing goes in first, straight after the
     # compile and the default relocation: phantom-point tuples on the
     # parametric axes, which the SPAC injector then re-encodes with the
@@ -1102,9 +1102,9 @@ def _apply_transform_chain(vf_path):
     # earlier tuples first, so a re-run of the chain lands in the same place.
     try:
         out = Path(_kinetikern.inject.apply_to_font(
-            out, ORIGINAL_PATH, log=lambda m: print(m, file=sys.stderr)))
+            out, ORIGINAL_PATH, log=lambda m: log.info(m)))
     except Exception as e:
-        print(f"kinetikern: injection failed: {e}", file=sys.stderr)
+        log.info(f"kinetikern: injection failed: {e}")
         errors.append(f"Kinetikern: {e}")
     # Source-stage transforms' font-stage apply() (round_corners' ROND
     # instance stamp) runs LAST: fix_instances regenerates the instance
@@ -1121,7 +1121,7 @@ def _apply_transform_chain(vf_path):
             elif result is not None:
                 raise RuntimeError(f"returned a path that does not exist: {result}")
         except Exception as e:
-            print(f"transform '{transform.spec.id}' failed: {e}", file=sys.stderr)
+            log.info(f"transform '{transform.spec.id}' failed: {e}")
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
         LAST_TRANSFORM_ERROR = "; ".join(errors)
@@ -1165,11 +1165,11 @@ def _stamp_control_instance_values(vf_path):
                 stamped += 1
         if stamped:
             font.save(str(vf_path))
-            print(f"control axes: stamped {stamped} per-instance value(s) "
-                  f"onto fvar instances", file=sys.stderr)
+            log.info(f"control axes: stamped {stamped} per-instance value(s) "
+                  f"onto fvar instances")
         font.close()
     except Exception as exc:
-        print(f"control axes: instance stamping failed: {exc}", file=sys.stderr)
+        log.info(f"control axes: instance stamping failed: {exc}")
     return vf_path
 
 
@@ -1256,7 +1256,7 @@ def _resolve_active_source() -> Optional[Path]:
             # the build itself, so suppress the watcher for it.
             _suppress_watcher()
         except Exception as exc:
-            print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+            log.warning(f"Warning: shadow regeneration failed: {exc}")
         try:
             any_layers = any(ax.get("layers") for ax in _control_axes.list_axes(ORIGINAL_PATH))
         except Exception:
@@ -1276,7 +1276,7 @@ def _resolve_active_source() -> Optional[Path]:
                     _suppress_watcher()
         except Exception as exc:
             LAST_GRADE_ERROR = str(exc)
-            print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
+            log.warning(f"Warning: grade shadow generation failed: {exc}")
 
         # 3) source-stage transforms (round_corners), over a BUILD COPY of the
         #    composed shadow (or the original), so the control and grade braces
@@ -1297,7 +1297,7 @@ def _resolve_active_source() -> Optional[Path]:
             # (10) before rounding (50), so rounds land on slanted drawings.
             src_chain.sort(key=lambda tp: getattr(tp[0].spec, "source_priority", 100))
         except Exception as exc:
-            print(f"transforms: could not resolve source-stage chain: {exc}", file=sys.stderr)
+            log.info(f"transforms: could not resolve source-stage chain: {exc}")
         if src_chain and ORIGINAL_PATH.suffix.lower() == ".glyphs":
             current = None
             try:
@@ -1324,8 +1324,8 @@ def _resolve_active_source() -> Optional[Path]:
             except Exception as exc:
                 name = current.spec.id if current is not None else "source-stage transforms"
                 LAST_SOURCE_TRANSFORM_ERROR = f"{name}: {exc}"
-                print(f"Warning: source transform failed, building without it: "
-                      f"{LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+                log.warning(f"Warning: source transform failed, building without it: "
+                      f"{LAST_SOURCE_TRANSFORM_ERROR}")
 
         GLYPHS_PATH = shadow if (shadow is not None and (any_layers or any_grades or any_source)) \
             else ORIGINAL_PATH
@@ -1362,7 +1362,7 @@ def _resolve_source_after_save(path: Path) -> None:
             return
         except Exception as exc:
             if attempt:
-                print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
+                log.warning(f"Warning: shadow regeneration failed: {exc}")
             else:
                 _wait_for_save_to_settle(path, settle=1.0)
 
@@ -1421,7 +1421,7 @@ def _run_shadow_regen_and_build():
         try:
             trigger_build()
         except Exception as exc:
-            print(f"Warning: rebuild after control-axis change failed: {exc}", file=sys.stderr)
+            log.warning(f"Warning: rebuild after control-axis change failed: {exc}")
     finally:
         with _REBUILD_TIMER_LOCK:
             BACKGROUND_WORK -= 1
@@ -1474,7 +1474,7 @@ def _run_build():
         avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
         LAST_AVAR2_ERROR = None
-        print(f"Avar2 font built: {avar2_result['font_path']}", file=sys.stderr)
+        log.info(f"Avar2 font built: {avar2_result['font_path']}")
         return True
 
     # Record WHY, so /api/health can surface that the served font is
@@ -1486,15 +1486,12 @@ def _run_build():
         f"{avar2_result.get('error')}"
         + (f": …{_avar2_details[-400:]}" if _avar2_details else "")
     )
-    print(
-        f"Avar2 build skipped/failed ({avar2_result.get('error')}); "
-        f"falling back to plain variable-font build.",
-        file=sys.stderr,
-    )
+    log.info(f"Avar2 build skipped/failed ({avar2_result.get('error')}); "
+        f"falling back to plain variable-font build.")
 
     BUILDING = True
     try:
-        print(f"Building font from {GLYPHS_PATH}...", file=sys.stderr)
+        log.info(f"Building font from {GLYPHS_PATH}...")
         VARIABLE_FONT_PATH = _apply_transform_chain(
             build_variable_font(GLYPHS_PATH, BUILD_DIR, use_fontc=USE_FONTC)
         )
@@ -1504,10 +1501,10 @@ def _run_build():
         # otherwise the UI keeps showing "Build failed" indefinitely.
         LAST_BUILD_STATUS = "ok"
         LAST_BUILD_ERROR = None
-        print(f"Font built successfully: {VARIABLE_FONT_PATH}", file=sys.stderr)
+        log.info(f"Font built successfully: {VARIABLE_FONT_PATH}")
         return True
     except Exception as e:
-        print(f"Build failed: {e}", file=sys.stderr)
+        log.info(f"Build failed: {e}")
         # BOTH paths failed — the avar2 attempt and the plain fallback.
         # Report the compiler error (the actionable one: the source
         # itself can't compile) with the avar2 failure as context,
@@ -1700,7 +1697,7 @@ def get_text_width():
                 instance_font = instancer.instantiateVariableFont(font, location)
                 instance_font.save(tmp_path)
             except Exception as e:
-                print(f"Error during instantiation: {e}", file=sys.stderr)
+                log.error(f"Error during instantiation: {e}")
                 import traceback
                 traceback.print_exc()
                 return jsonify({"error": f"Font instantiation failed: {e}"}), 500
@@ -1781,7 +1778,7 @@ def get_text_width():
         })
 
     except Exception as e:
-        print(f"Error measuring text width: {e}", file=sys.stderr)
+        log.error(f"Error measuring text width: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -1890,8 +1887,7 @@ def create_instance():
                 _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
                                                   ctl_values)
         except Exception as exc:
-            print(f"Warning: could not save control-axis values: {exc}",
-                  file=sys.stderr)
+            log.warning(f"Warning: could not save control-axis values: {exc}")
 
         # Per-instance SPAC rides along when the caller provides one (a
         # duplicate of a spaced row) — same contract as update_instance:
@@ -1929,9 +1925,9 @@ def create_instance():
             writer.writeheader()
             writer.writerows(rows)
         _update_csv_modification_time(csv_path)
-        print(f"Created studio-only instance '{instance_name}' in CSV", file=sys.stderr)
+        log.info(f"Created studio-only instance '{instance_name}' in CSV")
     except Exception as e:
-        print(f"Error creating studio-only instance in CSV: {e}", file=sys.stderr)
+        log.error(f"Error creating studio-only instance in CSV: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Failed to create instance: {e}"}), 500
@@ -2014,8 +2010,7 @@ def update_instance(instance_name: str):
             _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
                                               control_values)
         except Exception as exc:
-            print(f"Warning: could not save control-axis values: {exc}",
-                  file=sys.stderr)
+            log.warning(f"Warning: could not save control-axis values: {exc}")
 
     global EDITING_INSTANCES
     EDITING_INSTANCES.discard(instance_name)
@@ -2099,18 +2094,18 @@ def update_instance(instance_name: str):
 
                 if instance_updated:
                     if updated_count > 1:
-                        print(f"Warning: Found {updated_count} duplicate rows for '{instance_name}', updated all", file=sys.stderr)
+                        log.warning(f"Warning: Found {updated_count} duplicate rows for '{instance_name}', updated all")
                     _csv_io.backup_sidecar(csv_path)
                     with _sidecar_io.atomic_writer(csv_path, encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                         writer.writerows(rows)
                     _update_csv_modification_time(csv_path)
-                    print(f"Saved '{instance_name}' in the studio", file=sys.stderr)
+                    log.info(f"Saved '{instance_name}' in the studio")
                 else:
-                    print(f"Error: Instance '{instance_name}' not found in the studio", file=sys.stderr)
+                    log.error(f"Error: Instance '{instance_name}' not found in the studio")
             except Exception as e:
-                print(f"Warning: Could not update CSV: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not update CSV: {e}")
                 import traceback
                 traceback.print_exc(file=sys.stderr)
 
@@ -2125,9 +2120,9 @@ def update_instance(instance_name: str):
                 if _csv_io.update_csv_from_glyphs(GLYPHS_PATH, csv_path, skip_instances={instance_name},
                                                   exclude_axes=_non_mapping_axis_tags()):
                     _update_csv_modification_time(csv_path)   # ours, not external
-                    print("CSV synced after instance update", file=sys.stderr)
+                    log.info("CSV synced after instance update")
             except Exception as e:
-                print(f"Warning: Could not sync CSV after update: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not sync CSV after update: {e}")
 
     if csv_only_flag:
         # NO rebuild for auto-saved coordinate edits. The instance
@@ -2188,7 +2183,7 @@ def rename_instance(instance_name: str):
                 try:
                     _instance_aliases.record(ORIGINAL_PATH, instance_name, new_name)
                 except Exception as alias_exc:
-                    print(f"Warning: could not persist instance rename: {alias_exc}", file=sys.stderr)
+                    log.warning(f"Warning: could not persist instance rename: {alias_exc}")
         else:
             # Studio-only: rename happens in CSV only, below.
             success = True
@@ -2233,9 +2228,9 @@ def rename_instance(instance_name: str):
                     # Update modification time cache
                     _update_csv_modification_time(csv_path)
 
-                    print(f"Renamed instance '{instance_name}' to '{new_name}' in preview CSV", file=sys.stderr)
+                    log.info(f"Renamed instance '{instance_name}' to '{new_name}' in preview CSV")
                 except Exception as e:
-                    print(f"Warning: Could not update instance name in preview CSV: {e}", file=sys.stderr)
+                    log.warning(f"Warning: Could not update instance name in preview CSV: {e}")
                     import traceback
                     traceback.print_exc()
             trigger_build()
@@ -2374,8 +2369,7 @@ def _get_avar2_built_font_filename() -> Optional[str]:
                 if fvar_instances:
                     return next(iter(fvar_instances.keys()))
             except Exception as e:
-                print(f"Warning: failed to read built-font filename from {config_path}: {e}",
-                      file=sys.stderr)
+                log.warning(f"Warning: failed to read built-font filename from {config_path}: {e}")
     if GLYPHS_PATH:
         family = GLYPHS_PATH.stem
         try:
@@ -2495,7 +2489,7 @@ def health():
             "build_job": JOBS.status().get("running"),
         })
     except Exception as e:
-        print(f"Error in health endpoint: {e}", file=sys.stderr)
+        log.error(f"Error in health endpoint: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -2675,10 +2669,10 @@ def _initialize_preview_csv_from_glyphs() -> Optional[Path]:
                     row.setdefault(axis, 0)
                 writer.writerow(row)
 
-        print(f"Initialized preview CSV: {csv_path}", file=sys.stderr)
+        log.info(f"Initialized preview CSV: {csv_path}")
         return csv_path
     except Exception as e:
-        print(f"Error initializing preview CSV: {e}", file=sys.stderr)
+        log.error(f"Error initializing preview CSV: {e}")
         import traceback
         traceback.print_exc()
 
@@ -2767,10 +2761,10 @@ def _initialize_preview_config_from_glyphs() -> Optional[Path]:
         with _sidecar_io.atomic_writer(config_path) as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-        print(f"Initialized preview config: {config_path}", file=sys.stderr)
+        log.info(f"Initialized preview config: {config_path}")
         return config_path
     except Exception as e:
-        print(f"Error initializing preview config: {e}", file=sys.stderr)
+        log.error(f"Error initializing preview config: {e}")
         import traceback
         traceback.print_exc()
 
@@ -2844,8 +2838,7 @@ def _derive_traditional_range(tag: str, rows: Optional[List[Dict]] = None,
                 if lo is not None and hi is not None and float(lo) < float(hi):
                     return float(lo), float(hi)
         except Exception as exc:
-            print(f"Warning: transform range lookup for {tag_upper} failed: {exc}",
-                  file=sys.stderr)
+            log.warning(f"Warning: transform range lookup for {tag_upper} failed: {exc}")
 
     # 2. The grade axis has a fixed registered extent.
     if tag_upper == _grade.GRAD_TAG.upper():
@@ -2912,7 +2905,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
         try:
             _sidecar_io.write_json(metadata_path, {})
         except Exception as e:
-            print(f"Error creating axis metadata file: {e}", file=sys.stderr)
+            log.error(f"Error creating axis metadata file: {e}")
             return {}
 
     # Load existing metadata
@@ -2920,7 +2913,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
         with metadata_path.open("r", encoding="utf-8") as f:
             metadata = json.load(f)
     except Exception as e:
-        print(f"Error loading axis metadata: {e}", file=sys.stderr)
+        log.error(f"Error loading axis metadata: {e}")
         metadata = {}
 
     # Get parametric axes from the source file and add to metadata if missing.
@@ -2974,7 +2967,7 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
             if metadata_updated:
                 _save_axis_metadata(metadata)
         except Exception as e:
-            print(f"Error reading axes from Glyphs file for metadata: {e}", file=sys.stderr)
+            log.error(f"Error reading axes from Glyphs file for metadata: {e}")
 
     return metadata
 
@@ -2991,7 +2984,7 @@ def _save_axis_metadata(metadata: Dict[str, Dict[str, any]]) -> bool:
         _sidecar_io.write_json(metadata_path, metadata)
         return True
     except Exception as e:
-        print(f"Error saving axis metadata: {e}", file=sys.stderr)
+        log.error(f"Error saving axis metadata: {e}")
         return False
 
 
@@ -3081,7 +3074,7 @@ def _get_glyphs_axis_tags() -> set:
         font, _fmt = _source_font.load_source_cached(GLYPHS_PATH)
         return {axis["tag"].lower() for axis in _source_font.get_axes(font)}
     except Exception as e:
-        print(f"Error reading axes from source file: {e}", file=sys.stderr)
+        log.error(f"Error reading axes from source file: {e}")
         return set()
 
 
@@ -3135,7 +3128,7 @@ def _add_missing_instance_to_csv(instance_name: str, glyphs_coords: Dict[str, fl
 
         return True
     except Exception as e:
-        print(f"Error adding instance to CSV: {e}", file=sys.stderr)
+        log.error(f"Error adding instance to CSV: {e}")
         return False
 
 
@@ -3324,7 +3317,7 @@ def glyph_coverage():
                         font, control_idx, ORIGINAL_PATH
                     )
                 except Exception as corner_exc:
-                    print(f"Warning: corner-name resolution unavailable: {corner_exc}", file=sys.stderr)
+                    log.warning(f"Warning: corner-name resolution unavailable: {corner_exc}")
             for ax in sidecar_axes:
                 tag_lower = (ax.get("tag") or "").lower()
                 if not tag_lower:
@@ -3380,7 +3373,7 @@ def glyph_coverage():
                     })
                     by_tag[tag_lower] = out[-1]
         except Exception as e:
-            print(f"Warning: failed to merge control-axes sidecar: {e}", file=sys.stderr)
+            log.warning(f"Warning: failed to merge control-axes sidecar: {e}")
 
         # Stable ordering: universal first (least interesting), then
         # scoped. Within each bucket, by tag.
@@ -3395,7 +3388,7 @@ def glyph_coverage():
             glyph_chars = {}
         return jsonify({"axes": out, "glyph_chars": glyph_chars})
     except Exception as e:
-        print(f"Error in /api/glyph-coverage: {e}", file=sys.stderr)
+        log.error(f"Error in /api/glyph-coverage: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -3598,8 +3591,8 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
                 merged += 1
             ds.sources.remove(src)
         if merged:
-            print(f"  export: merged {merged} baked-correction glyph(s) from "
-                  f"brace sources coincident with masters", file=sys.stderr)
+            log.info(f"  export: merged {merged} baked-correction glyph(s) from "
+                  f"brace sources coincident with masters")
 
         if str(source_path).lower().endswith(".glyphs"):
             for i, s in enumerate(ds.sources):
@@ -3642,9 +3635,8 @@ def _build_export_source(parametric_location: Dict[str, float], export_dir: Path
                     "or export without 'set default'")
             ds.sources.remove(src)
         if coincident:
-            print(f"  export: dropped {len(coincident)} brace source(s) coincident "
-                  f"with the new origin (content baked into the origin master)",
-                  file=sys.stderr)
+            log.info(f"  export: dropped {len(coincident)} brace source(s) coincident "
+                  f"with the new origin (content baked into the origin master)")
         origin_path = src_dir / "ExportOrigin.ufo"
         origin_ufo.save(str(origin_path), overwrite=True)
 
@@ -3764,8 +3756,7 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                     mapped = {str(t): float(v) for t, v in (m.get("out") or {}).items()}
                     break
         except Exception as exc:
-            print(f"export: authored-row lookup failed ({exc}); using the built table",
-                  file=sys.stderr)
+            log.info(f"export: authored-row lookup failed ({exc}); using the built table")
         if mapped is None:
             mapped = _evaluate_mapped_location(requested)
         export_defaults = {
@@ -3901,7 +3892,7 @@ def list_transforms():
             "sidecar_path": str(_transforms.sidecar_path_for(ORIGINAL_PATH)),
         })
     except Exception as e:
-        print(f"Error listing transforms: {e}", file=sys.stderr)
+        log.error(f"Error listing transforms: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -3930,7 +3921,7 @@ def update_transforms():
         try:
             previous = {t.get("id"): t for t in _transforms.available(ORIGINAL_PATH)}
         except Exception as prev_exc:
-            print(f"transforms: could not read previous state: {prev_exc}", file=sys.stderr)
+            log.info(f"transforms: could not read previous state: {prev_exc}")
         # Guardrail: a transform whose engine reads specific axes
         # (round_corners' XOPQ/XTRA radius formula) is refused on a
         # source that doesn't declare them — enabling it would build an
@@ -3997,7 +3988,7 @@ def update_transforms():
         try:
             build_ok = rebuild()
         except Exception as build_exc:
-            print(f"Warning: rebuild after transforms update failed: {build_exc}", file=sys.stderr)
+            log.warning(f"Warning: rebuild after transforms update failed: {build_exc}")
         # A transform can fail even when the base font compiled fine — surface
         # it so the UI doesn't show an enabled transform that silently no-op'd.
         return jsonify({
@@ -4007,7 +3998,7 @@ def update_transforms():
             "transform_error": LAST_TRANSFORM_ERROR,
         })
     except Exception as e:
-        print(f"Error updating transforms: {e}", file=sys.stderr)
+        log.error(f"Error updating transforms: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -4215,7 +4206,7 @@ def _grade_state_payload():
     try:
         data["diagnostics"] = _grade_diagnostics(data, coords, param_ranges)
     except Exception as exc:
-        print(f"Warning: grade diagnostics failed: {exc}", file=sys.stderr)
+        log.warning(f"Warning: grade diagnostics failed: {exc}")
         data["diagnostics"] = []
     data["sidecar_path"] = str(_grade.sidecar_path_for(ORIGINAL_PATH))
     return data
@@ -4229,7 +4220,7 @@ def get_grade():
     try:
         return jsonify(_grade_state_payload())
     except Exception as e:
-        print(f"Error reading grade: {e}", file=sys.stderr)
+        log.error(f"Error reading grade: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -4491,7 +4482,7 @@ def _source_glyph_sigs():
         font, _fmt = _source_font.load_source(ORIGINAL_PATH)
         sigs = {g.name: _control_axes.glyph_masters_sig(font, g.name) for g in font.glyphs}
     except Exception as exc:
-        print(f"Warning: could not fingerprint source glyphs: {exc}", file=sys.stderr)
+        log.warning(f"Warning: could not fingerprint source glyphs: {exc}")
         return None
     _SOURCE_GLYPH_SIGS = (mtime, sigs)
     return sigs
@@ -4554,7 +4545,7 @@ def list_control_axes():
             "sidecar_path": str(_control_axes.sidecar_path_for(ORIGINAL_PATH)),
         })
     except Exception as e:
-        print(f"Error listing control axes: {e}", file=sys.stderr)
+        log.error(f"Error listing control axes: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -4598,13 +4589,13 @@ def create_control_axis():
         try:
             shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
         except Exception as shadow_exc:
-            print(f"Warning: shadow regeneration after add failed: {shadow_exc}", file=sys.stderr)
+            log.warning(f"Warning: shadow regeneration after add failed: {shadow_exc}")
 
         return jsonify({"success": True, "axis": entry, "shadow_path": str(shadow) if shadow else None})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
-        print(f"Error creating control axis: {e}", file=sys.stderr)
+        log.error(f"Error creating control axis: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -4708,7 +4699,7 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
     FONTRA_PROCESS = proc
     FONTRA_CONTENT_ROOT = content_root
     FONTRA_SHADOW_MTIME = current_mtime
-    print(f"Started Fontra on http://127.0.0.1:{FONTRA_PORT} (root={content_root})", file=sys.stderr)
+    log.info(f"Started Fontra on http://127.0.0.1:{FONTRA_PORT} (root={content_root})")
     return FONTRA_PORT
 
 
@@ -4725,7 +4716,7 @@ def _stop_fontra() -> None:
             except Exception:
                 FONTRA_PROCESS.kill()
     except Exception as exc:
-        print(f"Warning: error stopping Fontra: {exc}", file=sys.stderr)
+        log.warning(f"Warning: error stopping Fontra: {exc}")
     finally:
         FONTRA_PROCESS = None
         FONTRA_CONTENT_ROOT = None
@@ -5226,7 +5217,7 @@ def set_control_axis_layers(tag: str):
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
-        print(f"Error setting control-axis layers: {e}", file=sys.stderr)
+        log.error(f"Error setting control-axis layers: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -5265,7 +5256,7 @@ def patch_control_axis_layers(tag: str):
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
-        print(f"Error setting control-axis layers: {e}", file=sys.stderr)
+        log.error(f"Error setting control-axis layers: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -5369,7 +5360,7 @@ def reseed_control_axis_layers(tag: str):
     except KeyError:
         return jsonify({"error": f"control axis '{tag}' not found"}), 404
     except Exception as e:
-        print(f"Error re-seeding control axis layers: {e}", file=sys.stderr)
+        log.error(f"Error re-seeding control axis layers: {e}")
         return jsonify({"error": str(e)}), 500
 
     if result["blocked"]:
@@ -5509,7 +5500,7 @@ def control_axis_reference_metrics(tag: str):
             "note": "Figures for the edited glyph are its pre-edit state.",
         })
     except Exception as e:
-        print(f"Error measuring reference metrics: {e}", file=sys.stderr)
+        log.error(f"Error measuring reference metrics: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -5551,14 +5542,14 @@ def update_control_axis(tag: str):
             try:
                 trigger_build()
             except Exception as build_exc:
-                print(f"Warning: rebuild after axis update failed: {build_exc}", file=sys.stderr)
+                log.warning(f"Warning: rebuild after axis update failed: {build_exc}")
         except Exception as shadow_exc:
-            print(f"Warning: shadow refresh after update failed: {shadow_exc}", file=sys.stderr)
+            log.warning(f"Warning: shadow refresh after update failed: {shadow_exc}")
         return jsonify({"success": True, "axis": entry})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
-        print(f"Error updating control axis: {e}", file=sys.stderr)
+        log.error(f"Error updating control axis: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -5601,13 +5592,13 @@ def delete_control_axis(tag: str):
             try:
                 trigger_build()
             except Exception as build_exc:
-                print(f"Warning: rebuild after delete failed: {build_exc}", file=sys.stderr)
+                log.warning(f"Warning: rebuild after delete failed: {build_exc}")
         except Exception as shadow_exc:
-            print(f"Warning: shadow refresh after delete failed: {shadow_exc}", file=sys.stderr)
+            log.warning(f"Warning: shadow refresh after delete failed: {shadow_exc}")
 
         return jsonify({"success": True, "tag": tag})
     except Exception as e:
-        print(f"Error deleting control axis: {e}", file=sys.stderr)
+        log.error(f"Error deleting control axis: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -5625,7 +5616,7 @@ def export_config_bundle():
         _suppress_watcher()
         bundle = _config_port.build_export(ORIGINAL_PATH, _get_avar2_csv_path())
     except Exception as e:
-        print(f"Error exporting config: {e}", file=sys.stderr)
+        log.error(f"Error exporting config: {e}")
         return jsonify({"error": str(e)}), 500
     family = (bundle.get("source") or {}).get("family_name") or "source"
     return Response(
@@ -5659,7 +5650,7 @@ def import_config_bundle():
     try:
         report = _config_port.validate_bundle(bundle, ORIGINAL_PATH)
     except Exception as e:
-        print(f"Error validating config bundle: {e}", file=sys.stderr)
+        log.error(f"Error validating config bundle: {e}")
         return jsonify({"error": str(e)}), 500
     if dry_run or not report["ok"]:
         return jsonify(report), (200 if dry_run else 400)
@@ -5672,7 +5663,7 @@ def import_config_bundle():
             csv_dest = _get_avar2_csv_path() or _get_preview_csv_path()
             report = _config_port.apply_bundle(bundle, ORIGINAL_PATH, csv_dest)
         except Exception as e:
-            print(f"Error applying config bundle: {e}", file=sys.stderr)
+            log.error(f"Error applying config bundle: {e}")
             return jsonify({"error": str(e)}), 500
 
         # Same shadow + build dance as delete_control_axis: re-derive the
@@ -5687,11 +5678,9 @@ def import_config_bundle():
             try:
                 trigger_build()
             except Exception as build_exc:
-                print(f"Warning: rebuild after config import failed: {build_exc}",
-                      file=sys.stderr)
+                log.warning(f"Warning: rebuild after config import failed: {build_exc}")
         except Exception as shadow_exc:
-            print(f"Warning: shadow refresh after config import failed: {shadow_exc}",
-                  file=sys.stderr)
+            log.warning(f"Warning: shadow refresh after config import failed: {shadow_exc}")
 
     return jsonify(report)
 
@@ -5734,7 +5723,7 @@ def get_avar2_axes():
                         "max": float(axis["max"]),
                     }
             except Exception as e:
-                print(f"Warning: Could not read axes from source file: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not read axes from source file: {e}")
 
         # Build axes with metadata
         # If axis doesn't exist in metadata, create default entry and save it
@@ -6005,9 +5994,9 @@ def delete_instance(instance_name: str):
 
                 # Update modification time cache
                 _update_csv_modification_time(csv_path)
-                print(f"Removed instance '{instance_name}' from preview CSV", file=sys.stderr)
+                log.info(f"Removed instance '{instance_name}' from preview CSV")
             except Exception as e:
-                print(f"Warning: Could not remove instance from preview CSV: {e}", file=sys.stderr)
+                log.warning(f"Warning: Could not remove instance from preview CSV: {e}")
                 import traceback
                 traceback.print_exc()
         trigger_build()
@@ -6359,7 +6348,7 @@ def delete_avar2_axis(axis_name: str):
         try:
             build_ok = trigger_build()
         except Exception as build_exc:
-            print(f"Warning: rebuild after axis delete failed: {build_exc}", file=sys.stderr)
+            log.warning(f"Warning: rebuild after axis delete failed: {build_exc}")
         return jsonify({"success": True, "deleted": axis_name_normalized,
                         "build_ok": bool(build_ok)})
     except Exception as e:
@@ -6768,9 +6757,9 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         # path's "set default" still rests shipped fonts on this row.
         dropped = {id(m) for m in default_rows}
         avar2_cfg = [m for m in avar2_cfg_early if id(m) not in dropped]
-        print("  avar2: default-location row(s) excluded from the preview "
+        log.info("  avar2: default-location row(s) excluded from the preview "
               "table (build-time relocation off); mapped stops stay exact, "
-              "the preview rests at the compiled origin", file=sys.stderr)
+              "the preview rests at the compiled origin")
         # (global LAST_ORIGIN_WARNING is declared earlier in this function.)
         LAST_ORIGIN_WARNING = (
             "Build-time default relocation is off: the preview font rests at "
@@ -7126,18 +7115,18 @@ def _apply_source_path(path: Path) -> None:
     try:
         _resolve_active_source()
     except Exception as exc:
-        print(f"Warning: failed to resolve active build source on load: {exc}", file=sys.stderr)
+        log.warning(f"Warning: failed to resolve active build source on load: {exc}")
 
     # A new source invalidates every queued/running job: cancel them and
     # start clean.
     JOBS.cancel_all()
 
-    print(f"Auto-building font from {GLYPHS_PATH}...", file=sys.stderr)
+    log.info(f"Auto-building font from {GLYPHS_PATH}...")
     try:
         trigger_build()
     except Exception as exc:
         # Non-fatal — the frontend can retry via /api/build.
-        print(f"⚠ Auto-build failed: {exc}", file=sys.stderr)
+        log.info(f"⚠ Auto-build failed: {exc}")
 
 
 @app.route('/api/examples', methods=['GET'])
@@ -7366,7 +7355,7 @@ def load_source():
             if not workspace.exists() and (legacy / glyphs_name).exists():
                 workspace.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(legacy), str(workspace))
-                print(f"Migrated legacy upload workspace → {workspace}", file=sys.stderr)
+                log.info(f"Migrated legacy upload workspace → {workspace}")
 
             workspace.mkdir(parents=True, exist_ok=True)
             glyphs_dest = workspace / glyphs_name
@@ -7427,7 +7416,7 @@ def load_source():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        print(f"Error in /api/load-source: {exc}", file=sys.stderr)
+        log.error(f"Error in /api/load-source: {exc}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(exc)}), 500
@@ -7461,11 +7450,11 @@ def sync_csv_with_glyphs():
                 f" (skipped {len(EDITING_INSTANCES)} editing instances)"
                 if EDITING_INSTANCES else ""
             )
-            print(f"CSV synced with source file{skipped_msg}", file=sys.stderr)
+            log.info(f"CSV synced with source file{skipped_msg}")
         else:
-            print("Warning: CSV sync returned no-op", file=sys.stderr)
+            log.warning("Warning: CSV sync returned no-op")
     except Exception as e:
-        print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
+        log.warning(f"Warning: Could not sync CSV: {e}")
 
 
 
@@ -7567,7 +7556,7 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
         self.settled_mtime[key] = settled_mtime
 
         if is_sidecar:
-            print(f"\n{src.name} changed outside the studio, regenerating...", file=sys.stderr)
+            log.info(f"{src.name} changed outside the studio, regenerating...")
             schedule_shadow_rebuild()
             return
 
@@ -7584,7 +7573,7 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
                     try:
                         _capture_shadow_drawings()
                     except Exception as exc:
-                        print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
+                        log.warning(f"Warning: could not capture outlines: {exc}")
                 # Re-resolve NOW so the read endpoints (/api/instances,
                 # /api/axes, coverage) stop serving the pre-save shadow
                 # while the current build is still running; the queue
@@ -7593,7 +7582,7 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
                 JOBS.request_build(source_refresh=kind)
             else:
                 JOBS.request_build()
-            print("Source changed mid-build; queued for after this build.", file=sys.stderr)
+            log.info("Source changed mid-build; queued for after this build.")
             return
 
         try:
@@ -7605,11 +7594,11 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
                 # the latter rebuilds only the control-axis shadow, so every
                 # save in Glyphs silently dropped the grade braces (and the
                 # GRAD axis with them) until an unrelated grade edit ran.
-                print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
+                log.info("Original source modified, regenerating shadow...")
                 _resolve_source_after_save(src)
                 sync_csv_with_glyphs()
             elif is_source or is_shadow:
-                print("\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                log.info("Source file modified, syncing CSV and rebuilding...")
                 # A Fontra save writes the SHADOW: pull hand-drawn brace
                 # outlines into the sidecar first, so drawings are durable
                 # even if the shadow is later regenerated away. Untouched
@@ -7618,16 +7607,16 @@ class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not 
                 try:
                     captured = _capture_shadow_drawings()
                     if captured:
-                        print(f"Captured {captured} drawn outline(s) into the sidecar.", file=sys.stderr)
+                        log.info(f"Captured {captured} drawn outline(s) into the sidecar.")
                 except Exception as exc:
-                    print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
+                    log.warning(f"Warning: could not capture outlines: {exc}")
                 # Sync CSV first (skips editing instances)
                 sync_csv_with_glyphs()
             else:
-                print("\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
+                log.info("UFO glyph edited (Fontra), rebuilding...")
             trigger_build()
         except Exception as e:
-            print(f"Error handling file change: {e}", file=sys.stderr)
+            log.error(f"Error handling file change: {e}")
 
 # Set up file watcher if watchdog is available AND we have a source
 # loaded. Blind launches skip watching — the source will be loaded
@@ -7697,12 +7686,12 @@ def main():
     # (sibling sidecars, job-dir output), so these overrides change nothing
     # the user can see. Fail loudly instead of pretending.
     if args.csv:
-        print("Error: --csv is no longer supported — the studio reads "
-              "<stem>-avar.csv next to the source file.", file=sys.stderr)
+        log.error("Error: --csv is no longer supported — the studio reads "
+              "<stem>-avar.csv next to the source file.")
         sys.exit(2)
     if args.build_dir:
-        print("Error: --build-dir is no longer supported — builds write to "
-              ".avar2-studio/build/ next to the source file.", file=sys.stderr)
+        log.error("Error: --build-dir is no longer supported — builds write to "
+              ".avar2-studio/build/ next to the source file.")
         sys.exit(2)
 
     global USE_FONTC
@@ -7715,43 +7704,40 @@ def main():
         try:
             resolved = glyphs_arg.resolve()
             if not resolved.exists():
-                print(f"Error: source file not found: {resolved}", file=sys.stderr)
+                log.error(f"Error: source file not found: {resolved}")
                 sys.exit(1)
             _apply_source_path(resolved)
         except (ValueError, UnsupportedSourceFormat) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            log.error(f"Error: {exc}")
             sys.exit(1)
     else:
         # Blind launch: no source loaded yet. The frontend will offer
         # the Load-Font dropdown (built-in examples or .glyphs upload)
         # which POSTs to /api/load-source. All read endpoints return
         # graceful empties while GLYPHS_PATH is None.
-        print(
-            "No source file provided — launching blind. "
-            "Use the Load Font dropdown in the UI to pick an example or upload a .glyphs file.",
-            file=sys.stderr,
-        )
+        log.info("No source file provided — launching blind. "
+            "Use the Load Font dropdown in the UI to pick an example or upload a .glyphs file.")
 
-    print(f"Starting server on {args.host}:{args.port}", file=sys.stderr)
-    print(f"Compiler: {'fontc (with fontmake fallback)' if USE_FONTC else 'fontmake only'}", file=sys.stderr)
+    log.info(f"Starting server on {args.host}:{args.port}")
+    log.info(f"Compiler: {'fontc (with fontmake fallback)' if USE_FONTC else 'fontmake only'}")
     if GLYPHS_PATH:
-        print(f"Glyphs file: {GLYPHS_PATH}", file=sys.stderr)
-        print(f"Build directory: {BUILD_DIR}", file=sys.stderr)
+        log.info(f"Glyphs file: {GLYPHS_PATH}")
+        log.info(f"Build directory: {BUILD_DIR}")
         if CSV_PATH:
-            print(f"CSV file: {CSV_PATH}", file=sys.stderr)
+            log.info(f"CSV file: {CSV_PATH}")
         else:
             csv_path = _get_avar2_csv_path()
             if csv_path:
-                print(f"CSV file (auto-detected): {csv_path}", file=sys.stderr)
+                log.info(f"CSV file (auto-detected): {csv_path}")
             else:
-                print("CSV file: not found (avar2 endpoints will be unavailable)", file=sys.stderr)
+                log.info("CSV file: not found (avar2 endpoints will be unavailable)")
 
     preview_csv = _get_preview_csv_path()
     if preview_csv:
-        print(f"Preview CSV: {preview_csv}", file=sys.stderr)
+        log.info(f"Preview CSV: {preview_csv}")
     preview_config = _get_preview_config_path()
     if preview_config:
-        print(f"Preview config: {preview_config}", file=sys.stderr)
+        log.info(f"Preview config: {preview_config}")
 
     # Set up real-time file watching using watchdog
     global _SYNC_CSV_HOOK
@@ -7776,7 +7762,7 @@ def main():
                 if orig_dir != GLYPHS_PATH.parent.resolve():
                     observer.schedule(event_handler, path=str(orig_dir), recursive=False)
         except Exception as exc:
-            print(f"Warning: could not watch the original source: {exc}", file=sys.stderr)
+            log.warning(f"Warning: could not watch the original source: {exc}")
         # And the shadow directory itself when the active source is the
         # transformed/ copy (source transforms on): studio-axis Fontra
         # sessions save shadow/<name>, which the GLYPHS_PATH watch —
@@ -7790,14 +7776,14 @@ def main():
                         and shadow_dir.resolve() != Path(GLYPHS_PATH).parent.resolve():
                     observer.schedule(event_handler, path=str(shadow_dir), recursive=False)
         except Exception as exc:
-            print(f"Warning: could not watch the shadow dir: {exc}", file=sys.stderr)
+            log.warning(f"Warning: could not watch the shadow dir: {exc}")
         observer.start()
         OBSERVER = observer
-        print(f"Real-time file watching enabled: watching {GLYPHS_PATH}", file=sys.stderr)
+        log.info(f"Real-time file watching enabled: watching {GLYPHS_PATH}")
     elif GLYPHS_PATH is None:
         pass  # blind launch — watcher attaches when a source is loaded later (TODO)
     else:
-        print("Warning: watchdog not available, falling back to periodic checking", file=sys.stderr)
+        log.warning("Warning: watchdog not available, falling back to periodic checking")
         # Fallback to periodic checking
         PERIODIC_CHECK_INTERVAL = 15
         def check_and_rebuild_periodically():
@@ -7812,7 +7798,7 @@ def main():
                     sync_csv_with_glyphs()
                     trigger_build()
             except Exception as e:
-                print(f"Error in periodic check: {e}", file=sys.stderr)
+                log.error(f"Error in periodic check: {e}")
 
         def start_periodic_checker():
             def periodic_loop():
@@ -7821,7 +7807,7 @@ def main():
                     check_and_rebuild_periodically()
             checker_thread = threading.Thread(target=periodic_loop, daemon=True)
             checker_thread.start()
-            print(f"Periodic file checking enabled: checking every {PERIODIC_CHECK_INTERVAL} seconds", file=sys.stderr)
+            log.info(f"Periodic file checking enabled: checking every {PERIODIC_CHECK_INTERVAL} seconds")
 
         start_periodic_checker()
 
