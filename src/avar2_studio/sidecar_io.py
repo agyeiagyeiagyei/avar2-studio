@@ -24,10 +24,15 @@ import os
 import stat
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Iterator, TextIO
 
 LOCK = threading.RLock()
+
+# {resolved path: time of the studio's last write} — the file watcher uses
+# it to tell the studio's own sidecar writes from external edits.
+LAST_WRITES: dict[str, float] = {}
 
 
 @contextlib.contextmanager
@@ -54,6 +59,7 @@ def atomic_writer(path: os.PathLike | str, *, encoding: str = "utf-8",
                 mode = 0o644
             os.chmod(tmp, mode)
             os.replace(tmp, target)
+            LAST_WRITES[str(target.resolve())] = time.time()
         except BaseException:
             with contextlib.suppress(OSError):
                 tmp.unlink()

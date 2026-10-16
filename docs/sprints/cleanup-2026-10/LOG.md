@@ -834,3 +834,30 @@ bar; findings rounds still get written so a second reviewer can re-check.
   reported, `add_axis` refuses, the bytes are preserved, and repairing
   the file clears the error; `/api/health` lists the error and drops it
   once the file is gone. Control-axis cluster: 85 passed; ruff clean.
+
+## T2.11 + T2.12 — the watcher sees sidecars, moved/created events, and ignores job snapshots
+
+- Hoisted `sync_csv_with_glyphs` and `GlyphsFileHandler` out of `main()`
+  to module level (no behaviour change; the class now degrades to
+  `object` when watchdog is missing instead of failing at import), so the
+  handler is testable with watchdog's event classes.
+- T2.11: `_classify_watched_path` returns `"sidecar"` for
+  `<stem>{-avar.csv,-control.json,-transforms.json,-grade.json,-kinetikern.json}`
+  beside the original (the same list the job snapshot stages). The
+  handler reacts to `on_created` and `on_moved` (destination path) as
+  well as `on_modified` — atomic saves and git checkouts surface that
+  way. The studio's own sidecar writes are filtered by a per-path stamp
+  that `sidecar_io.atomic_writer` records (`LAST_WRITES`): only a later
+  mtime is an external edit, and it schedules the debounced regen +
+  rebuild.
+- T2.12: any path under `.avar2-studio/jobs/` is ignored. §10-M3
+  reproduced first on `examples/roboto-delta-mini` (designspace →
+  recursive watch): with NO edits the pre-fix server ran **46 builds in
+  150 s** and logged 51,215 self-triggered lines ("UFO glyph edited" /
+  "Source changed mid-build"). Post-fix probe: see below.
+- Tests [verified]: `tests/test_watcher_events.py` — external sidecar edit
+  → regen; the studio's own write → ignored, a later rewrite → regen;
+  created + moved events count; original → resolve/csv/build and the
+  shadow → csv/build keep their paths; snapshot paths (`.glyphs`,
+  `.glif`) under `jobs/` classify as None and trigger nothing; the
+  handler imports without watchdog. Full suite green; ruff clean.

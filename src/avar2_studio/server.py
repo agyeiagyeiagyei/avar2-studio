@@ -1413,6 +1413,9 @@ def _resolve_source_after_save(path: Path) -> None:
                 _wait_for_save_to_settle(path, settle=1.0)
 
 
+_SIDECAR_SUFFIXES = tuple(_build_jobs.SIDECAR_SUFFIXES)
+
+
 def _classify_watched_path(src: Path) -> Optional[str]:
     """Which studio file a watchdog event belongs to: "source" (the active
     build source — the transformed copy when source transforms are on),
@@ -1426,14 +1429,25 @@ def _classify_watched_path(src: Path) -> Optional[str]:
     """
     if GLYPHS_PATH is None:
         return None
+    parts = src.parts
+    if ".avar2-studio" in parts and "jobs" in parts[parts.index(".avar2-studio"):]:
+        # Build-job snapshots live under the watched tree (recursively, for
+        # designspace sources): staging copies UFOs there and the worker
+        # regenerates pooled UFOs inside the job dir. Reacting to those
+        # .glif writes re-queued a build per job, forever.
+        return None
     resolved = src.resolve()
     if resolved == Path(GLYPHS_PATH).resolve():
         return "source"
     if ORIGINAL_PATH is not None:
-        if resolved == Path(ORIGINAL_PATH).resolve():
+        original = Path(ORIGINAL_PATH)
+        if resolved == original.resolve():
             return "original"
-        if resolved == _control_axes.shadow_path_for(ORIGINAL_PATH).resolve():
+        if resolved == _control_axes.shadow_path_for(original).resolve():
             return "shadow"
+        if resolved.parent == original.parent.resolve() and resolved.name in {
+                f"{original.stem}{suffix}" for suffix in _SIDECAR_SUFFIXES}:
+            return "sidecar"
     if str(GLYPHS_PATH).lower().endswith(".designspace") \
             and src.suffix.lower() in (".glif", ".plist"):
         return "glif"
@@ -7887,6 +7901,209 @@ def load_source():
         return jsonify({"error": str(exc)}), 500
 
 
+@_sidecar_locked
+def sync_csv_with_glyphs():
+    """Sync CSV with the source file, skipping instances being edited."""
+    global EDITING_INSTANCES
+
+    csv_path = _get_avar2_csv_path()
+    if not csv_path or not csv_path.exists():
+        return
+
+    try:
+        ok = _csv_io.update_csv_from_glyphs(
+            GLYPHS_PATH,
+            csv_path,
+            skip_instances=set(EDITING_INSTANCES),
+            exclude_axes=_non_mapping_axis_tags(),
+        )
+        if ok:
+            # OUR write, not an external one. Without this the
+            # external-edit guard sees the new mtime on the next save and
+            # refuses it — and since every secondary-axis layer edit
+            # regenerates the shadow, which trips this watcher, that made
+            # "changed outside this window" fire on essentially every
+            # avar2 save.
+            _update_csv_modification_time(csv_path)
+            skipped_msg = (
+                f" (skipped {len(EDITING_INSTANCES)} editing instances)"
+                if EDITING_INSTANCES else ""
+            )
+            print(f"CSV synced with source file{skipped_msg}", file=sys.stderr)
+        else:
+            print("Warning: CSV sync returned no-op", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
+
+
+
+class GlyphsFileHandler(FileSystemEventHandler if FileSystemEventHandler is not None else object):
+    """Watchdog handler for real-time Glyphs file changes."""
+
+    def __init__(self):
+        # Per-PATH: a Glyphs save is a write + rename (two events, ms
+        # apart) and must fold to one build; but the server's own shadow
+        # write arrives in the same drain as a designer's save that
+        # landed mid-build, and with one shared timestamp the shadow's
+        # events spent the throttle budget and the save was dropped.
+        self.last_modified: Dict[str, float] = {}
+        # First-processed-event-per-final-mtime: a multi-second save
+        # fires several events as the file is written.
+        self.settled_mtime: Dict[str, float] = {}
+        self.debounce_interval = 0.5  # seconds
+
+    def on_modified(self, event):
+        if not event.is_directory:
+            self._handle(Path(event.src_path))
+
+    def on_created(self, event):
+        # Editors and git materialise a file as create (+ modify); a plain
+        # on_modified-only handler could miss a restored sidecar.
+        if not event.is_directory:
+            self._handle(Path(event.src_path))
+
+    def on_moved(self, event):
+        # Atomic saves (write temp + rename) surface as a move onto the
+        # watched name on some platforms; the destination is what changed.
+        if not event.is_directory:
+            self._handle(Path(event.dest_path))
+
+    def _handle(self, src: Path):
+        """One settled, de-duplicated reaction per external change to a
+        watched file; the server's own writes are filtered out first."""
+
+        # Relevant changes: the active build source (sync + rebuild),
+        # the designer's ORIGINAL (GLYPHS_PATH is the SHADOW once a
+        # secondary axis has layers — comparing only against it meant
+        # edits to the real source never fired: deleting an instance in
+        # Glyphs left the shadow stale), the shadow itself (Fontra saves
+        # for studio axes — a separate class because GLYPHS_PATH is the
+        # transformed/ copy when source transforms are on), and — for an
+        # active .designspace shadow — .glif edits inside its UFOs.
+        event_kind = _classify_watched_path(src)
+        if event_kind is None:
+            return
+        is_source = event_kind == "source"
+        is_original = event_kind == "original"
+        is_shadow = event_kind == "shadow"
+        is_sidecar = event_kind == "sidecar"
+
+        # Debounce rapid saves
+        current_time = time.time()
+        key = str(src.resolve())
+        if current_time - self.last_modified.get(key, 0.0) < self.debounce_interval:
+            return
+        self.last_modified[key] = current_time
+
+        # Server-initiated write (instance edit / shadow regen / transform
+        # save): the triggering code already queued its rebuild — a
+        # watcher-driven sync+build here would duplicate it. Two guards:
+        # the time window covers the in-flight write; the mtime watermark
+        # covers events PROCESSED late — the handler thread can be busy in
+        # a multi-second resolve when the time window expires, and a late
+        # self-event then resolved again and re-queued the build forever
+        # (the T0.7 round-1 storm). The Glyphs.app instance-edit
+        # round-trip writes the ORIGINAL and arms the second watermark.
+        try:
+            src_mtime = src.stat().st_mtime
+        except OSError:
+            src_mtime = None
+        if is_sidecar:
+            # Every studio edit rewrites a sidecar through sidecar_io, which
+            # stamps the write; only a LATER mtime is an external edit (git
+            # checkout, a hand edit, another tool) worth regenerating for.
+            if src_mtime is not None and src_mtime <= _sidecar_io.LAST_WRITES.get(key, 0.0):
+                return
+        elif is_original:
+            if current_time < _SUPPRESS_ORIGINAL_UNTIL or (
+                    src_mtime is not None
+                    and src_mtime <= _SELF_WRITE_ORIGINAL_WATERMARK):
+                return
+        elif current_time < _SUPPRESS_WATCHDOG_UNTIL or (
+                src_mtime is not None and src_mtime <= _SELF_WRITE_WATERMARK):
+            return
+
+        # A multi-second save fires several events as the file is written;
+        # settle, then process only the first event per final mtime.
+        _wait_for_save_to_settle(src)
+        try:
+            settled_mtime = src.stat().st_mtime
+        except OSError:
+            settled_mtime = None
+        if settled_mtime is not None and settled_mtime == self.settled_mtime.get(key):
+            return
+        self.settled_mtime[key] = settled_mtime
+
+        if is_sidecar:
+            print(f"\n{src.name} changed outside the studio, regenerating...", file=sys.stderr)
+            schedule_shadow_rebuild()
+            return
+
+        if JOBS.is_building():
+            # Do NOT drop the save. Record what changed so the queue's
+            # next pass re-syncs the CSV and re-stages the source before
+            # rebuilding; a rebuild from the pre-save snapshot would look
+            # like success while serving stale outlines.
+            kind = "original" if is_original else ("source" if (is_source or is_shadow) else None)
+            if kind:
+                if is_source or is_shadow:
+                    # A Fontra save writes the SHADOW: secure any drawing
+                    # into the sidecar before the resolve below regens it.
+                    try:
+                        _capture_shadow_drawings()
+                    except Exception as exc:
+                        print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
+                # Re-resolve NOW so the read endpoints (/api/instances,
+                # /api/axes, coverage) stop serving the pre-save shadow
+                # while the current build is still running; the queue
+                # re-resolves before staging the follow-up regardless.
+                _resolve_source_after_save(src)
+                JOBS.request_build(source_refresh=kind)
+            else:
+                JOBS.request_build()
+            print("Source changed mid-build; queued for after this build.", file=sys.stderr)
+            return
+
+        try:
+            if is_original:
+                # The user's own file changed. Re-derive the active source
+                # FROM it so masters, instances and glyph edits propagate;
+                # without this the shadow keeps serving a stale copy.
+                # Go through _resolve_active_source, NOT regenerate_shadow:
+                # the latter rebuilds only the control-axis shadow, so every
+                # save in Glyphs silently dropped the grade braces (and the
+                # GRAD axis with them) until an unrelated grade edit ran.
+                print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
+                _resolve_source_after_save(src)
+                sync_csv_with_glyphs()
+            elif is_source or is_shadow:
+                print("\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                # A Fontra save writes the SHADOW: pull hand-drawn brace
+                # outlines into the sidecar first, so drawings are durable
+                # even if the shadow is later regenerated away. Untouched
+                # seeds are skipped by their stamps — a cheap no-op after
+                # server-side regens.
+                try:
+                    captured = _capture_shadow_drawings()
+                    if captured:
+                        print(f"Captured {captured} drawn outline(s) into the sidecar.", file=sys.stderr)
+                except Exception as exc:
+                    print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
+                # Sync CSV first (skips editing instances)
+                sync_csv_with_glyphs()
+            else:
+                print("\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
+            trigger_build()
+        except Exception as e:
+            print(f"Error handling file change: {e}", file=sys.stderr)
+
+# Set up file watcher if watchdog is available AND we have a source
+# loaded. Blind launches skip watching — the source will be loaded
+# via /api/load-source, but a runtime-swappable file watcher is
+# left for a future iteration. The frontend's polling tick covers
+# the no-watcher case acceptably.
+
+
 def main():
     global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, OBSERVER
 
@@ -8005,184 +8222,9 @@ def main():
         print(f"Preview config: {preview_config}", file=sys.stderr)
 
     # Set up real-time file watching using watchdog
-    @_sidecar_locked
-    def sync_csv_with_glyphs():
-        """Sync CSV with the source file, skipping instances being edited."""
-        global EDITING_INSTANCES
-
-        csv_path = _get_avar2_csv_path()
-        if not csv_path or not csv_path.exists():
-            return
-
-        try:
-            ok = _csv_io.update_csv_from_glyphs(
-                GLYPHS_PATH,
-                csv_path,
-                skip_instances=set(EDITING_INSTANCES),
-                exclude_axes=_non_mapping_axis_tags(),
-            )
-            if ok:
-                # OUR write, not an external one. Without this the
-                # external-edit guard sees the new mtime on the next save and
-                # refuses it — and since every secondary-axis layer edit
-                # regenerates the shadow, which trips this watcher, that made
-                # "changed outside this window" fire on essentially every
-                # avar2 save.
-                _update_csv_modification_time(csv_path)
-                skipped_msg = (
-                    f" (skipped {len(EDITING_INSTANCES)} editing instances)"
-                    if EDITING_INSTANCES else ""
-                )
-                print(f"CSV synced with source file{skipped_msg}", file=sys.stderr)
-            else:
-                print("Warning: CSV sync returned no-op", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: Could not sync CSV: {e}", file=sys.stderr)
-
     global _SYNC_CSV_HOOK
     _SYNC_CSV_HOOK = sync_csv_with_glyphs
 
-    class GlyphsFileHandler(FileSystemEventHandler):
-        """Watchdog handler for real-time Glyphs file changes."""
-
-        def __init__(self):
-            # Per-PATH: a Glyphs save is a write + rename (two events, ms
-            # apart) and must fold to one build; but the server's own shadow
-            # write arrives in the same drain as a designer's save that
-            # landed mid-build, and with one shared timestamp the shadow's
-            # events spent the throttle budget and the save was dropped.
-            self.last_modified: Dict[str, float] = {}
-            # First-processed-event-per-final-mtime: a multi-second save
-            # fires several events as the file is written.
-            self.settled_mtime: Dict[str, float] = {}
-            self.debounce_interval = 0.5  # seconds
-
-        def on_modified(self, event):
-            """Handle file modification events."""
-            if event.is_directory:
-                return
-
-            # Relevant changes: the active build source (sync + rebuild),
-            # the designer's ORIGINAL (GLYPHS_PATH is the SHADOW once a
-            # secondary axis has layers — comparing only against it meant
-            # edits to the real source never fired: deleting an instance in
-            # Glyphs left the shadow stale), the shadow itself (Fontra saves
-            # for studio axes — a separate class because GLYPHS_PATH is the
-            # transformed/ copy when source transforms are on), and — for an
-            # active .designspace shadow — .glif edits inside its UFOs.
-            src = Path(event.src_path)
-            event_kind = _classify_watched_path(src)
-            if event_kind is None:
-                return
-            is_source = event_kind == "source"
-            is_original = event_kind == "original"
-            is_shadow = event_kind == "shadow"
-
-            # Debounce rapid saves
-            current_time = time.time()
-            key = str(src.resolve())
-            if current_time - self.last_modified.get(key, 0.0) < self.debounce_interval:
-                return
-            self.last_modified[key] = current_time
-
-            # Server-initiated write (instance edit / shadow regen / transform
-            # save): the triggering code already queued its rebuild — a
-            # watcher-driven sync+build here would duplicate it. Two guards:
-            # the time window covers the in-flight write; the mtime watermark
-            # covers events PROCESSED late — the handler thread can be busy in
-            # a multi-second resolve when the time window expires, and a late
-            # self-event then resolved again and re-queued the build forever
-            # (the T0.7 round-1 storm). The Glyphs.app instance-edit
-            # round-trip writes the ORIGINAL and arms the second watermark.
-            try:
-                src_mtime = src.stat().st_mtime
-            except OSError:
-                src_mtime = None
-            if is_original:
-                if current_time < _SUPPRESS_ORIGINAL_UNTIL or (
-                        src_mtime is not None
-                        and src_mtime <= _SELF_WRITE_ORIGINAL_WATERMARK):
-                    return
-            elif current_time < _SUPPRESS_WATCHDOG_UNTIL or (
-                    src_mtime is not None and src_mtime <= _SELF_WRITE_WATERMARK):
-                return
-
-            # A multi-second save fires several events as the file is written;
-            # settle, then process only the first event per final mtime.
-            _wait_for_save_to_settle(src)
-            try:
-                settled_mtime = src.stat().st_mtime
-            except OSError:
-                settled_mtime = None
-            if settled_mtime is not None and settled_mtime == self.settled_mtime.get(key):
-                return
-            self.settled_mtime[key] = settled_mtime
-
-            global VARIABLE_FONT_PATH, LAST_BUILD_TIME
-
-            if JOBS.is_building():
-                # Do NOT drop the save. Record what changed so the queue's
-                # next pass re-syncs the CSV and re-stages the source before
-                # rebuilding; a rebuild from the pre-save snapshot would look
-                # like success while serving stale outlines.
-                kind = "original" if is_original else ("source" if (is_source or is_shadow) else None)
-                if kind:
-                    if is_source or is_shadow:
-                        # A Fontra save writes the SHADOW: secure any drawing
-                        # into the sidecar before the resolve below regens it.
-                        try:
-                            _capture_shadow_drawings()
-                        except Exception as exc:
-                            print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
-                    # Re-resolve NOW so the read endpoints (/api/instances,
-                    # /api/axes, coverage) stop serving the pre-save shadow
-                    # while the current build is still running; the queue
-                    # re-resolves before staging the follow-up regardless.
-                    _resolve_source_after_save(src)
-                    JOBS.request_build(source_refresh=kind)
-                else:
-                    JOBS.request_build()
-                print("Source changed mid-build; queued for after this build.", file=sys.stderr)
-                return
-
-            try:
-                if is_original:
-                    # The user's own file changed. Re-derive the active source
-                    # FROM it so masters, instances and glyph edits propagate;
-                    # without this the shadow keeps serving a stale copy.
-                    # Go through _resolve_active_source, NOT regenerate_shadow:
-                    # the latter rebuilds only the control-axis shadow, so every
-                    # save in Glyphs silently dropped the grade braces (and the
-                    # GRAD axis with them) until an unrelated grade edit ran.
-                    print("\nOriginal source modified, regenerating shadow...", file=sys.stderr)
-                    _resolve_source_after_save(src)
-                    sync_csv_with_glyphs()
-                elif is_source or is_shadow:
-                    print("\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
-                    # A Fontra save writes the SHADOW: pull hand-drawn brace
-                    # outlines into the sidecar first, so drawings are durable
-                    # even if the shadow is later regenerated away. Untouched
-                    # seeds are skipped by their stamps — a cheap no-op after
-                    # server-side regens.
-                    try:
-                        captured = _capture_shadow_drawings()
-                        if captured:
-                            print(f"Captured {captured} drawn outline(s) into the sidecar.", file=sys.stderr)
-                    except Exception as exc:
-                        print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
-                    # Sync CSV first (skips editing instances)
-                    sync_csv_with_glyphs()
-                else:
-                    print("\nUFO glyph edited (Fontra), rebuilding...", file=sys.stderr)
-                trigger_build()
-            except Exception as e:
-                print(f"Error handling file change: {e}", file=sys.stderr)
-
-    # Set up file watcher if watchdog is available AND we have a source
-    # loaded. Blind launches skip watching — the source will be loaded
-    # via /api/load-source, but a runtime-swappable file watcher is
-    # left for a future iteration. The frontend's polling tick covers
-    # the no-watcher case acceptably.
     if WATCHDOG_AVAILABLE and GLYPHS_PATH is not None:
         event_handler = GlyphsFileHandler()
         observer = Observer()
