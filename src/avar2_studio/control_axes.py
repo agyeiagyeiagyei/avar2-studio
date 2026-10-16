@@ -1199,17 +1199,26 @@ def regenerate_shadow(original_path: Path) -> Optional[Path]:
             preserved = preserved_layers.get(
                 (glyph_name, tuple(float(v) for v in location))
             )
-            # Keep a preserved outline only if it's a genuine EDIT — i.e.
-            # it differs from the default master. Old seeds (and this
-            # loop's own fallback) copied the default master, so a
-            # preserved outline that's byte-identical to it is an
-            # unedited seed we should re-interpolate to the glyph's
-            # natural shape at this location. A drawn outline differs
-            # from the master and is preserved.
-            preserved_is_edit = (
-                preserved is not None
-                and _paths_sig(preserved.get("paths")) != _paths_sig(default_layer.paths)
-            )
+            # Seed-vs-edit is decided by the seed signature stamped when
+            # the layer was seeded (_restamp_seeds): a preserved layer
+            # whose geometry still matches its stamp is an untouched seed
+            # and is re-interpolated, so seeds follow master edits. The old
+            # rule — "differs from the default master" — froze every seed,
+            # because a seed interpolates at its corner and so nearly
+            # always differs from the default master. Layers from before
+            # stamping fall back to that comparison (they stay frozen, as
+            # today, until a reseed stamps them).
+            if preserved is None:
+                preserved_is_edit = False
+            elif preserved.get("seed_sig"):
+                preserved_is_edit = (
+                    _geometry_sig(preserved.get("paths"), preserved.get("width"))
+                    != preserved["seed_sig"]
+                )
+            else:
+                preserved_is_edit = (
+                    _paths_sig(preserved.get("paths")) != _paths_sig(default_layer.paths)
+                )
             # A correction layer (seed_location set) is COMPUTED, not
             # drawn: it is re-derived from its target on every regen so
             # changing the target in the studio takes effect. Fontra

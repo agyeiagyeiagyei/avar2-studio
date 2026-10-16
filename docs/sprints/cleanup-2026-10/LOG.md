@@ -97,3 +97,30 @@ results, and what is inferred vs verified.
   `test_build_gate.py` +2 tests (cancel after ok → PUT passes; cancel
   after failed → PUT still 409). `pytest tests/test_build_jobs.py
   tests/test_build_gate.py -q` → 16 passed in 5.58 s.
+
+## T0.5 — seeds follow master edits
+
+- Root cause [verified by probe]: `regenerate_shadow` decided
+  seed-vs-edit by `_paths_sig(preserved) != _paths_sig(default_master)`.
+  A seed interpolates at its corner, so it differs from the default
+  master by construction → `preserved_is_edit` was always True → seeds
+  froze on any master edit. The `xyz.avar2studio.seed-sig` stamp was
+  written (`_restamp_seeds`) and read (`_extract_brace_outlines`) but
+  never consulted in regen.
+- Fix (`control_axes.py`, seeding block): with a stamp present, compare
+  `_geometry_sig(preserved.paths, preserved.width)` against it — match
+  means untouched seed → re-interpolate; mismatch means hand-drawn →
+  preserve. No stamp (pre-stamping shadow) → old default-master
+  comparison, unchanged behaviour until a reseed stamps the layer.
+- Probe [verified]: on crispy-mini, 'e' brace stamp matches before a
+  master edit (`a1112a98…` == recomputed), regen after +37 master shift
+  moves the seed exactly (37.0, 0.0).
+- Tests [verified]: tests/test_seed_follows_masters.py (imports
+  `_brace`/`_draw_into`/`_nodes` from test_capture_outlines) — both pass
+  with the fix; the seed-follow test FAILS without it (stash-checked).
+  One float-noise fix in the assertion (round after adding 37.0).
+  Control-axis cluster (`-k "control or capture or seed or brace or
+  editor or shadow"`) → 36 passed.
+- Known limitation (pre-existing, logged not fixed): the sig covers
+  paths+width only — a components/anchors-only edit to a seed still
+  reads as untouched (same blind spot as `capture_outlines`).
