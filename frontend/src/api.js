@@ -44,6 +44,19 @@ async function parseJSON(response) {
 }
 
 export const api = {
+  // What this provider can do. The UI consults these instead of probing the
+  // mode; the browser provider (static-api.js) swaps in its own answers, and
+  // e2e/api-parity.spec.mjs keeps the two providers' method sets and these
+  // keys in step.
+  capabilities: {
+    kinetikern: true,       // per-instance spacing engine (Kinetikern tab)
+    woff2: true,            // WOFF2 preview/download + export sizes from the build queue
+    cancel: true,           // cancel a running or queued build/export job
+    masters: true,          // /api/masters (the brace-location pins list the masters)
+    sourceWriteback: true,  // edits can be written back to the source file
+    fontraEditor: true,     // open a brace layer in the outline editor
+  },
+
   async health() {
     const response = await fetch(`${API_BASE}/health`);
     if (!response.ok) {
@@ -519,13 +532,17 @@ export const api = {
     return parseJSON(response);
   },
 
-  async openControlAxisInEditor(tag, glyph) {
+  // Same arguments as the browser provider, which needs the layer location
+  // and the axes for its fontra-embed session; the server derives those from
+  // the sidecar and only needs the glyph, which rides along so the injected
+  // shim can show reference measurements for THIS layer without reading
+  // Fontra's scene state.
+  // eslint-disable-next-line no-unused-vars
+  async openControlAxisInEditor(tag, glyphName, layerLocation = null, studioAxes = null) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/open-editor`, {
       method: 'POST',
-      // The glyph rides along so the injected shim can show reference
-      // measurements for THIS layer without reading Fontra's scene state.
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ glyph: glyph || null }),
+      body: JSON.stringify({ glyph: glyphName || null }),
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));

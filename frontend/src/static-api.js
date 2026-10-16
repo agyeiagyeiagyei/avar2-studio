@@ -1282,6 +1282,18 @@ const loadExampleProject = async (id) => {
 };
 
 const staticOverrides = {
+  // See api.js — the browser provider's answers. A live-only method that is
+  // NOT overridden here would still hit /api/… in the browser, so the UI
+  // gates those calls on these flags (e2e/api-parity.spec.mjs checks that
+  // every live-only method maps to a flag that is false here).
+  capabilities: {
+    kinetikern: false,      // needs the live engine routes
+    woff2: false,           // no background compression in the browser
+    cancel: false,          // builds run to completion in the worker
+    masters: false,         // no /api/masters: the pins list stays instance-only
+    sourceWriteback: false, // the source file never changes in the browser
+    fontraEditor: true,     // fontra-embed session (editor-bridge) for .glyphs projects
+  },
   health: async () => (uploadDataset
     ? { ...uploadDataset.health, session_lock_lost: sessionLockLost }
     : { ...noProjectHealth(), session_lock_lost: sessionLockLost }),
@@ -1296,11 +1308,10 @@ const staticOverrides = {
     await persistSession();
     return {};
   },
-  // STUB on purpose: the one consumer (the removed Rounding tab) is
-  // gone, and implementing this via glyph_model turned out to PERTURB
-  // later measure_at results in the shared wasm instance (pin synthesis
-  // stopped triggering) — see HANDOVER §4 before resurrecting it.
-  getMasters: async () => ({ masters: [] }),
+  // No getMasters here (capabilities.masters is false and App skips the
+  // call): implementing it via glyph_model turned out to PERTURB later
+  // measure_at results in the shared wasm instance (pin synthesis stopped
+  // triggering) — see HANDOVER §4 before resurrecting it.
   getAxes: async () => (uploadDataset ? uploadDataset.axes : { axes: [] }),
   getAvar2Instances: async () => {
     if (!uploadDataset) return { instances: [] };

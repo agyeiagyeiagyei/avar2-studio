@@ -407,7 +407,7 @@ function App() {
       const [instancesData, axesData, mastersData, transformsData, gradeData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
-        api.getMasters().catch(() => ({ masters: [] })),
+        api.capabilities.masters ? api.getMasters().catch(() => ({ masters: [] })) : Promise.resolve({ masters: [] }),
         api.getTransforms().catch(() => ({ transforms: [] })),
         api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, intensity: 1, clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] })),
       ]);
@@ -675,8 +675,9 @@ function App() {
   const handleOpenControlAxisInEditor = useCallback(async (tag, glyphName, layerLocation) => {
     try {
       setError(null);
-      // The static provider (editor-bridge) takes the layer location and
-      // the axes list for its session; the server ignores the extras.
+      // Both providers take (tag, glyphName, layerLocation, axes): the
+      // browser's editor-bridge session needs the location and axes, the
+      // live one only sends the glyph (the server has the sidecar).
       const data = await api.openControlAxisInEditor(tag, glyphName, layerLocation, axes);
       let url = data.url;
       let directUrl = data.direct_url;
@@ -1668,8 +1669,8 @@ function App() {
     );
 
     // Show confirmation dialog only for selected instance updates
-    // (skip in static mode — there is no source file to modify).
-    if (!staticMode && (!instanceName || instanceName === selectedInstance?.name)) {
+    // (skipped where the source can't be written back — the browser).
+    if (api.capabilities.sourceWriteback && (!instanceName || instanceName === selectedInstance?.name)) {
       const confirmed = window.confirm(
         `Update instance "${targetInstanceName}"?\n\n` +
         (parametricChanged ? `This will modify the source file.\n` : '')
@@ -2229,7 +2230,7 @@ function App() {
           >
             Preview
           </button>
-          {!staticMode && (
+          {api.capabilities.kinetikern && (
           <button
             type="button"
             className={`main-tab${mainTab === 'kinetikern' ? ' active' : ''}`}
@@ -2247,7 +2248,7 @@ function App() {
           </button>
         </div>
         <div className={`build-scope${building ? ' is-building' : ''}`}>
-        {mainTab === 'kinetikern' && !staticMode ? (
+        {mainTab === 'kinetikern' && api.capabilities.kinetikern ? (
           <KinetikernTab
             instances={instances}
             axes={axes}
@@ -2374,7 +2375,7 @@ function App() {
                 ? `${buildJob.kind === 'export' ? 'Exporting' : 'Compressing'} — the preview stays live…`
                 : 'Rebuilding — hold your edits…'}
             </span>
-            {buildJob && buildJob.job_id && (
+            {api.capabilities.cancel && buildJob && buildJob.job_id && (
               <button
                 type="button"
                 className="build-veil-cancel"

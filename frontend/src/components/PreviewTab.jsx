@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PreviewTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
-import { isStaticMode } from '../static-api';
 import { registerPreviewFont } from '../fontLoad';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -192,7 +191,7 @@ function PreviewTab({
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) return;
     registerPreviewFont(vfFamilyId, fontUrl,
-                        isStaticMode() ? null : api.getWoff2PreviewUrl())
+                        api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
       .catch(err => console.error('Preview: failed to load font:', err));
   }, [fontUrl, fontLoaded, vfFamilyId]);
 
@@ -246,8 +245,9 @@ function PreviewTab({
 
   // File sizes come from the build queue's export status (TTF exact; WOFF2
   // exact once the background compression has caught up, else an estimate).
+  // Only where WOFF2 exists (the format row below is gated the same way).
   useEffect(() => {
-    if (!showExportModal || isStaticMode()) return;
+    if (!showExportModal || !api.capabilities.woff2) return;
     let live = true;
     api.getBuildStatus()
       .then((st) => { if (live) setExportSizes(st.sizes || null); })
@@ -540,7 +540,7 @@ function PreviewTab({
                 {familyName || vfFamilyId || 'Aa'}
               </div>
               <div className="preview-export-options">
-                {!isStaticMode() && (
+                {api.capabilities.woff2 && (
                   <div className="preview-export-row">
                     <span
                       className="preview-export-label"
