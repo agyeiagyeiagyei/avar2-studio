@@ -10,7 +10,7 @@ import threading
 import time
 
 import avar2_studio.server as server
-from avar2_studio import pipeline, state
+from avar2_studio import pipeline, state, watch
 
 
 def test_settle_returns_immediately_for_an_old_file(tmp_path):
@@ -20,7 +20,7 @@ def test_settle_returns_immediately_for_an_old_file(tmp_path):
     old = time.time() - 10
     os.utime(f, (old, old))   # a settled file
     t0 = time.time()
-    server._wait_for_save_to_settle(f, settle=0.5)
+    watch._wait_for_save_to_settle(f, settle=0.5)
     assert time.time() - t0 < 0.3
 
 
@@ -28,14 +28,14 @@ def test_settle_waits_for_a_fresh_write(tmp_path):
     f = tmp_path / "fresh.glyphs"
     f.write_text("familyName = X;")   # mtime == now
     t0 = time.time()
-    server._wait_for_save_to_settle(f, settle=0.5)
+    watch._wait_for_save_to_settle(f, settle=0.5)
     assert time.time() - t0 >= 0.5
 
 
 def test_resolve_after_save_retries_once_and_then_warns(monkeypatch, capsys, tmp_path):
     f = tmp_path / "x.glyphs"
     f.write_text("familyName = X;")
-    monkeypatch.setattr(server, "_wait_for_save_to_settle", lambda *a, **k: None)
+    monkeypatch.setattr(watch, "_wait_for_save_to_settle", lambda *a, **k: None)
 
     calls = []
 
@@ -44,15 +44,15 @@ def test_resolve_after_save_retries_once_and_then_warns(monkeypatch, capsys, tmp
         if len(calls) < 2:
             raise ValueError("Unexpected EOF while parsing plist")
 
-    monkeypatch.setattr(server, "_resolve_active_source", flaky)
-    server._resolve_source_after_save(f)
+    monkeypatch.setattr(pipeline, "_resolve_active_source", flaky)
+    watch._resolve_source_after_save(f)
     assert len(calls) == 2, "one retry after a mid-write parse failure"
 
     def always_broken():
         raise ValueError("still broken")
 
-    monkeypatch.setattr(server, "_resolve_active_source", always_broken)
-    server._resolve_source_after_save(f)  # must not raise out of the watcher
+    monkeypatch.setattr(pipeline, "_resolve_active_source", always_broken)
+    watch._resolve_source_after_save(f)  # must not raise out of the watcher
     assert "shadow regeneration failed" in capsys.readouterr().err
 
 
@@ -99,23 +99,23 @@ def test_classify_watched_path(tmp_path, monkeypatch):
 
     # Transforms on: the build source is the transformed copy.
     monkeypatch.setattr(state, "GLYPHS_PATH", transformed)
-    assert server._classify_watched_path(transformed) == "source"
-    assert server._classify_watched_path(original) == "original"
-    assert server._classify_watched_path(shadow) == "shadow"
-    assert server._classify_watched_path(tmp_path / "notes.txt") is None
+    assert watch._classify_watched_path(transformed) == "source"
+    assert watch._classify_watched_path(original) == "original"
+    assert watch._classify_watched_path(shadow) == "shadow"
+    assert watch._classify_watched_path(tmp_path / "notes.txt") is None
 
     # Transforms off: GLYPHS_PATH IS the shadow.
     monkeypatch.setattr(state, "GLYPHS_PATH", shadow)
-    assert server._classify_watched_path(shadow) == "source"
-    assert server._classify_watched_path(original) == "original"
+    assert watch._classify_watched_path(shadow) == "source"
+    assert watch._classify_watched_path(original) == "original"
 
     # No shadow at all: a save to the original is "source" (it IS the build
     # source), and a designspace build sees pooled-UFO edits as "glif".
     monkeypatch.setattr(state, "GLYPHS_PATH", original)
-    assert server._classify_watched_path(original) == "source"
+    assert watch._classify_watched_path(original) == "source"
     monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.designspace")
-    assert server._classify_watched_path(tmp_path / "F.ufo/glyphs/e.glif") == "glif"
+    assert watch._classify_watched_path(tmp_path / "F.ufo/glyphs/e.glif") == "glif"
 
     # Blind launch: nothing loaded, nothing classified.
     monkeypatch.setattr(state, "GLYPHS_PATH", None)
-    assert server._classify_watched_path(original) is None
+    assert watch._classify_watched_path(original) is None

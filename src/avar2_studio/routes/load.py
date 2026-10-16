@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 
 from .. import csv_io as _csv_io
 from .. import server
+from .. import watch as _watch
 from ..studio_log import get_logger
 
 log = get_logger(__name__)
@@ -231,6 +232,7 @@ def _load_project_zip(upload):
                 shutil.copy2(item, workspace / name)
 
         server._apply_source_path(source_dest)
+        _watch.WATCHER.reschedule()
         return jsonify({
             "success": True,
             "path": str(source_dest),
@@ -347,6 +349,7 @@ def load_source():
                     extras_skipped.append(name)
 
             server._apply_source_path(glyphs_dest)
+            _watch.WATCHER.reschedule()
             return jsonify({
                 "success": True,
                 "path": str(glyphs_dest),
@@ -367,6 +370,7 @@ def load_source():
                          "Examples ship with the dev checkout only."
             }), 404
         server._apply_source_path(staged)
+        _watch.WATCHER.reschedule()
         return jsonify({"success": True, "path": str(staged), "example": example_id})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

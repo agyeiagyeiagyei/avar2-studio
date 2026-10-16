@@ -8,7 +8,7 @@ import pytest
 from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileMovedEvent
 
 import avar2_studio.server as server
-from avar2_studio import sidecar_io, state
+from avar2_studio import sidecar_io, state, watch
 
 
 def _settled(path):
@@ -35,8 +35,9 @@ def watched(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "schedule_shadow_rebuild", lambda: calls.append("regen"))
     monkeypatch.setattr(server, "trigger_build", lambda: calls.append("build"))
     monkeypatch.setattr(server, "sync_csv_with_glyphs", lambda: calls.append("csv"))
-    monkeypatch.setattr(server, "_resolve_source_after_save", lambda p: calls.append("resolve"))
-    monkeypatch.setattr(server, "_capture_shadow_drawings", lambda: 0)
+    # These two moved to watch.py with the handler (T3.10).
+    monkeypatch.setattr(watch, "_resolve_source_after_save", lambda p: calls.append("resolve"))
+    monkeypatch.setattr(watch, "_capture_shadow_drawings", lambda: 0)
 
     class Jobs:
         def is_building(self):
@@ -45,8 +46,8 @@ def watched(tmp_path, monkeypatch):
         def request_build(self, **kw):
             calls.append("request")
 
-    monkeypatch.setattr(server, "JOBS", Jobs())
-    return original, server.GlyphsFileHandler(), calls
+    monkeypatch.setattr(state, "JOBS", Jobs())
+    return original, watch.GlyphsFileHandler(), calls
 
 
 def test_an_external_sidecar_edit_regenerates(watched):
@@ -54,7 +55,7 @@ def test_an_external_sidecar_edit_regenerates(watched):
     sidecar = original.with_name("F-control.json")
     sidecar.write_text("{}")
     _settled(sidecar)
-    assert server._classify_watched_path(sidecar) == "sidecar"
+    assert watch._classify_watched_path(sidecar) == "sidecar"
     handler.on_modified(FileModifiedEvent(str(sidecar)))
     assert calls == ["regen"]
 
@@ -111,12 +112,12 @@ def test_build_job_snapshots_are_ignored(watched):
     glif.parent.mkdir(parents=True)
     glif.write_text("<glyph/>")
     _settled(glif)
-    assert server._classify_watched_path(staged) is None
-    assert server._classify_watched_path(glif) is None
+    assert watch._classify_watched_path(staged) is None
+    assert watch._classify_watched_path(glif) is None
     handler.on_modified(FileModifiedEvent(str(staged)))
     handler.on_modified(FileModifiedEvent(str(glif)))
     assert calls == []
 
 
 def test_the_handler_is_importable_without_watchdog():
-    assert server.GlyphsFileHandler.__name__ == "GlyphsFileHandler"
+    assert watch.GlyphsFileHandler.__name__ == "GlyphsFileHandler"

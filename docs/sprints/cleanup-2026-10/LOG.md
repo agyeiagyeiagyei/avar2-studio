@@ -1115,3 +1115,22 @@ bar; findings rounds still get written so a second reviewer can re-check.
   SIDECARS).
 - Verified by me independently: 512 passed / 3 skipped, ruff clean,
   no-flask import probe OK, name parity probe OK.
+
+## T3.10 — watcher lifecycle object (watch.py)
+- New `src/avar2_studio/watch.py`: `GlyphsFileHandler` (verbatim) +
+  `_classify_watched_path`/`_wait_for_save_to_settle`/
+  `_resolve_source_after_save`/`_capture_shadow_drawings` moved from
+  server.py, and a `SourceWatcher` singleton (`WATCHER`) with
+  `start`/`stop`/`reschedule`. Call-ins go through late-bound `server.X`
+  (the T3.2 idiom); reads are `state.X`; resolve is pipeline.py.
+- server.py: main() shrinks to `_watch.WATCHER.start()` + the periodic
+  fallback + `finally: WATCHER.stop()`; the dead watchdog import block
+  removed. routes/load.py: `WATCHER.reschedule()` after each successful
+  `_apply_source_path` — the audit's long-standing TODO (a source swap
+  or blind launch now re-points the watcher).
+- Tests: the three watcher test files' patches moved to their new homes
+  (watch./pipeline./state.JOBS); new tests/test_watch_lifecycle.py —
+  reschedule re-points (fake Observer records schedule paths), blind
+  launch is a no-op, and POST /api/load-source triggers reschedule.
+- Verified by me: full suite **514 passed / 3 skipped**, ruff clean,
+  no-flask probe OK. server.py now **1,024 lines** (audit: 8,180).
