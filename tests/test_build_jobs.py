@@ -255,3 +255,28 @@ def test_wait_for_idle_returns_the_current_builds_outcome(queue, monkeypatch):
     t.join(timeout=30)
     assert outcome == [False], \
         f"wait_for_idle must report the CURRENT build's failure, got {outcome}"
+
+
+def test_promotion_reaps_stale_fonts_but_keeps_the_newest(tmp_path):
+    """T2.14: build/ keeps the promoted font plus the newest KEEP_BUILDS
+    others; older fonts go together with their WOFF2 twins."""
+    import os
+    import time
+    from avar2_studio.build_jobs import KEEP_BUILDS, reap_build_dir
+    build = tmp_path / "build"
+    build.mkdir()
+    names = [f"F[{i}].ttf" for i in range(5)]
+    now = time.time()
+    for i, n in enumerate(names):
+        p = build / n
+        p.write_bytes(b"ttf")
+        os.utime(p, (now - 100 + i, now - 100 + i))  # names[4] newest
+        if i < 2:
+            p.with_suffix(".woff2").write_bytes(b"wOF2")
+            p.with_suffix(".woff2.json").write_text("{}")
+    current = build / names[4]
+    removed = reap_build_dir(current)
+    survivors = sorted(q.name for q in build.iterdir())
+    kept = names[5 - KEEP_BUILDS:]  # the newest KEEP_BUILDS, which include current
+    assert survivors == sorted(kept)
+    assert removed == 3 + 2 * 2  # three old fonts, two of them with twins

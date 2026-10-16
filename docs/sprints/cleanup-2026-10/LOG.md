@@ -785,3 +785,13 @@ bar; findings rounds still get written so a second reviewer can re-check.
   code-shape guard finds no raw `.open("w")` on a sidecar path under
   src/ (Glyphs plugins excluded). Full suite **484 passed** + 4 new;
   `ruff check` clean (9 import-order fixes applied).
+
+## T2.14 — `.avar2-studio/build/` reaper
+
+- `build_jobs.reap_build_dir(current, keep=KEEP_BUILDS=2)` runs after every
+  build promotion: fonts beyond the newest two (plus the promoted one) are
+  deleted with their `.woff2`/`.woff2.json` twins. The newest-by-mtime
+  picker in `_get_avar2_built_font_filename` is unchanged.
+- Test [verified]: `test_promotion_reaps_stale_fonts_but_keeps_the_newest`
+  (five fonts, two with twins → the newest two survive, 7 files removed).
+  `tests/test_build_jobs.py` green; ruff clean.

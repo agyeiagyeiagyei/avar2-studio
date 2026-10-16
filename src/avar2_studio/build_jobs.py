@@ -41,7 +41,31 @@ ENV_KEYS = ("AVAR2_RELOCATE_BUILD_DEFAULT", "AVAR2_STUDIO_GFTOOLS_BUILDER",
 
 #: Export artifacts kept on disk for download; older ones are reaped.
 KEEP_EXPORTS = 5
+# Fonts kept in .avar2-studio/build/ besides the one just promoted: an
+# axis-set change renames the output, so stale names otherwise pile up
+# (33 files / 78 MB observed) behind the newest-by-mtime picker.
+KEEP_BUILDS = 2
 
+
+
+def reap_build_dir(current: Path, keep: int = KEEP_BUILDS) -> int:
+    """Delete fonts in ``current``'s directory beyond the newest ``keep``
+    (plus the one just promoted), together with their WOFF2 cache twins.
+    Returns the number of files removed."""
+    build_dir = Path(current).parent
+    fonts = sorted(build_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    protected = {Path(current).resolve()} | {p.resolve() for p in fonts[:keep]}
+    removed = 0
+    for font in fonts:
+        if font.resolve() in protected:
+            continue
+        for twin in (font, font.with_suffix(".woff2"), font.with_suffix(".woff2.json")):
+            try:
+                twin.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+    return removed
 
 class JobQueue:
     def __init__(self, server, worker_cmd=None):
@@ -441,6 +465,7 @@ class JobQueue:
             dst = Path(self.server._get_avar2_font_dir()) / Path(built).name
             shutil.move(built, str(dst))  # jobs/ and build/ share a filesystem
             self.server.VARIABLE_FONT_PATH = dst
+            reap_build_dir(dst)
             # The regenerated gftools config is the current one — the
             # export row-lookup reads it (from snapshots).
             cfg = Path(self.server.ORIGINAL_PATH).parent / ".avar2-studio" / "config.yaml"
