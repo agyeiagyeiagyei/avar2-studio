@@ -260,9 +260,10 @@ Created once from the source (`sources`, `familyName`, `fvarInstances` —
 omitted when the source has no instances, because an empty list fails the
 builder's schema), then `stat` and `avar2` are regenerated from the CSV by
 `config_generator.update_config` inside each build job and the job's copy
-is promoted over this one. Consequence: after a build `sources:` points
-at the (deleted) job directory; nothing reads it after promotion except
-the export's row lookup, which uses the `avar2` section only.
+is promoted over this one. Consequence: between builds `sources:` points
+at the (deleted) job directory; the next build's `update_config` rewrites
+it for its staged source, and the export's row lookup reads the `avar2`
+section only.
 
 ## The `.avar2-studio/` directory
 
