@@ -1053,3 +1053,16 @@ bar; findings rounds still get written so a second reviewer can re-check.
   Def-as-real-master shelf) stay "Not yet recorded" in
   docs/decisions/README.md — only the user knows their terms; BLOCKED on
   them (write down or consciously drop).
+
+## Checkpoint — Tier 2 complete (round 4)
+
+- On resume: the previous session had landed T2.1/T2.2/T2.4/T2.9–T2.16
+  (+T2.17) and the T1.8/T1.22 fixes; I assessed, merged the parked
+  `t2-frontend` branch (T2.5/T2.6/T2.7), committed T2.8 (six modals →
+  Radix Dialog) and T2.3 (state.py — the audit's 37 globals, exactly),
+  and closed the noted follow-ups (shim.js pure JS + golden-verified
+  byte-identity, ADR 0013, doc-path fixes, examples anchors). The three
+  chat-only decisions remain BLOCKED on the user (their terms exist only
+  in conversation).
+- Gates on the final tree [verified]: pytest 511 passed / 3 skipped;
+  ruff clean; frontend lint/tsc/build/test:unit all exit 0.
