@@ -12,7 +12,7 @@
  * String(value) like the studio's writer.
  */
 
-const stripBom = (t) => t.replace(/^﻿/, '');
+const stripBom = (t) => t.replace(/^\uFEFF/, '');
 
 export function parseMappingsCsv(text) {
   const lines = stripBom(text).split('\n').filter(l => l.trim());

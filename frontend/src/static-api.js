@@ -137,7 +137,7 @@ const buildUploadDataset = async ({
       ? JSON.stringify(axisMetadata)
       : null;
     bytes = await addAvar2(bytes, mappingsText, ranges, [...compiledTags]);
-    const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
+    const header = mappingsText.split('\n', 1)[0].replace(/^\uFEFF/, '');
     // Registered columns normalize to lowercase fvar tags (wght etc.);
     // user-tag matching must use the normalized form.
     userAxisTags = new Set(
@@ -616,10 +616,10 @@ const KNOWN_TRANSFORMS = {
 };
 
 const csvRowCount = (text) =>
-  text.split('\n').filter(l => l.trim() && !l.startsWith('﻿')).length - 1;
+  text.split('\n').filter(l => l.trim() && !l.startsWith('\uFEFF')).length - 1;
 
 const csvHeaderTags = (csv) =>
-  csv.split('\n', 1)[0].replace(/^﻿/, '').split(',').slice(1).map(s => s.trim()).filter(Boolean);
+  csv.split('\n', 1)[0].replace(/^\uFEFF/, '').split(',').slice(1).map(s => s.trim()).filter(Boolean);
 
 const PARAM_TAGS = ['XTRA', 'XOPQ', 'YOPQ'];
 
@@ -631,7 +631,7 @@ const resolveGradeCoords = (dataset, avar2Csv) => {
   const coords = {};
   if (avar2Csv && avar2Csv.trim()) {
     const lines = avar2Csv.trim().split('\n').filter(l => l.trim());
-    const header = lines[0].replace(/^﻿/, '').split(',').map(s => s.trim());
+    const header = lines[0].replace(/^\uFEFF/, '').split(',').map(s => s.trim());
     for (const line of lines.slice(1)) {
       const cells = line.split(',');
       const row = {};

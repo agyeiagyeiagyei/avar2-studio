@@ -49,4 +49,14 @@ export default [
       'no-undef': 'off',
     },
   },
+  {
+    // Playwright specs and their harness scripts run in Node AND evaluate
+    // browser code (page.evaluate bodies reference window/document).
+    files: ['e2e/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
 ];

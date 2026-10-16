@@ -69,16 +69,6 @@ const gradeInstance = async (name, pct) => {
   }, [name, String(pct)]);
   await waitSettled();
 };
-const removeGrade = async (name) => {
-  await page.evaluate(async (n) => {
-    const rows = [...document.querySelectorAll('.instance-row')];
-    const row = rows.find(r => r.textContent.includes(n));
-    row.querySelector('.grade-badge').click();
-    await new Promise(r => setTimeout(r, 250));
-    row.querySelector('.grade-popover-remove').click();
-  }, name);
-  await waitSettled();
-};
 
 console.log(`target: ${BASE}`);
 await page.goto(BASE, { waitUntil: 'load', timeout: 30000 });
