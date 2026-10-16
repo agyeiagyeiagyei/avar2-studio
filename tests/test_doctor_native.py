@@ -1,7 +1,4 @@
 """T1.30: doctor reports the native accelerators and their env overrides."""
-import importlib
-import os
-
 from avar2_studio import doctor
 
 

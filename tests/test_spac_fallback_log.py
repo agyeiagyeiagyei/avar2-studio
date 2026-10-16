@@ -1,5 +1,6 @@
 """T1.31: the fontTools SPAC fallback says so when the native injector is absent."""
 import pytest
+from fontTools.ttLib import TTLibError
 
 from avar2_studio.transforms import builtin_spac_widthaware as spac
 from avar2_studio.transforms.base import BuildContext
@@ -13,6 +14,6 @@ def test_absent_native_injector_logs_the_fallback(tmp_path, monkeypatch):
                        log=logs.append)
     dummy_font = tmp_path / "F.ttf"
     dummy_font.write_bytes(b"not a font")   # the fontTools path fails AFTER the log
-    with pytest.raises(Exception):
+    with pytest.raises(TTLibError):
         spac.WidthAwareSpacTransform().apply(dummy_font, {"min": -20, "max": 40}, ctx)
     assert any("native injector not found" in m for m in logs), logs

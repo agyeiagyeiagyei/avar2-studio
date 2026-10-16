@@ -706,3 +706,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   described was Space-tab UI). The structural contradictions (§3 vs §4.6
   caching, §4.8 designspace roadmap) are T2.16's docs restructure, not
   one-line edits.
+
+## Hand-off — Tier 1 (round 3)
+
+- All Tier-1 items in audit order: server (T1.1–T1.10; T1.11 aliased to
+  T0.7), control axes (T1.12–T1.15; T1.16 BLOCKED — the contract bug is
+  real but lives in the fontra-embed repo, outside this sprint's reach),
+  frontend (T1.17 SpaceTab removed per the user's decision; T1.18–T1.25),
+  rust/tests/process (T1.26–T1.29 cargo/ruff; T1.30 doctor; T1.31 SPAC
+  absence log; T1.32 pkg/ verified absent from the worktree; T1.33 marker
+  registered; T1.34 six merged branches pruned; T1.35 BLOCKED — 0.1.0 is
+  not on PyPI (404), nothing to tag; T1.36 git gc), docs (T1.37–T1.39).
