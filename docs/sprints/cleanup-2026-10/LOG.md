@@ -495,3 +495,17 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   f-string; `\\s`/`\\d` escapes intact) + py_compile; the shim has no JS
   harness — T3.4 (single shim implementation) is where it becomes
   testable.
+
+## T1.15 — _normalise_layers docstring
+- Docstring said "last write wins"; the code keeps the FIRST occurrence
+  (`if key in seen: continue`). Fixed the docstring (first-wins is the
+  intended authority order: the sidecar's stored order wins).
+
+## T1.16 — BLOCKED (wrong repo)
+- The contract bug is real [verified by reading]:
+  `~/Documents/fontra-embed/src/metrics-hud.js:364` calls
+  `getReferenceMetrics(g, loc)` but `embed-font.js:123-124` forwards
+  `[refs]` only — the location never crosses the RPC boundary, so the
+  static HUD always measures at the opening layer. The fix belongs to
+  the fontra-embed repo, which this sprint's branch/verifier cannot
+  cover. Needs the user's decision (fix there, or vendor the file).

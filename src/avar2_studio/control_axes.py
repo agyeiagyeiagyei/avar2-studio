@@ -595,7 +595,9 @@ def _normalise(data: Dict) -> Dict:
 def _normalise_layers(raw) -> List[Dict]:
     """Validate + dedup the unified layers list. Each entry shape:
     ``{glyph: str, location: {axis_tag: number}, target?: {axis_tag: number}}``.
-    Duplicates by (glyph, location) are folded — last write wins.
+    Duplicates by (glyph, location) are folded — FIRST write wins (the
+    sidecar's stored order is the authority; a dup later in the list is
+    the stale copy).
 
     ``target`` is the optional CORRECTION: parametric overrides naming
     the location the outline should be computed *as if at*. A layer at
