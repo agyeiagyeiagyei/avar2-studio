@@ -462,3 +462,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   `test_wait_for_idle_returns_the_current_builds_outcome` — hold
   `_read_result` open, assert the waiter blocks, then reports the current
   build's failure (not the previous ok). Fails pre-fix (stash-checked).
+
+## Tier 1 — control axes group
+
+## T1.12 — case-insensitive lookup in update_axis
+- Bug [verified]: `update_axis`'s range validation did
+  `loc.get(tag_norm)` with the lowercased tag against authored-case
+  location keys — for uppercase tags (SUBS) the lookup missed and the
+  narrowing check was silently skipped. Now matches case-insensitively.
+- Test [verified]: `test_update_axis_range_check_sees_authored_case`
+  (the audit's SUBS probe) — narrowing [0,100]→50 with a layer at 100
+  raises; fails pre-fix (stash-checked). 6 passed in the file.

@@ -305,7 +305,10 @@ def update_axis(
 
     for layer in entry.get("layers", []) or []:
         loc = layer.get("location") or {}
-        v = loc.get(tag_norm)
+        # Location keys carry the AUTHORED tag case; match case-insensitively
+        # or the range check is silently skipped for uppercase tags.
+        v = next((val for k, val in loc.items() if str(k).lower() == tag_norm),
+                 None)
         if v is None:
             continue
         if not (new_min <= float(v) <= new_max):
