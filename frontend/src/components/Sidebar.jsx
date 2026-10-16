@@ -8,6 +8,7 @@ import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
 import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
+import { useControlAxes } from '../hooks/useControlAxes';
 import { formatAxisValue } from '../utils/formatNumber';
 
 // Font size stays in rem internally (CSS font-size + /api/text-width's
@@ -21,8 +22,21 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
-  onControlAxisReseed, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
+function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded }) {
+  // CONTROL AXES come from the useControlAxes context (renamed to the
+  // old prop names so the body below is untouched) instead of being
+  // drilled through App.
+  const {
+    glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes,
+    handleToggleDisableControlAxis: onToggleDisableControlAxis,
+    handleCreateControlAxis: onCreateControlAxis,
+    handleUpdateControlAxis: onUpdateControlAxis,
+    handleDeleteControlAxis: onDeleteControlAxis,
+    controlAxisAuthoringDisabledReason,
+    handleControlAxisLayerDelta: onControlAxisLayerDelta,
+    handleControlAxisReseed: onControlAxisReseed,
+    handleOpenControlAxisInEditor: onOpenControlAxisInEditor,
+  } = useControlAxes();
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.

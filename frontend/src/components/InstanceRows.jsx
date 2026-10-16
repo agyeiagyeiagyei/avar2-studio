@@ -3,8 +3,21 @@ import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 import { api } from '../api';
 import { registerPreviewFont } from '../fontLoad';
+import { useTransforms } from '../hooks/useTransforms';
 
-function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
+function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, defaultOriginNames, axes }) {
+  // Per-row badge state (grade / rounding / slant) + save handlers come
+  // from the useTransforms context, renamed to the old prop names so the
+  // row rendering below is untouched.
+  const {
+    grade, rounding, slant,
+    handleSaveInstanceGrade: onSaveInstanceGrade,
+    handleRemoveInstanceGrade: onRemoveInstanceGrade,
+    handleSaveInstanceRounding: onSaveInstanceRounding,
+    handleRemoveInstanceRounding: onRemoveInstanceRounding,
+    handleSaveInstanceSlant: onSaveInstanceSlant,
+    handleRemoveInstanceSlant: onRemoveInstanceSlant,
+  } = useTransforms();
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);

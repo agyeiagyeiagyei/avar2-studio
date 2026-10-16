@@ -1153,3 +1153,18 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - The single-shim-shared-with-fontra-embed unification is deferred; the
   desktop shim stays as the lintable package file (T2.4) until a
   fontra-embed-coordinated pass is worth doing.
+
+## T3.6 — App.jsx shrinks to a shell (subagent agent-9)
+- App.jsx 2,398 → **207 lines**: providers + AppShell only. New modules:
+  hooks/useStudioData.jsx (data + loaders + health poll; the full-screen
+  "Loading…" gate now fires only on FIRST load — the audit's
+  unmount-on-every-refresh bug fixed), useTransforms.jsx + context
+  (Header 19→7 props), useControlAxes.jsx + context (Sidebar 43→31),
+  useInstanceEditing.jsx + InstancesTab container, StatusBanners.jsx +
+  BuildVeil.jsx. Invariant comments moved with their code; the audit's
+  adaptations (provider order, source-swap clearing signal) recorded in
+  its report. eslint warnings 41 → 34 (all moves accounted).
+- Verified by the subagent: gates exit 0; DOM smoke 13/13 (tab bar with
+  the Kinetikern fence, slider edit round-trips the context chain, no
+  re-gate on poll). Verified by me: lint/tsc/build/test:unit exit 0;
+  python suite 516 passed / 3 skipped.

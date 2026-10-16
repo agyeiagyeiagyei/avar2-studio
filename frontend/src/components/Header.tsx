@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
+import { useTransforms } from '../hooks/useTransforms';
 import './Header.css';
 import { api } from '../api';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
@@ -17,53 +19,15 @@ interface ExampleInfo {
   subtitle?: string;
 }
 
-interface TransformParamOption {
-  value: string;
-  label: string;
-}
-
-interface TransformParamSpec {
-  key: string;
-  label: string;
-  type: string; // 'select' | 'bool' | 'float' | 'int' (int/float share the number input)
-  default?: any; // server-defined; type depends on ``type``
-  options?: TransformParamOption[];
-  min?: number;
-  max?: number;
-}
-
-interface TransformEntry {
-  id: string;
-  name: string;
-  description?: string;
-  enabled?: boolean;
-  stage?: string; // "font" (post-build) or "source" (pre-compile, heavy rebuild)
-  injected_axis_tag?: string | null;
-  params_schema?: TransformParamSpec[];
-  params?: Record<string, any>; // user values keyed by ParamSpec.key
-}
-
 interface ImportData {
   bundle: unknown;
   report: ImportReport;
 }
 
 interface HeaderProps {
-  onBuildFont?: () => void;
   fontLoaded?: boolean;
   familyName?: string;
   onSourceLoaded?: () => void;
-  busy?: boolean;
-  transforms?: TransformEntry[];
-  onToggleTransform?: (id: string, enabled: boolean) => void;
-  onTransformParam?: (id: string, key: string, value: any) => void;
-  transformsDirty?: Record<string, boolean>;
-  onApplyTransform?: (id: string) => void;
-  grade?: GradeState;
-  onToggleGrade?: (enabled: boolean) => void;
-  onGradeDefault?: (pct: number) => void;
-  onGradeIntensity?: (value: number) => void;
-  onGradeClamp?: (value: boolean) => void;
   // Static demo (GitHub Pages): hide every action that needs the backend.
   staticMode?: boolean;
   // Static demo showing an uploaded source (not a baked snapshot) —
@@ -75,28 +39,6 @@ interface HeaderProps {
   // Static demo with an uploaded source: config import becomes
   // available (bundles apply in-browser via the static provider).
   allowImportInStatic?: boolean;
-}
-
-// Grade transform — source-level (adds a GRAD axis); toggle + global default
-// here, per-instance grade% in each style's row menu.
-interface GradeDiagnostic {
-  level: 'error' | 'warning' | 'info';
-  code: string;
-  instance: string | null;
-  message: string;
-  detail?: string;
-}
-
-interface GradeState {
-  enabled?: boolean;
-  default_pct?: number;
-  /** Global multiplier on every authored grade%. */
-  intensity?: number;
-  /** Stop a grade thickening where the counters have no room to open. */
-  clamp_to_headroom?: boolean;
-  instances?: { name: string; pct: number }[];
-  max_pct?: Record<string, number>;
-  diagnostics?: GradeDiagnostic[];
 }
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
@@ -115,14 +57,29 @@ interface GradeState {
 // useEffect. Its content keeps the original load-font-menu /
 // transforms-menu markup and styling hooks. The Load Font and Config
 // dropdowns still use the old manual pattern.
-function Header({ onBuildFont, fontLoaded, familyName, onSourceLoaded, busy,
-                 transforms = [], onToggleTransform, onTransformParam,
-                 transformsDirty = {}, onApplyTransform,
-                 grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
+function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
                  isUploadDataset = false }: HeaderProps) {
   // Building / stale come from the shared build signal, not a threaded prop.
   const { building, buildStale } = useBuildStatus();
+  // Transforms / grade state + commit handlers come from the
+  // useTransforms context (renamed to the old prop names so the body
+  // below is untouched); the build action + first-load flag come from
+  // useStudioData.
+  const { loading, buildFont: onBuildFont } = useStudioData();
+  const {
+    transforms = [], transformsDirty = {}, grade,
+    handleToggleTransform: onToggleTransform,
+    handleTransformParam: onTransformParam,
+    handleApplyTransform: onApplyTransform,
+    handleToggleGrade: onToggleGrade,
+    handleGradeDefault: onGradeDefault,
+    handleGradeIntensity: onGradeIntensity,
+    handleGradeClamp: onGradeClamp,
+  } = useTransforms();
+  // Same formula App drilled as `busy`: building (build signal) or the
+  // first-load gate is up.
+  const busy = building || loading;
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
