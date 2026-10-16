@@ -279,7 +279,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
       try {
         parsed = JSON.parse(reader.result as string); // readAsText → string
       } catch (parseErr) {
-        setLoadingMsg(`Not valid JSON: ${parseErr.message}`);
+        setLoadingMsg(`Couldn't read that file: ${parseErr.message}`);
         setTimeout(() => setLoadingMsg(null), 6000);
         return;
       }
@@ -572,7 +572,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               className="btn btn-load-font"
               onClick={() => setConfigOpen(o => !o)}
               disabled={busy}
-              title="Export or import the studio configuration (control axes, avar2 mappings, transforms) as one JSON file"
+              title="Export or import the studio configuration (control axes, avar2 mappings, transforms) as one file"
             >
               Config ▾
             </button>
@@ -585,7 +585,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Export configuration…</div>
                   <div className="load-font-item-subtitle">
-                    Control axes, avar2 mappings, transforms as one JSON file
+                    Control axes, avar2 mappings, transforms as one file
                   </div>
                 </button>
                 {staticMode && allowImportInStatic && (
@@ -595,7 +595,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Download workspace (.zip)…</div>
                   <div className="load-font-item-subtitle">
-                    Source, avar2 mappings, sidecars and the current build as one project zip — loads back here or in the full app
+                    Source, avar2 mappings, studio data and the current build as one project zip — loads back here or in the full app
                   </div>
                 </button>
                 )}
@@ -606,7 +606,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Import configuration…</div>
                   <div className="load-font-item-subtitle">
-                    Replace the current configuration from an exported JSON file. You review a validation report before anything is applied.
+                    Replace the current configuration from an exported file. You review a validation report before anything is applied.
                   </div>
                 </button>
                 )}

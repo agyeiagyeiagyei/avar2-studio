@@ -131,7 +131,7 @@ function AxisControl({ axis, value, onChange, disabled, treatEmptyAsActive }) {
         {axis.is_control_axis && (
           <span
             className="axis-control-badge"
-            title="Designer-declared secondary parametric axis. Lives in <basename>-control.json; managed in the SECONDARY PARAMETRIC AXES section."
+            title="Designer-declared secondary parametric axis. Saved with your studio data; managed in the SECONDARY PARAMETRIC AXES section."
           >
             secondary
           </span>

@@ -89,9 +89,9 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
             onUpdateStudio();
             onClose();
           }}
-          title="Save these coordinates in the studio (the avar2 mapping data) only. Your .glyphs / .designspace source file stays untouched."
+          title="Save these coordinates in the studio only. Your .glyphs / .designspace source file stays untouched."
         >
-          Save to avar2-studio (CSV)
+          Save in avar2-studio
         </button>
       )}
       {showSaveToSource && (

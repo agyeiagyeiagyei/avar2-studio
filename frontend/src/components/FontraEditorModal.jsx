@@ -135,7 +135,7 @@ function FontraEditorModal({ editor, onClose }) {
             {editor.editingOriginal && (
               <span
                 className="fontra-editor-original-note"
-                title="This axis's layers live in your source file itself (not a studio sidecar), so Fontra is editing the real source. Saves write to it directly."
+                title="This axis's layers live in your source file itself (not just in the studio), so Fontra is editing the real source. Saves write to it directly."
               >
                 {' '}Editing your actual source file.
               </span>

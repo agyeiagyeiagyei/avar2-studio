@@ -239,12 +239,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     className="control-axis-delete"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                      if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? Its studio data is removed; the source file is untouched.`)) {
                         markEdit();
                         onDeleteAxis(ax.tag);
                       }
                     }}
-                    title="Delete this studio-declared secondary parametric axis from the sidecar."
+                    title="Delete this studio-declared secondary parametric axis."
                   >
                     🗑
                   </button>
@@ -304,7 +304,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       className="control-axis-delete-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                        if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? Its studio data is removed; the source file is untouched.`)) {
                           onDeleteAxis(ax.tag);
                         }
                       }}

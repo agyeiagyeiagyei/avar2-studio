@@ -220,7 +220,7 @@ function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingC
           {!isStudioOnly && (
             <span
               className="origin-badge origin-badge-source"
-              title="Source-defined instance — this row is declared in the .glyphs / .designspace source file. Saving from the flyout's 'Save to source file' option writes any edited coordinates back into that file. Removing the SRC badge means the row exists only in the avar2 mapping CSV."
+              title="Source-defined instance — this row is declared in the .glyphs / .designspace source file. Saving from the flyout's 'Save to source file' option writes any edited coordinates back into that file. Removing the SRC badge means the row exists only in the studio."
               aria-label="source-defined instance"
             >
               SRC

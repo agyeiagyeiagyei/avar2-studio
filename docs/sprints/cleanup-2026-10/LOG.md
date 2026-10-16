@@ -555,3 +555,12 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   and ui/dropdown-menu.tsx stay (live users).
 - Gates after all five items [verified]: lint 0, typecheck 0,
   test:unit 0, vite build 0; python suite 472 passed, 8 skipped.
+
+## T1.22 — UI copy no longer leaks file-format internals
+- Reworded 12 spots: "Save to avar2-studio (CSV)" → "Save in
+  avar2-studio"; "-control.json"/"the sidecar" titles → "saved with your
+  studio data"; "avar2 mapping CSV" → "in the studio"; "Not valid JSON"
+  → "Couldn't read that file"; "as one JSON file" → "as one file";
+  "sidecars" → "studio data"; the Fontra "not a studio sidecar" → "not
+  just in the studio". Verified: the only remaining mentions are code
+  comments (grep). lint/typecheck/build all exit 0.
