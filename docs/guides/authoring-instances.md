@@ -5,7 +5,7 @@ parametric — one whose masters are elemental letterform components
 (stroke weight, counter width, x-height) rather than finished styles.
 This doc walks the workflow it exists to support — translating that
 parametric stroke vocabulary into named stylistic instances — using
-the two real-world fonts in the studio's [`examples/`](../examples/)
+the two real-world fonts in the studio's [`examples/`](../../examples/)
 directory as concrete demonstrations.
 
 The two examples are not an exhaustive listing of approaches, but are two established ones, intended to show **two ways designers can lay out
@@ -31,7 +31,7 @@ work the same way at the structural level:
    address (`wght=400 wdth=100`); its parametric columns are the
    parametric coordinates that address maps to. The CSV format also makes it easy for editing without the UI if desired, or for routing to an AI agent for mass edits.
 
-![Instance rows in the studio — each row is one authored instance rendered live in the built font](images/instance-rows.png)
+![Instance rows in the studio — each row is one authored instance rendered live in the built font](../images/instance-rows.png)
 
 The split between the two approaches is in **how the parametric
 axes themselves are laid out** — how many of them, and which glyphs
@@ -86,7 +86,7 @@ What the parametric move does, axis by axis:
 - `XOPQ` 2 → 228.9 — vertical strokes thicken to "regular" weight.
 - `YOPQ` 2 → 164.8 — horizontal strokes follow, slightly thinner than vertical for contrast.
 
-<img src="images/sidebar-axes.png" width="340" alt="The sidebar where parametric coordinates and avar2 mappings are authored">
+<img src="../images/sidebar-axes.png" width="340" alt="The sidebar where parametric coordinates and avar2 mappings are authored">
 
 ## The case-split approach (Roboto Delta)
 
@@ -116,7 +116,7 @@ That's more authoring per row but it buys per-case control. The full
 production Roboto Delta source actually goes further — it adds
 case-scoped *height* and *internal-counter* axes (`YTUC`, `YTLC`,
 `STUI`, `STLO`, etc.) that we left out of the
-[`roboto-delta-mini`](../examples/roboto-delta-mini/) fixture to keep
+[`roboto-delta-mini`](../../examples/roboto-delta-mini/) fixture to keep
 the demo focused on stroke contrast. The pattern is the same: one
 parametric concept, applied per-case for finer-grained control.
 
@@ -129,7 +129,7 @@ thicken through `XOUC`/`YOUC`, lowercase through `XOLC`/`YOLC`,
 digits through `XOFI`/`YOFI`. Counter widths (`XTUC`/`XTLC`/`XTFI`)
 all open up a touch to keep the heavier shapes readable.
 
-![Roboto Delta Mini morphing from Regular to Bold via nine parametric axes](../examples/roboto-delta-mini/docs/regular_to_bold.gif)
+![Roboto Delta Mini morphing from Regular to Bold via nine parametric axes](../../examples/roboto-delta-mini/docs/regular_to_bold.gif)
 
 Two named stylistic instances, one per axis, and the same parametric
 families in play:
@@ -177,7 +177,7 @@ with even tone built into the drawing, didn't need them.
 ## What "a couple of instances" actually buys you
 
 Two points define a line, not a designspace. The Crispy production
-font has 29 authored instances spanning four widths and seven
+font has 30 authored instances spanning four widths and seven
 weights; Roboto Delta has dozens more across multiple optical sizes
 and grades. Each one is a point in n-dimensional parametric space.
 avar2's job is to interpolate between those points along the
@@ -205,8 +205,8 @@ avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
 Each fixture's README documents the axis table, glyph coverage, and
 how the subset was assembled from upstream:
 
-- [crispy-mini/README.md](../examples/crispy-mini/README.md)
-- [roboto-delta-mini/README.md](../examples/roboto-delta-mini/README.md)
+- [crispy-mini/README.md](../../examples/crispy-mini/README.md)
+- [roboto-delta-mini/README.md](../../examples/roboto-delta-mini/README.md)
 
 ## How to regenerate the animations
 
