@@ -399,3 +399,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   untracked in the main checkout — nothing tracked to delete; noted.
 - Verification [verified]: zero references (grep), py_compile OK,
   `pytest -k "instance or rename or gate or build"` → 69 passed.
+
+## T1.6 — get_font_family_name without parsing
+
+- The function loaded the whole source via `_source_font.load_source`
+  just to call `get_family_name`, which returns `path.stem`
+  unconditionally (verified at source_font.py:137). Now returns the stem
+  directly; `_FAMILY_NAME_CACHE` deleted (pointless without the parse).
+  The one caller already falls back to `GLYPHS_PATH.stem`, and the old
+  not-found path returned None → same fallback — behavior identical.
+- Test [verified]: tests/test_family_name.py — stem returned with the
+  loader rigged to raise; None for no path.

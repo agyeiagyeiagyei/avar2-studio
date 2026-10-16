@@ -2340,33 +2340,17 @@ def add_instance_to_source(instance_name: str):
         return jsonify({"error": str(e)}), 500
 
 
-_FAMILY_NAME_CACHE: Dict[str, Optional[str]] = {}
-
-
 def get_font_family_name(glyphs_path: Path) -> Optional[str]:
     """Return the font family name (source file stem in both formats).
 
     Locked convention: file stem, not source-declared family. Keeps the
     avar2 build, sibling CSV, and built-font filename in lockstep
-    regardless of what's inside the source.
-
-    Cached by path: the stem can't change for a given path, and /api/health
-    polls this — parsing the source on every probe made health answer in
-    ~1.7s on Crispy.
+    regardless of what's inside the source. No read, no cache: the stem
+    is free.
     """
-    try:
-        if not glyphs_path or not glyphs_path.exists():
-            return None
-        key = str(glyphs_path)
-        if key in _FAMILY_NAME_CACHE:
-            return _FAMILY_NAME_CACHE[key]
-        font, _fmt = _source_font.load_source(glyphs_path)
-        name = _source_font.get_family_name(font, glyphs_path)
-        _FAMILY_NAME_CACHE[key] = name
-        return name
-    except Exception as e:
-        print(f"Error getting font family name: {e}", file=sys.stderr)
+    if not glyphs_path:
         return None
+    return glyphs_path.stem
 
 
 def _get_avar2_built_font_filename() -> Optional[str]:
