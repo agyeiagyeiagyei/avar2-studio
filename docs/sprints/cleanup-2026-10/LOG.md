@@ -345,3 +345,15 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - Test [verified]: tests/test_blind_launch.py boots the server with no
   source on 5199 and SIGINTs it; fails pre-fix (UnboundLocalError in
   stderr, stash-checked), passes post-fix.
+
+## T1.2 — M2 double build: verified dead, no code change
+
+- §10 item. Probe [verified]: fresh Crispy copy on 5071, boot → idle →
+  POST /api/control-axes/LCWD/layers/delta (one brace) → studio log:
+  exactly **1** build (build-3 after the boot build), **0** "Source
+  changed mid-build" lines, idle after. Pre-watermark this edit class
+  produced a second build (the transformed/ write landing outside the
+  2.5 s window); the T0.7-v2 watermark suppression drops those
+  self-events regardless of processing delay. The probe's own counter
+  under-reported (its idle check can't see the pre-build resolve
+  window); the counts above are read directly from the server log.
