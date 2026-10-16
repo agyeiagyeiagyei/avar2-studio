@@ -244,6 +244,31 @@ _SUPPRESS_WATCHDOG_SECONDS = 2.5   # outlast the server's own shadow write (~1s)
 # written by different things and must be suppressed for different reasons.
 _SUPPRESS_ORIGINAL_SECONDS = 6.0
 _SUPPRESS_ORIGINAL_UNTIL = 0.0
+# mtime watermarks, armed at the same sites as the windows above. The time
+# window alone fails when the watchdog handler is BUSY (a multi-second
+# resolve): the self-write's event is processed after the window expired
+# and re-fires the handler, which resolved again and re-queued the build —
+# the T0.7 round-1 storm. The watermark suppresses an event whenever the
+# file's mtime is not newer than the last server-initiated write, no matter
+# how late the event is processed; a designer's save always re-writes the
+# file, so its mtime is newer and the event goes through.
+_SELF_WRITE_WATERMARK = 0.0
+_SELF_WRITE_ORIGINAL_WATERMARK = 0.0
+
+
+def _suppress_watcher(original: bool = False) -> None:
+    """Mark a server-initiated write for watcher suppression: the time
+    window covers the in-flight write (mtime still moving), the watermark
+    covers events processed late. Arm AFTER the write when possible."""
+    global _SUPPRESS_WATCHDOG_UNTIL, _SUPPRESS_ORIGINAL_UNTIL
+    global _SELF_WRITE_WATERMARK, _SELF_WRITE_ORIGINAL_WATERMARK
+    now = time.time()
+    if original:
+        _SUPPRESS_ORIGINAL_UNTIL = now + _SUPPRESS_ORIGINAL_SECONDS
+        _SELF_WRITE_ORIGINAL_WATERMARK = now
+    else:
+        _SUPPRESS_WATCHDOG_UNTIL = now + _SUPPRESS_WATCHDOG_SECONDS
+        _SELF_WRITE_WATERMARK = now
 # Debounced shadow-regen + rebuild. Layer edits arrive in bursts (clicking ✕ a
 # few times, adding several glyphs); regenerating the shadow and recompiling
 # per edit costs seconds each and would queue up. Coalesce a burst into one job.
@@ -340,9 +365,8 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
     # This write (and the Glyphs.app save/close/reopen dance below) is
     # server-initiated — suppress the file watcher so it doesn't queue a
     # redundant sync + second build on top of the caller's own rebuild.
-    global _SUPPRESS_WATCHDOG_UNTIL, _SUPPRESS_ORIGINAL_UNTIL
-    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
-    _SUPPRESS_ORIGINAL_UNTIL = time.time() + _SUPPRESS_ORIGINAL_SECONDS
+    _suppress_watcher()
+    _suppress_watcher(original=True)
     try:
         # Touch the file to update its modification time
         current_time = time.time()
@@ -425,6 +449,11 @@ def _force_reload_glyphs_document(glyphs_path: Path, font_object=None) -> None:
     except Exception as e:
         # Silently fail - file save already succeeded, this is just a notification
         print(f"Warning: Could not force reload Glyphs document: {e}", file=sys.stderr)
+    finally:
+        # Re-arm after the dance: the file's final mtime lands here, so the
+        # watermark covers events delivered (or processed) late.
+        _suppress_watcher()
+        _suppress_watcher(original=True)
 
 
 def get_instances_from_glyphs(glyphs_path: Path) -> List[Dict]:
@@ -1269,7 +1298,7 @@ def _resolve_active_source() -> Optional[Path]:
     overlapping resolves interleave the shadow/transformed writes.
     """
     with _RESOLVE_LOCK, _gc_paused():
-        global GLYPHS_PATH, _SUPPRESS_WATCHDOG_UNTIL, LAST_GRADE_ERROR
+        global GLYPHS_PATH, LAST_GRADE_ERROR
         global LAST_SOURCE_TRANSFORM_ERROR
         if ORIGINAL_PATH is None:
             return GLYPHS_PATH
@@ -1285,7 +1314,7 @@ def _resolve_active_source() -> Optional[Path]:
             shadow = _control_axes.regenerate_shadow(ORIGINAL_PATH)
             # Regenerating rewrites the watched source file — the caller triggers
             # the build itself, so suppress the watcher for it.
-            _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+            _suppress_watcher()
         except Exception as exc:  # noqa: BLE001
             print(f"Warning: shadow regeneration failed: {exc}", file=sys.stderr)
         try:
@@ -1304,7 +1333,7 @@ def _resolve_active_source() -> Optional[Path]:
                 if grade_shadow is not None:
                     shadow = grade_shadow
                     any_grades = True
-                    _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+                    _suppress_watcher()
         except Exception as exc:  # noqa: BLE001
             LAST_GRADE_ERROR = str(exc)
             print(f"Warning: grade shadow generation failed: {exc}", file=sys.stderr)
@@ -1349,7 +1378,7 @@ def _resolve_active_source() -> Optional[Path]:
                 # expire during a multi-second transform pass, and an
                 # unsuppressed self-write re-fires the watcher as an external
                 # save → resolve → write → … (the T0.7 storm).
-                _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+                _suppress_watcher()
                 shadow = transformed
                 any_source = True
             except Exception as exc:  # noqa: BLE001
@@ -2057,8 +2086,7 @@ def update_instance(instance_name: str):
     control_values = {tag: value for tag, value in coordinates.items()
                       if str(tag).lower() in _ctl_tags}
     if control_values:
-        global _SUPPRESS_WATCHDOG_UNTIL
-        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+        _suppress_watcher()
         try:
             _control_axes.set_instance_values(ORIGINAL_PATH, instance_name,
                                               control_values)
@@ -6138,8 +6166,7 @@ def export_config_bundle():
         # build_export captures drawn outlines into the sidecar first, which
         # is a write next to the watched source — suppress the watcher so an
         # export does not look like a designer edit and trigger a rebuild.
-        global _SUPPRESS_WATCHDOG_UNTIL
-        _SUPPRESS_WATCHDOG_UNTIL = time.time() + _SUPPRESS_WATCHDOG_SECONDS
+        _suppress_watcher()
         bundle = _config_port.build_export(ORIGINAL_PATH, _get_avar2_csv_path())
     except Exception as e:
         print(f"Error exporting config: {e}", file=sys.stderr)
@@ -8108,6 +8135,9 @@ def main():
             # landed mid-build, and with one shared timestamp the shadow's
             # events spent the throttle budget and the save was dropped.
             self.last_modified: Dict[str, float] = {}
+            # First-processed-event-per-final-mtime: a multi-second save
+            # fires several events as the file is written.
+            self.settled_mtime: Dict[str, float] = {}
             self.debounce_interval = 0.5  # seconds
         
         def on_modified(self, event):
@@ -8139,19 +8169,38 @@ def main():
                 return
             self.last_modified[key] = current_time
 
-            # Server-initiated write (instance edit / shadow regen): the
-            # triggering code already queued its rebuild — a watcher-driven
-            # sync+build here would duplicate it.
-            # Server-initiated writes: the shadow regen sets the first window
-            # and only ever writes the SHADOW; a designer's save to the
-            # original must not be dropped because of it. Only the Glyphs.app
-            # instance-edit round-trip writes the original, and it sets the
-            # second window for itself.
+            # Server-initiated write (instance edit / shadow regen / transform
+            # save): the triggering code already queued its rebuild — a
+            # watcher-driven sync+build here would duplicate it. Two guards:
+            # the time window covers the in-flight write; the mtime watermark
+            # covers events PROCESSED late — the handler thread can be busy in
+            # a multi-second resolve when the time window expires, and a late
+            # self-event then resolved again and re-queued the build forever
+            # (the T0.7 round-1 storm). The Glyphs.app instance-edit
+            # round-trip writes the ORIGINAL and arms the second watermark.
+            try:
+                src_mtime = src.stat().st_mtime
+            except OSError:
+                src_mtime = None
             if is_original:
-                if current_time < _SUPPRESS_ORIGINAL_UNTIL:
+                if current_time < _SUPPRESS_ORIGINAL_UNTIL or (
+                        src_mtime is not None
+                        and src_mtime <= _SELF_WRITE_ORIGINAL_WATERMARK):
                     return
-            elif current_time < _SUPPRESS_WATCHDOG_UNTIL:
+            elif current_time < _SUPPRESS_WATCHDOG_UNTIL or (
+                    src_mtime is not None and src_mtime <= _SELF_WRITE_WATERMARK):
                 return
+
+            # A multi-second save fires several events as the file is written;
+            # settle, then process only the first event per final mtime.
+            _wait_for_save_to_settle(src)
+            try:
+                settled_mtime = src.stat().st_mtime
+            except OSError:
+                settled_mtime = None
+            if settled_mtime is not None and settled_mtime == self.settled_mtime.get(key):
+                return
+            self.settled_mtime[key] = settled_mtime
 
             global VARIABLE_FONT_PATH, LAST_BUILD_TIME
 
@@ -8162,10 +8211,6 @@ def main():
                 # like success while serving stale outlines.
                 kind = "original" if is_original else ("source" if (is_source or is_shadow) else None)
                 if kind:
-                    # A long save fires its first event mid-write: act once
-                    # the file has stopped moving (mid-write reads crash on
-                    # "Unexpected EOF"), and retry the resolve once.
-                    _wait_for_save_to_settle(src)
                     if is_source or is_shadow:
                         # A Fontra save writes the SHADOW: secure any drawing
                         # into the sidecar before the resolve below regens it.
@@ -8198,9 +8243,6 @@ def main():
                     sync_csv_with_glyphs()
                 elif is_source or is_shadow:
                     print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
-                    # A long save fires its first event mid-write — let the
-                    # file stop moving before reading it.
-                    _wait_for_save_to_settle(src)
                     # A Fontra save writes the SHADOW: pull hand-drawn brace
                     # outlines into the sidecar first, so drawings are durable
                     # even if the shadow is later regenerated away. Untouched
