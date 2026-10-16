@@ -43,8 +43,9 @@ config bundle. See docs/secondary-parametric-axes.md.
 from __future__ import annotations
 
 from . import sidecar_io
+from .studio_log import get_logger
 
-
+log = get_logger(__name__)
 def _locked(fn):
     """Load → mutate → save under the shared sidecar lock (see sidecar_io)."""
     @functools.wraps(fn)
@@ -864,8 +865,7 @@ def corner_name_maps(font, control_axis_indices, original_path=None):
                         continue
                     instances.setdefault(_key(values), name)
         except Exception as exc:
-            print(f"Warning: could not read instance corners from {avar_csv}: {exc}",
-                  file=sys.stderr)
+            log.warning(f"Warning: could not read instance corners from {avar_csv}: {exc}")
 
     return masters, instances
 
@@ -1849,7 +1849,7 @@ def _outline_to_layer_data(outline) -> Optional[Dict[str, object]]:
             "width": float(outline.get("width", 0) or 0),
         }
     except Exception as exc:
-        print(f"Warning: could not restore a stored outline: {exc}", file=sys.stderr)
+        log.warning(f"Warning: could not restore a stored outline: {exc}")
         return None
 
 
@@ -1878,7 +1878,7 @@ def capture_outlines(source_path: Path) -> int:
     try:
         shadow_font = GSFont(str(shadow))
     except Exception as exc:
-        print(f"Warning: could not read the shadow to capture outlines: {exc}", file=sys.stderr)
+        log.warning(f"Warning: could not read the shadow to capture outlines: {exc}")
         return 0
     axis_tags = [str(a.axisTag) for a in shadow_font.axes]
     # A sidecar location is SPARSE. regenerate_shadow fills the gaps with the
@@ -1945,7 +1945,7 @@ def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]
         from glyphsLib import GSFont
         font = GSFont(str(shadow_path))
     except Exception as exc:
-        print(f"Warning: failed to read previous shadow for outline preservation: {exc}", file=sys.stderr)
+        log.warning(f"Warning: failed to read previous shadow for outline preservation: {exc}")
         return {}
 
     # Keys are full axis vectors. A brace created before an axis was
@@ -2001,7 +2001,3 @@ def _extract_brace_outlines(shadow_path: Path) -> Dict[tuple, Dict[str, object]]
     return out
 
 
-# sys is referenced in _extract_brace_outlines via print(file=sys.stderr).
-# Imported here rather than at module top to keep the rest of the
-# module unaware of stderr plumbing.
-import sys

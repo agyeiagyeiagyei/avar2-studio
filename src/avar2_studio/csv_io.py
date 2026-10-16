@@ -27,15 +27,15 @@ from __future__ import annotations
 
 import csv
 import shutil
-import sys
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from . import sidecar_io, source_font
+from .studio_log import get_logger
 
-
+log = get_logger(__name__)
 def backup_sidecar(path: Path, keep: int = 20) -> None:
     """Timestamped copy of an authored sidecar (mappings CSV, axis
     metadata, control/transforms JSON) under the project's
@@ -59,7 +59,7 @@ def backup_sidecar(path: Path, keep: int = 20) -> None:
         for old in siblings[:-keep]:
             old.unlink()
     except Exception as e:
-        print(f"Warning: sidecar backup failed for {path}: {e}", file=sys.stderr)
+        log.warning(f"Warning: sidecar backup failed for {path}: {e}")
 
 
 # Column-name → axis tag mapping. CSV columns for registered axes are
@@ -184,10 +184,7 @@ def read_csv_mappings_with_axes(
                     if axis.get("has_master_coverage", True)
                 }
             except Exception as e:
-                print(
-                    f"Warning: Could not read source file to determine parametric axes: {e}",
-                    file=sys.stderr,
-                )
+                log.warning(f"Warning: Could not read source file to determine parametric axes: {e}")
 
         in_cols: List[str] = []
         out_cols: List[str] = []
@@ -245,17 +242,17 @@ def update_csv_from_glyphs(
     try:
         glyphs_instances = get_glyphs_instances(source_path)
         if not glyphs_instances:
-            print("No instances found in source file", file=sys.stderr)
+            log.info("No instances found in source file")
             return False
 
         csv_rows, fieldnames = read_csv_mappings(csv_path)
         if not fieldnames:
-            print("CSV has no header row", file=sys.stderr)
+            log.info("CSV has no header row")
             return False
 
         name_col = "Instance Name"
         if name_col not in fieldnames:
-            print(f"CSV missing '{name_col}' column", file=sys.stderr)
+            log.info(f"CSV missing '{name_col}' column")
             return False
 
         all_axes: set = set()
@@ -274,10 +271,7 @@ def update_csv_from_glyphs(
         }
 
         if new_axes:
-            print(
-                f"New axes found in source file (will add to CSV): {sorted(new_axes)}",
-                file=sys.stderr,
-            )
+            log.info(f"New axes found in source file (will add to CSV): {sorted(new_axes)}")
             fieldnames = list(fieldnames) + sorted(new_axes)
             # Refresh the CI map so subsequent lookups find the freshly
             # appended columns too.
@@ -298,8 +292,7 @@ def update_csv_from_glyphs(
                     tag = str(ax.get("tag") or "")
                     defaults[tag.upper()] = ax.get("default", 0)
             except Exception as e:
-                print(f"Warning: could not read axis defaults for backfill: {e}",
-                      file=sys.stderr)
+                log.warning(f"Warning: could not read axis defaults for backfill: {e}")
             for row in csv_rows:
                 for axis in new_axes:
                     row[axis] = str(defaults.get(axis.upper(), 0))
@@ -309,10 +302,7 @@ def update_csv_from_glyphs(
         # wght instead of creating a parallel wght column.
         existing_axes = {a for a in all_axes if a.upper() in csv_axes_ci}
         if existing_axes:
-            print(
-                f"Syncing existing axes from source file: {sorted(existing_axes)}",
-                file=sys.stderr,
-            )
+            log.info(f"Syncing existing axes from source file: {sorted(existing_axes)}")
 
         glyphs_coords: Dict[str, Dict[str, float]] = {
             name: {axis: coords.get(axis) for axis in all_axes if axis in coords}
@@ -330,10 +320,7 @@ def update_csv_from_glyphs(
                 updated_rows.append(row)
                 glyphs_instance_names.discard(instance_name)
                 if not dry_run:
-                    print(
-                        f"Skipping sync for '{instance_name}' (currently being edited)",
-                        file=sys.stderr,
-                    )
+                    log.info(f"Skipping sync for '{instance_name}' (currently being edited)")
                 continue
 
             if instance_name in glyphs_coords:
@@ -361,10 +348,7 @@ def update_csv_from_glyphs(
                     continue
                 removed_count += 1
                 if not dry_run:
-                    print(
-                        f"Removing row: {instance_name} (not in source file)",
-                        file=sys.stderr,
-                    )
+                    log.info(f"Removing row: {instance_name} (not in source file)")
 
         for instance_name in glyphs_instance_names:
             coords = glyphs_coords[instance_name]
@@ -376,7 +360,7 @@ def update_csv_from_glyphs(
             updated_rows.append(new_row)
             added_count += 1
             if not dry_run:
-                print(f"Adding new instance: {instance_name}", file=sys.stderr)
+                log.info(f"Adding new instance: {instance_name}")
 
         if dry_run:
             changes: List[str] = []
@@ -389,7 +373,7 @@ def update_csv_from_glyphs(
             if new_axes:
                 changes.append(f"add {len(new_axes)} new axis columns")
             if changes:
-                print(f"Dry run: Would {', '.join(changes)}", file=sys.stderr)
+                log.info(f"Dry run: Would {', '.join(changes)}")
             return bool(updated_count or removed_count or added_count or new_axes)
 
         if updated_count or removed_count or added_count or new_axes:
@@ -407,12 +391,12 @@ def update_csv_from_glyphs(
                 changes.append(f"{added_count} instances added")
             if new_axes:
                 changes.append(f"{len(new_axes)} new axis columns added")
-            print(f"Updated CSV: {', '.join(changes)}", file=sys.stderr)
+            log.info(f"Updated CSV: {', '.join(changes)}")
         else:
-            print("No changes needed", file=sys.stderr)
+            log.info("No changes needed")
         return True
     except Exception as e:
-        print(f"Error updating CSV: {e}", file=sys.stderr)
+        log.error(f"Error updating CSV: {e}")
         return False
 
 

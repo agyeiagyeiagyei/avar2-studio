@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import csv
 import shutil
-import sys
 import tempfile
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
@@ -31,13 +30,15 @@ from typing import Dict, List, Optional, Tuple
 import yaml  # PyYAML
 
 from .. import source_font as _source_font
+from ..studio_log import get_logger
 
+log = get_logger(__name__)
 try:
     import ruamel.yaml  # noqa: F401  (availability probe — HAS_RUAMEL gates its use)
     HAS_RUAMEL = True
 except ImportError:
     HAS_RUAMEL = False
-    print("Warning: ruamel.yaml not available, will use basic YAML formatting", file=sys.stderr)
+    log.warning("Warning: ruamel.yaml not available, will use basic YAML formatting")
 
 
 # ============================================================================
@@ -583,11 +584,8 @@ def _drop_colliding_in_locations(
             else:
                 note = ("with a DIFFERENT out: — dropped the later row; "
                         "check these instances' mapping values")
-            print(
-                f"  ⚠ '{m.instance_name}' resolves to the same avar2 input "
-                f"location as '{prev.instance_name}' — {note}",
-                file=sys.stderr,
-            )
+            log.info(f"  ⚠ '{m.instance_name}' resolves to the same avar2 input "
+                f"location as '{prev.instance_name}' — {note}")
             continue
         seen[loc] = m
         out.append(m)
@@ -610,11 +608,8 @@ def _drop_identical_duplicates(mappings: List[RowMapping]) -> List[RowMapping]:
             sorted((k, str(v)) for k, v in list(m.in_axes.items()) + list(m.out_axes.items()))
         )
         if key in seen:
-            print(
-                f"  ℹ Duplicate mapping '{m.instance_name}' identical to "
-                f"'{seen[key]}' — dropped (one avar2 entry serves both)",
-                file=sys.stderr,
-            )
+            log.info(f"  ℹ Duplicate mapping '{m.instance_name}' identical to "
+                f"'{seen[key]}' — dropped (one avar2 entry serves both)")
             continue
         seen[key] = m.instance_name
         out.append(m)
@@ -865,7 +860,7 @@ def write_config(
         backup_path = config_path.with_suffix(".yaml.backup")
         if config_path.exists():
             shutil.copy2(config_path, backup_path)
-            print(f"Created backup: {backup_path}", file=sys.stderr)
+            log.info(f"Created backup: {backup_path}")
 
     # Read original file
     original_text = config_path.read_text(encoding="utf-8")
@@ -1374,19 +1369,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         # Step 1: Validate CSV structure
-        print("Step 1: Validating CSV structure...", file=sys.stderr)
+        log.info("Step 1: Validating CSV structure...")
         validate_csv_structure(args.csv)
-        print("  ✓ CSV structure valid", file=sys.stderr)
+        log.info("  ✓ CSV structure valid")
 
         # Step 2: Read CSV mappings (with optional contrast/opsz expansion)
-        print("Step 2: Reading CSV mappings...", file=sys.stderr)
+        log.info("Step 2: Reading CSV mappings...")
         csv_to_use = args.csv
 
         # Check opsz variation before expansion (for avar2 generation later)
         has_opsz_variation_before = check_opsz_variation(csv_to_use)
 
         if args.add_opsz:
-            print("  Expanding CSV with opsz variations...", file=sys.stderr)
+            log.info("  Expanding CSV with opsz variations...")
             # Determine output path based on flag
             if args.save_opsz_csv:
                 opsz_output = csv_to_use.parent / f"{csv_to_use.stem}_with_opsz{csv_to_use.suffix}"
@@ -1394,12 +1389,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 opsz_output = None  # Will use temporary file
             csv_to_use = expand_csv_with_opsz(csv_to_use, output_path=opsz_output)
             if args.save_opsz_csv:
-                print(f"  ✓ Expanded CSV written to: {csv_to_use}", file=sys.stderr)
+                log.info(f"  ✓ Expanded CSV written to: {csv_to_use}")
             else:
-                print("  ✓ Expanded CSV generated (temporary file)", file=sys.stderr)
+                log.info("  ✓ Expanded CSV generated (temporary file)")
 
         if args.add_contrast:
-            print("  Expanding CSV with contrast variations...", file=sys.stderr)
+            log.info("  Expanding CSV with contrast variations...")
             csv_to_use = expand_csv_with_contrast(
                 csv_to_use,
                 # Asymmetric scaling for balanced perceptual impact
@@ -1409,7 +1404,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 positive_factor=Decimal("0.85"),  # Moderate factor for positive (more contrast) side
                 positive_offset=Decimal("30"),    # Moderate offset for positive side
             )
-            print(f"  ✓ Expanded CSV written to: {csv_to_use}", file=sys.stderr)
+            log.info(f"  ✓ Expanded CSV written to: {csv_to_use}")
 
         # The compiled parametric font's axis tags, from the config's
         # fvarInstances coordinates: the authoritative out: set. Columns
@@ -1421,10 +1416,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 for inst in insts or []:
                     parametric_tags.update((inst.get("coordinates") or {}).keys())
         except Exception as exc:
-            print(f"  (could not derive parametric axes from config: {exc})",
-                  file=sys.stderr)
+            log.info(f"  (could not derive parametric axes from config: {exc})")
         mappings = read_csv_mappings(csv_to_use, parametric_tags or None)
-        print(f"  ✓ Read {len(mappings)} mappings", file=sys.stderr)
+        log.info(f"  ✓ Read {len(mappings)} mappings")
 
         # Store path for cleanup if temporary file was used
         temp_opsz_file = None
@@ -1432,7 +1426,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             temp_opsz_file = csv_to_use
 
         # Step 3: Load and validate existing config
-        print("Step 3: Loading existing config.yaml...", file=sys.stderr)
+        log.info("Step 3: Loading existing config.yaml...")
         config = load_config(args.config)
 
         # The config's sources: must track the ACTIVE source path — a
@@ -1456,8 +1450,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
                 if n:
                     Path(args.config).write_text(text2, encoding="utf-8")
-                    print(f"  ✓ sources: repointed to {resolved}", file=sys.stderr)
-        print("  ✓ Config loaded and validated", file=sys.stderr)
+                    log.info(f"  ✓ sources: repointed to {resolved}")
+        log.info("  ✓ Config loaded and validated")
 
         # Step 4: Determine font key. The builder names the VF after
         # the ACTIVE source's axes — "<family>[<sorted axis tags>].ttf"
@@ -1481,10 +1475,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         f"{family}[{','.join(tags)}].ttf" if tags else f"{family}-VF.ttf"
                     )
                 except Exception as e:
-                    print(f"  Warning: font key from source failed: {e}", file=sys.stderr)
+                    log.warning(f"  Warning: font key from source failed: {e}")
             if font_key is None:
                 font_key = _load_font_key_from_config(args.config)
-        print(f"  ✓ Font key: {font_key}", file=sys.stderr)
+        log.info(f"  ✓ Font key: {font_key}")
 
         # Filename-keyed config sections go stale the same way the
         # font key does — gen-fvar-instances looks up the BUILT
@@ -1507,12 +1501,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     config["fvarInstances"][font_key] = config["fvarInstances"].pop(
                         fvar_keys[0]
                     )
-                    print(
-                        f"  ✓ fvarInstances: re-keyed {fvar_keys[0]} → {font_key}",
-                        file=sys.stderr,
-                    )
+                    log.info(f"  ✓ fvarInstances: re-keyed {fvar_keys[0]} → {font_key}")
         except Exception as e:
-            print(f"  Warning: fvarInstances re-key failed: {e}", file=sys.stderr)
+            log.warning(f"  Warning: fvarInstances re-key failed: {e}")
 
         # Parametric-only CSV: pin in: to the source's instance
         # coordinates so edited CSV values remap the design (an in-sync
@@ -1529,7 +1520,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 source_axes_list = _source_font.get_axes(font)
                 mappings = _pad_in_envelope(mappings, source_axes_list)
             except Exception as e:
-                print(f"  Warning: could not pad avar2 range envelope: {e}", file=sys.stderr)
+                log.warning(f"  Warning: could not pad avar2 range envelope: {e}")
 
         if args.fill_in_defaults:
             # Materialize blank cells at the DECLARED defaults so each
@@ -1562,7 +1553,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 filled.append(replace(m, in_axes=in_axes))
             mappings = filled
             if filled_count:
-                print(f"  ℹ Filled {filled_count} blank in: cells at declared defaults", file=sys.stderr)
+                log.info(f"  ℹ Filled {filled_count} blank in: cells at declared defaults")
 
         # Two mappings that normalize to the SAME in: location crash
         # fontTools ("Locations must be unique") deep inside gen-avar2
@@ -1572,14 +1563,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
         # Step 5: Generate STAT section
-        print("Step 5: Generating STAT section...", file=sys.stderr)
+        log.info("Step 5: Generating STAT section...")
         # Use expanded CSV if opsz or contrast was added, otherwise use original
         stat_csv = csv_to_use if (args.add_opsz or args.add_contrast) else args.csv
         axis_values = extract_axis_values_from_csv(stat_csv)
         # Remove opsz from STAT if there's no variation (only one value)
         if len(axis_values.get("opsz", [])) <= 1:
             axis_values.pop("opsz", None)
-            print("  ℹ OPSZ axis skipped in STAT (no variation)", file=sys.stderr)
+            log.info("  ℹ OPSZ axis skipped in STAT (no variation)")
         # SPAC is transform-injected, not a STAT axis this generator emits —
         # without the drop, a CSV whose only registered column is SPAC
         # produces an empty section and fails validation.
@@ -1587,16 +1578,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         if axis_values:
             stat_data = generate_stat_section(axis_values, font_key)
             validate_stat_section(stat_data, font_key)
-            print(f"  ✓ STAT section generated ({len(stat_data[font_key])} axes)", file=sys.stderr)
+            log.info(f"  ✓ STAT section generated ({len(stat_data[font_key])} axes)")
         else:
             # Parametric-only CSV (identity in: case): no registered
             # (traditional) axes to describe, so STAT has nothing to say.
             # Leave any existing stat section in the config untouched.
             stat_data = None
-            print("  ℹ No traditional axes in CSV — STAT section skipped", file=sys.stderr)
+            log.info("  ℹ No traditional axes in CSV — STAT section skipped")
 
         # Step 6: Generate avar2 section
-        print("Step 6: Generating avar2 section...", file=sys.stderr)
+        log.info("Step 6: Generating avar2 section...")
         # Check if opsz has variation (after expansions)
         has_opsz_variation_after = check_opsz_variation(csv_to_use)
         avar2_yaml = generate_avar2_yaml_string(
@@ -1610,12 +1601,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         entry_count = len(avar2_parsed["avar2"][font_key] or [])
         if entry_count:
             validate_avar2_yaml(avar2_yaml, font_key)
-            print(f"  ✓ avar2 section generated ({entry_count} entries)", file=sys.stderr)
+            log.info(f"  ✓ avar2 section generated ({entry_count} entries)")
         else:
-            print("  ℹ No mapping rows carry user-axis values — avar2 section emptied (identity)", file=sys.stderr)
+            log.info("  ℹ No mapping rows carry user-axis values — avar2 section emptied (identity)")
 
         # Step 7: Merge into config
-        print("Step 7: Merging sections into config...", file=sys.stderr)
+        log.info("Step 7: Merging sections into config...")
         merged_config, avar2_yaml_final = merge_config(
             config, stat_data, avar2_yaml, font_key,
             add_contrast=args.add_contrast,
@@ -1626,19 +1617,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             fvar_inst = merged_config.get("fvarInstances", {}).get(font_key, [])
             all_have_cntr = all("cntr" in inst.get("coordinates", {}) for inst in fvar_inst)
             if all_have_cntr:
-                print(f"  ✓ fvarInstances updated with cntr: 0 ({len(fvar_inst)} instances)", file=sys.stderr)
+                log.info(f"  ✓ fvarInstances updated with cntr: 0 ({len(fvar_inst)} instances)")
         validate_merged_config(merged_config, font_key, require_stat=stat_data is not None)
-        print("  ✓ Config merged and validated", file=sys.stderr)
+        log.info("  ✓ Config merged and validated")
 
         # Step 8: Write config (or dry-run)
         if args.dry_run:
-            print("Step 8: DRY RUN - Config validated, no changes written", file=sys.stderr)
+            log.info("Step 8: DRY RUN - Config validated, no changes written")
         else:
-            print("Step 8: Writing updated config.yaml...", file=sys.stderr)
+            log.info("Step 8: Writing updated config.yaml...")
             write_config(merged_config, avar2_yaml_final, args.config, backup=not args.no_backup)
-            print(f"  ✓ Config written: {args.config}", file=sys.stderr)
+            log.info(f"  ✓ Config written: {args.config}")
 
-        print("\n✓ All steps completed successfully!", file=sys.stderr)
+        log.info("✓ All steps completed successfully!")
 
         # Clean up temporary opsz file if it was created
         if 'temp_opsz_file' in locals() and temp_opsz_file and temp_opsz_file.exists():
@@ -1650,7 +1641,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n✗ Error: {e}", file=sys.stderr)
+        log.error(f"✗ Error: {e}")
         import traceback
         traceback.print_exc()
         return 1

@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from ..studio_log import get_logger
 from . import config as _config
 from .base import Transform
 from .builtin_gftools import (
@@ -35,6 +35,8 @@ from .builtin_spac import SpacTransform
 from .builtin_spac_widthaware import WidthAwareSpacTransform
 
 # id -> Transform instance
+
+log = get_logger(__name__)
 REGISTRY: Dict[str, Transform] = {}
 
 _discovered = False
@@ -43,7 +45,7 @@ _discovered = False
 def register(transform: Transform) -> None:
     tid = transform.spec.id
     if tid in REGISTRY:
-        print(f"transforms: '{tid}' already registered; overriding", file=sys.stderr)
+        log.info(f"transforms: '{tid}' already registered; overriding")
     REGISTRY[tid] = transform
 
 
@@ -74,14 +76,14 @@ def discover(force: bool = False) -> None:
             d.mkdir(parents=True, exist_ok=True)
             _write_readme(d)
     except OSError as e:
-        print(f"transforms: could not create {d}: {e}", file=sys.stderr)
+        log.info(f"transforms: could not create {d}: {e}")
 
     if d.exists():
         for py in sorted(d.glob("*.py")):
             try:
                 _load_script(py)
             except Exception as e:
-                print(f"transforms: failed to load {py.name}: {e}", file=sys.stderr)
+                log.info(f"transforms: failed to load {py.name}: {e}")
 
     _discovered = True
 
@@ -102,10 +104,7 @@ def _load_script(path: Path) -> None:
             register(obj())
             found += 1
     if found == 0:
-        print(
-            f"transforms: {path.name} defines no Transform subclass — skipped",
-            file=sys.stderr,
-        )
+        log.info(f"transforms: {path.name} defines no Transform subclass — skipped")
 
 
 def get(transform_id: str):

@@ -934,3 +934,19 @@ bar; findings rounds still get written so a second reviewer can re-check.
   names; the comparators already took their paths as arguments.
 - [verified] `cargo test` for the five binaries on the warm target: all
   ok; no `"/tmp/` literal left in `wasm/fontc-web/tests/*.rs`.
+
+## T2.2 (part 1) — logging for the library modules
+
+- New `src/avar2_studio/studio_log.py`: `get_logger(name)` returns a child
+  of the `avar2_studio` logger, which has one handler that writes the
+  plain message to whatever `sys.stderr` is at emit time (test capture and
+  redirected launches both see it); werkzeug's request log is untouched.
+- Converted with an AST-based rewriter (`print(x, file=sys.stderr)` →
+  `log.info/warning/error(x)` by message prefix, leading "\n" spacing
+  dropped): `control_axes.py` 4, `csv_io.py` 15, `build/config_generator.py`
+  38, `transforms/registry.py` 4 — 61 calls; no stderr prints remain in
+  those modules. `server.py`, `build_jobs.py` and `cli.py`/`doctor.py`
+  follow in part 2 (after the frontend branch merges; the CLI's own
+  user-facing output stays `print`).
+- [verified] compiles; ruff clean; full suite **505 passed** (including
+  the capsys assertion in `test_watcher_save_flow`).
