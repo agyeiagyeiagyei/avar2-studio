@@ -357,3 +357,16 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   self-events regardless of processing delay. The probe's own counter
   under-reported (its idle check can't see the pre-build resolve
   window); the counts above are read directly from the server log.
+
+## T1.3 — secure_filename on uploads
+
+- Mechanism [verified]: the multipart branch of `/api/load-source` saved
+  `f.filename` verbatim under the per-font workspace — a
+  `../../../tmp/x.glyphs` name escaped it (path traversal).
+- Fix: `secure_filename()` (werkzeug) on the upload name; directories
+  flatten into a single safe segment. The .zip branch already guards
+  member paths ("Unsafe path in archive").
+- Test [verified]: tests/test_upload_security.py — traversal name lands
+  inside the workspace as one safe segment, normal upload unaffected.
+  Pre-fix the destination escapes the workspace (stash-checked; the
+  parent-location assertion fails).

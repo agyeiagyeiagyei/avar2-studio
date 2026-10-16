@@ -34,6 +34,7 @@ except ImportError:
     yaml = None
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
@@ -7880,7 +7881,9 @@ def load_source():
             staged: list = []
             extras_skipped: list = []
             for f in uploaded:
-                name = (f.filename or '').strip()
+                # Client-supplied filename: strip any directory components
+                # before it becomes a path under the workspace.
+                name = secure_filename((f.filename or '').strip())
                 if not name:
                     continue
                 lower = name.lower()
