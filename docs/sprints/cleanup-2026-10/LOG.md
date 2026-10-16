@@ -334,3 +334,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   **452 passed, 8 skipped** [verified] — grade tests and the new
   component-capture test pass on both glyphsLib versions.
 - Live probe: see above; both phases meet the verifier's acceptance.
+
+## Tier 1 (server group)
+
+## T1.1 — global OBSERVER
+- Bug [verified]: `main()` assigned `OBSERVER` without `global`; the
+  `finally` then read a never-assigned local on blind-launch shutdown
+  (UnboundLocalError), and the module global stayed None either way.
+- Fix: added `OBSERVER` to main()'s global declaration.
+- Test [verified]: tests/test_blind_launch.py boots the server with no
+  source on 5199 and SIGINTs it; fails pre-fix (UnboundLocalError in
+  stderr, stash-checked), passes post-fix.

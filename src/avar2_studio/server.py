@@ -7976,7 +7976,7 @@ def load_source():
 
 
 def main():
-    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH
+    global GLYPHS_PATH, SOURCE_FORMAT, BUILD_DIR, CSV_PATH, OBSERVER
 
     parser = argparse.ArgumentParser(description="avar2-studio server")
     parser.add_argument(
