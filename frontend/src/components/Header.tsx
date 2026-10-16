@@ -57,6 +57,8 @@ interface HeaderProps {
   transforms?: TransformEntry[];
   onToggleTransform?: (id: string, enabled: boolean) => void;
   onTransformParam?: (id: string, key: string, value: any) => void;
+  transformsDirty?: Record<string, boolean>;
+  onApplyTransform?: (id: string) => void;
   grade?: GradeState;
   onToggleGrade?: (enabled: boolean) => void;
   onGradeDefault?: (pct: number) => void;
