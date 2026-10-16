@@ -171,3 +171,27 @@ results, and what is inferred vs verified.
   `pytest tests/test_build_jobs.py -q` → 11 passed. server.py compiles
   and imports [verified]; the watcher branch itself is nested in
   `main()` — reading-verified only until T3.10 makes it testable.
+
+## T0.8 — capture on Fontra save
+
+- Mechanism [verified by reading]: studio-axis Fontra sessions serve
+  `shadow_path_for(ORIGINAL_PATH)` (server.py:5559) — saves write the
+  shadow. `capture_outlines`' sole caller was config-bundle export
+  (`config_port.py`), so drawings sat in derived state until an export.
+- Fix: module-level `server._capture_shadow_drawings()` (guard: no-op
+  when no source or when GLYPHS_PATH == ORIGINAL_PATH; capture under
+  SIDECAR_LOCK per the layer-mutation invariant), called from both
+  Fontra-save watcher branches: the direct `is_source` branch (before
+  the CSV sync) and the mid-build branch (before the re-resolve, so regen
+  can't precede capture).
+- Deliberately not in scope: the `.glif`/designspace branch
+  (`capture_outlines` on .designspace is a no-op per audit §10 —
+  unverified beyond that; parity question is T2.15); "drawer close"
+  (watcher covers saves continuously; no close endpoint exists);
+  the shadow dir not being watched when source transforms are active
+  (watcher watches `transformed/` then, not `shadow/` — pre-existing
+  watcher gap, belongs to T2.11 watcher work; logged here so it isn't
+  lost).
+- Tests [verified]: tests/test_capture_on_fontra_save.py — capture
+  moves paths + source_sig into the sidecar; editing-original guard
+  no-op; no-source no-op. 3 passed; server.py py_compile + import OK.

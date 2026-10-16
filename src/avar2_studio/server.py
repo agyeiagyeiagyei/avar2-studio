@@ -1221,6 +1221,24 @@ def _gc_paused():
         # without blocking the world.
 
 
+def _capture_shadow_drawings() -> int:
+    """Pull hand-drawn brace outlines from the shadow into the sidecar.
+
+    Fontra sessions for studio axes edit the SHADOW (the open-editor
+    routing serves ``shadow_path_for(ORIGINAL_PATH)``), so without this a
+    drawing waits for the next config export to reach the sidecar — the
+    only durable copy — and a shadow wipe or an unstaged build loses it
+    before then. Untouched seeds are skipped by their stamps, so this is
+    a cheap no-op after server-side regens. Returns layers captured.
+    """
+    if ORIGINAL_PATH is None or GLYPHS_PATH is None:
+        return 0
+    if Path(GLYPHS_PATH).resolve() == Path(ORIGINAL_PATH).resolve():
+        return 0  # no shadow in play — Fontra is editing the original itself
+    with SIDECAR_LOCK:
+        return _control_axes.capture_outlines(ORIGINAL_PATH)
+
+
 def _resolve_active_source() -> Optional[Path]:
     """Re-derive the active build source (``GLYPHS_PATH``) from the CURRENT
     control-axis + grade state, without triggering a build. Sets and returns
@@ -8071,6 +8089,13 @@ def main():
                 # like success while serving stale outlines.
                 kind = "original" if is_original else ("source" if is_source else None)
                 if kind:
+                    if is_source:
+                        # A Fontra save writes the SHADOW: secure any drawing
+                        # into the sidecar before the resolve below regens it.
+                        try:
+                            _capture_shadow_drawings()
+                        except Exception as exc:
+                            print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
                     # Re-resolve NOW so the read endpoints (/api/instances,
                     # /api/axes, coverage) stop serving the pre-save shadow
                     # while the current build is still running; the queue
@@ -8102,6 +8127,17 @@ def main():
                     sync_csv_with_glyphs()
                 elif is_source:
                     print(f"\nSource file modified, syncing CSV and rebuilding...", file=sys.stderr)
+                    # A Fontra save writes the SHADOW: pull hand-drawn brace
+                    # outlines into the sidecar first, so drawings are durable
+                    # even if the shadow is later regenerated away. Untouched
+                    # seeds are skipped by their stamps — a cheap no-op after
+                    # server-side regens.
+                    try:
+                        captured = _capture_shadow_drawings()
+                        if captured:
+                            print(f"Captured {captured} drawn outline(s) into the sidecar.", file=sys.stderr)
+                    except Exception as exc:
+                        print(f"Warning: could not capture outlines: {exc}", file=sys.stderr)
                     # Sync CSV first (skips editing instances)
                     sync_csv_with_glyphs()
                 else:
