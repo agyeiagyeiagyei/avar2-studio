@@ -440,3 +440,13 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - Test [verified]: tests/test_declared_ranges_cache.py — one computation
   across repeat calls, recompute on metadata touch, overrides key
   separately, callers get copies.
+
+## T1.9 — dead --csv / --build-dir fail loudly
+
+- `_apply_source_path` resets `CSV_PATH = None` (server.py:7521) and the
+  worker builds a staged snapshot with sibling sidecars — both flags set
+  globals nothing reads (dead since the worker rework; the CLI `build
+  --csv` set it pre-reset, equally dead). Both now exit(2) with a clear
+  message; the unreachable `server.CSV_PATH = ...` in cli.py removed.
+- Test [verified]: tests/test_dead_cli_flags.py — both flags exit 2 with
+  the message (server + build CLI), `--help` unaffected. 4 passed.

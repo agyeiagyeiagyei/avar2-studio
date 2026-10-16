@@ -7910,6 +7910,18 @@ def main():
     
     args = parser.parse_args()
 
+    # --csv / --build-dir are dead: the worker builds a staged snapshot
+    # (sibling sidecars, job-dir output), so these overrides change nothing
+    # the user can see. Fail loudly instead of pretending.
+    if args.csv:
+        print("Error: --csv is no longer supported — the studio reads "
+              "<stem>-avar.csv next to the source file.", file=sys.stderr)
+        sys.exit(2)
+    if args.build_dir:
+        print("Error: --build-dir is no longer supported — builds write to "
+              ".avar2-studio/build/ next to the source file.", file=sys.stderr)
+        sys.exit(2)
+
     global USE_FONTC
     USE_FONTC = not args.no_fontc  # Use fontc unless --no-fontc is specified
 
@@ -7926,14 +7938,6 @@ def main():
         except (ValueError, UnsupportedSourceFormat) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
-
-        # Honour the explicit CLI overrides AFTER _apply_source_path has
-        # set sensible defaults — the user's --build-dir / --csv beat
-        # the auto-derived locations.
-        if args.build_dir:
-            BUILD_DIR = args.build_dir.resolve()
-        if args.csv:
-            CSV_PATH = args.csv.resolve()
     else:
         # Blind launch: no source loaded yet. The frontend will offer
         # the Load-Font dropdown (built-in examples or .glyphs upload)

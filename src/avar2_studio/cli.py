@@ -76,6 +76,13 @@ def _build(argv) -> int:
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
 
+    if args.csv is not None:
+        # Dead override: _apply_source_path resets CSV_PATH and the build
+        # always reads the sibling <stem>-avar.csv. Say so, don't pretend.
+        print("error: --csv is no longer supported — the build reads "
+              "<stem>-avar.csv next to the source file.", file=sys.stderr)
+        return 2
+
     meta = args.source.resolve().parent / ".avar2-studio" / "axis-metadata.json"
     if not meta.exists():
         # The declared defaults of the traditional axes live there. Built
@@ -86,8 +93,6 @@ def _build(argv) -> int:
               f"to each CSV column's minimum, and named styles may land off "
               f"their mapped values", file=sys.stderr)
     from . import server
-    if args.csv is not None:
-        server.CSV_PATH = args.csv.resolve()
     try:
         server._apply_source_path(args.source)
     except Exception as exc:  # noqa: BLE001
