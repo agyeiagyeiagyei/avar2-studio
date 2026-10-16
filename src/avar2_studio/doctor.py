@@ -279,6 +279,51 @@ def check_fontra() -> CheckResult:
     )
 
 
+def check_spac_injector() -> CheckResult:
+    """The native SPAC injector (Rust `spac-inject` binary). Optional:
+    without it the fontTools path runs, whose gvar re-encode can overflow
+    the 64 KB per-glyph tuple-header ceiling on twin-heavy fonts."""
+    import os
+
+    from .transforms import builtin_spac_widthaware
+    env = os.environ.get("AVAR2_SPAC_INJECT")
+    found = builtin_spac_widthaware._native_injector()
+    if found:
+        via = f" via $AVAR2_SPAC_INJECT ({env})" if env else ""
+        return CheckResult(name="spac-inject (optional)", ok=True,
+                           detail=f"{found}{via}")
+    detail = "not found — builds fall back to the fontTools SPAC path"
+    if env:
+        detail += f" ($AVAR2_SPAC_INJECT={env} does not exist)"
+    return CheckResult(
+        name="spac-inject (optional)", ok=True,
+        detail=detail,
+        fix="cargo build --release --manifest-path wasm/fontc-web/Cargo.toml --bin spac-inject",
+    )
+
+
+def check_kinetikern_engine() -> CheckResult:
+    """The Kinetikern2 engine library (ctypes). Optional: the Kinetikern
+    tab reports it missing; everything else works."""
+    import os
+
+    from . import kinetikern
+    env = os.environ.get("AVAR2_KK2_DYLIB")
+    found = kinetikern.engine_path()
+    if found:
+        via = f" via $AVAR2_KK2_DYLIB ({env})" if env else ""
+        return CheckResult(name="kinetikern2 (optional)", ok=True,
+                           detail=f"{found}{via}")
+    detail = "not built — the Kinetikern tab is disabled"
+    if env:
+        detail += f" ($AVAR2_KK2_DYLIB={env} does not exist)"
+    return CheckResult(
+        name="kinetikern2 (optional)", ok=True,
+        detail=detail,
+        fix="cargo build --release --manifest-path native/kinetikern2/Cargo.toml",
+    )
+
+
 CHECKS: List[Callable[[], CheckResult]] = [
     check_python,
     check_fontc,
@@ -286,6 +331,8 @@ CHECKS: List[Callable[[], CheckResult]] = [
     check_glyphslib,
     check_static_bundle,
     check_fontra,
+    check_spac_injector,
+    check_kinetikern_engine,
     check_install_shadowing,
     check_stale_processes,
 ]

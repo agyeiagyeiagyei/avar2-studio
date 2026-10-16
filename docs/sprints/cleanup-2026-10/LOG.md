@@ -625,3 +625,12 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
   reason. Note for the verifier: in a worktree there's no `.venv`, so
   the oracle python falls back to `python3` — set AVAR2_PYTHON to a venv
   with fontTools+gftools to run them.
+
+## T1.30 — doctor checks the native accelerators
+- Two new optional checks mirror the production discovery exactly (via
+  import, so they can't drift): `spac-inject` (`_native_injector`) and
+  `kinetikern2` (`engine_path`), reporting `$AVAR2_SPAC_INJECT` /
+  `$AVAR2_KK2_DYLIB` when set (and flagging a set-but-missing override
+  by name). Optional = never fails the gate (ok=True with detail + fix),
+  same contract as the fontra check. Tests + live run [verified]:
+  2 passed; `doctor` lists both.
