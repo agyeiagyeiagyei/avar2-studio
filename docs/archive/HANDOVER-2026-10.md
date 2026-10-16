@@ -1,18 +1,20 @@
+> **Archived 2026-10-16.** The pre-restructure handover, kept verbatim as history. Its live content moved to [ARCHITECTURE.md](../ARCHITECTURE.md), [DEVELOPMENT.md](../DEVELOPMENT.md), [SIDECARS.md](../SIDECARS.md), the [guides](../guides/) and the [decision records](../decisions/); see [docs/HANDOVER.md](../HANDOVER.md) for the map. Known-stale claims in this copy: outline capture is now wired (on config export, on Fontra save and across coordinate edits); builds and exports run in a worker subprocess; the Space tab was removed; the avar2-reflection item in §4.2 was a misdiagnosis (see decision 0001).
+
 # Handover — project state & undocumented knowledge (July 2026, updated August 2026)
 
 This doc captures everything a new developer needs that is **not**
 already written down. Read the existing docs first — this deliberately
 doesn't repeat them:
 
-- [README.md](../README.md) — what the tool is, install, launch,
+- [README.md](../../README.md) — what the tool is, install, launch,
   working-tree layout, axis surface, Preview tab, transforms (user-facing)
-- [docs/authoring-instances.md](./authoring-instances.md) — the
+- [docs/authoring-instances.md](../guides/authoring-instances.md) — the
   instance/mapping authoring workflow, both example fixtures
-- [docs/secondary-parametric-axes.md](./secondary-parametric-axes.md) — secondary
+- [docs/secondary-parametric-axes.md](../guides/secondary-parametric-axes.md) — secondary
   parametric ("control") axes: the user reference (authoring, coverage, editing)
 - [docs/design-notes.md](./design-notes.md) — the same feature's design record:
   what isn't built, alternatives weighed, the Fontra integration paths
-- [docs/grade.md](./grade.md) — the grade feature's weight model
+- [docs/grade.md](../guides/grade.md) — the grade feature's weight model
 - [docs/migration-github-pages.md](./migration-github-pages.md) — the
   static (GitHub Pages) port: wasm crate internals, coverage audit,
   corner pinning, dropping out-of-range sources, zip workspaces

@@ -1,3 +1,5 @@
+> **Archived 2026-10-16.** The design record of the static (GitHub Pages) build. How the static app works today is in [ARCHITECTURE.md](../ARCHITECTURE.md) (processes, pipeline order, parity table); the out-of-range decision is [decision 0009](../decisions/0009-drop-out-of-range-sources.md) and the browser editor is [decision 0010](../decisions/0010-fontra-embed-gpl-subproject.md). The Space tab described below was removed on 2026-10-16.
+
 > **Status (September 2026):** the snapshot scheme described below —
 > baked API responses per example, a pre-built SPAC-off variant,
 > read-only examples — has been retired. The bundled examples now stage

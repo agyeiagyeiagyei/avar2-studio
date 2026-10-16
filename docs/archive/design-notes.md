@@ -1,9 +1,11 @@
+> **Archived 2026-10-16.** The design record behind secondary parametric axes. What it calls "model α" is now fully wired (capture on config export, on Fontra save, and carried across coordinate edits); the Fontra integration paths are summarised in [decision 0010](../decisions/0010-fontra-embed-gpl-subproject.md); the not-built items live in the [secondary parametric axes guide](../guides/secondary-parametric-axes.md#not-built).
+
 # Secondary parametric axes — design notes
 
-The design record behind [secondary parametric axes](secondary-parametric-axes.md):
+The design record behind [secondary parametric axes](../guides/secondary-parametric-axes.md):
 what isn't built yet, and the alternatives weighed along the way. The user
 reference is the sibling doc; how the *shipped* code works under the hood is in
-[HANDOVER.md](HANDOVER.md).
+[HANDOVER.md](HANDOVER-2026-10.md).
 
 ## Naming seam
 

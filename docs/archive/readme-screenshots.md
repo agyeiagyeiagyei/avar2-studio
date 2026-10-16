@@ -1,3 +1,5 @@
+> **Archived 2026-10-16.** The capture brief for the README's screenshot set. Four of its shots were never taken and the README no longer references them (see sprint item T1.37); the Space tab shot (S08) is obsolete — the tab was removed. Kept for whoever retakes the set.
+
 # README screenshots — capture brief
 
 The README's images are one consistent set, captured on the hosted demo
