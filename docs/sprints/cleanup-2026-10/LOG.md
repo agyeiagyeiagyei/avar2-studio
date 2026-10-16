@@ -473,3 +473,14 @@ T0.11 was folded into the T0.10 commit series (hygiene, one line).
 - Test [verified]: `test_update_axis_range_check_sees_authored_case`
   (the audit's SUBS probe) — narrowing [0,100]→50 with a layer at 100
   raises; fails pre-fix (stash-checked). 6 passed in the file.
+
+## T1.13 — Fontra session/responses keep authored tag case
+
+- The open-editor session and four responses forced `tag.lower()`,
+  which breaks the shim's authored-case label matching for uppercase
+  axes (the tag-case change's whole point). Now: the session and the
+  open-editor response carry the matched sidecar axis's tag (fallback:
+  the URL tag as sent); the layers/delete responses echo the URL tag
+  as sent. Updated the test pin (`xouc` → `XOUC`).
+- Tests [verified]: test_open_editor.py + tag-case + delta-carry +
+  capture suites → 15 passed.

@@ -100,7 +100,7 @@ def test_source_derived_axis_on_designspace_opens_original(studio_client, roboto
     assert body["success"] is True
     assert body["editing_original"] is True
     assert body["project"] == "RobotoDeltaMini.designspace"
-    assert body["tag"] == "xouc"
+    assert body["tag"] == "XOUC"   # authored case, not lowercased
     # Single-file mode: the file itself is the content root, so sibling
     # UFOs in the same folder aren't exposed as projects.
     assert studio_client.fontra_calls == [(roboto_source, roboto_source)]

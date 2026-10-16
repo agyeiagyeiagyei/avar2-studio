@@ -5604,8 +5604,10 @@ def open_control_axis_in_editor(tag: str):
     body = request.get_json(silent=True) or {}
     FONTRA_EDITOR_SESSION = {
         "studio": bool(is_studio_axis and not editing_original),
-        "tag": tag.lower(),
-        "axis_name": (spec or {}).get("display_name") or tag.lower(),
+        # Authored tag case (fvar tags are case-sensitive; the shim matches
+        # layer labels printed in authored case).
+        "tag": (spec or {}).get("tag") or tag,
+        "axis_name": (spec or {}).get("display_name") or (spec or {}).get("tag") or tag,
         "axis_default": float((spec or {}).get("default") or 0.0),
         "glyph": (body.get("glyph") or "").strip() or None,
     }
@@ -5629,7 +5631,7 @@ def open_control_axis_in_editor(tag: str):
         "direct_url": direct_url,
         "port": port,
         "project": project,
-        "tag": tag.lower(),
+        "tag": (spec or {}).get("tag") or tag,
         # True when Fontra is serving the user's actual source (no
         # shadow) — saves write straight to it. The frontend shows a
         # notice so that's never a surprise.
@@ -5666,7 +5668,7 @@ def set_control_axis_layers(tag: str):
         with SIDECAR_LOCK:
             stored = _control_axes.set_layers(ORIGINAL_PATH, tag, entries)
         schedule_shadow_rebuild()
-        return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
+        return jsonify({"success": True, "tag": tag, "layers": stored})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
@@ -5702,7 +5704,7 @@ def patch_control_axis_layers(tag: str):
         with SIDECAR_LOCK:
             stored = _control_axes.apply_layer_delta(ORIGINAL_PATH, tag, add=add, remove=remove)
         schedule_shadow_rebuild()
-        return jsonify({"success": True, "tag": tag.lower(), "layers": stored})
+        return jsonify({"success": True, "tag": tag, "layers": stored})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
@@ -6037,7 +6039,7 @@ def delete_control_axis(tag: str):
         except Exception as shadow_exc:
             print(f"Warning: shadow refresh after delete failed: {shadow_exc}", file=sys.stderr)
 
-        return jsonify({"success": True, "tag": tag.lower()})
+        return jsonify({"success": True, "tag": tag})
     except Exception as e:
         print(f"Error deleting control axis: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
