@@ -1,5 +1,7 @@
-STATE: ready-for-verification
+STATE: working
 ROUND: 5
 HEAD: 19cb51cd3a8dbd8f3b31b51a1ddfb9a90ef42d02
-ITEMS_READY: T3.1,T3.2,T3.3,T3.5,T3.6,T3.8,T3.10
-ITEMS_BLOCKED: T3.4 (skipped — user decision), T3.7 (pending user decision on history rewrite), T3.9 (pending user decision on distribution strategy)
+VERIFIED_HEAD: 725d605
+NEXT: T3.8 re-done per ADR 0007 (lossless relocation to P, no inserted master; fidelity test ≤3 u at authored stops); docs module map for state.py/watch.py/routes/; stale doc paths in code; examples anchors
+APPROVED: the NEXT line above; then ready-for-verification (T3.7/T3.9 remain BLOCKED on the user; T3.4 skipped)
+VERIFIER: active again from 2026-10-17

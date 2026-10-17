@@ -213,6 +213,65 @@ rounds. Carry the two nits (doctor test hermeticity; dead live-mode
 pin/clamp/addMappingRow api methods + routes) into Tier 2's test and
 dead-code work.
 
+## Rounds 4 + 5 — hand-off `725d605` (HEAD `19cb51c`), Tier 2 remainder + Tier 3 — 2026-10-17
+
+(Round 4's hand-off was not verified at the time — the verifier was
+paused — so both are covered here.)
+
+**Verification environment.** Brand-new clone + venv at `725d605`:
+install OK; `import avar2_studio.build_worker` loads **no Flask** (T3.1);
+`pytest` **526 passed, 0 skipped** (fontc-gated and engine tests on);
+`ruff` clean; frontend `npm ci` → lint exit 0 (0 errors, 2 warnings),
+typecheck 0, `test:unit` all passed (incl. the api-parity, export-poll and
+build-wait specs), vite build OK, `App.jsx` 207 lines; a wheel built from
+the clone carries `routes/`, `control_axes/`, `state.py`, `pipeline.py`
+and the Fontra assets. Rust (warm target, no `/tmp` fixtures): **18
+binaries, 22 passed, 0 failed, 1 ignored** (incl. `spac_csv_parity`).
+Live smoke on a fresh Crispy copy (port 5071, hand-off code): boot
+build 1 job, 0 warnings; mappings exact (rest 663.1/202.5/121.8, wght 399
+→ 662.9, 900 → 725.9/316.3/235.2, 100 → 619.2/48.7/41.0); all 12 axes;
+`?format=woff2` serves `wOF2`; 30 instances / 9 YMOD / no lowercase keys;
+**T2.5 live:** `POST /api/export-font` → `GET /api/build/<id>` reports
+`state: finished, artifact_ready: true` → download `font/woff2` 917,064 B
+`wOF2`.
+
+| ID | Verdict | Evidence / notes |
+|---|---|---|
+| T2.3 | **VERIFIED** | `state.py` holds 38 names; no `server.X =` writes left in src/tests; suite green in the fresh clone. |
+| T2.5 | **VERIFIED** | Per-job endpoint live (above); `useBuildWait`/export-poll specs in `test:unit`. |
+| T2.6 | **VERIFIED (gates + reading)** | `hooks/useBuildWait.js`, `useBuildStatus.jsx`; the four 60 s loops are gone from App.jsx (207 lines). |
+| T2.7 | **VERIFIED** | `api-parity.spec.mjs` wired into `test:unit` and passing. |
+| T2.8 | **VERIFIED (gates + reading)** | 7 components import the vendored Dialog / carry `role="dialog"`; Escape/focus behaviour taken from the gates and the executor's DOM smoke, not re-driven here. |
+| T3.1 | **VERIFIED** | Flask absent from the worker's import graph; real-worker e2e in the suite. |
+| T3.2 | **VERIFIED** | 13 blueprints; `tests/test_url_map_snapshot.py` green; server.py 1,012 lines. |
+| T3.3 | **VERIFIED** | `control_axes/` package (schema, naming, outlines, shadow_glyphs, shadow_designspace); suite green; wheel ships it. |
+| T3.4 | SKIPPED (user decision, per the executor's log) | — |
+| T3.5 | **VERIFIED** | `csv_io.read_csv_spac_overrides` is the one reader; `spac.rs`'s CSV parser gone; parity tests on both sides pass (python suite + cargo). |
+| T3.6 | **VERIFIED** | App.jsx 207 lines; `useStudioData` gates "Loading…" on first load only (`firstLoadDoneRef`) — the audit's unmount-on-refresh bug is closed by construction. |
+| T3.7 | BLOCKED (user) | History rewrite / LFS strategy for the wasm blob needs the user's call. |
+| T3.8 | **FAILED** | The implementation keeps the inserted-origin-master staging (`_build_export_source`) and only turns the step-3.5 rebase off — the method ADR 0007 rejects. Measured on the Crispy copy, the set-default export (wght 400/wdth 100/opsz 144) vs the lossless preview font, instantiated at the same absolute parametric locations: ORIGIN ≤ 3 u and the 47/1/1 master corner ≤ 2 u, **but the wght 900 stop deviates up to 543 u (e 4, n 476, o 543, a 468, H 516, g 451) and the wght 100 stop up to 761 u** — the interior drift that made the user reject this export on 2026-10-11. Its mappings are also off by the rounding (rest 663.0/202.0/122.0; wght 399 → 662.8/201.5/121.7). Size 1.4 MB vs 10.5 MB is the symptom, not a win. **Fix (the ADR's direction):** drop `_build_export_source` from the export path; build from the staged ORIGINAL source exactly like the preview with relocation ON and the relocation target P = the requested instance's authored parametric location (the authored-row lookup already finds it; no `round()`), regenerate the avar2 table anchored at P, then the transform chain and hidden axes; WOFF2 (ADR 0002) absorbs the size. **Acceptance:** the drift probe (`scratchpad/drift_probe.py`, or an equivalent test on crispy-mini) reads ≤ 3 u at every authored stop and both master corners; the mapping probe is exact; a test asserts outline parity between a preview build and a set-default export at an interior authored location. The existing `test_export_relocation.py` stays valid for the parameter itself. |
+| T3.9 | BLOCKED (user) | Platform wheels vs Rust-only SPAC needs the user's call. |
+| T3.10 | **VERIFIED (test + reading)** | `watch.SourceWatcher.start/stop/reschedule`; `routes/load.py` reschedules after `_apply_source_path`; `tests/test_watch_lifecycle.py` green. Not driven live: `/api/load-source` only takes an upload or `{example: id}`, and staging an example writes to the user's `~/.avar2-studio/workspace`, which the verifier does not touch. |
+
+### Also required before Tier 3 closes
+- **Docs follow-through for the Tier-3 moves:** `docs/ARCHITECTURE.md` /
+  `DEVELOPMENT.md` do not mention `state.py`, `watch.py` or `routes/`
+  (`pipeline.py` ×2, `control_axes/` ×1 only). Update the module map and
+  the process description.
+- **Stale doc paths cited from code** (the "grep-verified" claim in the
+  log does not hold): `docs/WORKER_BUILD_PLAN.md` in `server.py` and
+  `state.py`; `docs/control-axes.md` (never existed) in
+  `frontend/src/components/ControlAxes.jsx`; `docs/migration-github-pages.md`
+  in `frontend/src/fontc-compile.js` and `static-api.js` (now under
+  `docs/archive/`). The two `examples/` README anchors to
+  `#axis-surface…` still point at a heading that does not exist.
+
+### Round-4/5 decision
+Tier 2 is **closed**. Tier 3 closes once T3.8 is re-done per ADR 0007
+(with the fidelity test), the docs module map is updated and the stale
+paths fixed. T3.7 and T3.9 wait on the user; T3.4 stands skipped. The
+three chat-only decisions remain the user's to record or drop.
+
 ---
 
 ## Standing instructions (apply to every round) — revised 2026-10-16
