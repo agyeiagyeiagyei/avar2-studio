@@ -272,6 +272,25 @@ Tier 2 is **closed**. Tier 3 closes once T3.8 is re-done per ADR 0007
 paths fixed. T3.7 and T3.9 wait on the user; T3.4 stands skipped. The
 three chat-only decisions remain the user's to record or drop.
 
+### User decisions recorded 2026-10-17 (unblock T3.7 and T3.9)
+- **T3.7 — history is important: NO history rewrite.** Stop committing
+  the wasm blob from here on (CI builds it in `pages.yml`/`release.yml`
+  via `wasm-pack`; keep the JS glue; the binary leaves HEAD via `git rm`
+  + `.gitignore`), but the 25 historical revisions stay — no
+  `filter-repo`, no force-push to `github-pages`. Record as
+  `docs/decisions/0014-wasm-blob-built-in-ci-history-kept.md`.
+- **T3.9 — users must be able to use the SPAC axis OR Kinetikern.** Both
+  accelerators must reach end users: platform wheels (macOS arm64/x86_64,
+  Linux) carrying `spac-inject` and `libkinetikern2` (maturin or
+  cibuildwheel), `doctor` reporting both, and the fontTools SPAC fallback
+  kept for pure-Python installs (Kinetikern has no fallback, so the
+  wheel must carry its engine). The `AVAR2_SPAC_INJECT` /
+  `AVAR2_KK2_DYLIB` overrides stay. Record as
+  `docs/decisions/0015-native-accelerators-ship-in-platform-wheels.md`.
+  Acceptance: a fresh install from the built wheel on this Mac → `doctor`
+  shows both accelerators found with no env overrides; `pytest
+  tests/test_kinetikern.py` runs (not skipped) against the wheel's dylib.
+
 ---
 
 ## Standing instructions (apply to every round) — revised 2026-10-16
