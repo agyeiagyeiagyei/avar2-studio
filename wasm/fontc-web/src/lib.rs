@@ -129,15 +129,18 @@ pub fn compile_with_overlays(source: String, request_json: &str) -> Result<Vec<u
 /// width-aware variant).
 ///
 /// `transforms_json` is the bundle's `transforms.transforms` array;
-/// `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
-/// present, pins per-instance SPAC coordinates).
+/// per-instance SPAC coordinates ride it as `params.instance_spac`
+/// (parsed from the avar2 mappings CSV by the caller — csv_io on the
+/// desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+/// for caller/ABI compatibility and IGNORED: Rust no longer parses the
+/// CSV (one parse rule, Python-side).
 #[wasm_bindgen]
 pub fn apply_transforms(
     font_bytes: Vec<u8>,
     transforms_json: &str,
-    avar2_csv: &str,
+    _avar2_csv: &str,
 ) -> Result<Vec<u8>, JsError> {
-    spac::apply_transforms(font_bytes, transforms_json, avar2_csv)
+    spac::apply_transforms(font_bytes, transforms_json)
 }
 
 /// Add control (secondary parametric) axes from a config bundle to a

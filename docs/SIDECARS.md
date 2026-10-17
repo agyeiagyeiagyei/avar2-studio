@@ -57,8 +57,10 @@ Ultra Wide Thin 144,2895.4,12.0,10.0,144.0,,200.0
   per-style spacing coordinate. The column does not exist at bootstrap;
   `update_instance` **mints it on first use** and backfills the other rows
   blank (= 0). The config generator excludes it from `out:` everywhere;
-  the spacing transforms read it themselves (`_instance_spac_overrides`)
-  when pinning named instances. Control-axis values never become
+  the spacing transforms read it themselves (`_instance_spac_overrides`
+  → `csv_io.read_csv_spac_overrides`) when pinning named instances — the
+  native `spac-inject` gets the parsed values in the transforms JSON
+  (`params.instance_spac`), never the CSV. Control-axis values never become
   columns (decision 0008); `_non_mapping_axis_tags` is the exclusion set.
 - **Bootstrap** (`_initialize_preview_csv_from_glyphs`): when the file is
   missing, one column per source axis (uppercased, master-backed or not)

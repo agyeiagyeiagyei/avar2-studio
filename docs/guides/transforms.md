@@ -61,9 +61,12 @@ transform when it pins instance coordinates; blank = 0).
   splices tuples with write-fonts' compact encoding; the fontTools
   fallback re-encodes the whole gvar table and can overflow its 64 KB
   per-glyph header ceiling on twin-heavy fonts, which is why the log says
-  which path ran. The native parser splits the CSV on commas and expects
-  a literal `SPAC` header, so an instance name containing a comma loses
-  its per-style SPAC on that path.
+  which path ran. Per-style SPAC values never cross as CSV: Python
+  parses the CSV via csv_io (the one mappings reader) and hands the
+  values to the injector in the transforms JSON
+  (`params.instance_spac`), so style names containing commas survive on
+  the native path too — parity-pinned by `tests/spac_csv_parity.rs` +
+  the Python `tests/test_spac_csv_parity.py`.
 
 ### gftools fixers
 

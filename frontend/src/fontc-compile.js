@@ -132,7 +132,10 @@ export function applyGrade(fontBytes, gradeJson, coordsJson) {
 
 /** TTF bytes + transforms JSON array + avar2 CSV → TTF bytes with the
  * enabled SPAC transform applied (SPAC fvar axis + gvar phantom tuples
- * + rebuilt HVAR — the axis stays a live slider). */
+ * + rebuilt HVAR — the axis stays a live slider). Per-instance SPAC
+ * coordinates ride the JSON (`params.instance_spac`, filled by
+ * withSpacOverrides in static-api.js); the CSV argument is retained for
+ * pre-JSON wasm builds and ignored by the current one. */
 export function applyTransforms(fontBytes, transformsJson, avar2Csv) {
   return send({ kind: 'transforms', fontBytes, json: transformsJson, csv: avar2Csv });
 }

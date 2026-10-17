@@ -23,9 +23,16 @@ const TRANSFORMS_DISABLED: &str = r#"[{"type":"spac_widthaware","enabled":false,
 const TRANSFORMS_BOTH: &str = r#"[{"type":"spac","enabled":true,"params":{"min":-20,"max":40}},{"type":"spac_widthaware","enabled":true,"params":{"min":-20,"max":40}}]"#;
 
 /// avar2 CSV with a SPAC column: per-instance SPAC overrides for two of
-/// CrispyMini's instances (values inside the -20..40 range).
+/// CrispyMini's instances (values inside the -20..40 range). Feeds the
+/// PYTHON oracle (its source sidecar); the wasm call gets the same
+/// values via the transforms JSON (TRANSFORMS_WA_OVR) — the CSV text is
+/// never read Rust-side.
 const OVERRIDE_CSV: &str =
     "Instance Name,XTRA,SPAC\nNarrow Thin 144,94.0,10.0\nUltra Wide Thin 144,2895.4,-15.0\n";
+/// Width-aware, with OVERRIDE_CSV's SPAC column carried as
+/// `params.instance_spac` (parsed Python-side via csv_io — the contract
+/// since the CSV parse moved out of the injector).
+const TRANSFORMS_WA_OVR: &str = r#"[{"type":"spac_widthaware","enabled":true,"params":{"min":-20,"max":40,"bias":1.0,"scale":1.25,"instance_spac":{"Narrow Thin 144":10.0,"Ultra Wide Thin 144":-15.0}}}]"#;
 
 #[test]
 fn spac_matches_studio_oracle() {
@@ -60,7 +67,7 @@ fn spac_matches_studio_oracle() {
     // The compiled font has no fvar instances (CrispyMini.glyphs
     // declares none), so the per-instance override path needs a font
     // that HAS instances: synthesize one, then apply with the plain
-    // CSV (pins 0.0) and the SPAC-column CSV (pins the overrides).
+    // CSV (pins 0.0) and the SPAC-column overrides via the JSON.
     let tmp = common::tmp_dir();
     let instanced_path = tmp.join("spac-instanced-input.ttf");
     let maker = manifest.join("spike/make_instanced_font.py");
@@ -74,7 +81,7 @@ fn spac_matches_studio_oracle() {
     let instanced = std::fs::read(&instanced_path).expect("read instanced font");
     let wa_inst_plain = fontc_web::apply_transforms(instanced.clone(), TRANSFORMS_WA, &csv)
         .expect("width-aware SPAC on instanced font");
-    let wa_inst_ovr = fontc_web::apply_transforms(instanced.clone(), TRANSFORMS_WA, OVERRIDE_CSV)
+    let wa_inst_ovr = fontc_web::apply_transforms(instanced.clone(), TRANSFORMS_WA_OVR, "")
         .expect("width-aware SPAC with instance overrides");
 
     let wa_path = tmp.join("spac-wasm-widthaware.ttf");
@@ -87,7 +94,8 @@ fn spac_matches_studio_oracle() {
     std::fs::write(&inst_plain_path, &wa_inst_plain).expect("write instanced plain output");
     std::fs::write(&inst_ovr_path, &wa_inst_ovr).expect("write instanced override output");
     // The oracle reads the override CSV as a source sidecar
-    // (`<stem>-avar.csv`); the wasm call takes it directly.
+    // (`<stem>-avar.csv`), parsing it Python-side (csv_io) exactly like
+    // the studio does; the wasm call got the same values via the JSON.
     std::fs::write(&override_csv_path, OVERRIDE_CSV).expect("write override csv");
 
     let comparator = manifest.join("spike/compare_spac.py");

@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml  # PyYAML
 
+from .. import csv_io as _csv_io
 from .. import source_font as _source_font
 from ..studio_log import get_logger
 
@@ -123,52 +124,48 @@ def validate_csv_structure(
     spacing transform pins it onto fvar instances). The studio writes it
     sparsely, so it must never fall into the strict out: set.
     """
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            raise ValueError("CSV has no header row")
+    _, raw_fieldnames = _csv_io.read_csv_mappings(csv_path)
+    fieldnames = [h.strip() for h in raw_fieldnames]
+    name_col = "Instance Name"
 
-        fieldnames = [h.strip() for h in reader.fieldnames]
-        name_col = "Instance Name"
+    if name_col not in fieldnames:
+        raise ValueError(f"CSV must include a '{name_col}' column. Found: {fieldnames}")
 
-        if name_col not in fieldnames:
-            raise ValueError(f"CSV must include a '{name_col}' column. Found: {fieldnames}")
+    in_cols: List[str] = []
+    if parametric_tags:
+        ptags = {str(t).upper() for t in parametric_tags} - {"SPAC"}
+        for c in fieldnames:
+            if c == name_col or c.upper() == "SPAC":
+                continue
+            if c.upper() not in ptags:
+                in_cols.append(c)
+    else:
+        # Legacy fallback: traditional axes (with or without "-e"
+        # suffix). Anything else lands in out: — fine for the
+        # standalone pre-check, authoritative only when no config
+        # exists yet.
+        traditional_axes = {"WGHT", "WDTH", "OPSZ", "CONTRAST"}
+        for c in fieldnames:
+            col_upper = c.upper()
+            if col_upper in traditional_axes or col_upper.endswith("-E"):
+                in_cols.append(c)
 
-        in_cols: List[str] = []
-        if parametric_tags:
-            ptags = {str(t).upper() for t in parametric_tags} - {"SPAC"}
-            for c in fieldnames:
-                if c == name_col or c.upper() == "SPAC":
-                    continue
-                if c.upper() not in ptags:
-                    in_cols.append(c)
-        else:
-            # Legacy fallback: traditional axes (with or without "-e"
-            # suffix). Anything else lands in out: — fine for the
-            # standalone pre-check, authoritative only when no config
-            # exists yet.
-            traditional_axes = {"WGHT", "WDTH", "OPSZ", "CONTRAST"}
-            for c in fieldnames:
-                col_upper = c.upper()
-                if col_upper in traditional_axes or col_upper.endswith("-E"):
-                    in_cols.append(c)
+    # No traditional columns is NOT an error: such a CSV maps instance
+    # names straight onto parametric axes, which only makes sense for a
+    # font whose fvar axes ARE those parametric axes. in_axes stay
+    # empty here; main() fills them from the source's fvarInstances
+    # (see _fill_identity_in_axes).
+    out_cols = [c for c in fieldnames
+                if c not in (name_col,) and c not in in_cols
+                and c.upper() != "SPAC"]
+    if not out_cols:
+        raise ValueError("CSV contains no parametric axis columns for 'out:'")
 
-        # No traditional columns is NOT an error: such a CSV maps instance
-        # names straight onto parametric axes, which only makes sense for a
-        # font whose fvar axes ARE those parametric axes. in_axes stay
-        # empty here; main() fills them from the source's fvarInstances
-        # (see _fill_identity_in_axes).
-        out_cols = [c for c in fieldnames
-                    if c not in (name_col,) and c not in in_cols
-                    and c.upper() != "SPAC"]
-        if not out_cols:
-            raise ValueError("CSV contains no parametric axis columns for 'out:'")
+    # Don't require any specific traditional axis tags — a font with just
+    # opsz, or just wght, or a custom traditional axis like ROND is valid.
+    # The caller decides whether the in_cols are sufficient for its needs.
 
-        # Don't require any specific traditional axis tags — a font with just
-        # opsz, or just wght, or a custom traditional axis like ROND is valid.
-        # The caller decides whether the in_cols are sufficient for its needs.
-
-        return name_col, in_cols, out_cols
+    return name_col, in_cols, out_cols
 
 
 def read_csv_mappings(
@@ -181,56 +178,51 @@ def read_csv_mappings(
 
     mappings: List[RowMapping] = []
 
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        fieldnames = [h.strip() for h in reader.fieldnames]
+    rows, fieldnames = _csv_io.read_csv_mappings(csv_path)
+    for line_no, row in enumerate(rows, start=2):
+        # Skip fully empty rows
+        if all(_is_blank(row.get(c, "")) for c in fieldnames):
+            continue
 
-        for line_no, row in enumerate(reader, start=2):
-            row = {k.strip(): (v if v is not None else "") for k, v in row.items()}
+        inst_name = str(row.get(name_col, "")).strip()
+        if _is_blank(inst_name):
+            raise ValueError(f"Line {line_no}: '{name_col}' is blank")
 
-            # Skip fully empty rows
-            if all(_is_blank(row.get(c, "")) for c in fieldnames):
+        # Build in_axes
+        in_axes: Dict[str, Decimal] = {}
+        for c in in_cols:
+            raw = row.get(c, "")
+            if _is_blank(raw):
                 continue
+            in_axes[_normalize_in_axis_name(c)] = _parse_decimal(raw, context=f"line {line_no} / {c}")
 
-            inst_name = str(row.get(name_col, "")).strip()
-            if _is_blank(inst_name):
-                raise ValueError(f"Line {line_no}: '{name_col}' is blank")
+        # Build out_axes (STRICT: no blanks)
+        out_axes: Dict[str, Decimal] = {}
+        for c in out_cols:
+            raw = row.get(c, "")
+            if _is_blank(raw):
+                raise ValueError(f"Line {line_no}: parametric axis '{c}' is blank (not allowed)")
+            out_axes[c] = _parse_decimal(raw, context=f"line {line_no} / {c}")
 
-            # Build in_axes
-            in_axes: Dict[str, Decimal] = {}
-            for c in in_cols:
-                raw = row.get(c, "")
-                if _is_blank(raw):
-                    continue
-                in_axes[_normalize_in_axis_name(c)] = _parse_decimal(raw, context=f"line {line_no} / {c}")
+        # No traditional columns → in_axes stays empty here. main()
+        # fills it from the source's instance coordinates via
+        # _fill_identity_in_axes (that's what makes CSV edits remap
+        # the design instead of compiling to a no-op table).
 
-            # Build out_axes (STRICT: no blanks)
-            out_axes: Dict[str, Decimal] = {}
-            for c in out_cols:
-                raw = row.get(c, "")
-                if _is_blank(raw):
-                    raise ValueError(f"Line {line_no}: parametric axis '{c}' is blank (not allowed)")
-                out_axes[c] = _parse_decimal(raw, context=f"line {line_no} / {c}")
+        # No traditional axis is universally required; if a row's in_axes
+        # is empty the mapping is degenerate and gets skipped elsewhere.
 
-            # No traditional columns → in_axes stays empty here. main()
-            # fills it from the source's instance coordinates via
-            # _fill_identity_in_axes (that's what makes CSV edits remap
-            # the design instead of compiling to a no-op table).
+        # Contrast is optional - only include if present in CSV
+        # Don't add cntr to in_axes if not in CSV
 
-            # No traditional axis is universally required; if a row's in_axes
-            # is empty the mapping is degenerate and gets skipped elsewhere.
-
-            # Contrast is optional - only include if present in CSV
-            # Don't add cntr to in_axes if not in CSV
-
-            mappings.append(
-                RowMapping(
-                    instance_name=inst_name,
-                    in_axes=in_axes,
-                    out_axes=out_axes,
-                    out_axis_order=out_order,
-                )
+        mappings.append(
+            RowMapping(
+                instance_name=inst_name,
+                in_axes=in_axes,
+                out_axes=out_axes,
+                out_axis_order=out_order,
             )
+        )
 
     if not mappings:
         raise ValueError("CSV contains no valid mappings")
@@ -308,36 +300,36 @@ def extract_axis_values_from_csv(csv_path: Path) -> Dict[str, List[int]]:
 
     accumulators: Dict[str, set] = {}
 
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            return {}
+    try:
+        rows, fieldnames = _csv_io.read_csv_mappings(csv_path)
+    except ValueError:
+        return {}  # no header row (empty CSV) — as before
 
-        # Build column->key mapping once.
-        column_keys: Dict[str, str] = {}
-        for col in reader.fieldnames:
-            stripped = col.strip()
-            lowered = stripped.rstrip("-eE").lower().rstrip("-")
-            if lowered in CONTRAST_ALIAS:
-                lowered = CONTRAST_ALIAS[lowered]
-            if lowered in REGISTERED:
-                column_keys[stripped] = lowered
+    # Build column->key mapping once.
+    column_keys: Dict[str, str] = {}
+    for col in fieldnames:
+        stripped = col.strip()
+        lowered = stripped.rstrip("-eE").lower().rstrip("-")
+        if lowered in CONTRAST_ALIAS:
+            lowered = CONTRAST_ALIAS[lowered]
+        if lowered in REGISTERED:
+            column_keys[stripped] = lowered
 
-        if not column_keys:
-            return {}
+    if not column_keys:
+        return {}
 
-        for _col, key in column_keys.items():
-            accumulators[key] = set()
+    for _col, key in column_keys.items():
+        accumulators[key] = set()
 
-        for row in reader:
-            for col, key in column_keys.items():
-                raw = row.get(col, "")
-                if not raw or not str(raw).strip():
-                    continue
-                try:
-                    accumulators[key].add(int(float(raw)))
-                except (ValueError, TypeError):
-                    continue
+    for row in rows:
+        for col, key in column_keys.items():
+            raw = row.get(col, "")
+            if not raw or not str(raw).strip():
+                continue
+            try:
+                accumulators[key].add(int(float(raw)))
+            except (ValueError, TypeError):
+                continue
 
     return {k: sorted(v) for k, v in accumulators.items() if v}
 
@@ -1197,12 +1189,7 @@ def expand_csv_with_opsz(
         # Use temporary file if no output path specified
         output_path = Path(tempfile.mktemp(suffix='.csv', prefix='avar2-mappings_with_opsz_'))
 
-    rows = []
-    with csv_path.open('r', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        fieldnames = list(reader.fieldnames)
-        for row in reader:
-            rows.append(row)
+    rows, fieldnames = _csv_io.read_csv_mappings(csv_path)
 
     # Generate new rows
     new_rows = []
@@ -1297,12 +1284,14 @@ def expand_csv_with_opsz(
 def check_opsz_variation(csv_path: Path) -> bool:
     """Check if CSV has variation in OPSZ column (more than one unique value)."""
     opsz_values = set()
-    with csv_path.open('r', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            opsz = row.get('OPSZ', '').strip()
-            if opsz:
-                opsz_values.add(opsz)
+    try:
+        rows, _fieldnames = _csv_io.read_csv_mappings(csv_path)
+    except ValueError:
+        return False  # no header row (empty CSV): no variation, as before
+    for row in rows:
+        opsz = row.get('OPSZ', '').strip()
+        if opsz:
+            opsz_values.add(opsz)
     return len(opsz_values) > 1
 
 

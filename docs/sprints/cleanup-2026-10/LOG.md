@@ -1168,3 +1168,24 @@ bar; findings rounds still get written so a second reviewer can re-check.
   the Kinetikern fence, slider edit round-trips the context chain, no
   re-gate on poll). Verified by me: lint/tsc/build/test:unit exit 0;
   python suite 516 passed / 3 skipped.
+
+## T3.5 — one CSV/axis model (subagent agent-10)
+- csv_io now owns mappings-CSV reading; config_generator's five sites and
+  kinetikern/inject's site delegate (identical semantics, incl. the
+  bad-cell prefix rule; ragged rows now tolerated everywhere instead of
+  crashing some readers). New `read_csv_spac_overrides()` is the one
+  SPAC-column parse.
+- Rust↔Python: per-instance SPAC values ride the transforms JSON as
+  `params.instance_spac`; `spac.rs`'s hand CSV parser is DELETED (the M7
+  divergences — quoted-comma names lost, column voided on one bad cell —
+  gone by construction). The CLI's 4th arg is retained-but-ignored;
+  the wasm export signature kept (arg ignored) so the checked-in JS glue
+  stays valid; static-api.js fills `params.instance_spac` browser-side.
+- Parity tests on both sides (tests/test_spac_csv_parity.py ×6 +
+  wasm spac_csv_parity.rs, with a non-vacuity guard); the native binary
+  exercised via the cargo oracle (log line verified).
+- Verified by me: 523 passed / 3 skipped, ruff clean (incl. fixing the
+  I001 in MY T3.8 test file that the subagent caught), frontend gates 0,
+  cargo spac_csv_parity + spac_oracle pass. Pathological-input behavior
+  deltas (padded headers, ragged rows, empty-CSV error type) are
+  documented in its report — all toward-consistency.

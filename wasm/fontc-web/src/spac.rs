@@ -19,8 +19,9 @@
 //! default 0) and rebuild HVAR from the gvar phantom deltas (fontTools
 //! `varLib.hvar.add_HVAR`), so the advance adjustment is
 //! variation-driven: SPAC stays a live slider in the built font.
-//! Per-instance SPAC coordinates come from the bundle's avar2 CSV when
-//! it has a SPAC column (`builtin_spac._instance_spac_overrides`).
+//! Per-instance SPAC coordinates ride the transforms JSON
+//! (`params.instance_spac`), parsed from the mappings CSV by the caller
+//! (`builtin_spac._instance_spac_overrides` / csv_io).
 
 use std::collections::HashMap;
 
@@ -448,36 +449,21 @@ fn new_tuple_region(tuple: &NewTuple) -> VariationRegion {
 // Per-instance SPAC overrides (builtin_spac._instance_spac_overrides)
 // --------------------------------------------------------------------------
 
-/// `_instance_spac_overrides`: per-instance SPAC coordinates from the
-/// avar2 CSV's SPAC column; blank cells fall back to the axis default.
-/// Any unparseable value voids the whole column, like the reference's
-/// blanket `except ValueError`.
-fn instance_spac_overrides(csv: &str) -> HashMap<String, f64> {
-    let mut overrides = HashMap::new();
-    let csv = csv.trim_start_matches('\u{feff}');
-    let mut lines = csv.lines().filter(|l| !l.trim().is_empty());
-    let Some(header) = lines.next() else {
-        return overrides;
-    };
-    let headers: Vec<&str> = header.split(',').map(str::trim).collect();
-    let Some(spac_col) = headers.iter().position(|h| *h == "SPAC") else {
-        return overrides;
-    };
-    for line in lines {
-        let cells: Vec<&str> = line.split(',').collect();
-        let name = cells.first().map(|s| s.trim()).unwrap_or("");
-        let cell = cells.get(spac_col).map(|s| s.trim()).unwrap_or("");
-        if name.is_empty() || cell.is_empty() {
-            continue;
-        }
-        match cell.parse::<f64>() {
-            Ok(v) => {
-                overrides.insert(name.to_string(), v);
-            }
-            Err(_) => return HashMap::new(),
-        }
-    }
-    overrides
+/// `_instance_spac_overrides`: per-instance SPAC coordinates, blank cells
+/// falling back to the axis default. The mappings CSV is parsed by the
+/// CALLER (csv_io on the desktop, mappings-csv.js in the browser) and the
+/// values ride the transforms JSON as `params.instance_spac` — Rust never
+/// opens the CSV, so there is one parse rule, not two.
+fn instance_spac_params(params: &HashMap<String, serde_json::Value>) -> HashMap<String, f64> {
+    params
+        .get("instance_spac")
+        .and_then(|v| v.as_object())
+        .map(|o| {
+            o.iter()
+                .filter_map(|(k, v)| json_f64(v).map(|f| (k.clone(), f)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // --------------------------------------------------------------------------
@@ -487,7 +473,6 @@ fn instance_spac_overrides(csv: &str) -> HashMap<String, f64> {
 pub(crate) fn apply_transforms(
     font_bytes: Vec<u8>,
     transforms_json: &str,
-    avar2_csv: &str,
 ) -> Result<Vec<u8>, JsError> {
     let entries: Vec<TransformEntry> = serde_json::from_str(transforms_json)
         .map_err(|e| err(format!("bad transforms JSON: {e}")))?;
@@ -504,7 +489,7 @@ pub(crate) fn apply_transforms(
                 "only one SPAC transform can be enabled at a time ('spac' and 'spac_widthaware' both add the SPAC axis)",
             ));
         }
-        font_bytes = apply_spac(font_bytes, entry, avar2_csv)?;
+        font_bytes = apply_spac(font_bytes, entry)?;
     }
 
     // Table fixers, in semantic order (fvar instances before STAT).
@@ -550,7 +535,6 @@ pub(crate) fn apply_transforms(
 fn apply_spac(
     font_bytes: Vec<u8>,
     entry: &TransformEntry,
-    avar2_csv: &str,
 ) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
     let fvar = font
@@ -585,9 +569,9 @@ fn apply_spac(
         }
     };
 
-    // The reference reads the per-instance SPAC coordinates from the
-    // source's sidecar CSV; here the bundle's avar2 CSV plays that role.
-    let overrides: HashMap<String, Vec<f64>> = instance_spac_overrides(avar2_csv)
+    // Per-instance SPAC coordinates: parsed from the mappings CSV by the
+    // caller and carried in the entry's `params.instance_spac`.
+    let overrides: HashMap<String, Vec<f64>> = instance_spac_params(&entry.params)
         .into_iter()
         .map(|(name, v)| (name, vec![v]))
         .collect();

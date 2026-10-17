@@ -43,6 +43,22 @@ def _locations(font):
     }
 
 
+def test_instance_locations_completes_from_the_mappings_csv(tmp_path):
+    """instance_locations' avar-CSV completion goes through csv_io (the
+    one mappings reader): quoted comma names parse whole, blank cells
+    are skipped. Runs without fontc — the source read fails soft."""
+    src = tmp_path / "F.glyphs"
+    src.write_text("")  # unparseable source → CSV rows only
+    (tmp_path / "F-avar.csv").write_text(
+        'Instance Name,XTRA,XOPQ,YOPQ\n"Narrow, Thin",94.0,6.0,\nTall,50.0,2.0,3.0\n',
+        encoding="utf-8",
+    )
+    assert inject.instance_locations(src) == {
+        "Narrow, Thin": {"XTRA": 94.0, "XOPQ": 6.0},
+        "Tall": {"XTRA": 50.0, "XOPQ": 2.0, "YOPQ": 3.0},
+    }
+
+
 @needs_fontc
 def test_corrections_are_exact_at_each_instance_and_nowhere_else(tmp_path):
     src = tmp_path / "CrispyMini.glyphs"

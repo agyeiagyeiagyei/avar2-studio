@@ -8,9 +8,12 @@
 //!
 //! transforms.json is the studio's transform list shape, e.g.
 //!   [{"type": "spac_widthaware", "enabled": true,
-//!     "params": {"min": -100, "max": 100, "bias": 1.0, "scale": 1.25}}]
-//! The optional CSV supplies per-instance SPAC coordinates (the same
-//! `_instance_spac_overrides` contract as the Python transform).
+//!     "params": {"min": -100, "max": 100, "bias": 1.0, "scale": 1.25,
+//!                "instance_spac": {"Narrow Thin 144": 10.0}}}]
+//! Per-instance SPAC coordinates ride the JSON (`params.instance_spac`),
+//! parsed from the avar2 CSV by the caller (csv_io). The optional 4th
+//! argument — the avar.csv path — is RETAINED for positional-argument
+//! compatibility with older callers but IGNORED (never read).
 
 use std::{env, fs, process::exit};
 
@@ -18,6 +21,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 4 {
         eprintln!("usage: spac-inject <in.ttf> <out.ttf> <transforms.json> [avar.csv]");
+        eprintln!("note: the optional avar.csv argument is retained for compatibility and ignored;");
+        eprintln!("      per-instance SPAC coordinates ride the JSON (params.instance_spac).");
         exit(2);
     }
     let font = fs::read(&args[1]).unwrap_or_else(|e| {
@@ -28,15 +33,7 @@ fn main() {
         eprintln!("spac-inject: read {}: {e}", args[3]);
         exit(1);
     });
-    let csv = if args.len() > 4 {
-        fs::read_to_string(&args[4]).unwrap_or_else(|e| {
-            eprintln!("spac-inject: read {}: {e}", args[4]);
-            exit(1);
-        })
-    } else {
-        String::new()
-    };
-    match fontc_web::apply_transforms(font, &transforms, &csv) {
+    match fontc_web::apply_transforms(font, &transforms, "") {
         Ok(out) => {
             if let Err(e) = fs::write(&args[2], out) {
                 eprintln!("spac-inject: write {}: {e}", args[2]);

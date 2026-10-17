@@ -16,7 +16,6 @@ docs/decisions/0004-kinetikern-font-stage-phantom-tuples.md.
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -27,6 +26,7 @@ from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 from fontTools.varLib.models import VariationModel, normalizeValue, piecewiseLinearMap
 
+from .. import csv_io as _csv_io
 from .. import grade as _grade
 from .. import source_font as _source_font
 from . import sidecar
@@ -171,19 +171,22 @@ def instance_locations(source_path: Path) -> Dict[str, Dict[str, float]]:
         pass
     csv_path = source_path.parent / f"{source_path.stem}-avar.csv"
     if csv_path.exists():
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                name = (row.get("Instance Name") or "").strip()
-                if not name:
+        try:
+            csv_rows, _fieldnames = _csv_io.read_csv_mappings(csv_path)
+        except ValueError:
+            csv_rows = []  # headerless (empty) CSV: no rows, as before
+        for row in csv_rows:
+            name = row.get("Instance Name", "").strip()
+            if not name:
+                continue
+            c = coords.setdefault(name, {})
+            for tag in PARAM_TAGS:
+                if tag in c or not row.get(tag, ""):
                     continue
-                c = coords.setdefault(name, {})
-                for tag in PARAM_TAGS:
-                    if tag in c or row.get(tag) in (None, ""):
-                        continue
-                    try:
-                        c[tag] = float(row[tag])
-                    except (TypeError, ValueError):
-                        pass
+                try:
+                    c[tag] = float(row[tag])
+                except (TypeError, ValueError):
+                    pass
     return coords
 
 

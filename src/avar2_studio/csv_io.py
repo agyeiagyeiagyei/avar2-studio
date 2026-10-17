@@ -15,6 +15,8 @@ Public surface:
   used by the sync flow.
 - :func:`read_csv_mappings_with_axes` — same but also returns the
   in/out axis column split, derived from the source file's axes.
+- :func:`read_csv_spac_overrides` — per-instance SPAC coordinates from
+  the CSV's SPAC column (the transforms' pinning contract).
 - :func:`update_csv_from_glyphs` — sync source instances into the CSV.
 - :func:`match_instances` — pair source instances with CSV rows for the
   avar2 mapping endpoints.
@@ -118,18 +120,55 @@ def read_csv_mappings(csv_path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
     """Minimal CSV reader for the sync flow.
 
     Returns ``(rows, fieldnames)``. Rows are dicts with whitespace-stripped
-    keys and values; fieldnames preserve original case.
+    keys and values; fieldnames preserve original case (stripped, like the
+    row keys). Cells beyond the header's width have no column and are
+    dropped (DictReader keys them under ``None``).
     """
     rows: List[Dict[str, str]] = []
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
-        fieldnames = list(reader.fieldnames) if reader.fieldnames else []
+        fieldnames = [h.strip() for h in reader.fieldnames] if reader.fieldnames else []
         if not fieldnames:
             raise ValueError("CSV has no header row")
         for row in reader:
-            cleaned = {k.strip(): (v.strip() if v else "") for k, v in row.items()}
+            cleaned = {
+                k.strip(): (v.strip() if v else "")
+                for k, v in row.items()
+                if k is not None
+            }
             rows.append(cleaned)
     return rows, fieldnames
+
+
+def read_csv_spac_overrides(csv_path: Path) -> Dict[str, float]:
+    """Per-instance SPAC coordinates from the mappings CSV's SPAC column.
+
+    This is the one parse behind the transforms' instance pinning:
+    ``builtin_spac._instance_spac_overrides`` reads it for the fontTools
+    path, and the width-aware transform hands it to the native injector
+    in the transforms JSON (``params.instance_spac``) — the Rust side
+    never parses the CSV.
+
+    Blank names/cells are skipped; a missing or unreadable file yields
+    ``{}``. A non-numeric cell ends the parse and keeps the rows read so
+    far — the reference reader's blanket ``except ValueError`` semantics,
+    kept verbatim: the CSV is the data contract, this is its long-standing
+    reading."""
+    overrides: Dict[str, float] = {}
+    try:
+        rows, _fieldnames = read_csv_mappings(csv_path)
+    except (OSError, ValueError):
+        return overrides
+    for row in rows:
+        name = row.get("Instance Name", "").strip()
+        cell = row.get("SPAC", "").strip()
+        if not name or not cell:
+            continue
+        try:
+            overrides[name] = float(cell)
+        except ValueError:
+            break
+    return overrides
 
 
 def read_csv_mappings_with_axes(

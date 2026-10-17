@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 import yaml
 from fontTools.ttLib import TTFont
+from test_avar2_default_relocation import MAPPINGS, METADATA
 
 from avar2_studio import pipeline
-from test_avar2_default_relocation import MAPPINGS, METADATA
 
 REPO = Path(__file__).resolve().parents[1]
 CRISPY_MINI = REPO / "examples/crispy-mini/sources/CrispyMini.glyphs"

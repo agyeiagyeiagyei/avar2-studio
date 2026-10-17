@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont
 
+from .. import csv_io as _csv_io
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
 
 
@@ -44,20 +45,11 @@ def _instance_spac_overrides(source_path: Path) -> dict:
     studio. It lives OUTSIDE avar2 (the config generator excludes it from
     out:), so nothing else carries it into the built font — the transform
     applies it directly when pinning instance coordinates. Missing/blank
-    cells fall back to the axis default (0)."""
-    import csv as _csv
+    cells fall back to the axis default (0). The parse lives in csv_io
+    (the one CSV reader); the native injector gets the same dict via the
+    transforms JSON."""
     csv_path = source_path.parent / f"{source_path.stem}-avar.csv"
-    overrides = {}
-    try:
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            for row in _csv.DictReader(f):
-                name = (row.get("Instance Name") or "").strip()
-                cell = (row.get("SPAC") or "").strip()
-                if name and cell:
-                    overrides[name] = float(cell)
-    except (OSError, ValueError):
-        pass
-    return overrides
+    return _csv_io.read_csv_spac_overrides(csv_path)
 
 
 class SpacTransform(Transform):

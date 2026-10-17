@@ -652,6 +652,29 @@ const resolveGradeCoords = (dataset, avar2Csv) => {
   return coords;
 };
 
+// Per-instance SPAC coordinates ride the transforms JSON
+// (params.instance_spac) — the injector never parses the CSV itself
+// (one parse rule; the desktop parses Python-side via csv_io). The CSV
+// argument still goes over the wire for the pre-JSON wasm builds.
+const withSpacOverrides = (transforms, avar2Csv) => {
+  const overrides = {};
+  if (avar2Csv && avar2Csv.trim()) {
+    for (const row of mappingsCsv.parseMappingsCsv(avar2Csv).rows) {
+      const cell = (row.values.SPAC || '').trim();
+      if (!row.name || !cell) continue;
+      const v = parseFloat(cell);
+      if (Number.isNaN(v)) break;  // csv_io's bad-cell rule: prefix kept
+      overrides[row.name] = v;
+    }
+  }
+  if (!Object.keys(overrides).length) return transforms;
+  return transforms.map(t => (
+    t.enabled && (t.type === 'spac' || t.type === 'spac_widthaware')
+      ? { ...t, params: { ...(t.params || {}), instance_spac: overrides } }
+      : t
+  ));
+};
+
 const validateBundle = (bundle, dataset) => {
   const errors = [];
   const warnings = [];
@@ -865,7 +888,8 @@ const applyBundle = async (bundle, dataset) => {
   // reach the font — the wasm side applies only enabled known ones.
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     if (!rebuildFromSource) {
-      dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
+      dataset.fontBytes = await applyTransforms(
+        dataset.fontBytes, JSON.stringify(withSpacOverrides(transforms, avar2Csv)), avar2Csv);
     }
     report.applied.push('transforms (SPAC)');
   }
@@ -1093,7 +1117,8 @@ const rebuildUploadFont = async (dataset) => {
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     dataset.fontBytes = await applyTransforms(
-      dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
+      dataset.fontBytes, JSON.stringify(withSpacOverrides(transforms, dataset.mappingsCsv || '')),
+      dataset.mappingsCsv || ''
     );
   }
   await applyPins(dataset);

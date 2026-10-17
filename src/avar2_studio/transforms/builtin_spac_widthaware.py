@@ -42,6 +42,7 @@ glyph mean) also matches the gftools amount.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fontTools.pens.boundsPen import BoundsPen
@@ -73,6 +74,19 @@ def _native_injector():
     path = (Path(__file__).resolve().parents[3]
             / "wasm" / "fontc-web" / "target" / "release" / "spac-inject")
     return path if path.exists() else None
+
+
+def _native_payload(lo: int, hi: int, bias: float, scale: float,
+                    instance_spac: dict) -> str:
+    """The spac-inject transforms JSON. Per-instance SPAC coordinates ride
+    the payload (``params.instance_spac``): the mappings CSV is parsed
+    Python-side (csv_io.read_csv_spac_overrides, the one reader) — the
+    binary never opens it."""
+    params = {"min": lo, "max": hi, "bias": bias, "scale": scale}
+    if instance_spac:
+        params["instance_spac"] = instance_spac
+    return json.dumps([{"type": "spac_widthaware", "enabled": True,
+                        "params": params}])
 
 
 def _ink_width(glyph_set, name) -> float:
@@ -145,22 +159,17 @@ class WidthAwareSpacTransform(Transform):
 
         native = _native_injector()
         if native is not None:
-            import json as _json
             import os
             import subprocess
             import tempfile
             out = vf_path.parent / _spac_output_name(ctx.family, vf_path)
-            payload = _json.dumps([{"type": "spac_widthaware", "enabled": True,
-                                    "params": {"min": lo, "max": hi,
-                                               "bias": bias, "scale": scale}}])
+            payload = _native_payload(lo, hi, bias, scale,
+                                      _instance_spac_overrides(ctx.source_path))
             tf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
             try:
                 tf.write(payload)
                 tf.close()
-                csv_path = ctx.source_path.parent / f"{ctx.source_path.stem}-avar.csv"
                 cmd = [str(native), str(vf_path), str(out), tf.name]
-                if csv_path.exists():
-                    cmd.append(str(csv_path))
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             finally:
                 os.unlink(tf.name)
