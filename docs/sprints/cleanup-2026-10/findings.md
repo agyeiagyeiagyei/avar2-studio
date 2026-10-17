@@ -290,6 +290,21 @@ three chat-only decisions remain the user's to record or drop.
   Acceptance: a fresh install from the built wheel on this Mac → `doctor`
   shows both accelerators found with no env overrides; `pytest
   tests/test_kinetikern.py` runs (not skipped) against the wheel's dylib.
+- **T3.4 is back in scope (user instruction 2026-10-17).** One shim
+  implementation shared with fontra-embed: fontra-embed's `focused-ui.js`
+  / `metrics-hud.js` are the port of `fontra/shim.js`; the desktop proxy
+  injects a built copy of that implementation parameterised by the same
+  session config (`/api/fontra-shim-config`), with `fontra/shim.js`
+  retained only as the fallback when the fontra-embed build is absent.
+  The two implementations' known divergences (editing auto-enabled on
+  studio rows, the "→ computed" rule, the source-name sort) are
+  reconciled, not duplicated. The fontra-embed change goes on a branch in
+  `~/Documents/fontra-embed` (its HEAD already carries the T1.16 fix,
+  `f063a02`); no push there without the user. Acceptance: the
+  `_rewrite_html_paths` golden test updated once and passing; the
+  fontra-embed harness (`harness/verify.mjs`) green on the shared file;
+  the desktop open-editor smoke on a Crispy copy shows the layer labels,
+  sort and HUD unchanged.
 
 ---
 
