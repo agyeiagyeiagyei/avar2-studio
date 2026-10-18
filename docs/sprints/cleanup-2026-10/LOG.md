@@ -1189,3 +1189,33 @@ bar; findings rounds still get written so a second reviewer can re-check.
   cargo spac_csv_parity + spac_oracle pass. Pathological-input behavior
   deltas (padded headers, ragged rows, empty-CSV error type) are
   documented in its report — all toward-consistency.
+
+## T3.8 — RE-DONE per ADR 0007 (verifier FAILED round 1 of it)
+- Round-1 of T3.8 was wrong per the verifier's measurement: it kept the
+  inserted-master staging (`_build_export_source`) and only disabled the
+  rebase — the rejected method, with measured interior drift up to
+  543–761 u on Crispy (wght 900/100 stops).
+- The re-do per the verifier's direction: `_build_export_source` is GONE
+  (186 lines of the rejected method removed). The set-default export now
+  builds the staged ORIGINAL source exactly like the preview, with
+  step-3.5 relocation ON and its target = P: `_build_in_process` gains
+  `relocate_target` (parametric tags → exact location; wins over the
+  default row's out:) alongside `relocate_default` (env stays the preview
+  default). The authored-row lookup returns the row's out: verbatim —
+  the round() is gone.
+- Found while building it: the export's blank-cell fill read defaults
+  from the metadata file while the declared defaults were the requested
+  override — blank rows aliased onto the requested row ("Locations must
+  be unique"). The metadata copy that travels with the export now carries
+  the REQUESTED defaults.
+- Fidelity [verified by me]: preview vs plain-compile ground truth at the
+  authored stop "Narrow Heavy 12" = **0.0 u**; the export vs truth ≤
+  **0.49 u** (sub-unit F2Dot14 rounding; the bar is 3 u). The export's
+  fvar defaults are exactly the authored out: (222.8/279.6/250.2); the
+  mapping probe evaluates exactly. tests/test_export_relocation.py has
+  the three tests; the earlier false "701 u" reading was my test pinning
+  user AND parametric axes at once (double-applied the avar2 mapping) —
+  the correct methodology (avar-stripped copies pinned on the parametric
+  axes) is what's in the test. Pre-fix drift is the verifier's
+  measurement (543–761 u on Crispy).
+- Gates [verified]: 524 passed / 3 skipped; ruff clean; frontend 0.

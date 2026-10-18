@@ -556,7 +556,8 @@ def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
 
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                       default_overrides: Optional[Dict[str, float]] = None,
-                      relocate_default: Optional[bool] = None) -> Path:
+                      relocate_default: Optional[bool] = None,
+                      relocate_target: Optional[Dict[str, float]] = None) -> Path:
     """The gftools-builder pipeline, without gftools-builder.
 
     Profiling a rebuild put fontc at 0.06s and ``gftools builder`` at 9.5s:
@@ -692,20 +693,23 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # row dropped every tent is zero-anchored at the input default and the
     # neighbourhood collapses toward the compiled corner (the valley).
     # AVAR2_RELOCATE_BUILD_DEFAULT=0 restores the small-but-valleyed font.
-    # An explicit ``relocate_default`` parameter wins over the env — the
-    # export build passes False: it stages its own origin master
-    # (_build_export_source), and running this instancer rebase AS WELL
-    # densified the shipped font ~7× (audit §2 H3; decisions/0001+0007).
+    # An explicit ``relocate_default`` parameter wins over the env; an
+    # explicit ``relocate_target`` (parametric tags → exact location) wins
+    # over the default row's out: — the set-default export passes P (the
+    # requested style's authored parametric location) so the shipped font
+    # rests there losslessly (decisions/0001+0007).
     if relocate_default is None:
         relocate_default = os.environ.get(
             "AVAR2_RELOCATE_BUILD_DEFAULT", "1").lower() in ("1", "true", "yes")
     relocate_at_build = relocate_default
-    if relocate_at_build and avar2_cfg_early and default_rows:
+    target = relocate_target if relocate_target is not None else (
+        (default_rows[0].get("out") or {}) if (avar2_cfg_early and default_rows) else {})
+    if relocate_at_build and target:
         from fontTools.varLib import instancer as _instancer
         font = _TTFont(str(out))
         fvar_by_tag = {a.axisTag: a for a in font["fvar"].axes}
         limits = {}
-        for tag, v in (default_rows[0].get("out") or {}).items():
+        for tag, v in target.items():
             ax = fvar_by_tag.get(tag)
             try:
                 v = float(v)
@@ -1047,192 +1051,6 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
 
 
-def _build_export_source(parametric_location: Dict[str, float], export_dir: Path,
-                         source_path: Optional[Path] = None) -> Path:
-    """Materialize the export source: the loaded font as a designspace
-    with ONE ADDED MASTER — a fully interpolated instance (outlines,
-    metrics, kerning) at the mapped parametric location — set as the
-    default, so fontc compiles the export resting on that master
-    natively. This is the designer's formulation: corner deltas
-    anchored to the new default master, natural-size gvar. (The
-    earlier binary rebase via fontTools instancer preserved behavior
-    by splitting every variation region around the new origin — ~6x
-    the font size.) The user's source file is never touched."""
-    # GC paused: staging interpolates a new default master over the
-    # composed source and writes every master out as a UFO — the same
-    # allocation storm as the build paths, and unwrapped it spent ~9
-    # minutes before the first UFO landed.
-    with _gc_paused():
-        import glyphsLib
-        import ufoLib2
-        from fontmake.instantiator import Instantiator
-        from fontTools.designspaceLib import InstanceDescriptor, SourceDescriptor
-
-        src_dir = export_dir / "sources"
-        src_dir.mkdir(parents=True, exist_ok=True)
-
-        source_path = Path(source_path) if source_path is not None else state.GLYPHS_PATH
-        if str(source_path).lower().endswith(".glyphs"):
-            gsfont = glyphsLib.GSFont(str(source_path))
-            nonexport = {str(g.name) for g in gsfont.glyphs
-                         if not getattr(g, "export", True)}
-            ds = glyphsLib.to_designspace(gsfont, ufo_module=ufoLib2)
-        else:
-            from fontTools.designspaceLib import DesignSpaceDocument
-            ds = DesignSpaceDocument.fromfile(str(source_path))
-            ds.loadSourceFonts(ufoLib2.Font.open)
-            _EXPORT_KEY = "com.schriftgestaltung.Glyphs.Export"
-            nonexport = set()
-            for s in ds.sources:
-                for layer in s.font.layers:
-                    for g in layer:
-                        if g.lib.get(_EXPORT_KEY) is False:
-                            nonexport.add(g.name)
-
-        # Non-exporting glyphs: fontc's native .glyphs reader drops them,
-        # but glyphsLib's designspace conversion KEEPS them, writing an
-        # export lib key that lands on only some masters' glifs — fontc
-        # then sees the glyph in some masters and not others and dies with
-        # "interpolation-incompatible paths" (Crispy's braceleft, flagged
-        # export=0, broke every designspace build this way). Strip them
-        # from every source so this build matches the .glyphs build.
-        if nonexport:
-            kept = set()
-            for s in ds.sources:
-                for layer in s.font.layers:
-                    for name in list(layer.keys()):
-                        if name in nonexport:
-                            del layer[name]
-                        else:
-                            kept.add(name)
-            # An EXPORTING glyph referencing a stripped one would now have a
-            # dangling component — fail loudly rather than compile garbage
-            # (Glyphs decomposes these at export; wire that up if a source
-            # ever legitimately needs it).
-            dangling = set()
-            for s in ds.sources:
-                for layer in s.font.layers:
-                    for g in layer:
-                        for comp in g.components:
-                            if comp.baseGlyph in nonexport:
-                                dangling.add(f"{g.name} → {comp.baseGlyph}")
-            if dangling:
-                raise RuntimeError(
-                    "exporting glyph(s) reference non-exporting component(s): "
-                    + ", ".join(sorted(dangling)))
-            for s in ds.sources:
-                font = s.font
-                order = font.lib.get("public.glyphOrder")
-                if order:
-                    font.lib["public.glyphOrder"] = [n for n in order if n not in nonexport]
-                if font.kerning:
-                    font.kerning = {pair: v for pair, v in font.kerning.items()
-                                    if pair[0] not in nonexport and pair[1] not in nonexport}
-                if font.groups:
-                    font.groups = {k: [n for n in v if n not in nonexport]
-                                   for k, v in font.groups.items()}
-
-        # BAKED-CORRECTION braces can sit at a master's EXACT location —
-        # a correction pinned at the control axis's default (ymod rests
-        # on its corrected end) over a master corner. fontc renders the
-        # brace there, but fontmake's Instantiator refuses duplicate
-        # source locations outright ("Locations must be unique"; see
-        # docs/decisions/0011-ymod-baked-corrections.md). Reproduce the compiled behavior: copy each
-        # such brace glyph OVER the coincident master's glyph, then drop
-        # the brace source.
-        import copy as _copy
-        full_by_loc = {}
-        for src in ds.sources:
-            if not src.layerName:
-                full_by_loc[tuple(sorted((src.location or {}).items()))] = src
-        merged = 0
-        for src in list(ds.sources):
-            if not src.layerName:
-                continue
-            master = full_by_loc.get(tuple(sorted((src.location or {}).items())))
-            if master is None:
-                continue
-            brace_layer = src.font.layers[src.layerName]
-            target = master.font.layers.defaultLayer
-            for g in brace_layer:
-                dup = _copy.deepcopy(g)
-                if g.name in target:
-                    del target[g.name]
-                target.addGlyph(dup)
-                merged += 1
-            ds.sources.remove(src)
-        if merged:
-            log.info(f"  export: merged {merged} baked-correction glyph(s) from "
-                  f"brace sources coincident with masters")
-
-        if str(source_path).lower().endswith(".glyphs"):
-            for i, s in enumerate(ds.sources):
-                fname = Path(s.filename or f"master{i}.ufo").name
-                s.font.save(str(src_dir / fname), overwrite=True)
-                s.path = str(src_dir / fname)
-
-        name_by_tag = {a.tag: a.name for a in ds.axes}
-        design_loc = {
-            name_by_tag[t]: float(v)
-            for t, v in parametric_location.items()
-            if t in name_by_tag
-        }
-        # Fill unspecified axes at their (design-space) defaults.
-        for a in ds.axes:
-            if a.name not in design_loc:
-                design_loc[a.name] = float(a.map_forward(a.default))
-
-        inst = InstanceDescriptor()
-        inst.familyName = ds.sources[0].familyName or "Export"
-        inst.styleName = "ExportOrigin"
-        inst.location = dict(design_loc)
-        generator = Instantiator.from_designspace(ds, round_geometry=True)
-        origin_ufo = generator.generate_instance(inst)
-
-        # Sources that sit EXACTLY at the new origin (baked corrections
-        # pinned at their axis defaults over this spot) are already in
-        # the interpolated origin — the instantiator returns the source
-        # outline at an exact source location. Keeping them would hand
-        # fontc two sources at one location ("duplicate location"). Sparse ones are dropped; a coincident FULL
-        # master would mean the chosen default IS a master — fail loud.
-        coincident = [src for src in ds.sources
-                      if {k: float(v) for k, v in (src.location or {}).items()} == design_loc]
-        for src in coincident:
-            if not src.layerName:
-                raise RuntimeError(
-                    "export default location coincides with master "
-                    f"'{src.name}' — pick a location that is not a master, "
-                    "or export without 'set default'")
-            ds.sources.remove(src)
-        if coincident:
-            log.info(f"  export: dropped {len(coincident)} brace source(s) coincident "
-                  f"with the new origin (content baked into the origin master)")
-        origin_path = src_dir / "ExportOrigin.ufo"
-        origin_ufo.save(str(origin_path), overwrite=True)
-
-        s = SourceDescriptor()
-        s.path = str(origin_path)
-        s.name = "Export Origin"
-        s.familyName = inst.familyName
-        s.styleName = "ExportOrigin"
-        s.location = dict(design_loc)
-        ds.addSource(s)
-
-        # The added master becomes the DEFAULT: designspace axis defaults
-        # move to its location (parametric axes carry no maps, so design
-        # coords are axis coords).
-        for a in ds.axes:
-            if a.name in design_loc:
-                a.default = design_loc[a.name]
-
-        # SAME stem as the original: the gftools builder derives output
-        # names from the source filename, and the config's stat/avar2
-        # sections are keyed by that name — a suffix here breaks the keys.
-        out = export_dir / f"{Path(str(source_path)).stem}.designspace"
-        ds.write(str(out))
-        return out
-
-
 def _apply_hidden_axes(path: Path, hidden_tags) -> None:
     """Set the fvar HIDDEN flag (0x0001) on the given axes so end-user
     font pickers don't surface them. In place; unknown tags ignored."""
@@ -1319,20 +1137,12 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
             log.info(f"export: authored-row lookup failed ({exc}); using the built table")
         if mapped is None:
             mapped = _evaluate_mapped_location(requested)
-        export_defaults = {
-            t: round(mapped[t]) for t in fvar_tags if t not in requested and t in mapped
-        }
 
-        # Interpolate the new default master at the mapped
-        # location and stage a designspace resting on it.
-        export_source = _build_export_source(export_defaults, export_dir)
-
-        # Config for the export build: regenerated against the
-        # staged designspace, with blank in: cells MATERIALIZED
-        # at the standard declared defaults — blank means "at
-        # default", and with the default relocated the blanks
-        # would alias onto the new origin ("Locations must be
-        # unique").
+        # ADR 0007's method: NO inserted master (its interior drift measured
+        # up to 761 u on Crispy — the verifier's T3.8 failure). Build the
+        # staged ORIGINAL source exactly like the preview, with step-3.5
+        # relocation ON and its target = ``mapped`` (P, exact — the round()
+        # here used to re-trigger the densifying rebase, audit §2 H3).
         export_workdir = export_dir / "work"
         export_workdir.mkdir(parents=True, exist_ok=True)
         export_config = export_workdir / "config.yaml"
@@ -1344,13 +1154,24 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
         # and alias rows ("Locations must be unique").
         _meta_src = _get_avar2_metadata_path()
         if _meta_src and Path(_meta_src).exists():
-            shutil.copy2(str(_meta_src), str(export_workdir / "axis-metadata.json"))
+            # The blank-cell fill reads its defaults from the metadata file,
+            # so the copy that travels with the export must carry the
+            # REQUESTED defaults — otherwise a blank row aliases onto the
+            # requested row ("Locations must be unique").
+            import json as _json
+            meta = _json.loads(Path(_meta_src).read_text(encoding="utf-8"))
+            for _col, m in meta.items():
+                tag = (m.get("registered_tag") or "").strip()
+                if tag and tag in requested:
+                    m["default"] = requested[tag]
+            (export_workdir / "axis-metadata.json").write_text(
+                _json.dumps(meta, indent=2) + "\n", encoding="utf-8")
         from .build import config_generator as _cfg_gen
         _cfg_gen.update_config(
             csv_path=_get_preview_csv_path(),
             config_path=export_config,
             backup=False,
-            source_path=export_source,
+            source_path=state.ORIGINAL_PATH,
             fill_in_defaults=True,
         )
 
@@ -1368,12 +1189,10 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                 raise RuntimeError("Export build failed: %s"
                                    % (result.stderr or result.stdout or "")[-800:])
         else:
-            # relocate_default=False: the export stages its own origin
-            # master above — step 3.5's instancer rebase must not run on
-            # top of it (that's what densified shipped fonts ~7×).
             _build_in_process(export_config, export_workdir, fontc_path,
                               default_overrides=requested,
-                              relocate_default=False)
+                              relocate_default=True,
+                              relocate_target=mapped)
         produced = []
         for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
             produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []
