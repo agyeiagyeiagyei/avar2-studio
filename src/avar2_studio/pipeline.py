@@ -554,6 +554,81 @@ def _declared_ranges_cache_key(default_overrides) -> Optional[tuple]:
     return (tuple(parts), ov)
 
 
+
+# gvar stores each glyph's tuple headers before its data behind a u16
+# offset. Relocating the default to an interior point splits every region
+# around the new origin, and a twin-heavy font (slant × rounding masters)
+# can push its heaviest glyphs past that 64 KB block — fontTools then fails
+# the save with a bare "int too big to convert". The native SPAC injector
+# already prunes sub-visible splinter tuples for the same reason; this is
+# the Python-side equivalent for the relocation step.
+GVAR_PRUNE_TOL = 2.0   # font units: a tuple moving nothing more than this is sub-visible
+
+
+def _tuple_max_delta(tv) -> float:
+    return max((abs(x) + abs(y) for c in tv.coordinates if c is not None for x, y in [c]), default=0.0)
+
+
+def _fit_gvar_headers(font, tol: float = GVAR_PRUNE_TOL, log=None, headroom: int = 64) -> dict:
+    """Make every glyph's gvar header block fit the u16 offset, dropping its
+    smallest tuples (max |delta| ≤ ``tol``) only where it overflows.
+    Returns {glyph: tuples removed}. Raises RuntimeError with a readable
+    message when a glyph cannot be made to fit without dropping visible
+    movement.
+
+    fontTools packs offsetToData = 4 + Σ(tuple header bytes) as a u16; a
+    tuple's header is 4 bytes + its private peak (2 per axis unless the
+    peak is a shared tuple) + its intermediate region (4 per axis when
+    present). Only the headers count — the delta data lives past the
+    offset — so the budget is summed per tuple instead of recompiling
+    the glyph after every removal (quadratic on twin-heavy glyphs)."""
+    from fontTools.ttLib.tables._g_v_a_r import compileGlyph_
+    gvar = font["gvar"]
+    axis_tags = [a.axisTag for a in font["fvar"].axes]
+    limit = 0xFFFF - headroom
+
+    def header_bytes(tv) -> int:
+        # Upper bound: every peak counted as private. The shared-peak set
+        # is recomputed by fontTools at save time from whatever tuples
+        # remain, so a peak that is shared now may be private after the
+        # prune (and grow by 2 bytes per axis); budgeting without sharing
+        # cannot be beaten by that.
+        coord = tv.compileCoord(axis_tags)
+        inter = tv.compileIntermediateCoord(axis_tags)
+        return 4 + len(coord) + (len(inter) if inter else 0)
+
+    removed = {}
+    for name, variations in gvar.variations.items():
+        sizes = [header_bytes(tv) for tv in variations]
+        total = 4 + sum(sizes)
+        if total <= limit:
+            continue
+        order = sorted(range(len(variations)), key=lambda i: _tuple_max_delta(variations[i]))
+        drop = set()
+        for i in order:
+            if total <= limit:
+                break
+            if _tuple_max_delta(variations[i]) > tol:
+                break
+            drop.add(i)
+            total -= sizes[i]
+        if total > limit:
+            raise RuntimeError(
+                f"glyph '{name}' has too many variation tuples for OpenType's per-glyph gvar "
+                f"limit after relocating the default ({len(variations)} tuples; dropping the "
+                f"{len(drop)} sub-visible ones was not enough). Export at the resting style, or "
+                f"reduce twin masters (disable slant or rounding) for this export.")
+        variations[:] = [tv for i, tv in enumerate(variations) if i not in drop]
+        removed[name] = len(drop)
+        # one real compile as the safety net (headers are what overflow; the
+        # delta data past the offset never does)
+        compileGlyph_(2, variations, 0, axis_tags, {}, optimizeSize=False)
+    if removed and log:
+        log(f"gvar: pruned {sum(removed.values())} sub-visible tuple(s) (≤{tol:g} u) across "
+            f"{len(removed)} glyph(s) so the relocated font fits the per-glyph header limit")
+    return removed
+
+
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                       default_overrides: Optional[Dict[str, float]] = None,
                       relocate_default: Optional[bool] = None,
@@ -725,7 +800,8 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         if limits:
             _instancer.instantiateVariableFont(font, limits, inplace=True,
                                                updateFontNames=False)
-            font.save(str(out))
+            _fit_gvar_headers(font, log=log.info)
+        font.save(str(out))
         font.close()
 
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied

@@ -1324,3 +1324,31 @@ bar; findings rounds still get written so a second reviewer can re-check.
   workflows loads. No history rewrite; the 25 historical blobs stay.
 - `docs/decisions/0014-wasm-blob-built-in-ci-history-kept.md` + index
   row; `docs/DEVELOPMENT.md` note.
+
+## T3.8 — gvar header-fit pruning for relocated exports (executor: the verifier, 2026-10-19)
+
+- Measured on the Crispy copy: the set-default export at the ORIGIN style
+  is now the preview font re-origined — same axes, same point counts,
+  same 124,432 tuples, mappings exact, **0.0 u** drift at every probed
+  location. An export resting at a FAR interior style (wght 900) failed
+  with fontTools' bare `OverflowError: int too big to convert`: relocating
+  the default there splits every region again and the heaviest glyphs
+  (`B`: 2,707 tuples) exceed gvar's u16 per-glyph header block.
+- `pipeline._fit_gvar_headers` runs after the relocation step (preview and
+  export alike): per glyph it budgets the header bytes (4 + peak +
+  intermediate region per tuple, every peak counted as private — the
+  shared set is recomputed by fontTools after the prune, so this is the
+  bound that cannot be beaten) and drops only sub-visible tuples
+  (max |delta| ≤ 2 u, smallest first) and only where the block overflows;
+  one no-sharing compile verifies the result. When that is not enough it
+  raises a readable error naming the glyph and the two ways out (export at
+  the resting style; disable slant/rounding twins for the export) — which
+  the export modal shows as the job's error.
+- Tests [verified]: `tests/test_gvar_header_fit.py` on the in-repo
+  `WasmTest-VF.ttf` — 20,000 planted ±1 u tuples overflow the fixture and
+  are pruned back under the limit with every visible tuple intact; a glyph
+  of only visible tuples raises the readable error. Full suite green;
+  ruff clean. Crispy wght-900 export: the readable error, no traceback.
+- Residual (proposed follow-up, not in this sprint's backlog): an export
+  option that compiles without the twin masters (slant/ROND) so far
+  interior styles fit the header limit — the message already points at it.
