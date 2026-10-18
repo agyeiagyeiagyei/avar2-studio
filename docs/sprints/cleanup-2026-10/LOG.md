@@ -1288,3 +1288,39 @@ bar; findings rounds still get written so a second reviewer can re-check.
   whether binaries exist on disk.
 - Gates: 532 passed / **0 skipped** (the previously-skipped fontc-gated
   tests now run — the venv-fontc discovery resolved); ruff clean.
+
+## T3.8 — third pass (executor: the verifier, 2026-10-19): the export builds the ACTIVE source
+
+- Round 6 found the set-default export compiled `state.ORIGINAL_PATH`,
+  dropping every studio axis and transform. `_export_pipeline` now hands
+  `update_config` `state.GLYPHS_PATH` — the resolved active source the
+  job queue stages as `active-<name>` and binds in the worker — exactly
+  what the preview build compiles. Relocation to P (round 6's correct
+  half) is unchanged.
+- Test [verified]: `tests/test_export_active_source.py` — real worker on
+  crispy-mini with a `ymod` brace AND `round_corners` enabled; preview
+  initialised the way the server does (`_initialize_preview_*`,
+  `_resolve_active_source`); export at the authored row "Narrow Thin
+  144": the export's fvar axis set equals the preview's (incl. `ymod`,
+  `ROND`), defaults land on 94/6/6, every glyph's point count matches,
+  drift ≤ 3 u at the authored stop. Fails on the pre-fix source (axis
+  set differs). Full suite green; ruff clean; frontend build OK.
+- Note for future fixtures: a real-worker test needs the preview CSV +
+  config initialised and a server-side resolve before exporting, or the
+  avar2 step fails and the plain-VF fallback (no user axes) is served.
+
+## T3.7 — going-forward half (user decision 2026-10-19: history is kept)
+
+- `frontend/src/wasm/fontc-web/fontc_web_bg.wasm` untracked (`git rm
+  --cached`) and ignored; the small wasm-bindgen glue stays tracked so the
+  frontend builds and tests without a Rust toolchain — Vite only warns
+  when the binary is absent [verified: build exit 0 with the file hidden].
+- `pages.yml` and both frontend-bundle jobs in `release.yml` build it
+  before the frontend build (rust toolchain + wasm32 target + rust-cache +
+  `wasm-pack build --release --target web`). The command was run locally
+  on the warm target [verified]; the glue it regenerates differs from the
+  tracked copy (newer wasm-bindgen) — CI regenerates both, the tracked
+  glue is updated when it is next rebuilt locally. YAML of all three
+  workflows loads. No history rewrite; the 25 historical blobs stay.
+- `docs/decisions/0014-wasm-blob-built-in-ci-history-kept.md` + index
+  row; `docs/DEVELOPMENT.md` note.

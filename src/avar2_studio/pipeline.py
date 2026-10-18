@@ -1167,11 +1167,17 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
             (export_workdir / "axis-metadata.json").write_text(
                 _json.dumps(meta, indent=2) + "\n", encoding="utf-8")
         from .build import config_generator as _cfg_gen
+        # The export compiles the same source the preview does: the resolved
+        # ACTIVE source (control-axis shadow + grade braces + source-stage
+        # transforms), which the job queue stages for the worker as
+        # ``active-<name>`` and binds to state.GLYPHS_PATH. Building the raw
+        # original here dropped every studio axis and transform (verifier
+        # round 6).
         _cfg_gen.update_config(
             csv_path=_get_preview_csv_path(),
             config_path=export_config,
             backup=False,
-            source_path=state.ORIGINAL_PATH,
+            source_path=state.GLYPHS_PATH,
             fill_in_defaults=True,
         )
 
