@@ -186,7 +186,8 @@ not.
   `pip install -e .`, `scripts/snapshot_static_demo.py`, Node 22, `npm ci`,
   lint + typecheck + test:unit, `vite build --base=/avar2-studio/
   --outDir dist-pages`, deploy. It ships the **committed** wasm blob
-  (no `wasm-pack` in CI). Commit + push is the deploy.
+  — the wasm binary is built in CI by `wasm-pack` (decision 0014); it is
+  not committed. Commit + push is the deploy.
 - `.github/workflows/release.yml` — on a `v*` tag (bump `pyproject.toml`
   first): Node 20, builds the frontend, rsyncs it into
   `src/avar2_studio/static/`, `python -m build` (the sdist carries the

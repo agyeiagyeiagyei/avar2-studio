@@ -63,6 +63,9 @@ frontend/dist-pages/
 
 # Rust/wasm build artifacts
 wasm/fontc-web/pkg/
+# The wasm binary is built in CI (pages.yml / release.yml) and locally with
+# wasm-pack (docs/DEVELOPMENT.md); the small JS glue stays tracked.
+frontend/src/wasm/fontc-web/fontc_web_bg.wasm
 wasm/fontc-web/target/
 
 # Keep the (otherwise gitignored, CI-populated) static dir present in every

@@ -43,6 +43,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The wasm binary is not committed (decision 0014): build it before the
+      # frontend bundle so the static mode ships the engine. Cold cache compiles
+      # fontc + fontations for wasm32 (10+ min); rust-cache keeps it warm.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm/fontc-web
+      - run: cargo install wasm-pack --locked
+      - run: wasm-pack build --release --target web --out-dir ../../frontend/src/wasm/fontc-web
+        working-directory: wasm/fontc-web
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -145,6 +157,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The wasm binary is not committed (decision 0014): build it before the
+      # frontend bundle so the static mode ships the engine. Cold cache compiles
+      # fontc + fontations for wasm32 (10+ min); rust-cache keeps it warm.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm/fontc-web
+      - run: cargo install wasm-pack --locked
+      - run: wasm-pack build --release --target web --out-dir ../../frontend/src/wasm/fontc-web
+        working-directory: wasm/fontc-web
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
