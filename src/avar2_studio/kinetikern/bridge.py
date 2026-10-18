@@ -1,7 +1,8 @@
 # encoding: utf-8
 # Vendored from Kinetikern2 (https://github.com/bghryct/kinetikern2, MIT, (c) 2026 Mirko Velimirovic):
-# plugin/Kinetikern2.glyphsPlugin/Contents/Resources/kk2_bridge.py at 7c42a12, unchanged. The engine it loads
-# is native/kinetikern2 (same commit); see that folder's README.
+# plugin/Kinetikern2.glyphsPlugin/Contents/Resources/kk2_bridge.py at 7c42a12, unchanged except
+# DYLIB_NAME below (platform-aware; upstream hard-codes the macOS name, the Linux wheel ships .so).
+# The engine it loads is native/kinetikern2 (same commit); see that folder's README.
 """
 kk2_bridge — ctypes bridge to libkinetikern2.dylib.
 
@@ -19,10 +20,11 @@ from __future__ import division, print_function, unicode_literals
 import ctypes
 import os
 import struct
+import sys
 from ctypes import POINTER, Structure, byref, c_char_p, c_double, c_float, c_uint8, c_uint32, c_uint64, c_void_p, sizeof
 
 ABI_VERSION = 1
-DYLIB_NAME = "libkinetikern2.dylib"
+DYLIB_NAME = "libkinetikern2.dylib" if sys.platform == "darwin" else "libkinetikern2.so"
 NONE = 0xFFFFFFFF
 EXISTING = 1 << 31
 # class origin of a frozen glyph without a kerning group: written with the

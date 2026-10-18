@@ -61,6 +61,9 @@ Issues = "https://github.com/agyeiagyeiagyei/avar2-studio/issues"
 # The React bundle is gitignored (CI assembles it into static/). Carry it
 # in the sdist anyway: a wheel built from the sdist is then the full
 # studio rather than the headless install that answers 503.
+# (src/avar2_studio/bin/ is NOT carried here: the sdist ships for every
+# platform, and the cargo-built accelerators are platform-specific — the
+# wheel hook force-includes them only when staged, decision 0015.)
 artifacts = ["src/avar2_studio/static/**"]
 
 [tool.hatch.build.targets.wheel]
@@ -72,6 +75,14 @@ exclude = ["src/avar2_studio/static/**"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/avar2_studio/static" = "avar2_studio/static"
+
+# Platform wheels (decision 0015): when src/avar2_studio/bin/ holds the
+# cargo-built accelerators (gitignored, staged by release.yml's platform
+# job), this hook force-includes them as avar2_studio/bin/ and tags the
+# wheel py3-none-<plat> + non-pure. Without them the wheel stays py3-none-any.
+# (bin/ cannot ride the unconditional force-include above: hatchling raises
+# FileNotFoundError for a missing source, which would break clean checkouts.)
+[tool.hatch.build.hooks.custom]
 
 [tool.ruff]
 line-length = 160

@@ -22,6 +22,11 @@ frontend/.eslintcache
 # (not the dir itself) so the .gitkeep exception at the bottom can apply.
 src/avar2_studio/static/*
 
+# Native accelerators (cargo builds of spac-inject + libkinetikern2) staged
+# into the package for the platform wheels (decision 0015) — build outputs,
+# never commit; release.yml assembles them per platform.
+src/avar2_studio/bin/
+
 # Tool scratch
 .avar2-studio/
 

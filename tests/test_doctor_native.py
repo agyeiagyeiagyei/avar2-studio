@@ -5,10 +5,12 @@ from avar2_studio import doctor
 def test_spac_and_kinetikern_checks_report_absence_and_env(monkeypatch, capsys):
     monkeypatch.delenv("AVAR2_SPAC_INJECT", raising=False)
     monkeypatch.delenv("AVAR2_KK2_DYLIB", raising=False)
-    # Absence is simulated, not read off the checkout: a built
-    # target/release/spac-inject must not flip this test.
+    # Absence is simulated, not read off the checkout: built binaries must
+    # not flip this test (target/release or the package-carried bin/).
+    from avar2_studio import kinetikern
     from avar2_studio.transforms import builtin_spac_widthaware
     monkeypatch.setattr(builtin_spac_widthaware, "_native_injector", lambda: None)
+    monkeypatch.setattr(kinetikern, "engine_path", lambda: None)
 
     r1 = doctor.check_spac_injector()
     r2 = doctor.check_kinetikern_engine()

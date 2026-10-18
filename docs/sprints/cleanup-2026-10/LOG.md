@@ -1253,3 +1253,38 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - Follow-up for the user: fontra-embed's branch is unpushed (per the
   rule); deploying it updates the Pages demo — the e2e expectations hold
   because the flags preserve behavior.
+
+### Note — a mis-staging I caught and fixed
+- My first T3.4 commit (7a39d1c, unpushed) accidentally swept the T3.9
+  subagent's in-progress files via `git add -A`. Recovered with
+  `git reset --soft HEAD~1` (unpushed; tree untouched) and recommitted as
+  c573d91 with only T3.4's files. The T3.9 work continues uncommitted as
+  its agent expects. One known-red test mid-flight:
+  test_doctor_native.py's absence case sees agent-11's just-built
+  `src/avar2_studio/bin/` binaries — T3.9's own acceptance (green suite)
+  covers fixing it.
+
+## T3.9 — platform wheels carry both accelerators (per decision 0015)
+- Discovery order everywhere: env override → package-carried
+  `avar2_studio/bin/<name>` → checkout-relative. `DYLIB_NAME` is now
+  platform-aware (`.dylib` darwin / `.so` linux).
+- New `hatch_build.py` build hook: when `src/avar2_studio/bin/` holds the
+  cargo-built binaries, the wheel is tagged `py3-none-<plat>` non-pure so
+  pip installs them into platlib; a tree without binaries builds the pure
+  wheel as before. `release.yml` gained a per-platform matrix (macOS
+  arm64/x86_64 + ubuntu) that cargo-builds both binaries before the wheel
+  builds. `src/avar2_studio/bin/` is gitignored (build output).
+- Acceptance, run by me: built
+  `dist/avar2_studio-0.1.0-py3-none-macosx_26_0_arm64.whl` (unzip -l
+  shows both binaries under avar2_studio/bin/); fresh scratch venv →
+  `avar2-studio doctor` → **spac-inject AND kinetikern2 found** at the
+  installed site-packages path, no env overrides; `pytest
+  tests/test_kinetikern*.py` in that venv → **8 passed** (runs against
+  the wheel's dylib, not skipped).
+- The subagent (agent-11) timed out twice on the slow tail (cargo
+  rebuilds); the wheel build + acceptance above are verified by me
+  directly. The hermetic doctor test (absence simulated via monkeypatch
+  on both discovery functions) is fixed — it no longer depends on
+  whether binaries exist on disk.
+- Gates: 532 passed / **0 skipped** (the previously-skipped fontc-gated
+  tests now run — the venv-fontc discovery resolved); ruff clean.

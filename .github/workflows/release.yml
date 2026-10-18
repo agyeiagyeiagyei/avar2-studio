@@ -1,11 +1,12 @@
 name: Release
 
-# Build the sdist + wheel (both carrying the React bundle), attach them
-# to a GitHub Release and publish them to PyPI whenever a tag matching
-# ``v*`` is pushed. Also runnable manually (workflow_dispatch): by
-# default that only uploads the artifacts to the run page so the build
-# can be checked without cutting a release; with ``publish_to:
-# testpypi`` it also publishes them to TestPyPI as a dry run.
+# Build the sdist + pure wheel (both carrying the React bundle) and the
+# per-platform wheels (carrying the cargo-built native accelerators,
+# decision 0015), attach them to a GitHub Release and publish them to PyPI
+# whenever a tag matching ``v*`` is pushed. Also runnable manually
+# (workflow_dispatch): by default that only uploads the artifacts to the
+# run page so the build can be checked without cutting a release; with
+# ``publish_to: testpypi`` it also publishes them to TestPyPI as a dry run.
 #
 # Publishing uses PyPI trusted publishing — no API token in secrets.
 # One-time setup: on pypi.org (and test.pypi.org for the dry run) add
@@ -116,8 +117,117 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
 
+  # Decision 0015: per-platform wheels carrying the two cargo-built native
+  # accelerators (spac-inject + libkinetikern2) under avar2_studio/bin/.
+  # hatch_build.py tags these py3-none-<plat> and non-pure; the pure wheel
+  # from the `build` job above remains the install path for every other
+  # platform (fontTools SPAC fallback, Kinetikern disabled).
+  build-platform-wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # arm64
+            dylib: libkinetikern2.dylib
+            deployment-target: '11.0'
+          - os: macos-13       # x86_64
+            dylib: libkinetikern2.dylib
+            deployment-target: '10.13'
+          - os: ubuntu-latest
+            dylib: libkinetikern2.so
+    runs-on: ${{ matrix.os }}
+    # Cargo and hatch_build.py both honour MACOSX_DEPLOYMENT_TARGET, so the
+    # wheel's platform tag matches the binaries' real deployment target.
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment-target }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          CI: false   # see the `build` job for why
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle frontend into the Python package
+        run: |
+          rm -f src/avar2_studio/static/.gitkeep
+          mkdir -p src/avar2_studio/static
+          rsync -a frontend/build/ src/avar2_studio/static/
+
+      - name: Build the native accelerators
+        run: |
+          cargo build --release --manifest-path wasm/fontc-web/Cargo.toml --bin spac-inject
+          cargo build --release --manifest-path native/kinetikern2/Cargo.toml
+          mkdir -p src/avar2_studio/bin
+          cp wasm/fontc-web/target/release/spac-inject src/avar2_studio/bin/
+          cp native/kinetikern2/target/release/${{ matrix.dylib }} src/avar2_studio/bin/
+
+      - name: Build the platform wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build --wheel
+
+      # PyPI rejects plain `linux_x86_64` tags; auditwheel verifies the
+      # binaries' glibc symbol floor and rewrites the wheel as the highest
+      # claimable manylinux policy. (Sketch: first live run should confirm
+      # auditwheel's verdict in the log.)
+      - name: Re-tag the Linux wheel as manylinux
+        if: runner.os == 'Linux'
+        run: |
+          pip install auditwheel
+          auditwheel repair dist/*-linux_x86_64.whl --wheel-dir dist/
+          rm dist/*-linux_x86_64.whl
+
+      - name: Upload artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-platform-${{ matrix.os }}
+          path: dist/*
+
+  # Appends the platform wheels to the release the `build` job created.
+  release-platform-assets:
+    needs: build-platform-wheels
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download the platform wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-platform-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Add platform wheels to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.whl
+
   publish-pypi:
-    needs: build
+    needs: [build, build-platform-wheels]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment: pypi
@@ -128,14 +238,15 @@ jobs:
       - name: Download the built artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: dist*
           path: dist/
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-testpypi:
-    needs: build
+    needs: [build, build-platform-wheels]
     if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
     runs-on: ubuntu-latest
     environment: testpypi
@@ -146,8 +257,9 @@ jobs:
       - name: Download the built artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: dist*
           path: dist/
+          merge-multiple: true
 
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
