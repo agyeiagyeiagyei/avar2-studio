@@ -142,7 +142,7 @@ _REBUILD_TIMER_LOCK = threading.Lock()
 _REBUILD_DEBOUNCE_SECONDS = 0.4    # sized for a ~1s in-process build, not the old 9s one
 
 # The build/export job queue: all heavy pipeline work runs in worker
-# SUBPROCESSES (docs/WORKER_BUILD_PLAN.md) so a build can never starve
+# SUBPROCESSES (docs/archive/WORKER_BUILD_PLAN.md) so a build can never starve
 # request threads. trigger_build submits; builds coalesce through it.
 # Bound to this module for its methods (_resolve_active_source, the
 # preview-dir getters — both imported back from pipeline.py); the

@@ -33,7 +33,7 @@ BUILD_DIR: Optional[Path] = None
 VARIABLE_FONT_PATH: Optional[Path] = None  # Last-good built font; only updated after a successful build
 LAST_BUILD_TIME: Optional[float] = None
 # Re-entrancy guard inside the build WORKER only (a fresh process per job —
-# see docs/WORKER_BUILD_PLAN.md): _run_build/_perform_avar2_build manage it
+# see docs/archive/WORKER_BUILD_PLAN.md): _run_build/_perform_avar2_build manage it
 # there. The server process never runs builds; request threads read
 # JOBS.is_building() instead.
 BUILDING: bool = False

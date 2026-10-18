@@ -1219,3 +1219,12 @@ bar; findings rounds still get written so a second reviewer can re-check.
   axes) is what's in the test. Pre-fix drift is the verifier's
   measurement (543–761 u on Crispy).
 - Gates [verified]: 524 passed / 3 skipped; ruff clean; frontend 0.
+
+## Verifier NEXT items — docs module map + stale doc paths + anchors
+- ARCHITECTURE.md's module map now carries `state.py`, `watch.py`,
+  `routes/` rows, an accurate post-T3.2 `server.py` row, and pipeline.py
+  no longer lists the removed `_build_export_source`.
+- Stale code citations to `docs/WORKER_BUILD_PLAN.md` repointed to
+  `docs/archive/WORKER_BUILD_PLAN.md` (server.py, state.py).
+- examples/ README anchors: all relative links verified resolving (the
+  direct `docs/guides/authoring-instances.md` links went in earlier).
