@@ -1,6 +1,6 @@
 /**
  * Static-demo data provider — lets the built bundle run with NO backend
- * (GitHub Pages). docs/migration-github-pages.md has the history.
+ * (GitHub Pages). docs/archive/migration-github-pages.md has the history.
  *
  * How it works: before the app renders, selectApiMode() probes
  * /api/health. A real server answers 200 → nothing changes. On a static

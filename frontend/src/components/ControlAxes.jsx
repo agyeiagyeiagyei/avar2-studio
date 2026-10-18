@@ -10,7 +10,7 @@ import { useBuildStatus } from '../hooks/useBuildStatus';
  * Naming seam: the UI label is "secondary parametric axes" (renamed
  * from "control axes" on designer feedback, v0.1.0.dev8), while the
  * component/file names, CSS classes, API routes (/api/control-axes),
- * the -control.json sidecar, and docs/control-axes.md keep the
+ * the -control.json sidecar, and docs/guides/secondary-parametric-axes.md keep the
  * original "control axis" term. Same concept; grep either name from
  * here.
  *

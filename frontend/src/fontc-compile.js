@@ -1,7 +1,7 @@
 /**
  * compileFont / addAvar2 / applyControlAxes / applyGrade — font
  * compilation and bundle application in a Web Worker (fontc → WASM;
- * see wasm/fontc-web and docs/migration-github-pages.md).
+ * see wasm/fontc-web and docs/ARCHITECTURE.md (history: docs/archive/migration-github-pages.md)).
  *
  * One worker for the app's lifetime; calls serialize through a queue (the
  * worker resolves one job at a time — see send()).
