@@ -773,6 +773,11 @@ export async function createEditorBridge({ dataset, tag, glyphName, layerLocatio
               axis_name: axisSpec.name || tag,
               axis_default: axisSpec.default,
               glyph: glyphName,
+              // Shared-shim flag (T3.4): the embed demo auto-enables
+              // editing on the studio rows; the desktop shim leaves rows
+              // for the designer to toggle. allow_computed_edits stays
+              // unset — this bridge guards computed layers read-only.
+              auto_enable_edits: true,
             },
             glyphName,
             location: sessionLocation,

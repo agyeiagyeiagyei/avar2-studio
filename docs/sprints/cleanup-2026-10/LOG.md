@@ -1228,3 +1228,28 @@ bar; findings rounds still get written so a second reviewer can re-check.
   `docs/archive/WORKER_BUILD_PLAN.md` (server.py, state.py).
 - examples/ README anchors: all relative links verified resolving (the
   direct `docs/guides/authoring-instances.md` links went in earlier).
+
+## T3.4 — one Fontra shim shared with fontra-embed (subagent agent-12)
+- fontra-embed branch `shared-studio-shim` @ 3de37a6 (NOT pushed):
+  `build-studio-shim.mjs` concatenates focused-ui.js + metrics-hud.js +
+  a new host bootstrap into one classic script (provenance header;
+  import/export strip asserted at build). Session flags: the desktop sets
+  `allow_computed_edits: true`, the embed sets `auto_enable_edits: true`
+  — the subagent found the brief's premise wrong (the desktop has
+  auto-enabled NOTHING since a23d78c; the embed's auto-enable is pinned
+  by our own e2e) and parameterised rather than forced one behavior.
+  Reconciled: labelRe escaped+case-insensitive both hosts; the embed now
+  sorts by source name (desktop's behavior); the HUD's hardcoded 'lcwd'
+  filter → the session tag (the T1.16-class bug's sibling).
+- avar2-studio: `_studio_shim_script()` prefers the built
+  `fontra/embed-shim.js`, falls back to `fontra/shim.js` byte-untouched;
+  `/api/fontra-shim-config` adds `allow_computed_edits` for studio
+  sessions. Goldens regenerated once (delta = header + bundle swap,
+  CSS prefix byte-identical).
+- Verified by me: the three targeted test files → 10 passed; ruff clean;
+  fontra-embed harness 8/8 PASS; the subagent's desktop smoke on a
+  Crispy copy :5071 (12/12: sorted rows, no auto-enabled edits, HUD
+  present, no double CSS) is recorded with evidence in its report.
+- Follow-up for the user: fontra-embed's branch is unpushed (per the
+  rule); deploying it updates the Pages demo — the e2e expectations hold
+  because the flags preserve behavior.

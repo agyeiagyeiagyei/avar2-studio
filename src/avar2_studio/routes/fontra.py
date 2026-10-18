@@ -112,14 +112,20 @@ def _fontra_focus_css() -> str:
 # ("<name>" or, for unnamed locations, "<tag> <value>" coordinates).
 # If no row matches, the list is left untrimmed (fail open) and
 # nothing is auto-enabled (fail closed).
-# The Fontra studio shim (sidebar focus, layer labels, the metrics HUD)
-# lives in fontra/shim.js so it can be linted and diffed as JavaScript;
-# the <script> wrapper belongs to the injection, not the file.
-_FONTRA_STUDIO_SHIM_JS = (
-    '\n<script id="avar2-studio-fontra-shim">\n'
-    + server._read_asset("fontra/shim.js")
-    + '\n</script>\n'
-)
+# T3.4: the implementation is SHARED with the browser embed.
+# fontra/embed-shim.js is a build artifact of fontra-embed's
+# src/{metrics-hud,focused-ui,studio-shim-bootstrap}.js (provenance
+# header in the file; rebuild with fontra-embed's build-studio-shim.mjs
+# and re-copy) and is the injected shim when present. fontra/shim.js,
+# the pre-T3.4 desktop-only shim, is the fallback when the built copy
+# is absent. The <script> wrapper belongs to the injection, not the
+# file.
+def _studio_shim_script() -> str:
+    try:
+        source = server._read_asset("fontra/embed-shim.js")
+    except FileNotFoundError:
+        source = server._read_asset("fontra/shim.js")
+    return '\n<script id="avar2-studio-fontra-shim">\n' + source + '\n</script>\n'
 
 
 def _is_html_response(headers) -> bool:
@@ -156,7 +162,7 @@ def _rewrite_html_paths(body: bytes) -> bytes:
     for needle in ("</head>", "</HEAD>"):
         if needle in text:
             text = text.replace(
-                needle, _fontra_focus_css() + _FONTRA_STUDIO_SHIM_JS + needle, 1
+                needle, _fontra_focus_css() + _studio_shim_script() + needle, 1
             )
             break
     return text.encode("utf-8")
@@ -367,4 +373,12 @@ def fontra_shim_config():
     """Session config for the shim injected into proxied Fontra
     pages. Must be registered before Fontra's /api catch-all so the
     specific rule wins."""
-    return jsonify(state.FONTRA_EDITOR_SESSION or {"studio": False})
+    session = dict(state.FONTRA_EDITOR_SESSION or {"studio": False})
+    # Desktop studio sessions allow edits to "→ computed" correction
+    # targets: writes into the shadow self-heal on the next regen. The
+    # browser embed leaves the flag unset — its bridge guards computed
+    # layers read-only. The shared shim (fontra/embed-shim.js) reads
+    # it; the fontra/shim.js fallback never strips studio rows anyway.
+    if session.get("studio"):
+        session["allow_computed_edits"] = True
+    return jsonify(session)
