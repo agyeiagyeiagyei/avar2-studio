@@ -306,6 +306,39 @@ three chat-only decisions remain the user's to record or drop.
   the desktop open-editor smoke on a Crispy copy shows the layer labels,
   sort and HUD unchanged.
 
+## Round 6 — hand-off `2b99233` (HEAD `7c74265`), Tier 3 completion — 2026-10-18
+
+**Verification environment.** Fresh clone + venv at `2b99233`: install OK;
+**532 passed, 0 skipped**; ruff clean; worker imports no Flask; frontend
+lint 0 errors (34 warnings), typecheck 0, `test:unit` all passed, build OK.
+Rust warm target: 18 binaries, 22 passed, 0 failed, 1 ignored.
+fontra-embed branch `shared-studio-shim` (3 unpushed commits): harness
+`npm run verify` **8/8 PASS**. Live smoke on a fresh Crispy copy: boot
+build 1 job, 0 warnings; mappings exact; 30 instances / 9 YMOD; the
+desktop `open-editor` page references `embed-shim.js` (fetched 200) with
+the inline fallback id present once.
+
+| ID | Verdict | Evidence / what to change |
+|---|---|---|
+| T3.4 | **VERIFIED** | One implementation: `fontra/embed-shim.js` built from fontra-embed @ `3de37a6` (provenance header), injected by the desktop proxy; `fontra/shim.js` kept as fallback; divergences reconciled (escaped case-insensitive labelRe both sides, source-name sort in the embed, HUD filters the session tag); harness 8/8; goldens regenerated once. fontra-embed branch stays unpushed until the user says so. |
+| T3.9 | **VERIFIED** | Reproduced the release recipe in the fresh clone: cargo-built `spac-inject` + `libkinetikern2.dylib` into `src/avar2_studio/bin/` → `pip wheel` produced `avar2_studio-0.1.0-py3-none-macosx_26_0_arm64.whl` carrying both → clean venv install → `doctor` finds both at site-packages with NO env overrides → `tests/test_kinetikern*.py` **8 passed** against the wheel's dylib. (A tree without the binaries still builds the pure wheel — by design; the release matrix stages them.) |
+| T3.8 | **FAILED (second time, new cause)** | The inserted-master staging is gone and relocation now targets P with the authored out: verbatim (export fvar defaults 663.1/202.5/121.8; mappings exact) — that part is right. But `_export_pipeline` now builds **`state.ORIGINAL_PATH`**, the raw source, instead of the resolved ACTIVE source the preview builds (control-axis shadow + grade braces + source-stage transforms). Measured on the Crispy copy: the set-default export has axes `XTRA/XOPQ/YOPQ/opsz/wdth/wght/SPAC` only — **no LCWD, YMOD, GRAD, slnt or ROND** — sharp corners (`e` 14 points vs 60 in the preview), 13,774 gvar tuples vs 124,432; 600 KB because most of the design is missing. The crispy-mini fidelity test passed only because that fixture has no control axes or transforms. **Fix:** build the export from the resolved active source — `build_jobs._stage` already stages the server-side active source as `active-<name>` for exports; compile THAT (with its `config.yaml`/metadata) with `relocate_target=P`, then `_apply_transform_chain` and hidden axes, exactly as the preview path does. **Acceptance:** on a fixture WITH a control axis and a source-stage transform enabled (crispy-mini + a ymod brace + round_corners on, or the Crispy copy at 5071), the export's fvar axis set equals the preview's, every glyph's point count matches, and the drift probe reads ≤ 3 u at the authored stops; the test must assert the axis-set and point-count parity, not only the drift. |
+| T3.7 | **needs the user** | STATUS says "SKIPPED (user decision, 2026-10-18)" and the log has no entry; the blob is still tracked (`frontend/src/wasm/fontc-web/fontc_web_bg.wasm`). The recorded decision was "no history rewrite" — the going-forward half (CI builds the blob; `git rm` + ignore; history untouched) is still open unless the user confirms the whole item is dropped. |
+
+### Nits still open
+- `frontend/src/components/ControlAxes.jsx` cites `docs/control-axes.md`
+  (never existed) and `frontend/src/fontc-compile.js` /
+  `static-api.js` cite `docs/migration-github-pages.md` (now
+  `docs/archive/…`) — listed in round 4+5, still unfixed.
+- The verifier's drift probe must check point-count parity before
+  comparing coordinates (it reported "0.0 u" with differing point counts;
+  fixed in the scratchpad copy — any in-repo test should do the same).
+
+### Round-6 decision
+T3.4 and T3.9 close. **T3.8 is re-opened** (wrong source). Tier 3 closes
+once T3.8 builds the active source with the parity test above and the
+two stale citations are fixed; T3.7 awaits the user's word.
+
 ---
 
 ## Standing instructions (apply to every round) — revised 2026-10-16
