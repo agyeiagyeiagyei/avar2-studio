@@ -339,6 +339,33 @@ T3.4 and T3.9 close. **T3.8 is re-opened** (wrong source). Tier 3 closes
 once T3.8 builds the active source with the parity test above and the
 two stale citations are fixed; T3.7 awaits the user's word.
 
+## Round 7 — executor + verifier: the verifier (user instruction 2026-10-19) — head 
+
+Executed and self-verified by the verifier (the executor agent was not
+re-run for these): T3.8 third pass, T3.7's going-forward half, the three
+stale doc citations.
+
+**Verification.** Fresh clone at  (before the final pruning
+commit): install OK, **533 passed**, ruff clean, lint 0 errors, typecheck
+0,  all passed, Vite build OK **with no wasm binary on disk**,
+all three workflows load. Worktree at : **535 passed**, ruff
+clean. Live on the Crispy copy (5071, worktree code): preview build 1
+job, mappings exact.
+
+| ID | Verdict | Evidence |
+|---|---|---|
+| T3.8 | **VERIFIED, with a documented limit** |  compiles  (the staged active source) with the lossless relocation to P. Crispy copy, export at the ORIGIN style (wght 400/wdth 100/opsz 144): axes identical to the preview, 0 glyphs with differing point counts, 124,432 tuples both, mappings exact (rest 663.1/202.5/121.8, wght 399 → 662.9), **0.0 u drift** at the wght 900 and 100 stops, the ORIGIN and the 47/1/1 corner. Real-worker parity test on crispy-mini (ymod brace + round_corners) in the suite. Limit: an export resting at a FAR interior style (wght 900) exceeds gvar's u16 per-glyph header block on this twin-heavy font (: 2,707 tuples);  prunes sub-visible tuples where that suffices and otherwise fails with a readable error naming the glyph and the ways out (was: bare ). Unit-tested on . Follow-up proposed, not in this backlog: an export option that compiles without the slant/ROND twin masters. |
+| T3.7 | **VERIFIED (going-forward half; history kept)** |  untracked + ignored; glue tracked;  and both  bundle jobs run  before the frontend build;  command validated locally on the warm target; fresh clone without the binary builds (Vite warns only); ADR 0014 + index + DEVELOPMENT note. GitHub Actions not run from here. |
+| nits | **VERIFIED** | The three stale doc citations repointed; every  path cited from code resolves. |
+
+### Backlog status
+Every item in PLAN.md is now VERIFIED (Tier 0: rounds 1–2; Tier 1: round
+3 + fixes; Tier 2: rounds 4–5; Tier 3: rounds 5–7). Open outside the
+backlog, for the user: the three chat-only decisions (record or drop);
+the proposed twin-free export option; pushing fontra-embed's
+ branch (deploys the Pages demo); and merging
+ into  (Crispy's CI pins that branch).
+
 ---
 
 ## Standing instructions (apply to every round) — revised 2026-10-16

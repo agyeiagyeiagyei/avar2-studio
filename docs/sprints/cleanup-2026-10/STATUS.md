@@ -1,7 +1,6 @@
-STATE: working
-ROUND: 6
-HEAD: 7c74265cda01785826c607db1470044b8d9d117b
-VERIFIED_HEAD: 2b99233
-NEXT: T3.8 — export must build the resolved ACTIVE source (staged active-<name>: shadow + grade + source-stage transforms) with relocate_target=P; parity test on a fixture with a control axis + transform (axis set, point counts, drift ≤3 u); fix the two stale doc citations (ControlAxes.jsx, fontc-compile.js, static-api.js)
-APPROVED: the NEXT line; then ready-for-verification. T3.7: awaiting the user's word (keep history; going-forward CI build still open).
-VERIFIER: active
+STATE: verified-complete
+ROUND: 7
+HEAD: bf13d55
+VERIFIED_HEAD: bf13d55
+NEXT: user decisions only — record/drop the three chat-only decisions; optional twin-free export option; push fontra-embed shared-studio-shim; merge cleanup-2026-10 into github-pages
+APPROVED: nothing pending — the PLAN.md backlog is complete and verified
