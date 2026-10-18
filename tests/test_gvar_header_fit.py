@@ -15,7 +15,7 @@ FIXTURE = Path(__file__).resolve().parents[1] / "frontend" / "e2e" / "fixtures" 
 
 def _font():
     font = TTFont(str(FIXTURE))
-    font["gvar"].variations  # decompile
+    assert font["gvar"].variations  # force decompile
     return font
 
 
@@ -45,7 +45,7 @@ def test_overflowing_glyph_is_pruned_back_under_the_limit():
     glyph = next(g for g in font.getGlyphOrder() if font["glyf"][g].numberOfContours > 0)
     big = _stuff(font, glyph, 5, 40)        # visible: must survive
     _stuff(font, glyph, 20000, 1)             # sub-visible splinters: prunable
-    with pytest.raises(Exception):
+    with pytest.raises(OverflowError):
         _saves(font)                         # the fixture now overflows
     removed = pipeline._fit_gvar_headers(font)
     assert glyph in removed and removed[glyph] > 0

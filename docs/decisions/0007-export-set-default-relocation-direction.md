@@ -74,3 +74,13 @@ build uses (decision 0001), made an explicit per-build parameter:
   row when relocation is off), `server._build_in_process` step 3.5.
 - `build_jobs.JobQueue._stage` (export spec), `build_worker._run_export_job`.
 - History: archived `HANDOVER-2026-10.md` §4.2 (the Oct 4 method note).
+
+## Status update (2026-10-19)
+
+Built: the export compiles the resolved active source with the lossless
+relocation to the chosen instance's authored location; measured identical
+to the preview at the ORIGIN style (0.0 u). Relocating to a far interior
+style can exceed gvar's per-glyph header limit on a twin-heavy font;
+`pipeline._fit_gvar_headers` prunes sub-visible tuples where needed and
+otherwise fails with a readable error (export at the resting style, or
+without slant/rounding twins — a proposed follow-up option).

@@ -242,6 +242,7 @@ ORIGINAL_PATH          the designer's file. Never written by studio
    - **1** `fontc -o … --flatten-components --decompose-transformed-components`;
    - **2** `gftools.fix.fix_font`; **3** STAT from the config;
    - **3.5** default relocation: fontTools instancer moves the parametric
+   After the relocation, `pipeline._fit_gvar_headers` keeps every glyph's gvar header block under the u16 limit by dropping only sub-visible tuples (≤2 u) where it overflows, or fails with a readable error naming the glyph (far interior defaults on twin-heavy fonts).
      fvar defaults to the ORIGIN row's `out` on the still avar-free font
      (`AVAR2_RELOCATE_BUILD_DEFAULT`, default on — decision 0001);
    - **4** `gen_avar2_mapping` with `gen_fvar_axes` patched (drop `in:`
