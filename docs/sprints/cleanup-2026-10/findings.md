@@ -412,6 +412,30 @@ the headless scenario above; its script lives in the session scratchpad.
 wasm-pack, Linux/x86_64 wheel legs, rust-cache), the Pages deploy and
 the fontra-embed deploy.
 
+### Round-8 addendum — the origin warning on 5072 is a staging artefact
+
+The verifier's server on 5072 (staged at `/private/tmp/av2-local-test`
+per the routine) shows "No instance row sits at the axis defaults (… opsz
+72 …)". Cause: the routine's first version staged the source files but
+not `.avar2-studio/axis-metadata.json`, so the studio regenerated the
+metadata without the declared defaults and `opsz` fell back to the
+registered convention (72). The real Crispy declares `opsz` default 144,
+which makes `Default 400 MaxOpsz` (renamed from `Def` in
+`instance-renames.json`) the ORIGIN row; the designer's studio is not
+affected. Routine fixed: stage the authored `.avar2-studio` state and
+check `origin_warning` null + `OPSZ.default` 144 before A1. Results
+gathered against the incomplete copy must be re-run after re-staging
+(the ORIGIN row changes default relocation, so A10–A13 and anything that
+builds or exports depend on it).
+
+Cosmetic, pre-existing, not fixed: the warning text lists `lcwd -1000`
+and `ymod -1000` because control axes carry placeholder ranges with no
+`default` in the metadata and `_declared_axis_ranges` prints min as the
+default; their real defaults come from the control sidecar (0 and 100).
+The row test is unaffected (rows never carry control inputs), only the
+message is misleading. Candidate fix: exclude control axes from
+`defaults_desc` or print their sidecar defaults.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

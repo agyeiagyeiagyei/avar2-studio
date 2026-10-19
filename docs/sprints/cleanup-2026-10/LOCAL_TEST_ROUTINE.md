@@ -13,9 +13,19 @@ table dump)`. A claim without evidence is NOT-VERIFIED.
 - **Never** touch `~/Documents/Crispy` (sources or sidecars) and never
   start, stop or probe port **5070**. Everything runs on a copy.
 - The copy: stage the current on-disk `Crispy.glyphs`, `Crispy-avar.csv`,
-  `Crispy-grade.json` and `Crispy-transforms.json` from
-  `~/Documents/Crispy/sources/` into a scratch directory. The working tree
-  there is dirty by design; copy what is on disk, do not check out.
+  `Crispy-control.json`, `Crispy-grade.json` and `Crispy-transforms.json`
+  from `~/Documents/Crispy/sources/` **and the designer-authored state
+  inside `.avar2-studio/`**: `axis-metadata.json` (the declared axis
+  defaults — `opsz` default 144 is what makes `Default 400 MaxOpsz` the
+  ORIGIN row; without it the registered convention 72 applies, no row sits
+  at the defaults, and the studio shows the origin warning),
+  `instance-renames.json` and `default-origin/`. Never copy `build/`,
+  `jobs/`, `shadow/`, `backups/` or `*.ninja`; the studio regenerates
+  those. The working tree there is dirty by design; copy what is on disk,
+  do not check out.
+- Staging check before any test: `/api/health` → `origin_warning` is
+  null and `/api/avar2/axes` → `OPSZ.default` is 144. If either fails the
+  copy is incomplete; fix the staging, do not work around it.
 - Isolate the server: its own port (5072 here) and `HOME=<scratch>` so
   `~/.avar2-studio/` is never written. Open-editor spawns Fontra on 8001
   (single global port); kill it with the server.
@@ -32,8 +42,11 @@ table dump)`. A claim without evidence is NOT-VERIFIED.
 WT=~/Documents/avar2-studio-sprint          # the sprint worktree (branch cleanup-2026-10)
 PY=~/Documents/avar2-studio/.venv/bin/python
 SCRATCH=/path/to/scratch; mkdir -p $SCRATCH/sources $SCRATCH/home
-cp ~/Documents/Crispy/sources/Crispy.glyphs ~/Documents/Crispy/sources/Crispy-avar.csv \
-   ~/Documents/Crispy/sources/Crispy-grade.json ~/Documents/Crispy/sources/Crispy-transforms.json $SCRATCH/sources/
+SRC=~/Documents/Crispy/sources
+cp $SRC/Crispy.glyphs $SRC/Crispy-avar.csv $SRC/Crispy-control.json $SRC/Crispy-grade.json $SRC/Crispy-transforms.json $SCRATCH/sources/
+mkdir -p $SCRATCH/sources/.avar2-studio
+cp $SRC/.avar2-studio/axis-metadata.json $SRC/.avar2-studio/instance-renames.json $SCRATCH/sources/.avar2-studio/
+cp -R $SRC/.avar2-studio/default-origin $SCRATCH/sources/.avar2-studio/
 
 # bundle: build and copy into the served static dir (no --delete: static/.gitkeep is tracked)
 (cd $WT/frontend && npm ci && npm run build) && rsync -a $WT/frontend/build/index.html $WT/frontend/build/assets $WT/src/avar2_studio/static/
@@ -72,7 +85,7 @@ Each test: steps → expected → evidence. "No build" means no `POST
 
 | ID | Area | Steps | Expected |
 | --- | --- | --- | --- |
-| A1 | Launch | Start the server as above; `GET /api/health`, `/api/build/status`, `/api/axes`, `/api/instances` | `status ok`, `font_built true`, `last_build_status ok`; axes include the parametric trio, user axes, LCWD/YMOD, GRAD/slnt/ROND/SPAC as configured; instance list matches the copy's CSV rows |
+| A1 | Launch | Start the server as above; `GET /api/health`, `/api/build/status`, `/api/axes`, `/api/avar2/axes`, `/api/instances` | `status ok`, `font_built true`, `last_build_status ok`, `origin_warning` null; `OPSZ.default` 144 and `Default 400 MaxOpsz` is the ORIGIN row; axes include the parametric trio, user axes, LCWD/YMOD, GRAD/slnt/ROND/SPAC as configured; instance list matches the copy's CSV rows |
 | A2 | First load | Open `/`, dismiss landing if shown; tabs render; row count = `/api/instances`; `document.fonts` holds the preview family | Zero console errors; row names match; font registered (check `document.fonts.check` or `.status === 'loaded'`) |
 | A3 | Select ≠ edit (round-8 fix) | Click a studio row, wait 3 s, open Preview | No PUT, no build, `build_stale` stays false (`ui_probe.py select-no-save`) |
 | A4 | Preview sliders | Preview → drag wght, wdth, opsz, a parametric axis; Reset | Only `GET /api/mapped-location` traffic; the mapped parametric read-outs change; Reset restores every default; no build (`preview-no-build`) |
