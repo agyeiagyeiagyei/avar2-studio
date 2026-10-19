@@ -782,6 +782,70 @@ gate stays closed until the file is touched. `git checkout` and every
 editor save set mtime=now, so the practical exposure is low, but it is the
 one way "restore the file" does not self-heal.
 
+## Verifier review of round 11 — S0 checkpoint `329d181` VERIFIED (2026-10-20)
+
+Independent of the agent's environment: fresh clone of `329d181`
+(scratchpad `verify-r11/repo`, own venv, `pip install -e .[dev]`), live
+smoke from that clone on port 5071 against a copy staged per the
+corrected routine (`crispy-r11`, authored `.avar2-studio` state, isolated
+`HOME`), static demo built from the clone with the wasm binary and the
+snapshotted examples on 5075.
+
+**Gates (fresh clone).** pytest 545 passed, 2 skipped (with the two
+accelerator env vars; the agent's 547 counts the two skips as passes on
+its machine — not material); `ruff check src tests` clean; frontend lint
+0 errors, typecheck clean, `test:unit` all passed including
+`transforms-context` and `instance-sync`; `npm run build` OK;
+`native/kinetikern2` 53 passed; `wasm/fontc-web` 6 passed on the warm
+target.
+
+**Live smoke (my copy, the clone's server).** Staging gate: origin
+warning null, OPSZ default 144. `ui_probe.py` scenarios first-load,
+select-no-save, sync-dots, flyout-source (source PUT 200), lifecycle
+(create no longer blocked), grade (Transforms menu + G badges present —
+screenshot checked), multi-broadcast: all PASS. My own A16 script:
+export → dry-run (0 errors, 0 warnings) → apply → all four sidecars
+byte-identical; control sidecar 2 axes / 133 layers / 697 pins before and
+after. My own A18 script: truncate the source inside a glyph → health
+`last_build_status failed` with the readable parse message and
+`source_transform_error` set; `PUT` → `409 application/json` with
+`build_blocked`; `/api/font` still 11,034,988 B (last-good kept);
+restore with mtime=now → one build → `PUT 200`. Static demo: 8 rows,
+wght slider drives `font-variation-settings`, **zero `/api/*` requests,
+zero console errors**.
+
+**Verdict: every S0 item VERIFIED.** `VERIFIED_HEAD: 329d181`. A10's
+regression is closed with a guard that provably bites.
+
+**One claim not reproduced — re-scopes S1.** Round 10 reported that the
+1 % ORIGIN-row nudge (`Default 400 MaxOpsz` XOPQ 202.5 → 191.2) makes
+the *preview* build fail on glyph `g` (1,767 tuples). On my copy the
+same nudge (made by the flyout-source scenario) relocated the preview
+font — fvar XOPQ default is 191.2 in the built TTF — and four
+subsequent builds succeeded; `g` has 1,471 tuples, `B` 1,386. The
+agent's surviving logs contain only the set-default *export* failures
+(`B`, 2,927 tuples at wght 921.8/605.8), which are the documented
+limit. The likely difference is the extra regions the agent's copy had
+accumulated by then (the A11 control axis `TST2` with brace layers, a
+Kinetikern entry, row grades) — each adds tuples that the relocation
+then splits. So the ORIGIN row is NOT pinned on a pristine Crispy; it
+becomes fragile as studio-authored axes and braces accumulate.
+
+S1 is re-ordered accordingly: **(a) budget pre-check and (b) keep the
+avar2 font on failure stay approved** (they are what makes the
+accumulating case safe and cheap); **(c) the oracle-pinned Preview and
+(d) the badge tooltip wait** until the agent supplies a reproducible
+recipe (which axes/braces/grades present, build log, tuple counts) on a
+copy staged per the routine. Add that recipe to `LOCAL_TEST_RESULTS.md`
+as the first S1 deliverable.
+
+**S2 evidence from this run:** one config import produced builds
+`…-7/-9/-11/-13/-15` (five, ~40–48 s each plus compress) on my copy —
+the watcher self-trigger is confirmed and S2 stays next after S1(a)/(b).
+
+**Backlog noted:** the watcher ignores an older mtime on restore
+(`cp -p`); agreed low exposure, keep as backlog.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

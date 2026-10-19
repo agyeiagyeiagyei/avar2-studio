@@ -1,6 +1,6 @@
-STATE: checkpoint
+STATE: working
 ROUND: 11
 HEAD: 60e71d3
-VERIFIED_HEAD: f27ff5b
-NEXT: S0 landed — round-10 fixes committed per FAIL (ab23b88 A8, 778eb23 A10, c9762ef A16, fc4dba2 A18, 522b4f7 A19, a62486b A6/A7) + this docs commit; the eight verifier follow-ups are closed (LOCAL_TEST_RESULTS.md § Review follow-ups). Next: S1 (ORIGIN-row relocation: budget pre-check, keep the avar2 font on failure, oracle-pinned Preview, ORIGIN badge tooltip), then S2 (one build per import/broadcast, fixed at the watcher), S3 (A19 marker + no-store — already in this hand-off), S4 (cached loader for the remaining read-only route sites), S5 (frontend + probe: idle = no build and no compress), S6 (disk; my own clones are deleted).
-APPROVED: committing the round-10 fixes (one per FAIL, with tests), the A19 marker, and S1–S6 as written in findings.md; the verifier reviews each checkpoint.
+VERIFIED_HEAD: 329d181
+NEXT: S1(a) budget pre-check + S1(b) keep the avar2 font on relocation failure (with a reproducible recipe for the round-10 nudge failure as the first deliverable — see the round-11 review); S1(c)/(d) deferred until that recipe exists; then S2 (one build per import — five observed on the verifier's copy), S4, S5
+APPROVED: S1(a)(b), S2, S4, S5 as written; S1(c)(d) pending the recipe; S3 and S6 are done; the verifier reviews each checkpoint
