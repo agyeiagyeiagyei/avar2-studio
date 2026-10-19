@@ -632,6 +632,121 @@ config import queues four full rebuilds (~7 min); coalescing is a
 job-queue change; (3) whether the A19 marker ships; (4) the machine was
 at 100 % disk during A21 (3.2 GB free at review time).
 
+## Approved next scope — user decisions of 2026-10-20 (verifier-written; the agent picks up from here)
+
+**Decisions recorded.** (1) Committing the round-10 fixes is approved:
+one commit per FAIL with its test, pushed, `STATE: checkpoint`; the
+eight follow-ups in the verifier review above are part of that
+hand-off. (2) The A19 backend marker ships. (3) Import rebuilds are
+fixed at the trigger, not the queue. (4) The ORIGIN-row relocation
+stays as designed (ADR 0001); the failing case gets cheap and
+non-destructive — see S1, which revises the verifier's first draft of
+this recommendation after checking the Preview tab's wiring. (5) Disk:
+test clones go, the warm Rust target stays.
+
+Aim for every item: identical behaviour to what is planned, less time
+or load. Order below is the order of work. Each item names the
+smallest change and the evidence that closes it (into
+`LOCAL_TEST_RESULTS.md`, with commands/logs/screenshots as before).
+
+### S0 — land round 10
+Commit per FAIL (A6, A7, A8, A10, A16, A18, A19) with tests, push,
+checkpoint. Follow-ups 1–8 of the verifier review are due in the same
+hand-off. Full Part A re-run at idle.
+
+### S1 — ORIGIN-row relocation: keep it, bound its cost, never degrade to the 7-axis font
+Why not "skip relocation on the preview": `PreviewTab.jsx` pins
+non-overridden parametric axes at their defaults and drives the user
+axes, so it consumes the font's own avar2 table — relocation is what
+makes the neighbourhood of the default inputs show the ORIGIN row
+(ADR 0001). Instance rows pin the parametric location explicitly and
+never depend on it. So:
+- (a) **Budget pre-check before the instancer.** Before
+  `instantiateVariableFont`, estimate the post-relocation header bytes
+  per glyph from the current tuple set and the moved axes (each tuple
+  splits across every axis whose default moves). If the worst glyph
+  cannot fit even after pruning the ≤2 u tuples, raise the existing
+  readable error WITHOUT running the instancer. Evidence: the round-10
+  nudge (`Default 400 MaxOpsz` XOPQ 202.5 → 191.2) — wall-clock of the
+  failing build before/after (log timestamps), same message text.
+- (b) **Failure keeps the avar2 font.** When relocation is impossible,
+  serve the un-relocated avar2 build (the existing
+  `relocate_at_build=False` path: all axes, avar2 table present) instead
+  of the plain fallback, and report it in health as
+  `origin_relocation_error` with the message. Evidence: after the nudge,
+  `/api/axes` still lists 13 axes, the parametric sliders stay, health
+  carries the error, the amber banner names it.
+- (c) **Preview tab under (b):** when health carries
+  `origin_relocation_error`, pin the parametric axes to
+  `/api/mapped-location`'s values for the current inputs (the oracle the
+  tab already fetches) with the user axes at their defaults — the same
+  technique the rows use — and show a one-line notice ("resting state
+  is approximated by the mapping until the ORIGIN row is back on a
+  master; exports will say the same"). Evidence: with the nudge in
+  place, the Preview canvas at three input locations matches a
+  fontTools instancing of the export-at-that-location within 3 u
+  (drift probe), screenshot of the notice.
+- (d) **ORIGIN row affordance (small):** the ORIGIN badge tooltip says
+  whether the row's out sits on a compiled master and, if not, by how
+  much per axis. No snap action yet (user to decide after seeing it).
+ADR 0001 gets an amendment paragraph for (b)/(c); no new ADR.
+
+### S2 — one build per import (and per broadcast)
+The job queue coalesces already; the extra builds come from
+`watch.py` reacting to the shadow/transformed copies the studio itself
+regenerates during an import (`_resolve_active_source`) and after
+sidecar writes. Stamp studio-written shadow/transformed files as "ours"
+exactly as `_update_csv_modification_time` does for the CSV, and give
+the watcher a short settle window (≈1 s) so a burst of sidecar writes
+yields one request. Evidence: config import → exactly one
+`[jobs] build-… started` in the log; multi-select LCWD broadcast over 3
+rows then Preview open → exactly one build; A17 (external Glyphs save →
+exactly one build) still passes.
+
+### S3 — A19 marker, shipped properly
+Keep the uncommitted change; serve the marked `index.html` with
+`Cache-Control: no-store` (better for bundle updates than the dropped
+ETag); keep the Vite-dev probe. Evidence: follow-up 6 of the review
+(static scenario shows no `/api/health`; desktop shows the marker and
+no probe; `prod-smoke.mjs` + static e2e pass) plus a request-timing
+line showing the desktop first paint no longer waits on the probe.
+
+### S4 — stop re-parsing the source per request
+Seven route call sites parse the `.glyphs` on every request with
+`load_source` (`routes/instances.py` ×4 incl. the auto-save PUT,
+`routes/control_axes.py` ×2, `routes/load.py`); the mtime-keyed
+`load_source_cached` exists for read-only callers. Switch every
+read-only site (and the A18 pre-flight) to the cached loader; any site
+that mutates the returned font object keeps the uncached load (say
+which). Evidence: `PUT /api/instance/<row>?csv_only=true` latency
+before/after from the log timestamps (request start → `Saved … in the
+studio`), on Crispy; the full pytest still green.
+
+### S5 — idle means no build AND no compress
+Frontend: the WOFF2 preview fetch and the "rebuild once when Preview
+opens stale" effect wait for `build_job == null`, not only
+`building == false`, so a page load or slider settle during the
+compress job neither logs 409s nor queues behind it. Probe: same rule.
+Evidence: `console-clean` run immediately after a build passes (no
+409s); the A5 scenario timing unchanged.
+
+### S6 — disk
+The verifier deletes its own `verify-r5`/`verify-r6` clones (1.4 GB).
+The agent deletes `/private/tmp/av2-wheel-test`, `av2-pw`,
+`av2-local-test` (its own, ~0.5 GB) and keeps `av2-routine`. Nobody
+touches `~/Documents/avar2-studio/wasm/fontc-web/target` (9.9 GB, the
+warm target that makes `cargo test` cheap); run that crate's tests with
+`CARGO_TARGET_DIR` pointed at it (follow-up 7).
+
+### S7 — optional, cosmetic
+The origin warning text prints `-1000` for control axes (placeholder
+ranges, no `default`); print their sidecar defaults or omit control
+axes from the list. Pre-existing; take it only if it falls out of S1(d).
+
+Out of scope until the user says otherwise: a snap-to-master action,
+twin-free preview relocation, the 13 `ruff` errors outside `src tests`,
+and anything in Part B.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
