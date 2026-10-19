@@ -849,6 +849,48 @@ the watcher self-trigger is confirmed and S2 stays next after S1(a)/(b).
 **Backlog noted:** the watcher ignores an older mtime on restore
 (`cp -p`); agreed low exposure, keep as backlog.
 
+## Verifier review of the S1 recipe (2026-10-20) — reproduced; S1(c)(d) unparked
+
+Ran `s1_recipe.py` (head `9b83fc0`) myself from the fresh clone on a
+newly staged copy (`crispy-r11b`, port 5071). Same numbers as the agent:
+
+| stage | status / avar2_error | axes | font | `g` | `B` |
+| --- | --- | --- | --- | --- | --- |
+| pristine | ok / None | 12 | 10,472,360 B | 1,476 | 1,328 |
+| + control axis `TST2` + reseeded braces | ok / None | 13 | 10,790,892 B | 1,332 | 1,281 |
+| + 1 % ORIGIN nudge (XOPQ 202.5 → 187.89) | **ok** / "glyph 'g' … 1767 tuples; dropping the 425 sub-visible ones was not enough" | **10** | **586,304 B** | 85 | 77 |
+| + second nudge (→ 173.28) | same | 10 | 585,884 B | 85 | 77 |
+
+**Recipe VERIFIED.** The round-11 review's "not reproduced" stands for a
+pristine copy and is withdrawn for the studio-authored case: one control
+axis with seeded brace layers is enough. S1(c) and S1(d) are unparked;
+the full S1 (a)–(d) is the next checkpoint, in that order. S1(b)'s bar is
+set by this table: after the fix the nudge must leave 13 axes and the
+avar2 table in the served font, `last_build_status` must not read `ok`
+while the mapped build failed (today only `avar2_error` tells), and the
+budget pre-check must short-circuit before the instancer runs.
+
+**Two side findings from the recipe run (agent to close in the S1
+hand-off):**
+
+1. **Unknown `/api/*` requests fall into the Fontra proxy.** The recipe
+   POSTed to `/api/instances/<row>/grade` and
+   `/api/kinetikern/instances/<row>` (both are `PUT` routes); instead of
+   `405`/`404`, the catch-all `'/api/<path:rest>'` in `routes/fontra.py`
+   answered `503 {"error": "Fontra subprocess is not running"}`. A recipe
+   bug (use `PUT`; fix the script and re-run so grade + Kinetikern state
+   is part of the recipe as intended), and a product wart: the catch-all
+   should proxy only Fontra's own paths and let everything else 404/405
+   with a JSON body. Smallest change: narrow the catch-all's prefix or
+   return 404 when the path is not a Fontra route. Evidence: the two
+   recipe calls answering `405`/`404`, and the Fontra editor still working
+   (A11).
+2. **The recipe's baseline font differs in size run to run**
+   (10,533,616 B agent vs 10,472,360 B here, same source bytes) — most
+   likely the SPAC injector's pruning or table ordering, not a defect, but
+   note the cause in the results so size comparisons in A12 have a
+   tolerance.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
