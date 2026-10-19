@@ -328,16 +328,31 @@ export function InstanceEditingProvider({ children }) {
     // persist — dragging them must not schedule CSV writes or
     // destabilize the saved-key guard. SPAC stays: it saves to the
     // CSV's per-instance spacing column.
+    const persistedKey = (c) => {
+      const kept = {};
+      for (const k of Object.keys(c)) {
+        if (!previewOnlyAxisTags.has(k.toLowerCase())) kept[k] = c[k];
+      }
+      return JSON.stringify(Object.keys(kept).sort().map(k => [k, kept[k]]));
+    };
     for (const k of Object.keys(coords)) {
       if (previewOnlyAxisTags.has(k.toLowerCase())) delete coords[k];
     }
-    const coordsKey = JSON.stringify(Object.keys(coords).sort().map(k => [k, coords[k]]));
+    const coordsKey = persistedKey(coords);
     // Idempotence guard. WITHOUT it, a completed rebuild (font reload,
     // instances refetch) re-fires this effect with UNCHANGED coords,
     // which saves again, which rebuilds again — a self-sustaining
     // rebuild loop while the user sits idle (shipped once: 442 PUTs
     // at ~11s intervals). Only genuinely new coordinates get saved.
     if (autoSaveLastSaved.current[name] === coordsKey) {
+      return undefined;
+    }
+    // Selecting a row seeds editingCoordinates from the row itself;
+    // that is not an edit. The guard above has no memory before the
+    // first save, so without this check a plain click saved the
+    // unchanged row, which bumped the mappings' mtime, marked the build
+    // stale, and cost a full rebuild the moment the Preview tab opened.
+    if (coordsKey === persistedKey(selectedInstance.coordinates || {})) {
       return undefined;
     }
     clearTimeout(autoSaveTimer.current);
