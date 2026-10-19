@@ -768,12 +768,15 @@ commit `364ae67`):
 | 7. A21 | `wasm/fontc-web cargo test` with `CARGO_TARGET_DIR` pointed at the warm target: compiles and all test binaries pass (6 tests across the targets, 0 failures); the earlier BLOCKED was the cold-build disk, not code. Disk after S6 clean-up: 5.1 GiB free. |
 | 8. full Part A re-run at idle | idle is now enforced before every scenario (`building: false` **and** no `build_job`), plus a header-interactive wait before the menu-driven ones. Results table in `LOCAL_TEST_RESULTS.md`. |
 
-**Two harness defects found while re-running** (both fixed in `ui_probe.py`,
-neither a product defect): a scenario could start while a build from the
+**Three harness defects found while re-running** (all fixed in `ui_probe.py`,
+none a product defect): a scenario could start while a build from the
 previous one was in flight — the `.build-veil` intercepts the Download
 click and the header menus are `disabled={busy}`, which read as failures;
-and the first `export` failure in the round-10 run was the ORIGIN-row nudge
-from A7 (now ordered before A7).
+the first `export` failure in the round-10 run was the ORIGIN-row nudge
+from A7 (now ordered before A7); and opening the Preview tab on a stale
+build makes the app itself post `/api/build`, so `export` has to wait for
+*that* build too (A6's source save leaves the build stale) — the veil then
+eats the Download click even though the scenario started at idle.
 
 **New observation for the backlog (not in S1–S6):** restoring a corrupt
 source with an *older* mtime (e.g. `cp -p` from a backup) is not picked up
