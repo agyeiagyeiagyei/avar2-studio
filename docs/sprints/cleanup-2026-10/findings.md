@@ -512,6 +512,126 @@ capture, FAIL screenshots and one scenario per test ID.
 **Part B is untouched** (Glyphs/Fontra/design apps/push are the
 designer's).
 
+## Round 10 — the Round-9 FAILs fixed and re-run (2026-10-19/20)
+
+Fixes (uncommitted until the user approves the commit), one root cause
+each, each with a test:
+
+| Round-9 FAIL | Root cause | Fix | Test |
+| --- | --- | --- | --- |
+| A6 orange source rows | `getInstanceSyncStatus` compares the CSV `out` map (parametric only) with `source_coordinates` (every axis), and `_sameCoords` bails on the key-count mismatch | compare against the subset of source coordinates the CSV actually carries | `test_source_writeback_targets.py` |
+| A7 500 on save-to-source | `instance-renames.json` alias `Def → Default 400 MaxOpsz` is stale; the route maps back to a `Def` the source no longer has | fall back to the requested name when the alias target is absent; skip the CSV row only when the CSV branch wrote it; a studio-only delete no longer touches the source | `test_save_falls_back_to_the_display_name_when_the_alias_is_stale`, `test_full_source_save_resyncs_its_own_csv_row`, `test_delete_of_a_studio_only_row_does_not_touch_the_source` |
+| A8 New Instance blocked | `DuplicateModal` seeds `step={0.1}` inputs with float32 defaults (`663.1000061035156`), so native validation refuses to submit | `step="any"` (the server clamps) | lifecycle scenario |
+| A10 no Transforms menu / no G badges | `useTransforms()`'s provider value omits `transforms`/`grade` | re-export them (they stay owned by `useStudioData`) | grade scenario |
+| A16 self-import rejected | layer pins and control tags are compared case-sensitively (`lcwd`/`LCWD`) | case-insensitive tag lookup in `validate_bundle`; a layer on a missing glyph is a warning; CSV read/write keeps its own line endings | `test_round_trip_accepts_authored_tag_case_on_layers`, `test_layer_for_a_missing_glyph_is_a_warning`, `test_apply_bundle_preserves_the_csv_bytes` |
+| A18 broken source passes the gate | the pipeline falls back to a reduced font and reports success, so `LAST_BUILD_STATUS` stays `ok` | `_run_build()` pre-flights `load_source`; a loader failure records `last_build_status: failed` with the parse message and keeps the last-good font | `test_unreadable_source_fails_the_build` |
+| A19 `/api/health` 404 on the static demo | `selectApiMode()` probes the backend before deciding | the served index carries `<meta name="avar2-backend">`; production without it goes straight to static mode | `test_ui_index_marker.py` |
+
+**Two new findings from the re-run.**
+
+1. **A modest ORIGIN-row edit takes the mapped build over gvar's
+   per-glyph header limit.** Once A7 actually saves, the probe's 1 %
+   XOPQ nudge on `Default 400 MaxOpsz` (202.5 → 191.2) makes the
+   *preview* build fail: “glyph 'g' has too many variation tuples …
+   after relocating the default (1767 tuples; dropping the 428
+   sub-visible ones was not enough)”, the studio shows the amber
+   fallback banner, the exported estimates drop to the plain build
+   (642 KB) and the parametric sliders disappear — so A12 cannot even
+   run. Restoring the row restores the mapped build. This is the
+   documented relocation limit, but 1 % of a slider is a plausible
+   design move, so it deserves a note in the studio UI (the message is
+   readable and the fallback is safe; it is discovery cost, not data
+   loss). Probe consequence: `export` now runs **before** the origin
+   edit.
+2. **A config import queues four sequential full rebuilds.** Applying a
+   bundle rewrites four sidecars; each write schedules its own rebuild
+   — observed `build-…-3/4/5` at 47–48 s each plus a ~16 s compress
+   apiece, ~7 minutes on Crispy before the studio is idle again. Not a
+   correctness bug (the payload round-trips), but it makes A16 slow and
+   would feel broken to a designer. Candidate fix (not done): coalesce
+   the import's writes into one rebuild.
+
+**Round-10 fix found by re-running A16 with strict comparison.** Export
+pruned layer pins with an exact-case keep-set (`WGHT` vs the source's
+`wght`), and because the import then wrote the pruned locations back,
+one export→import cycle moved every brace layer that pinned a
+traditional axis. On Crispy that was 55 of 133 layers (WGHT 900, WDTH 5,
+WDTH 220, …). Fixed in `_portable_control_axes` with a case-insensitive
+keep-set and `test_export_keeps_pins_on_source_axes_that_differ_in_case`.
+Pins on axes the source genuinely lacks (SPAC/GRAD/ROND) are still
+pruned — `control_axes/shadow_designspace.py` ignores them at build time
+(`if name is None: continue`), so those are inert either way.
+
+## Verifier review of rounds 9–10 (2026-10-20, head `9c4ee68` + the uncommitted fixes)
+
+Reviewed against the committed code, the pre-sprint baseline `4e4313b`
+and the uncommitted diff in the worktree; ran the four new test files
+(20 passed), `ruff check src tests` (clean) and the frontend typecheck
+(clean) on the uncommitted state. Verdict per item, then the follow-ups
+the agent owes before the next hand-off.
+
+| Item | Root cause verified? | Regression or pre-existing | Fix as proposed |
+| --- | --- | --- | --- |
+| A6 orange SRC rows | yes — `_sameCoords` key-count compare | pre-existing (`4e4313b` has it) | accepted: compare the subset the CSV carries |
+| A7 stale alias → 500 | yes — `_source_instance_name` has no fallback | pre-existing | accepted (save + delete fallbacks, `csv_row_written` sync fix) |
+| A8 step validation | yes — `step={0.1}` seeded with float32 defaults | pre-existing | accepted: `step="any"` |
+| A10 Transforms menu / G badges gone | yes — provider value omits `transforms`/`grade` | **SPRINT REGRESSION from T3.6 (`cdaebc8`)**: App passed them as props, the context does not carry them. Missed in round 7 (the smoke never opened the menu). | accepted: re-export them |
+| A16 self-import rejected + export moved 55/133 layer pins | yes for the case mismatch; the pin-pruning data loss is plausible from the code and **must be shown in evidence** (see below) | pre-existing | accepted |
+| A18 unparseable source | **partly**: the degraded build with `source_transform_error` set is BY DESIGN (ARCHITECTURE §5 banner); the real defects are the raw-HTML 500s on every mutating route and that fontc's leniency let a file glyphsLib cannot read build at all | pre-existing | accepted as a pre-flight that fires ONLY when `load_source` fails; the transform-failure fallback must stay |
+| A19 `/api/health` 404 on static hosts | yes | pre-existing, by design | marker approach acceptable; it is a product change, so it ships only with the user's nod (alternative: document the 404) |
+| A20 / A21 | routine notes | — | routine updated; wasm crate BLOCKED by disk space, not code |
+
+**Follow-ups owed by the agent (each with evidence in
+`LOCAL_TEST_RESULTS.md`):**
+
+1. **Commit the fixes** one commit per FAIL with its test, push, and set
+   `STATE: checkpoint`; I verify in a fresh clone + live smoke on my own
+   copy. Nothing in the shared worktree counts until it is pushed.
+2. **A10 guard.** Typecheck passed with the fields missing because
+   `Header.tsx` destructures an untyped context with silent defaults
+   (`transforms = []`). Type the TransformsContext value (an interface
+   in the hook or a `.d.ts`) or drop the defaults so a missing field
+   fails `npm run typecheck`; show the typecheck failing before the fix
+   and passing after. Re-run the grade scenario and attach the
+   Transforms-menu and G-badge screenshots.
+3. **A6 evidence is frontend, the named test is Python.** Add a node
+   spec for the subset comparison (the `test:unit` harness) or at
+   minimum the probe screenshot of a pristine SRC row showing green.
+4. **A16 data-loss proof.** Export → import on the Crispy copy with no
+   edits in between; diff `Crispy-control.json` before/after (layer
+   locations identical, 133 of 133 pins kept). Record the four
+   sequential rebuilds as a backlog item, not a fix.
+5. **A18.** (a) Name the test that keeps the transform-failure fallback
+   (banner, degraded font) green. (b) Measure the pre-flight's cost on
+   Crispy (one extra glyphsLib load per build); use the cached loader if
+   its invalidation covers the watcher path. (c) Re-run with a
+   corruption fontc also rejects (truncate inside a glyph), and record
+   `last_build_status`, `last_build_error`, `source_transform_error`, the
+   served font size and a mutating request's status before and after
+   restore. (d) Every mutating route must answer JSON, never an HTML
+   500, while the source is unreadable.
+6. **A19.** Serving `index.html` through `Response` drops `send_file`'s
+   conditional/ETag handling — confirm that is acceptable or set the
+   headers. Evidence: the static scenario's request log shows no
+   `/api/health` at all; the desktop path shows the marker and no probe;
+   `prod-smoke.mjs` and the static e2e still pass.
+7. **A21.** Re-run `wasm/fontc-web cargo test` with
+   `CARGO_TARGET_DIR=~/Documents/avar2-studio/wasm/fontc-web/target` (the
+   warm target; a cold build is what filled the disk). The 13 `ruff`
+   errors outside `src tests` stay pre-existing and out of scope.
+8. **Full Part A re-run** after the fixes, not only the failing
+   scenarios, at idle (`building: false` and `build_job: null`).
+
+**For the user, not the agent:** (1) new finding 1 — a 1 % parametric
+nudge on the ORIGIN row pushes the preview relocation over the gvar
+header limit on Crispy, so the ORIGIN row is in practice pinned to the
+compiled master; options are a UI note with a revert affordance, a
+twin-free relocation (drop slant/rounding twins during relocation) or
+the inserted-master route ADR 0007 rejected; (2) new finding 2 — a
+config import queues four full rebuilds (~7 min); coalescing is a
+job-queue change; (3) whether the A19 marker ships; (4) the machine was
+at 100 % disk during A21 (3.2 GB free at review time).
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
