@@ -44,7 +44,8 @@ def test_build_export_captures_fingerprint_and_authored_state(crispy_source, cri
         {"tag": "YOPQ", "min": 2.0, "default": 2.0, "max": 462.0, "has_master_coverage": True},
     ]
     assert bundle["source"]["avar2_out_columns"] == ["XTRA", "XOPQ", "YOPQ"]
-    assert bundle["avar2_csv"] == crispy_csv.read_text(encoding="utf-8-sig")
+    with crispy_csv.open("r", encoding="utf-8-sig", newline="") as f:
+        assert bundle["avar2_csv"] == f.read(), "the CSV text is recorded verbatim"
     assert bundle["control_axes"] == {"version": 1, "axes": [],
                                       "instance_values": {}}
     assert bundle["transforms"] == {"version": 1, "transforms": []}
@@ -75,6 +76,73 @@ def test_export_validate_apply_round_trip(crispy_source, crispy_csv):
     assert tx_config.entries(crispy_source) == [
         {"type": "spac", "enabled": True, "params": {"min": -20, "max": 40}}
     ]
+
+
+def test_round_trip_accepts_authored_tag_case_on_layers(crispy_source, crispy_csv):
+    """A control axis keeps its authored tag case (LCWD/CRBR), and its
+    layers pin that same case. Validation must compare case-insensitively
+    or an exported bundle cannot be imported into the source it came from."""
+    control_axes.add_axis(crispy_source, "CRBR", "Crossbar", 0, -100, 100)
+    control_axes.apply_layer_delta(
+        crispy_source, "CRBR",
+        add=[{"glyph": "e", "location": {"CRBR": 100}}],
+    )
+    bundle = config_port.build_export(crispy_source, crispy_csv)
+    assert bundle["control_axes"]["axes"][0]["tag"] == "CRBR"
+
+    report = config_port.validate_bundle(bundle, crispy_source)
+    assert report["ok"] is True, report["errors"]
+    assert report["errors"] == []
+
+
+def test_export_keeps_every_authored_layer_pin(crispy_source, crispy_csv):
+    """A self-export/import must not rewrite the designer's layer locations.
+
+    Layer pins carry the COMPILED font's tags (WGHT/WDTH/OPSZ from the
+    instance set, SPAC/GRAD/ROND from transforms) as well as the source's
+    own. The export used to prune pins whose axis the source does not
+    declare — exact-case matching meant even ``WGHT`` against ``wght`` —
+    and the import then wrote the pruned locations back: on Crispy that was
+    55 of 133 brace layers. Pins are now kept verbatim (the shadow regen
+    ignores axes its designspace lacks), so the bundle is a faithful
+    record."""
+    control_axes.add_axis(crispy_source, "CRBR", "Crossbar", 0, -100, 100)
+    control_axes.apply_layer_delta(
+        crispy_source, "CRBR",
+        add=[{"glyph": "e", "location": {"CRBR": 100, "XTRA": 100, "WWGT": 900}}],
+    )
+    bundle = config_port.build_export(crispy_source, crispy_csv, capture=False)
+    loc = bundle["control_axes"]["axes"][0]["layers"][0]["location"]
+    assert loc == {"CRBR": 100, "XTRA": 100, "WWGT": 900}, loc
+
+    report = config_port.validate_bundle(bundle, crispy_source)
+    assert report["ok"] is True, report["errors"]
+    assert any("WWGT" in w for w in report["warnings"]), report["warnings"]
+
+
+def test_apply_bundle_preserves_the_csv_bytes(crispy_source, crispy_csv):
+    """A self-export/import must write the same CSV bytes back: reading with
+    universal newlines turned CRLF into LF, so every row changed."""
+    text = crispy_csv.read_text(encoding="utf-8-sig")
+    crispy_csv.write_bytes(
+        ("\ufeff" + text.replace("\r\n", "\n").replace("\n", "\r\n")).encode("utf-8"))
+    before = crispy_csv.read_bytes()
+    bundle = config_port.build_export(crispy_source, crispy_csv, capture=False)
+    report = config_port.apply_bundle(bundle, crispy_source, crispy_csv)
+    assert report["ok"] is True, report["errors"]
+    assert crispy_csv.read_bytes() == before
+
+
+def test_layer_for_a_missing_glyph_is_a_warning(crispy_source, crispy_csv):
+    """Stale seed layers can name glyphs the source no longer has. The
+    regen skips them; import must warn, not refuse the whole bundle."""
+    _seed_studio_config(crispy_source)
+    bundle = config_port.build_export(crispy_source, crispy_csv)
+    bundle["control_axes"]["axes"][0]["layers"][0]["glyph"] = "not-a-glyph"
+
+    report = config_port.validate_bundle(bundle, crispy_source)
+    assert report["ok"] is True, report["errors"]
+    assert any("not-a-glyph" in w for w in report["warnings"])
 
 
 def test_bundle_from_glyphs_is_refused_on_designspace(crispy_source, crispy_csv, roboto_source):

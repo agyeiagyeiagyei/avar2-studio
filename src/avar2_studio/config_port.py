@@ -35,7 +35,6 @@ transforms are always replaced wholesale.
 
 from __future__ import annotations
 
-import copy
 import csv
 import io
 import re
@@ -48,6 +47,7 @@ from typing import Dict, List, Optional
 from . import control_axes as _control_axes
 from . import csv_io as _csv_io
 from . import grade as _grade
+from . import sidecar_io as _sidecar_io
 from . import source_font as _source_font
 from .transforms import config as _tx_config
 from .transforms import registry as _tx_registry
@@ -106,7 +106,11 @@ def build_export(source_path: Path, csv_path: Optional[Path],
     csv_text = ""
     out_columns: List[str] = []
     if csv_path is not None and csv_path.exists():
-        csv_text = csv_path.read_text(encoding="utf-8-sig")
+        # newline="" keeps the file's own line endings in the bundle; a
+        # universal-newline read turns CRLF into LF, and the import then
+        # rewrote every row (a byte diff on a no-op round-trip).
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+            csv_text = f.read()
         try:
             _, _, _, out_cols, _ = _csv_io.read_csv_mappings_with_axes(csv_path, source_path)
             out_columns = list(out_cols)
@@ -132,9 +136,7 @@ def build_export(source_path: Path, csv_path: Optional[Path],
             ],
             "avar2_out_columns": out_columns,
         },
-        "control_axes": _portable_control_axes(
-            _control_axes.load(source_path), {a.get("tag") for a in axes}
-        ),
+        "control_axes": _control_axes.load(source_path),
         "avar2_csv": csv_text,
         "transforms": _tx_config.load(source_path),
         "grade": _grade.load(source_path),
@@ -144,40 +146,6 @@ def build_export(source_path: Path, csv_path: Optional[Path],
 # --------------------------------------------------------------------------
 # Validate
 # --------------------------------------------------------------------------
-
-
-def _portable_control_axes(data: Dict, source_tags) -> Dict:
-    """Drop layer pins for axes the TARGET source cannot have.
-
-    Layers authored while the studio was showing the built font's axis list
-    picked up pins on transform-injected axes — SPAC from the spacing
-    transform, GRAD from grade. Those exist only in the compiled font, never
-    in a .glyphs source, so validate_bundle rejects them and the bundle will
-    not import anywhere, including back onto the source it came from.
-
-    Every such pin observed sits at the axis default, so dropping it changes
-    nothing about where the layer lives. Pins on the bundle's own control axes
-    are kept — those are declared by the bundle itself.
-    """
-    out = copy.deepcopy(data)
-    declared = {str(a.get("tag")) for a in (out.get("axes") or [])}
-    keep = {str(t) for t in source_tags if t} | declared
-    dropped = 0
-    for axis in out.get("axes") or []:
-        for layer in axis.get("layers") or []:
-            for field in ("location", "target"):
-                loc = layer.get(field)
-                if not isinstance(loc, dict):
-                    continue
-                phantom = [k for k in loc if k not in keep]
-                for k in phantom:
-                    del loc[k]
-                    dropped += 1
-    if dropped:
-        print(f"Export: dropped {dropped} layer pin(s) on axes absent from the "
-              f"source (transform-injected); the bundle stays portable",
-              file=_sys.stderr)
-    return out
 
 
 def _num(v) -> Optional[float]:
@@ -220,6 +188,11 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
 
     src_axes = _source_font.get_axes(font)
     axis_by_tag = {str(a.get("tag", "")): a for a in src_axes}
+    # Layer locations carry the authored tag case (e.g. "LCWD"), while
+    # declared control tags are normalized to lowercase for collision
+    # checks. Compare everything case-insensitively, or a bundle exported
+    # from a source with authored-case control axes fails its own import.
+    axis_by_tag_ci = {tag.lower(): a for tag, a in axis_by_tag.items()}
     parametric_tags = {
         str(a.get("tag", "")).upper()
         for a in src_axes
@@ -267,7 +240,7 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
             )
 
     # Layer locations may pin any source axis OR any control axis in the bundle.
-    known_loc_axes = set(axis_by_tag.keys()) | declared_tags
+    known_loc_axes = set(axis_by_tag_ci) | declared_tags
     for ax in bundle_axes:
         tag = str(ax.get("tag", "")).strip().lower()
         own_min, own_max = _num(ax.get("min")), _num(ax.get("max"))
@@ -277,15 +250,31 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
             summary["layers"] += 1
             glyph = str(layer.get("glyph", "")).strip()
             if glyph and glyph not in glyph_names:
-                errors.append(
-                    f"layer on axis '{tag}': glyph '{glyph}' does not exist in this source."
+                # A layer on a glyph this source doesn't have cannot be
+                # applied; the shadow regen skips it too. Warn (and keep the
+                # layer in the sidecar) rather than refusing the whole
+                # bundle — otherwise a self-export with a stale seed layer
+                # cannot be re-imported.
+                warnings.append(
+                    f"layer on axis '{tag}': glyph '{glyph}' does not exist in "
+                    f"this source; the layer will be skipped."
                 )
             loc = layer.get("location") or {}
             for atag, val in loc.items():
-                if atag not in known_loc_axes:
-                    errors.append(
+                atag_key = str(atag).lower()
+                if atag_key not in known_loc_axes:
+                    # Pins on axes only the COMPILED font has (WGHT/WDTH/OPSZ
+                    # from the instance set, SPAC/GRAD/ROND from transforms)
+                    # are kept verbatim: the sidecar is the designer's file and
+                    # a round-trip must not rewrite it. The shadow regen skips
+                    # whatever axis its designspace lacks
+                    # (control_axes/shadow_designspace.py), so keeping the pin
+                    # cannot move the layer — but dropping it WOULD lose the
+                    # only record of where the layer was authored.
+                    warnings.append(
                         f"layer on axis '{tag}' (glyph '{glyph}'): pins axis '{atag}', "
-                        f"which this source does not have."
+                        f"which this source does not have; the pin is kept in the "
+                        f"sidecar and ignored by the build."
                     )
                     continue
                 v = _num(val)
@@ -295,8 +284,9 @@ def validate_bundle(bundle: Dict, source_path: Path) -> Dict:
                         f"is not a number ({val!r})."
                     )
                     continue
-                if atag in axis_by_tag:
-                    lo, hi = _num(axis_by_tag[atag].get("min")), _num(axis_by_tag[atag].get("max"))
+                if atag_key in axis_by_tag_ci:
+                    src_axis = axis_by_tag_ci[atag_key]
+                    lo, hi = _num(src_axis.get("min")), _num(src_axis.get("max"))
                 else:
                     lo, hi = own_min, own_max
                 if lo is not None and hi is not None and not (lo <= v <= hi):
@@ -414,8 +404,10 @@ def apply_bundle(bundle: Dict, source_path: Path, csv_path: Optional[Path]) -> D
 
     csv_text = bundle.get("avar2_csv") or ""
     if csv_text.strip() and csv_path is not None:
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        csv_path.write_text(csv_text, encoding="utf-8-sig")
+        # Through the shared atomic writer, keeping the bundle's own line
+        # endings (newline=""): a universal-newline write turned the file's
+        # CRLF into LF, which rewrote every row on a no-op import.
+        _sidecar_io.write_text(csv_path, csv_text, encoding="utf-8-sig", newline="")
 
     _tx_registry.discover()
     cleaned = _tx_registry.validate(bundle.get("transforms", {}).get("transforms") or [])
