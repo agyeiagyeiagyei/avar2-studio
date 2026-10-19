@@ -436,6 +436,82 @@ The row test is unaffected (rows never carry control inputs), only the
 message is misleading. Candidate fix: exclude control axes from
 `defaults_desc` or print their sidecar defaults.
 
+## Round 9 — local test routine, Part A on a Crispy copy (2026-10-19)
+
+Ran `LOCAL_TEST_ROUTINE.md` Part A end to end against
+`/private/tmp/av2-routine` (port 5072) at `de4de1a`, after re-staging
+with the authored `.avar2-studio` state. Full evidence in
+`LOCAL_TEST_RESULTS.md`; this section is the verdict summary and the
+root causes.
+
+**Greens (13).** A1 staging gate + axes/rows, A2 first load, A3
+select≠edit, A4 Preview-only traffic, A5 one csv-only save + one
+build, A9 multi-select LCWD broadcast, A11 secondary axis + Fontra on
+the shadow, A12 exports (TTF/WOFF2; 496 glyphs, 0 point-count
+mismatches, 0.0 u drift at wght 900; set-default at 921.8/605.8
+returns the documented gvar-limit error), A13 Kinetikern (KKRN
+present on apply, absent after revert), A14 Tester, A15 Load Font
+(example and back), A17 watcher (exactly one build, no unexpected
+EOF), A21 clean install (pytest 536, ruff `src tests` clean, lint 0
+errors, typecheck/unit/build green, kinetikern2 Rust 53 passed).
+
+**FAILs (7).**
+
+1. **A6 — a source row can never be green.** `_sameCoords` compares
+   key counts; `csvCoords` (CSV `out`, 3 keys) vs `source_coordinates`
+   (8 keys, control/transform axes included at their defaults) is
+   always false. `Default 400 MaxOpsz` has `out == glyphs_coordinates`
+   for XTRA/XOPQ/YOPQ yet its dot is orange.
+2. **A7 — stale rename alias → 500 on “Save to source file”.**
+   `instance-renames.json` says `Def → Default 400 MaxOpsz`, but the
+   `.glyphs` instance is already named `Default 400 MaxOpsz`;
+   `_source_instance_name` maps back to a `Def` that no longer exists
+   and the route 500s. Repro: direct PUT, source unchanged.
+3. **A8 — New Instance is blocked by HTML step validation.** The modal
+   seeds `step=0.1` inputs with float32 defaults
+   (`663.1000061035156`), so native validation refuses to submit (no
+   POST). Rounding the fields makes create/duplicate/rename/delete
+   pass.
+4. **A10 — Transforms menu and G badges never render.**
+   `useTransforms()`'s provider value omits `transforms` and `grade`
+   (they live in `useStudioData`), so Header's menu condition and the
+   rows' `gradeEnabled` are always false even though the sidecars
+   drive the build.
+5. **A16 — config bundle cannot import into its own source.** Dry-run
+   reports 163 `lcwd` layer errors (“pins axis 'LCWD', which this
+   source does not have”); the validator checks layers against the
+   source axes before the control-axis sidecar applies.
+6. **A18 — a source that no longer parses does not trip the build
+   gate.** The build falls back to a reduced 7-axis font and reports
+   success, so `LAST_BUILD_STATUS` stays `ok`; the PUT then 500s with
+   `ParseError: Junk after plist`, and the degraded font replaces the
+   last-good full font. Restoring + rebuilding succeeds.
+7. **A19 — one `/api/health` 404 on the static demo.** `selectApiMode`
+   probes it by design; Chrome logs the 404, so “no `/api/*` / zero
+   console errors” is not literally met. Everything else (example
+   switch, sliders, wasm) passes.
+
+**A20 note.** Console-clean passes at idle; running it while the
+WOFF2 compress job is alive logs three 409s from
+`/api/font?format=woff2`. Idle must be `building: false` AND no
+`build_job`.
+
+**A21 scope notes.** `ruff check .` (incl. `examples/`, `spike/`)
+still reports 13 pre-existing errors; round 7's “ruff clean” holds for
+`src tests`. `wasm/fontc-web cargo test` could not compile — the
+machine is at 100% disk with 1.2 GB free — so that crate is BLOCKED
+here, not failed.
+
+**Routine/probe defects fixed.** The accelerator paths in the setup
+snippet expanded `~` against the new `HOME` and silently disabled both
+engines (SPAC fell back to fontTools, Kinetikern 503); they now use
+`$WT/...`. The routine now defines idle with `build_job` included.
+`ui_probe.py` gained `--sources`, dialog acceptance, response
+capture, FAIL screenshots and one scenario per test ID.
+
+**Part B is untouched** (Glyphs/Fontra/design apps/push are the
+designer's).
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

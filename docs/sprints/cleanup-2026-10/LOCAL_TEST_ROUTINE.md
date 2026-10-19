@@ -30,8 +30,10 @@ table dump)`. A claim without evidence is NOT-VERIFIED.
   `~/.avar2-studio/` is never written. Open-editor spawns Fontra on 8001
   (single global port); kill it with the server.
 - A full Crispy build is ≈40 s plus ≈15 s WOFF2 compress. `POST
-  /api/build` blocks until the build ends. Wait for `building: false` on
-  `/api/health` between tests that build.
+  /api/build` blocks until the build ends. Between tests that build wait
+  for BOTH `building: false` and `build_job: null` on `/api/health`: the
+  compress job outlives `building`, and `/api/font?format=woff2` answers
+  409 (a console error in Chrome) until it finishes.
 - Verify font-level claims by reading the built tables with fontTools,
   never by eyeballing the preview. Verify UI claims with screenshots you
   have looked at, plus the request log.
@@ -51,9 +53,12 @@ cp -R $SRC/.avar2-studio/default-origin $SCRATCH/sources/.avar2-studio/
 # bundle: build and copy into the served static dir (no --delete: static/.gitkeep is tracked)
 (cd $WT/frontend && npm ci && npm run build) && rsync -a $WT/frontend/build/index.html $WT/frontend/build/assets $WT/src/avar2_studio/static/
 
+# Accelerator paths MUST be absolute: in `HOME=... VAR=~/x cmd`, zsh expands
+# the tilde against the NEW home, so the server silently loses both engines
+# (SPAC falls back to fontTools, Kinetikern answers 503).
 HOME=$SCRATCH/home PYTHONPATH=$WT/src \
-AVAR2_SPAC_INJECT=~/Documents/avar2-studio/wasm/fontc-web/target/release/spac-inject \
-AVAR2_KK2_DYLIB=~/Documents/avar2-studio/native/kinetikern2/target/release/libkinetikern2.dylib \
+AVAR2_SPAC_INJECT=$WT/wasm/fontc-web/target/release/spac-inject \
+AVAR2_KK2_DYLIB=$WT/native/kinetikern2/target/release/libkinetikern2.dylib \
 $PY -m avar2_studio $SCRATCH/sources/Crispy.glyphs --port 5072 > $SCRATCH/server.log 2>&1 &
 
 curl -s localhost:5072/api/health   # wait for font_built true, building false, last_build_status ok
