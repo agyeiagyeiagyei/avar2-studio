@@ -280,6 +280,12 @@ export function TransformsProvider({ children }) {
   };
 
   const value = {
+    // Header's Transforms menu and InstanceRows' grade badges read the
+    // state from here (it lives in useStudioData); without these two the
+    // menu and the G badge never rendered even though the sidecars drive
+    // the build.
+    transforms,
+    grade,
     transformsDirty,
     rounding,
     slant,
