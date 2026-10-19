@@ -82,7 +82,6 @@ queue.
 8. **Full Part A re-run at idle** — the table above; every scenario now starts from a drained queue.
 
 ### New items for the backlog (not S1–S6)
-
 - **The watcher ignores an older mtime.** Restoring a corrupt source with `cp -p`/`copy2` (mtime going backwards) does not trigger a rebuild; the gate stays closed until the file is touched. `git checkout` and editor saves set mtime=now, so the exposure is low.
 - **`npm run lint` counts a local Pages build.** With `frontend/dist-pages/` present, `eslint .` reports ~690 errors inside the built JS (round 8's note). CI lints *before* it builds `dist-pages`, so it is only a local annoyance — the directory is deleted here (13 MB) and lint is back to **0 errors / 34 warnings**. Adding `dist-pages/` to the eslint ignores is a one-line change for whoever wants it.
 - **ORIGIN-row nudge ≈ gvar limit** and **four rebuilds per config import** — written up in `findings.md` § Round 10; S1 and S2 own them.
@@ -133,6 +132,46 @@ queue.
 | A19 | **FAIL** (minor; by design?) | Static Pages build served on 5075: example switch Roboto Delta Mini (1 row) ↔ Crispy Mini (8 rows), sliders drive the font (`wght 100 → 753.1`, `font-variation-settings` follows), no backend data requests. But `selectApiMode()` issues `GET /api/health` on load; on the static host it 404s and Chrome logs `Failed to load resource: 404`, so the “no `/api/*` request / zero console errors” expectation is not met. Shot `ui-shots/a19-static.png`. |
 | A20 | **PASS** (with a timing note) | `ui_probe console-clean` visits Instances/Preview/Kinetikern/Tester with zero console errors when run at idle. If run immediately after a build while the **compress** job still runs, three `GET /api/font?format=woff2` return 409 and Chrome logs them; the 409s stop once compression finishes. Idle is `building: false` **and** `build_job: null` — the routine's idle rule only covered the first. |
 | A21 | **PASS** (two scope notes) | Fresh clone of `de4de1a` in `/private/tmp/av2-clean`: `pip install -e '.[dev]'` OK; **pytest 536 passed** in 71.27 s (with the two accelerator env vars); `ruff check src tests` → “All checks passed!”. Frontend: `npm ci` 355 packages; `npm run lint` **0 errors** (34 warnings); `typecheck` clean; `test:unit` “all passed”; `npm run build` OK (chunk-size warning only). Rust: `native/kinetikern2 cargo test` → **53 passed** (plus 1 ignored); `wasm/fontc-web cargo test` **could not compile — No space left on device** (disk at 100%, 1.2 GB free), so that crate's tests are BLOCKED by the machine, not by code. Note: `ruff check .` (repo root, including `examples/` and `spike/`) reports **13 pre-existing** errors (I001/F401/B007/F841/RUF100 outside `src`/`tests`); round 7's “ruff clean” is only true for `src tests`. |
+
+## S1 — reproduction recipe for the ORIGIN-nudge relocation failure
+
+The round-11 review could not reproduce the round-10 claim on a *pristine*
+copy, so S1(c)(d) are parked on a reproducible recipe. Here it is, with the
+control it was missing: **a control axis with its seeded brace layers** is
+what makes the 1 % ORIGIN nudge overflow the relocation.
+
+Script: `docs/sprints/cleanup-2026-10/s1_recipe.py` (mutates only the
+scratch copy). Copy re-staged per the routine (CSV sha `b13128f7…`), server
+on 5072, logs `s1-recipe.log` (accumulated) and `s1-recipe-pristine.log`
+(control).
+
+| Stage | status / `avar2_error` | axes | font | `g` tuples | `B` tuples |
+| --- | --- | --- | --- | --- | --- |
+| pristine baseline | ok / None | 12 | 10,533,616 B | 1,476 | 1,328 |
+| **pristine + nudge** (`XOPQ 202.5 → 187.89`) | **ok / None** | 12 | 11,042,136 B | 1,467 | 1,383 |
+| pristine + second nudge (`→ 173.28`) | ok / None | 12 | 11,013,112 B | 1,466 | 1,402 |
+| + control axis `TST2` + reseeded brace layers | ok / None | 13 | 10,853,032 B | 1,332 | 1,281 |
+| **+ same nudge** (`→ 187.89`) | **build failed** / “glyph 'g' has too many variation tuples … after relocating the default (1767 tuples; dropping the 425 sub-visible ones was not enough)” | **10** | **641,432 B** | 85 | 77 |
+| + second nudge (`→ 173.28`) | same failure (1,767 / 428 dropped) | 10 | 641,012 B | 85 | 77 |
+
+Reading:
+
+- On a pristine Crispy the nudge relocates cleanly at both steps — the
+  verifier's result reproduces exactly (their `g` 1,471 / `B` 1,386).
+- With **one control axis and its brace layers** present, the same nudge
+  takes `g` from 1,332 to 1,767 tuples *after relocation* (+33 %) and the
+  per-glyph header budget overflows; the studio then serves a **10-axis,
+  641 KB plain fallback** (`g` down to 85 tuples, mapped axes gone) and
+  reports it only through `avar2_error`, with `last_build_status: ok`.
+- Grade and Kinetikern were **not** needed: both endpoints answered 503
+  (“Fontra subprocess is not running”) in this run, so the accumulation is
+  the control axis + its seeded braces alone.
+- The second nudge adds nothing (`1,767` again) — the failure is the
+  brace-layer tuple count crossing the ceiling, not the distance moved.
+
+This is what S1(a) must catch before the instancer and what S1(b) must not
+make worse: a 641 KB unmapped font instead of the 10.8 MB avar2 font with
+its axes intact.
 
 ## Part B — designer
 

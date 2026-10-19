@@ -56,6 +56,10 @@ def call(url, path, payload=None, method=None):
             return e.code, body
 
 
+def quote(name: str) -> str:
+    return urllib.parse.quote(name, safe="")
+
+
 def health(url):
     return call(url, "/api/health")[1]
 
@@ -140,11 +144,10 @@ def main():
         code, body = call(url, f"/api/control-axes/{tag}/reseed", {})
         print(f"  reseed {tag} (brace layers on coverage glyphs): HTTP {code}")
         wait_idle(url)
-        code, body = call(url, f"/api/instances/{GRADED_ROW}/grade", {"pct": 0.25})
+        code, body = call(url, f"/api/instances/{quote(GRADED_ROW)}/grade", {"pct": 0.25})
         print(f"  grade {GRADED_ROW}: HTTP {code} {str(body)[:80]}")
         wait_idle(url)
-        code, body = call(url, "/api/kinetikern/instances/"
-                               + urllib.parse.quote("Default 1 MaxOpsz"),
+        code, body = call(url, "/api/kinetikern/instances/" + quote("Default 1 MaxOpsz"),
                           {"looseness": 0.45})
         print(f"  kinetikern entry: HTTP {code} {str(body)[:80]}")
         wait_idle(url)
@@ -158,7 +161,7 @@ def main():
     step = (float(axis_range["max"]) - float(axis_range["min"])) * 0.01
     coords["XOPQ"] = round(float(coords["XOPQ"]) - step, 3)
     print(f"  XOPQ {inst.get('source_coordinates', {}).get('XOPQ')} -> {coords['XOPQ']}")
-    code, body = call(url, f"/api/instance/{urllib.parse.quote(ORIGIN_ROW)}",
+    code, body = call(url, f"/api/instance/{quote(ORIGIN_ROW)}",
                       {"coordinates": coords}, method="PUT")
     print(f"  source writeback: HTTP {code} {str(body)[:140]}")
     h = wait_idle(url)
@@ -169,7 +172,7 @@ def main():
 
     print("== second nudge (direction check)")
     coords["XOPQ"] = round(float(coords["XOPQ"]) - step, 3)
-    code, body = call(url, f"/api/instance/{urllib.parse.quote(ORIGIN_ROW)}",
+    code, body = call(url, f"/api/instance/{quote(ORIGIN_ROW)}",
                       {"coordinates": coords}, method="PUT")
     print(f"  source writeback: HTTP {code} (XOPQ {coords['XOPQ']})")
     h = wait_idle(url)
