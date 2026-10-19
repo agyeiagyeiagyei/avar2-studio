@@ -747,6 +747,41 @@ Out of scope until the user says otherwise: a snap-to-master action,
 twin-free preview relocation, the 13 `ruff` errors outside `src tests`,
 and anything in Part B.
 
+## Round 11 — S0 hand-off: round-10 fixes landed, review follow-ups closed (2026-10-20)
+
+Round 10's fixes are committed one FAIL at a time (each with its test) and
+pushed; this section is the hand-off note for the verifier's checkpoint
+review. Evidence lives in `LOCAL_TEST_RESULTS.md`; the scope after this is
+S1–S6 from "Approved next scope" above.
+
+**What changed since the verifier review** (all on top of the review's own
+commit `364ae67`):
+
+| Review follow-up | Outcome |
+| --- | --- |
+| 1. commit per FAIL + push + checkpoint | done: see the commit list in `LOCAL_TEST_RESULTS.md § S0` |
+| 2. A10 guard | **typecheck cannot do it**: `tsconfig.json` sets `allowJs` but not `checkJs` and there is no `.d.ts` for the hook, so `src/**/*.jsx` is parsed but never checked — a missing context field is invisible to `tsc`. Guard is a new `test:unit` spec, `e2e/transforms-context.spec.mjs`, which reads the provider's `value` keys and every consumer's `useTransforms()` destructure and fails when a consumer reads what the provider does not expose. Proved to bite: deleting `transforms,`/`grade,` from the provider makes it report 5 failures (2 named + the 3 consumer assertions). Grade scenario + screenshots re-run. |
+| 3. A6 node spec | extracted the comparison to `src/instance-sync.js` (`sameCoords`, `csvDivergesFromSource`) and added `e2e/instance-sync.spec.mjs` (9 assertions incl. the float32-noise case and the "no comparable axis" case); both specs are wired into `npm run test:unit`. |
+| 4. A16 data-loss proof | export no longer prunes layer pins at all (`_portable_control_axes` deleted); validation downgrades a pin on an axis the target lacks from error to warning, because the pin is the only record of where the layer was authored and `control_axes/shadow_designspace.py` ignores such axes at build time. Measured on the Crispy copy: **133 layers / 697 pins before and after** one export→import, `layer/axis payload changed: []`, and on an already-canonical sidecar the byte diff is `[]` too. |
+| 5. A18 | (a) new `test_a_readable_source_that_misses_the_mapping_still_builds` pins the degraded-fallback (plain font published, `LAST_AVAR2_ERROR` set, gate open) so the pre-flight cannot swallow it; (b) the pre-flight now uses `load_source_cached` (mtime+size keyed, so a saved/edited source still re-reads); (c) truncation corruption evidence in `LOCAL_TEST_RESULTS.md § A18`; (d) every mutating route answers **JSON** (`409` + `build_blocked`) while unreadable — verified by a live PUT, not only by the unit test. |
+| 6. A19 | marker ships, and the index is served with `Cache-Control: no-store` (S3) instead of the conditional/ETag handling `send_file` provided — the index names hashed assets, so revalidation is the wrong default. |
+| 7. A21 | `wasm/fontc-web cargo test` with `CARGO_TARGET_DIR` pointed at the warm target: compiles and all test binaries pass (6 tests across the targets, 0 failures); the earlier BLOCKED was the cold-build disk, not code. Disk after S6 clean-up: 5.1 GiB free. |
+| 8. full Part A re-run at idle | idle is now enforced before every scenario (`building: false` **and** no `build_job`), plus a header-interactive wait before the menu-driven ones. Results table in `LOCAL_TEST_RESULTS.md`. |
+
+**Two harness defects found while re-running** (both fixed in `ui_probe.py`,
+neither a product defect): a scenario could start while a build from the
+previous one was in flight — the `.build-veil` intercepts the Download
+click and the header menus are `disabled={busy}`, which read as failures;
+and the first `export` failure in the round-10 run was the ORIGIN-row nudge
+from A7 (now ordered before A7).
+
+**New observation for the backlog (not in S1–S6):** restoring a corrupt
+source with an *older* mtime (e.g. `cp -p` from a backup) is not picked up
+by the watcher — it compares mtimes and only reacts to newer ones, so the
+gate stays closed until the file is touched. `git checkout` and every
+editor save set mtime=now, so the practical exposure is low, but it is the
+one way "restore the file" does not self-heal.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

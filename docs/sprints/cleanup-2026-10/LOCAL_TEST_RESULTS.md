@@ -4,7 +4,84 @@ Run of `LOCAL_TEST_ROUTINE.md` on a copy of Crispy. One line per test ID:
 verdict + the evidence that backs it. A claim without a command,
 request log, screenshot path or table dump is NOT-VERIFIED.
 
-## Environment
+> **Status 2026-10-20 (S0): every Part-A scenario PASSES.** The post-fix
+> results are below; the sections from “Environment (round 9)” down are the
+> original run that found the seven FAILs, kept as history.
+
+## S0 results — after the round-10 fixes and the review follow-ups
+
+**Environment.** Worktree `~/Documents/avar2-studio-sprint`, branch
+`cleanup-2026-10`, head `a62486b` (S0 commits on the verifier's
+`364ae67`/`17bd59d`). Copy `SCRATCH=/private/tmp/av2-routine`, re-staged per
+the routine (`.glyphs`, `-avar.csv`, `-control.json`, `-grade.json`,
+`-transforms.json`, authored `.avar2-studio/`). Server on 5072 with
+`HOME=$SCRATCH/home` and absolute accelerator paths; `~/Documents/Crispy`
+and port 5070 untouched. Probe `ui_probe.py`; logs `server15.log`–`server19.log`,
+`probe-all3.log`, `probe-all4.log`, `probe-export3.log`, `probe-config7.log`,
+`probe-grade2.log`; screenshots `ui-shots/`.
+
+**Idle is `building: false` AND `build_job: null`** — the WOFF2 compress job
+runs after the build and greys out Download / logs 409s. The probe waits for
+that before every scenario (`wait_ui_idle`, 600 s) and for the header chrome
+to be interactive (`wait_header_ready`), because the header menus are
+`disabled={busy}`.
+
+**Staging gate before A1 [PASS]:** `origin_warning: null`,
+`font_built: true`, `last_build_status: ok`, `opsz` default `144`, SRC row
+`Default 400 MaxOpsz` with `origin: source`, 30 rows.
+
+| ID | Verdict | Evidence |
+| --- | --- | --- |
+| A1 | **PASS** | health `{origin_warning: null, font_built: true, last_build_status: ok}`; `/api/axes` 12 axes (XTRA XOPQ YOPQ LCWD YMOD GRAD slnt ROND opsz wdth wght SPAC); SRC row `Default 400 MaxOpsz`, `origin: source`, ORIGIN badge; 30 rows == the CSV's 30 data rows. |
+| A2 | **PASS** | `first-load`: 30 rows, `document.fonts.status == "loaded"` (family `Crispy-VF`), ORIGIN badge present, zero console errors. `ui-shots/a2-first-load.png`. |
+| A3 | **PASS** | `select-no-save`: row click → Preview; only `GET /api/mapped-location`; no PUT, no `POST /api/build`; `build_stale` stayed false. |
+| A4 | **PASS** | `preview-no-build`: wght drag + Reset → only `mapped-location`; no build. |
+| A5 | **PASS** | `sidebar-edit-saves`: exactly one `PUT /api/instance/…?csv_only=true`, CSV row updated, `build_stale` true, opening Preview → exactly one `POST /api/build` → `last_build_status ok`. |
+| A6 | **PASS** (was FAIL) | `sync-dots`: the untouched source row is **green**, a studio row stays orange, an edited row goes red then green again after the save. Fix: compare only the axes the CSV carries (`frontend/src/instance-sync.js`); node spec `e2e/instance-sync.spec.mjs` (9 assertions, incl. `663.1000061035156` vs `663.1`). `ui-shots/a6-sync-dots.png`. |
+| A7 | **PASS** (was FAIL) | `flyout-source`: **`source PUT status: 200`**, a rebuild lands, the row turns green, the `.glyphs` carries the new value. Root cause: the stale `Def → Default 400 MaxOpsz` alias; the route now falls back to the requested name, resyncs its own CSV row and never 500s. `ui-shots/a7-after-save-to-source.png`. |
+| A8 | **PASS** (was FAIL) | `lifecycle`: `create with raw defaults blocked by native validation: False`; create/duplicate/rename/delete land in API+CSV. Fix: `step="any"`. |
+| A9 | **PASS** | `multi-broadcast`: shift-select 3 rows, one LCWD drag → 3 `?csv_only=true` PUTs, the broadcast bodies carry **only** LCWD. |
+| A10 | **PASS** (was FAIL) | `grade`: the Transforms menu opens, `grade: {"enabled": true, "default_pct": 0.25, "intensity": 1.0}`, per-row G badge present, save/remove instance grade works. Fix: the provider value exposes `transforms`/`grade`; guard `e2e/transforms-context.spec.mjs` (5 failures if removed again — `tsc` cannot see `.jsx`, see § Follow-ups). `ui-shots/a10-grade.png`. |
+| A11 | **PASS** | `control-axis`: new `TSTn` axis created, listed as a control axis, shadow regenerated, one rebuild, `POST /api/control-axes/<tag>/open-editor` → `{editing_original: false, port: 8001}`, Fontra editor 200. |
+| A12 | **PASS** (with the documented gvar limit) | `export` on a pristine copy: TTF `10,533,616 B` + WOFF2 `916,644 B`; set-default at wght 921.8 and 605.8 both return the readable limit error (“glyph 'B' has too many variation tuples … 2927/2915 tuples; dropping the 1259/1274 sub-visible ones was not enough”), no traceback, no partial download. `exports/default.ttf`, `exports/default.woff2`. |
+| A13 | **PASS** | `kinetikern`: proposal returns; Apply persists + rebuilds (KKRN in the built font); Revert removes it (no KKRN). |
+| A14 | **PASS** | `tester`: Bold/Italic/Center/Tracking → `fontWeight 700`, `fontStyle italic`, `letterSpacing 1.6px`, family `Crispy-VF`; zero console errors. |
+| A15 | **PASS** | `load-font`: `Crispy Mini` → `family_name CrispyMini`, 8 rows; back to the copy by uploading `.glyphs` + CSV + metadata → `Crispy`, 30 rows, no row left selected. |
+| A16 | **PASS** (was FAIL) | `config-roundtrip` on a pristine copy: **133 layers / 697 pins before and after**; `layer/axis payload changed: []`; `byte differences: []` on an already-canonical sidecar (the first round-trip differs only by canonicalisation: tag case, `0.0`→`0`); the Crispy CSV's sha256 is unchanged across the import. Fixes: case-insensitive tag matching, **no pin pruning at all** (a pin on an axis the source lacks is a warning), CSV read/write with `newline=""` through `sidecar_io.write_text`. |
+| A17 | **PASS** | Watcher: one `glyphsLib.load/save` on the copy → exactly one `[jobs] build-… started`, `finished: success=True`; no “Unexpected EOF”; the UI shows the rebuild then the fresh font. |
+| A18 | **PASS** (was FAIL) | Truncation inside a glyph (60 % of the file): `last_build_status=failed`, `last_build_error="The source file cannot be read: Expected terminating ')' for array at line 51222"`, `source_transform_error` set, every mutating request → **`PUT 409 application/json` `{"build_blocked": true, …}`**, `/api/font` still served the last-good **10,644,388 B**; after restoring the file and touching it, one build cleared everything (`ok`, `PUT 200 application/json`). The mapping-failure fallback is pinned by `test_a_readable_source_that_misses_the_mapping_still_builds`. |
+| A19 | **PASS** (was FAIL) | Static Pages build on 5075: example switch, sliders drive the font (`wght 100 → 753.1`), **`api hits [] count 0`**, **`console errors [] count 0`**. Fix: the backend-served index carries `<meta name="avar2-backend">` (+ `Cache-Control: no-store`); production without it goes straight to static mode. `tests/test_ui_index_marker.py`. |
+| A20 | **PASS** | `console-clean` visits Instances/Preview/Kinetikern/Tester with zero console errors when started at true idle (build **and** compress done). Before the idle guard the same scenario logged three 409s from `/api/font?format=woff2`. |
+| A21 | **PASS** | pytest **547 passed** with the two accelerator env vars; `ruff check src tests` clean; frontend `lint` 0 errors, `typecheck` clean, `test:unit` all passed (incl. the two new specs), `npm run build` OK; `native/kinetikern2 cargo test` 53 passed; **`wasm/fontc-web cargo test` compiles and passes** with `CARGO_TARGET_DIR` on the warm target (round 9's BLOCKED was a full disk). Disk after the S6 clean-up: 5.1 GiB free. |
+
+### S0 commits (one per FAIL)
+
+| Commit | Scope |
+| --- | --- |
+| `ab23b88` | A8 — `step="any"` in `DuplicateModal` |
+| `778eb23` | A10 — provider value + `e2e/transforms-context.spec.mjs` + `test:unit` wiring |
+| `c9762ef` | A16 — case-insensitive tags, no pin pruning, CSV bytes through `sidecar_io` |
+| `fc4dba2` | A18 — pre-flight (cached loader) + the fallback pin test |
+| `522b4f7` | A19 — backend marker + `no-store`, static-mode detection |
+| `a62486b` | A6/A7 — subset sync comparison (`instance-sync.js` + spec), alias fallback, CSV resync, studio-only delete |
+
+### Review follow-ups — how each was closed
+
+1. **Commit per FAIL + push + checkpoint** — the table above; `STATE: checkpoint` in `STATUS.md`.
+2. **A10 guard** — *not* via typecheck: `frontend/tsconfig.json` sets `allowJs: true` and **no `checkJs`**, and the hook has no `.d.ts`, so `.jsx` files are parsed but never type-checked; a missing context field cannot fail `npm run typecheck`. Guard is `e2e/transforms-context.spec.mjs` (wired into `test:unit`): it reads the provider's `value` keys and every consumer's `useTransforms()` destructure, and fails on a key the provider does not expose. Negative proof: removing `transforms,`/`grade,` from the value → 5 failures (2 named + 3 consumer assertions); restored → all pass.
+3. **A6 spec** — `e2e/instance-sync.spec.mjs`: 9 assertions (float32 noise, a real divergence, the 0.02 tolerance boundary, “no comparable axis ⇒ in sync”, non-numeric compare).
+4. **A16 data-loss proof** — 133 layers / 697 pins preserved, payload diff `[]`, byte diff `[]`; the four sequential rebuilds stay a backlog item (S2), not fixed here.
+5. **A18** — (a) `test_a_readable_source_that_misses_the_mapping_still_builds`; (b) the pre-flight uses `load_source_cached` (mtime+size keyed); (c) truncation evidence above; (d) mutating routes answer JSON `409`, verified live, not only in the unit test.
+6. **A19** — marker ships; the index is served `Cache-Control: no-store`; the static scenario shows no `/api/*` hits and no console errors.
+7. **A21** — `wasm/fontc-web cargo test` green with the warm `CARGO_TARGET_DIR`; my `/private/tmp` clones deleted (`av2-wheel-test` 303 MB, `av2-pw` 162 MB, `av2-local-test` 18 MB), `av2-routine` (51 MB) kept as evidence.
+8. **Full Part A re-run at idle** — the table above; every scenario now starts from a drained queue.
+
+### New items for the backlog (not S1–S6)
+
+- **The watcher ignores an older mtime.** Restoring a corrupt source with `cp -p`/`copy2` (mtime going backwards) does not trigger a rebuild; the gate stays closed until the file is touched. `git checkout` and editor saves set mtime=now, so the exposure is low.
+- **ORIGIN-row nudge ≈ gvar limit** and **four rebuilds per config import** — written up in `findings.md` § Round 10; S1 and S2 own them.
+
+## Environment (round 9, pre-fix record)
 
 - Worktree: `~/Documents/avar2-studio-sprint` at `de4de1a` (branch
   `cleanup-2026-10`). The probe/routine changes in this run are uncommitted
@@ -25,7 +102,7 @@ request log, screenshot path or table dump is NOT-VERIFIED.
   `font_built: true`, `last_build_status: ok`; `/api/avar2/axes` →
   `metadata.OPSZ.default == 144`.
 
-## Part A — agent
+## Part A — round-9 verdicts (pre-fix, superseded by § S0 results)
 
 | ID | Verdict | Evidence |
 | --- | --- | --- |
