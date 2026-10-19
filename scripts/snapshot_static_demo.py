@@ -50,7 +50,7 @@ SIDECAR_SUFFIXES = (
 def examples():
     """The server's example registry, Crispy Mini first (it is the
     avar2/SPAC showcase and the default project)."""
-    from avar2_studio.server import _BUILTIN_EXAMPLES
+    from avar2_studio.routes.load import _BUILTIN_EXAMPLES
 
     exs = [dict(e) for e in _BUILTIN_EXAMPLES]
     exs.sort(key=lambda e: (e["id"] != "crispy-mini", e["id"]))

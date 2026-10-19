@@ -51,10 +51,13 @@ export function apply_grade(font_bytes: Uint8Array, grade_json: string, instance
  * width-aware variant).
  *
  * `transforms_json` is the bundle's `transforms.transforms` array;
- * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
- * present, pins per-instance SPAC coordinates).
+ * per-instance SPAC coordinates ride it as `params.instance_spac`
+ * (parsed from the avar2 mappings CSV by the caller — csv_io on the
+ * desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+ * for caller/ABI compatibility and IGNORED: Rust no longer parses the
+ * CSV (one parse rule, Python-side).
  */
-export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, avar2_csv: string): Uint8Array;
+export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, _avar2_csv: string): Uint8Array;
 
 /**
  * Bring stranded (out-of-range) gvar sources back to the axis edge
