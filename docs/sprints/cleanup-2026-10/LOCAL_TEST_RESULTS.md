@@ -17,8 +17,8 @@ the routine (`.glyphs`, `-avar.csv`, `-control.json`, `-grade.json`,
 `-transforms.json`, authored `.avar2-studio/`). Server on 5072 with
 `HOME=$SCRATCH/home` and absolute accelerator paths; `~/Documents/Crispy`
 and port 5070 untouched. Probe `ui_probe.py`; logs `server15.log`–`server19.log`,
-`probe-all3.log`, `probe-all4.log`, `probe-export3.log`, `probe-config7.log`,
-`probe-grade2.log`; screenshots `ui-shots/`.
+`probe-all3.log`, `probe-all4.log`, `probe-all6.log`, `probe-all7.log`,
+`probe-export3.log`, `probe-config7.log`, `probe-grade2.log`, `probe-syncexport.log`; screenshots `ui-shots/`.
 
 **Idle is `building: false` AND `build_job: null`** — the WOFF2 compress job
 runs after the build and greys out Download / logs 409s. The probe waits for
@@ -29,6 +29,11 @@ to be interactive (`wait_header_ready`), because the header menus are
 **Staging gate before A1 [PASS]:** `origin_warning: null`,
 `font_built: true`, `last_build_status: ok`, `opsz` default `144`, SRC row
 `Default 400 MaxOpsz` with `origin: source`, 30 rows.
+
+**Full sequential run: 16/16 PASS, `EXIT=0`** (`probe-all7.log`, server
+`server23.log`, copy re-staged immediately before it — CSV sha
+`b13128f7…`). Every scenario below ran once, in order, from a drained
+queue.
 
 | ID | Verdict | Evidence |
 | --- | --- | --- |
