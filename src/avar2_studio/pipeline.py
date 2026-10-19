@@ -397,6 +397,28 @@ def _run_build():
     view always has *some* font to show.
     """
 
+    # A source that no longer parses is a HARD build failure. Both paths
+    # below can look successful from a stale snapshot/artifact, which used
+    # to publish a degraded font and report "ok" — leaving the build gate
+    # open while every mutating route 500s on the same parse error. Fail
+    # here, before either builder runs, so the last-good font keeps
+    # serving and LAST_BUILD_STATUS closes the gate.
+    try:
+        # Cached loader: memoized by (mtime, size), so a saved/edited source
+        # is re-read (the watcher path always touches the file) while a
+        # rebuild of unchanged bytes costs nothing. The font object is not
+        # mutated here — this is a read-only probe.
+        _source_font.load_source_cached(state.GLYPHS_PATH)
+    except Exception as exc:
+        flat = " | ".join(ln for ln in str(exc).splitlines() if ln.strip())
+        log.info(f"Build input cannot be read: {flat}")
+        _record_build_failure({
+            "success": False,
+            "error": "The source file cannot be read",
+            "details": flat[-350:],
+        })
+        return False
+
     # Try the avar2 build first. _perform_avar2_build manages BUILDING itself.
     # GC paused for the whole pass: the avar2 pipeline (update_config,
     # the instancer relocation over a ~9MB gvar, fix/STAT) churns as many
