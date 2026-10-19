@@ -72,13 +72,14 @@ to be interactive (`wait_header_ready`), because the header menus are
 3. **A6 spec** — `e2e/instance-sync.spec.mjs`: 9 assertions (float32 noise, a real divergence, the 0.02 tolerance boundary, “no comparable axis ⇒ in sync”, non-numeric compare).
 4. **A16 data-loss proof** — 133 layers / 697 pins preserved, payload diff `[]`, byte diff `[]`; the four sequential rebuilds stay a backlog item (S2), not fixed here.
 5. **A18** — (a) `test_a_readable_source_that_misses_the_mapping_still_builds`; (b) the pre-flight uses `load_source_cached` (mtime+size keyed); (c) truncation evidence above; (d) mutating routes answer JSON `409`, verified live, not only in the unit test.
-6. **A19** — marker ships; the index is served `Cache-Control: no-store`; the static scenario shows no `/api/*` hits and no console errors.
+6. **A19** — marker ships; the index is served `Cache-Control: no-store`; the static scenario shows no `/api/*` hits and no console errors. Re-checked against today's code: `npx vite build --base=/avar2-studio/ --outDir dist-pages` (the `pages.yml` command) served on 8123 under its base path → **8 rows, `document.fonts.status loaded`, `api requests count 0`, `console errors count 0`**, and `grep -c avar2-backend dist-pages/index.html` → **0** (the static artifact carries no marker, so the client never probes).
 7. **A21** — `wasm/fontc-web cargo test` green with the warm `CARGO_TARGET_DIR`; my `/private/tmp` clones deleted (`av2-wheel-test` 303 MB, `av2-pw` 162 MB, `av2-local-test` 18 MB), `av2-routine` (51 MB) kept as evidence.
 8. **Full Part A re-run at idle** — the table above; every scenario now starts from a drained queue.
 
 ### New items for the backlog (not S1–S6)
 
 - **The watcher ignores an older mtime.** Restoring a corrupt source with `cp -p`/`copy2` (mtime going backwards) does not trigger a rebuild; the gate stays closed until the file is touched. `git checkout` and editor saves set mtime=now, so the exposure is low.
+- **`npm run lint` counts a local Pages build.** With `frontend/dist-pages/` present, `eslint .` reports ~690 errors inside the built JS (round 8's note). CI lints *before* it builds `dist-pages`, so it is only a local annoyance — the directory is deleted here (13 MB) and lint is back to **0 errors / 34 warnings**. Adding `dist-pages/` to the eslint ignores is a one-line change for whoever wants it.
 - **ORIGIN-row nudge ≈ gvar limit** and **four rebuilds per config import** — written up in `findings.md` § Round 10; S1 and S2 own them.
 
 ## Environment (round 9, pre-fix record)

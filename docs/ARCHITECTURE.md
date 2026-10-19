@@ -268,8 +268,17 @@ ORIGINAL_PATH          the designer's file. Never written by studio
 If the avar2 build fails, `_run_build` falls back to a plain
 `build_variable_font` (fontc, or fontmake with `--no-fontc`) through the
 same transform chain and records `LAST_AVAR2_ERROR`; `/api/health` exposes
-every `LAST_*` so the UI can say which stage degraded. `avar2-studio
-build` treats any of them as a failing exit.
+every `LAST_*` so the UI can say which stage degraded. That fallback is
+BY DESIGN — a working font beats no font.
+
+It does not apply to a source that no longer *parses*: `_run_build`
+pre-flights the prepared source with `load_source_cached` (mtime+size
+keyed, read-only) and, if the loader raises, records
+`last_build_status: failed` with the parse message and returns before
+either builder runs. Without that, the degraded build published a
+truncated font as `ok`, the gate stayed open while every mutating route
+500'd on the same parse error, and the fallback replaced the last-good
+artifact. `avar2-studio build` treats any `LAST_*` as a failing exit.
 
 ### Export (worker, `_export_pipeline`)
 
