@@ -28,20 +28,7 @@ bp = Blueprint("load", __name__)
 # present; the endpoint reports an empty list in that case and the frontend
 # hides the built-in examples section.
 _REPO_ROOT_FOR_EXAMPLES = Path(__file__).resolve().parent.parent.parent.parent
-_BUILTIN_EXAMPLES = [
-    {
-        "id": "roboto-delta-mini",
-        "name": "Roboto Delta Mini",
-        "subtitle": "Case-split parametric axes (XOUC/YOUC/XTUC, XOLC/YOLC/XTLC, XOFI/YOFI/XTFI)",
-        "source_rel": "examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace",
-    },
-    {
-        "id": "crispy-mini",
-        "name": "Crispy Mini",
-        "subtitle": "Unified parametric axes (XTRA/XOPQ/YOPQ)",
-        "source_rel": "examples/crispy-mini/sources/CrispyMini.glyphs",
-    },
-]
+from ..examples import _BUILTIN_EXAMPLES
 
 
 def _builtin_example_source(example_id: str) -> Optional[Path]:
