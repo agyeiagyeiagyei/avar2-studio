@@ -69,3 +69,59 @@ def test_save_to_source_writes_the_original_under_its_in_file_name(client, harne
     order = [c[0] for c in calls]
     assert order.index("resolve") < order.index("csv-sync"), (
         "sync before regen copies stale shadow values back over the save")
+
+
+def test_full_source_save_resyncs_its_own_csv_row(client, harness, monkeypatch):
+    """The CSV row of a source instance is NOT written by the update branch
+    (only csv-only/studio rows are), so the post-writeback sync must not
+    skip it — otherwise the CSV keeps the old parametric value and the API
+    merges it back over the source (the row stays red)."""
+    seen = {}
+
+    def sync(glyphs_path, csv_path, skip_instances=None, exclude_axes=None):
+        seen["skip"] = skip_instances
+        return False
+
+    monkeypatch.setattr(server._csv_io, "update_csv_from_glyphs", sync)
+    r = client.put("/api/instance/Default", json={
+        "coordinates": {"XTRA": 700.0, "XOPQ": 200.0},
+    })
+    assert r.status_code == 200, r.get_json()
+    assert seen.get("skip") == set(), (
+        "a full source writeback must re-sync its own CSV row")
+
+
+def test_save_falls_back_to_the_display_name_when_the_alias_is_stale(
+        client, harness, monkeypatch):
+    """The alias sidecar can outlive a rename made in Glyphs itself.
+
+    `Def -> Default` is recorded in the sidecar, but the source file has
+    already been saved with the display name `Default`. Addressing `Def`
+    finds nothing; the writeback must retry with the name the listing
+    showed instead of returning 500.
+    """
+    seen = []
+
+    def write(path, name, coords):
+        seen.append(name)
+        return name == "Default"
+
+    monkeypatch.setattr(server, "update_instance_in_glyphs", write)
+    r = client.put("/api/instance/Default", json={
+        "coordinates": {"XTRA": 700.0, "XOPQ": 200.0},
+    })
+    assert r.status_code == 200, r.get_json()
+    assert seen == ["Def", "Default"], (
+        "must try the recorded in-file name, then fall back to the display name")
+
+
+def test_delete_of_a_studio_only_row_does_not_touch_the_source(client, harness, monkeypatch):
+    """A studio-only row has no source declaration; the default DELETE
+    must remove its CSV row instead of failing on the source writeback."""
+    monkeypatch.setattr(server, "_check_glyphs_file_unsaved_changes", lambda _p: False)
+    deleted = []
+    monkeypatch.setattr(server, "delete_instance_in_glyphs",
+                        lambda p, n: deleted.append(n) or True)
+    r = client.delete("/api/instance/Studio%20Only")
+    assert r.status_code == 200, r.get_json()
+    assert deleted == [], "the source must not be touched for a studio-only row"

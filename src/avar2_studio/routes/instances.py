@@ -406,8 +406,16 @@ def update_instance(instance_name: str):
     # regen and the user's file never changed.)
     glyphs_updated = False
     if not csv_only_flag and is_source_instance and glyphs_coordinates:
+        source_name = server._source_instance_name(instance_name)
         glyphs_updated = server.update_instance_in_glyphs(
-            state.ORIGINAL_PATH, server._source_instance_name(instance_name), glyphs_coordinates)
+            state.ORIGINAL_PATH, source_name, glyphs_coordinates)
+        if not glyphs_updated and source_name != instance_name:
+            # The alias sidecar can outlive a rename made in Glyphs itself:
+            # the source already carries the display name, so the recorded
+            # pre-rename name no longer exists. Fall back to the name the
+            # shadow listing showed.
+            glyphs_updated = server.update_instance_in_glyphs(
+                state.ORIGINAL_PATH, instance_name, glyphs_coordinates)
         if not glyphs_updated:
             return jsonify({"error": f"Failed to update instance '{instance_name}' in source file"}), 500
         # The shadow now trails the original — regenerate it BEFORE the
@@ -420,6 +428,7 @@ def update_instance(instance_name: str):
     # source instances it keeps the avar2 mapping CSV row in lockstep
     # with the source's <location>.
     csv_writeback_needed = bool(csv_coordinates)
+    csv_row_written = False
     if csv_writeback_needed:
         csv_path = server._get_preview_csv_path()
         if csv_path and csv_path.exists():
@@ -484,6 +493,7 @@ def update_instance(instance_name: str):
                         writer.writeheader()
                         writer.writerows(rows)
                     server._update_csv_modification_time(csv_path)
+                    csv_row_written = bool(should_write_csv_row)
                     log.info(f"Saved '{instance_name}' in the studio")
                 else:
                     log.error(f"Error: Instance '{instance_name}' not found in the studio")
@@ -492,15 +502,20 @@ def update_instance(instance_name: str):
                 import traceback
                 traceback.print_exc(file=sys.stderr)
 
-    # Sync CSV to pick up source-file coord changes (skip the in-flight
-    # edit; that row was already updated above). Skip the sync entirely
-    # for csv-only edits — we just wrote the user's edit to CSV and
-    # don't want to overwrite it with the source's unchanged values.
+    # Sync CSV to pick up source-file coord changes. Skip the in-flight row
+    # only when the CSV branch above already wrote it (csv-only / studio
+    # rows). A full source writeback deliberately does NOT write the CSV row
+    # above, so skipping it left the row stale (202.5) while the .glyphs said
+    # 360 — the API then merged the stale CSV over the source and the row
+    # stayed red. Skip the sync entirely for csv-only edits — we just wrote
+    # the user's edit to CSV and don't want to overwrite it with the
+    # source's unchanged values.
     if not csv_only_flag:
         csv_path = server._get_avar2_csv_path()
         if csv_path and csv_path.exists():
             try:
-                if _csv_io.update_csv_from_glyphs(state.GLYPHS_PATH, csv_path, skip_instances={instance_name},
+                skip = {instance_name} if csv_row_written else set()
+                if _csv_io.update_csv_from_glyphs(state.GLYPHS_PATH, csv_path, skip_instances=skip,
                                                   exclude_axes=server._non_mapping_axis_tags()):
                     server._update_csv_modification_time(csv_path)   # ours, not external
                     log.info("CSV synced after instance update")
@@ -758,16 +773,31 @@ def delete_instance(instance_name: str):
             except Exception:
                 pass
 
-        # Source-file delete fires for default + source_only. CSV-only
-        # skips it (the row was never in the source).
+        # Source-file delete fires for default + source_only, but only for
+        # rows the source actually declares. A studio-only row has nothing
+        # to delete there; the default DELETE (API clients, older UIs) used
+        # to fail with a 500 instead of removing its CSV row.
         if touches_source:
-            glyphs_deleted = server.delete_instance_in_glyphs(
-                state.ORIGINAL_PATH, server._source_instance_name(instance_name))
-            if not glyphs_deleted:
-                return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
-            # Regenerate the shadow from the now-updated original so the
-            # listing stops serving the deleted instance.
-            server._resolve_active_source()
+            font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
+            source_names = {entry["name"] for entry in
+                            _source_font.get_source_instances(font)}
+            if instance_name in source_names:
+                source_name = server._source_instance_name(instance_name)
+                glyphs_deleted = server.delete_instance_in_glyphs(
+                    state.ORIGINAL_PATH, source_name)
+                if not glyphs_deleted and source_name != instance_name:
+                    # Stale alias: the source already carries the display
+                    # name (renamed in Glyphs itself).
+                    glyphs_deleted = server.delete_instance_in_glyphs(
+                        state.ORIGINAL_PATH, instance_name)
+                if not glyphs_deleted:
+                    return jsonify({"error": f"Failed to delete instance '{instance_name}' from source file"}), 500
+                # Regenerate the shadow from the now-updated original so the
+                # listing stops serving the deleted instance.
+                server._resolve_active_source()
+            else:
+                log.info("Instance %r is not in the source; removing its CSV row only",
+                         instance_name)
 
         # CSV delete fires for default + csv_only. source_only PRESERVES
         # the CSV row — that's the "demote to studio-only" semantic.

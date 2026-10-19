@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { csvDivergesFromSource } from '../instance-sync';
 import { useBuildStatus } from './useBuildStatus';
 import { useStudioData } from './useStudioData';
 import { useTransforms } from './useTransforms';
@@ -16,25 +17,6 @@ import { useBuildWait, scrollToInstance } from './useBuildWait';
  * the InstancesTab container below only reads this context.
  */
 const InstanceEditingContext = createContext(null);
-
-// Coordinate-dict equality for the sync-status comparison: numeric
-// tolerance 0.01, non-numeric values compared literally.
-const _sameCoords = (a, b) => {
-  if (!a || !b) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) {
-    const va = Number(a[k]);
-    const vb = Number(b[k]);
-    if (!Number.isFinite(va) || !Number.isFinite(vb)) {
-      if (a[k] !== b[k]) return false;
-    } else if (Math.abs(va - vb) > 0.01) {
-      return false;
-    }
-  }
-  return true;
-};
 
 export function InstanceEditingProvider({ children }) {
   const { setBuilding } = useBuildStatus();
@@ -176,8 +158,11 @@ export function InstanceEditingProvider({ children }) {
       return 'orange';
     }
 
-    if (csvCoords && !_sameCoords(csvCoords, sourceCoords)) {
-      return 'orange';   // CSV diverges from source — needs a source push
+    if (csvCoords) {
+      // Compare only the axes the CSV carries — see instance-sync.js.
+      if (csvDivergesFromSource(csvCoords, sourceCoords)) {
+        return 'orange';   // CSV diverges from source — needs a source push
+      }
     }
 
     return 'green';
@@ -585,6 +570,11 @@ export function InstanceEditingProvider({ children }) {
       // This is important because the backend may have updated the Glyphs file
       const instancesData = await api.getInstances();
       setInstances(instancesData.instances);
+      // Refresh the CSV mapping too: the sync-status check compares the
+      // draft against avar2Instances' `out` map, and the source writeback
+      // just rewrote that CSV row. Without this the dot stayed red until a
+      // page reload (the studio auto-save path already refreshes it).
+      await loadAvar2Data();
 
 
       // Find the updated instance
@@ -614,9 +604,12 @@ export function InstanceEditingProvider({ children }) {
       if (selectedInstance && selectedInstance.name === targetInstanceName) {
         setSelectedInstance(updatedInstance);
         setOriginalCoordinates(updatedCoords);
-        // Use the coordinates that were just saved (coordinatesToUse), not the instance coordinates
-        // This ensures we show the exact values that were saved, including any rounding/clamping
-        setEditingCoordinates(coordinatesToUse);
+        // The refreshed instance is the canonical post-write state: the
+        // .glyphs serializer may round the float it stored (525.3777 →
+        // 525.4). Keeping the pre-save request here left the draft 0.03
+        // off the persisted value, so the row stayed red after a
+        // successful source save.
+        setEditingCoordinates(updatedCoords);
       }
 
       // Reset building state after font is fully loaded and ready
