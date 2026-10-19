@@ -2063,21 +2063,35 @@ const staticOverrides = {
  * Returns true when static mode was selected.
  */
 export async function selectApiMode() {
-  // A timeout is NOT "no backend": the desktop server goes silent for
-  // minutes while the source-transform chain grinds (GIL-bound), and a
-  // tab probed in that window used to latch static mode for its whole
-  // life — "No font loaded" with no way back. Retry timeouts with
-  // growing patience; an actual response (any status) or a fast
-  // connection refusal still decides immediately, so GitHub Pages
-  // (404s fast) and true no-backend hosts are unaffected.
-  for (const ms of [1500, 4000, 8000]) {
-    try {
-      const r = await fetch('/api/health', { signal: AbortSignal.timeout(ms) });
-      if (r.ok) return false;
-      break; // responded with non-ok — a static host, not a busy server
-    } catch (err) {
-      if (err && err.name === 'TimeoutError') continue; // busy server? retry
-      break; // refused/network error — no backend here
+  // A backend serves index.html with this marker (routes/ui.py). Checking
+  // it is synchronous and silent, so a static host never sees the
+  // /api/health 404 that Chrome logged as a console error on every visit.
+  if (typeof document !== 'undefined'
+      && document.querySelector('meta[name="avar2-backend"]')) {
+    return false;
+  }
+  // Vite dev serves its own index.html (no marker) and proxies /api to the
+  // backend, so it keeps the probe. A production build without the marker
+  // is a static host (GitHub Pages, `python -m http.server`) — there is no
+  // backend to look for, and probing only produces a 404.
+  const production = typeof import.meta !== 'undefined' && !import.meta.env.DEV;
+  if (!production) {
+    // A timeout is NOT "no backend": the desktop server goes silent for
+    // minutes while the source-transform chain grinds (GIL-bound), and a
+    // tab probed in that window used to latch static mode for its whole
+    // life — "No font loaded" with no way back. Retry timeouts with
+    // growing patience; an actual response (any status) or a fast
+    // connection refusal still decides immediately, so GitHub Pages
+    // (404s fast) and true no-backend hosts are unaffected.
+    for (const ms of [1500, 4000, 8000]) {
+      try {
+        const r = await fetch('/api/health', { signal: AbortSignal.timeout(ms) });
+        if (r.ok) return false;
+        break; // responded with non-ok — a static host, not a busy server
+      } catch (err) {
+        if (err && err.name === 'TimeoutError') continue; // busy server? retry
+        break; // refused/network error — no backend here
+      }
     }
   }
   staticMode = true;
@@ -2097,11 +2111,11 @@ export async function selectApiMode() {
       console.warn('The bundled example could not be loaded:', err);
     }
   }
-  // BLIND static mode (no session, no example — a desktop tab that lost
-  // the probe race): keep listening for the backend and reboot into it.
-  // On a true static host the probe returns non-ok fast and never
-  // triggers; where there is no backend at all it stays refused.
-  if (!uploadDataset && typeof window !== 'undefined') {
+  // BLIND static mode (no session, no example — a dev tab that lost the
+  // probe race): keep listening for the backend and reboot into it. A
+  // production build without the backend marker is a static host, where
+  // no backend can appear; probing there only logs 404s.
+  if (!production && !uploadDataset && typeof window !== 'undefined') {
     const retry = setInterval(async () => {
       try {
         const r = await fetch('/api/health', { signal: AbortSignal.timeout(10000) });

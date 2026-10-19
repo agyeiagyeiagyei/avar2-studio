@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from flask import Blueprint, jsonify, send_file, send_from_directory
+from flask import Blueprint, Response, jsonify, send_from_directory
 
 # Directory of the bundled React build that gets shipped inside the
 # wheel (populated by the Release CI). Routes below serve it under
@@ -25,7 +25,21 @@ def _serve_ui_index():
             "npm run build</code>) if you cloned from source.</p>",
             503,
         )
-    return send_file(str(index_html))
+    # Mark the HTML as backend-served. The app normally decides between
+    # server and static mode by probing /api/health; on a static host that
+    # probe 404s and Chrome logs a console error on every visit. The marker
+    # makes the server case synchronous and silent (the static host serves
+    # the same index.html without it).
+    html = index_html.read_text(encoding="utf-8")
+    marker = '<meta name="avar2-backend" content="1">'
+    if marker not in html:
+        html = html.replace("</head>", f"  {marker}\n</head>", 1)
+    resp = Response(html, mimetype="text/html")
+    # The index names hashed bundle assets, so it must never be served from a
+    # stale cache across a studio upgrade; no-store is the right answer here
+    # (rather than the conditional/ETag handling send_file provided).
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @bp.route('/static/<path:filename>')
