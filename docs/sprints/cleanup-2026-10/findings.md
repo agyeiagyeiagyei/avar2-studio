@@ -368,6 +368,50 @@ the proposed twin-free export option; pushing fontra-embed's
 
 ---
 
+## Round 8 — local test run, head `f27ff5b` — 2026-10-19
+
+Context: the user asked to run the sprint build locally before any push
+to Pages (studio on 5072 against a COPY of Crispy, static demo on 5075).
+First report from that run: "I was in the Preview tab, moved a weight
+slider, and got a rebuild."
+
+**Diagnosis (reproduced headless, Python Playwright against 5072).**
+The Preview tab's sliders are isolated local state and never save:
+load → Preview → drag wght produced only `GET /api/mapped-location`.
+The rebuild came from an earlier step: clicking an instance row seeds
+`editingCoordinates` from the row, the auto-save effect in
+`useInstanceEditing.jsx` had no saved baseline for that row, so it
+PUT the unchanged coordinates through the csv-only path 800 ms after the
+click. That rewrite bumped the mappings' mtime, `/api/health` reported
+`build_stale`, and the App shell's "rebuild once when Preview opens while
+stale" effect kicked a full build. Pre-existing: the audit baseline
+`4e4313b` has the same effect, so it is not a sprint regression.
+
+**Fix `f27ff5b`.** Skip the auto-save when the persisted coordinate set
+equals the selected row's own coordinates (same preview-only filtering as
+the saved-key guard). Verified against the rebuilt bundle on 5072:
+
+| scenario | before | after |
+| --- | --- | --- |
+| row click → Preview → drag wght | PUT at +0.8 s, `POST /api/build` on Preview open | no PUT, no build |
+| row click → sidebar XOPQ drag → Preview | PUT, build | PUT (real edit), one build on Preview open (by design) |
+
+Gates on the fix: frontend typecheck clean, `test:unit` all passed. Lint
+reports 690 errors, all in `frontend/dist-pages/assets` (my local Pages
+build output; `eslint.config.js` ignores only `build/` and
+`node_modules/`). CI is unaffected because `pages.yml` lints before it
+builds `dist-pages`, but a local `npm run lint` after a Pages build is
+noisy — add `dist-pages/` to the eslint ignores if the user wants (not
+done: outside the report).
+
+**Not covered by an automated test.** The hooks have no React test
+harness (`test:unit` runs plain-node specs), so the regression check is
+the headless scenario above; its script lives in the session scratchpad.
+
+**Still unconfirmable without a push:** GitHub Actions runs (cold
+wasm-pack, Linux/x86_64 wheel legs, rust-cache), the Pages deploy and
+the fontra-embed deploy.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
