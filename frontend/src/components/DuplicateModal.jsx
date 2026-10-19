@@ -101,7 +101,12 @@ function DuplicateModal({ isOpen, onClose, onConfirm, instanceName, mode = 'dupl
                     value={coords[axis.tag] ?? axis.default}
                     min={axis.min}
                     max={axis.max}
-                    step={0.1}
+                    // Axis defaults come from /api/axes as float32 values
+                    // (663.1000061035156); a 0.1 step makes the browser's
+                    // native validation reject them and the form never
+                    // submits. The server clamps/rounds, so any value is
+                    // acceptable here.
+                    step="any"
                     onChange={(e) => setAxisValue(axis.tag, e.target.value)}
                   />
                 </div>
