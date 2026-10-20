@@ -891,6 +891,44 @@ hand-off):**
    note the cause in the results so size comparisons in A12 have a
    tolerance.
 
+## Verifier call on S1(a) (2026-10-20) — measurement accepted; S1(a) becomes a relocation memo
+
+The agent's measurement (`s1_estimate_probe.py`, both calibration fonts)
+settles it: the instancer is ~27 s of a ~45 s build, the split count is
+not predictable from a cheap rule, and the pre-prune count would refuse
+builds that succeed after `_fit_gvar_headers` prunes (pristine `g`:
+2,036 pre-prune → 1,467 served). A pre-instancer budget gate is
+withdrawn. Order and shape of S1 from here:
+
+1. **S1(b) first** — on relocation failure serve the un-relocated avar2
+   build (13 axes, avar2 table, ~1,332-tuple gvar) and report it as a
+   failed mapped build (`last_build_status` not `ok`; health carries the
+   relocation error). Bar as set by the recipe table.
+2. **S1(a′) relocation memo, success AND failure.** The relocation's
+   inputs are the fontc-compiled font and the target; the compiled font
+   changes only when the staged source/shadow changes, while most studio
+   edits (every sidebar/CSV save, grade, Kinetikern) change only what
+   comes after it. Key the memo on sha256 of the compiled TTF bytes +
+   the target dict + `GVAR_PRUNE_TOL`; store the relocated TTF (or the
+   error) under the build dir; on hit, skip the instancer and the
+   header-fit. Evidence: (i) a CSV-only edit after a successful
+   relocation → log shows the hit and the build's wall-clock drops by
+   ~27 s on Crispy (record both numbers); (ii) the recipe's second
+   nudge after a failure (same target) → the failure is answered from
+   the memo in <1 s instead of 27 s; (iii) a source edit invalidates the
+   memo (miss logged); (iv) exports use the same memo when their target
+   matches (set-default at the ORIGIN row) and otherwise compute as
+   today. Same output bytes as an uncached run (hash compare) is the
+   acceptance.
+3. **S1(c)** oracle-pinned Preview under the relocation error, then
+   **S1(d)** the ORIGIN badge tooltip, as written.
+4. The pruned-aware budget model is **not** scheduled; it only pays if
+   the memo leaves a measurable failing case, which the recipe will show.
+
+This keeps the designed behaviour (the preview rests at the ORIGIN row
+whenever relocation fits) and removes the 27 s from every build that
+did not change the compiled font — the common case.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
