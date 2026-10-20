@@ -929,6 +929,34 @@ This keeps the designed behaviour (the preview rests at the ORIGIN row
 whenever relocation fits) and removes the 27 s from every build that
 did not change the compiled font — the common case.
 
+## Verifier early note on S1(b) + the catch-all (2026-10-20, commits `18c5d82`, `5a59d1b`) — read-only review, not a checkpoint
+
+Read the diffs; no live run yet (that comes with the S1 checkpoint).
+
+- **`degraded` as the status value is accepted.** It meets the bar
+  ("not `ok` while the mapped build failed") and keeps the build gate
+  open so the ORIGIN row can be put back — better than `failed`. The
+  frontend only special-cases `failed`, so nothing hangs on it (checked
+  `useBuildStatus`, `StatusBanners`, `build-wait`).
+- **But the degraded state is invisible today.** `StatusBanners.jsx`
+  renders banners for `failed`, the origin warning, the transform error
+  and the avar2 error; there is none for `origin_relocation_error`, so a
+  designer sees sliders at the compiled origin with no explanation
+  until S1(c) lands. Add the banner in the S1 hand-off (message + "revert
+  the ORIGIN row's parametric values to clear it"), and list the new
+  status in `routes/health.py`'s docstring and ARCHITECTURE §5.
+- **Exports raising on a failed relocation is right** (a set-default
+  export must not ship a different resting style silently).
+- **Probe:** `sidebar-edit-saves` asserts `last_build_status == "ok"`;
+  keep that strict there, and let only the recipe/S1 scenarios expect
+  `degraded`.
+- **Catch-all:** deriving the studio namespaces from the URL map is the
+  right source of truth; it is recomputed per request — compute it once
+  (the map is frozen after the first request) so a 404 path costs
+  nothing. `test_fontra_catchall.py` covers the 404/405 cases; add the
+  positive case (a Fontra-owned `/api/...` path still proxies) so the
+  editor cannot regress silently.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
