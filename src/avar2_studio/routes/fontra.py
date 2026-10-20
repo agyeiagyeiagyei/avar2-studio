@@ -287,18 +287,24 @@ def fontra_serverinfo_proxy():
 def _studio_api_namespaces() -> set:
     """First path segments of avar2-studio's OWN /api/ routes.
 
-    Derived from the URL map so it stays correct as routes are added. Used to
-    keep the Fontra catch-all from swallowing requests to studio paths — a
-    wrong method or a typo there used to reach Fontra and come back as
-    ``503 {"error": "Fontra subprocess is not running"}``, which tells the
-    caller nothing (round-11 review, side finding 1)."""
+    Derived from the URL map so it stays correct as routes are added, and
+    cached on the app (the map is frozen after the first request, so a 404
+    path costs nothing). Used to keep the Fontra catch-all from swallowing
+    requests to studio paths — a wrong method or a typo there used to reach
+    Fontra and come back as ``503 {"error": "Fontra subprocess is not
+    running"}``, which tells the caller nothing (round-11 review, side
+    finding 1)."""
     from flask import current_app
 
+    cached = current_app.extensions.get("studio_api_namespaces")
+    if cached is not None:
+        return cached
     namespaces = set()
     for rule in current_app.url_map.iter_rules():
         parts = str(rule.rule).split("/")
         if len(parts) > 2 and parts[1] == "api" and parts[2] and "<" not in parts[2]:
             namespaces.add(parts[2])
+    current_app.extensions["studio_api_namespaces"] = namespaces
     return namespaces
 
 

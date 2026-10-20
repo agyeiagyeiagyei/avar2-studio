@@ -15,7 +15,19 @@ bp = Blueprint("health", __name__)
 
 @bp.route('/api/health', methods=['GET'])
 def health():
-    """Health check endpoint."""
+    """Health check endpoint.
+
+    ``last_build_status`` is one of:
+
+    * ``ok`` — the last build produced the font the preview expects;
+    * ``degraded`` — the font IS the avar2 build (every axis, avar2 table)
+      but its default could not be relocated onto the ORIGIN row, so the
+      preview rests at the compiled origin. ``origin_relocation_error``
+      carries the reason; the build gate stays OPEN so the ORIGIN row can be
+      put back (deliberately not ``failed``);
+    * ``failed`` — the source does not compile: the last-good font keeps
+      serving and every mutating route answers 409.
+    """
     try:
         family_name = None
         if state.GLYPHS_PATH:

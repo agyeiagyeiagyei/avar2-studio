@@ -337,7 +337,11 @@ changing the transform set rebuilds from source.
 
 ## 5. API surface
 
-All JSON unless noted. Mutating methods (POST/PUT/PATCH/DELETE) are
+All JSON unless noted. `last_build_status` in `/api/health` is `ok`,
+`degraded` or `failed`: `degraded` means the served font IS the avar2 build
+(every axis, avar2 table) but its default could not be relocated onto the
+ORIGIN row — `origin_relocation_error` says why, and the gate stays open so
+the ORIGIN row can be put back. Mutating methods (POST/PUT/PATCH/DELETE) are
 refused with **409** while `LAST_BUILD_STATUS == "failed"`
 (`_refuse_edits_while_source_is_broken`), except `/api/build`,
 `/api/load-source` and the `…/editing` markers. The Fontra catch-alls
