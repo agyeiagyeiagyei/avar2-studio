@@ -12,7 +12,9 @@ the parametric fvar defaults to that row's out first (fontTools
 instancer, ranges kept), so the row compiles as a true identity and
 the other rows anchor exactly."""
 
+import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -256,8 +258,19 @@ def test_a_relocation_is_memoised_and_reused(tmp_path, monkeypatch):
     assert first_report.get("memo") == "miss", first_report
     assert (len(fits), len(instances)) == (1, 1)
 
+    # A MAPPING-only change must still hit the memo (the compile did not
+    # change) and still regenerate the avar2 table — the memo stores the
+    # post-relocation, pre-gen-avar2 font.
+    edited = [dict(m) for m in MAPPINGS]
+    edited[1] = {"in": {"wght": 900}, "out": {"XTRA": 450.0, "XOPQ": 700.0}}
+    config = tmp_path / "a" / "config.yaml"
+    config.write_text(yaml.safe_dump({
+        "sources": [str(tmp_path / "a" / "CrispyMini.glyphs")],
+        "avar2": {"CrispyMiniTest.ttf": edited},
+    }), encoding="utf-8")
+
     second_report = {}
-    second = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=second_report)
+    second = _build(tmp_path, monkeypatch, edited, sub="a", report=second_report)
     assert second_report.get("memo") == "hit", second_report
     assert second_report.get("error") is None
     assert (len(fits), len(instances)) == (1, 1), (
@@ -265,6 +278,18 @@ def test_a_relocation_is_memoised_and_reused(tmp_path, monkeypatch):
     assert (pipeline._font_content_digest(second)
             == pipeline._font_content_digest(first)), (
         "a memo hit must serve the same font content the uncached run produced")
+    # The memo holds the post-relocation, PRE-gen-avar2 font: the built font
+    # carries an avar table, every memo entry does not. That is why a hit still
+    # re-runs gen-avar2 and picks up a mapping edit.
+    memo_dir = second.parent / pipeline.RELOCATION_MEMO_DIRNAME
+    memos = sorted(memo_dir.glob("*.ttf"))
+    assert memos, "the successful relocation must be memoised"
+    memo_tt = TTFont(str(memos[-1]))
+    assert "avar" not in memo_tt, "the memo must sit BEFORE gen-avar2"
+    memo_tt.close()
+    built_tt = TTFont(str(second))
+    assert "avar" in built_tt, "the built font must carry the regenerated avar2"
+    built_tt.close()
 
 
 def test_a_failed_relocation_is_memoised(tmp_path, monkeypatch):
@@ -318,3 +343,19 @@ def test_a_source_edit_invalidates_the_memo(tmp_path, monkeypatch):
     _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=second_report)
     assert second_report.get("memo") == "miss", (
         "a changed compile must not reuse the old relocated font")
+
+
+def test_the_plain_build_picker_never_returns_a_memo_file(tmp_path):
+    """A memo entry is a relocated avar2 font from an earlier compile, and it
+    lives INSIDE the build dir. The plain-fallback picker must not hand it back
+    as "the font that was just built" (round-11 review)."""
+    out = tmp_path / "build"
+    memo = out / pipeline.RELOCATION_MEMO_DIRNAME
+    memo.mkdir(parents=True)
+    built = out / "Crispy[wght].ttf"
+    built.write_bytes(b"built")
+    cached = memo / ("a" * 32 + ".ttf")
+    cached.write_bytes(b"memo")
+    os.utime(cached, (time.time() + 60, time.time() + 60))  # newer on purpose
+    assert pipeline._pick_variable_font(out) == built
+    assert "memo" not in str(pipeline._pick_variable_font(out))

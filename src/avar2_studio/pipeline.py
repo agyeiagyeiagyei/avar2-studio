@@ -1196,6 +1196,21 @@ def _perform_avar2_build() -> Dict:
         state.BUILDING = False
 
 
+def _pick_variable_font(output_dir: Path) -> Path:
+    """The variable font fontmake/fontc just wrote under ``output_dir``.
+
+    ``rglob`` because fontmake may nest it. The relocation memo is skipped:
+    it is a tree of relocated avar2 fonts from earlier compiles sitting in
+    the same build dir, and a plain build must never hand one back as its own
+    output (round-11 review). Newest wins when there is more than one.
+    """
+    candidates = [p for p in Path(output_dir).rglob("*.ttf")
+                  if RELOCATION_MEMO_DIRNAME not in p.parts]
+    if not candidates:
+        raise RuntimeError(f"No variable font found in {output_dir}")
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = True) -> Path:
     """
     Build variable font from Glyphs file using fontc (with fontmake fallback).
@@ -1264,15 +1279,7 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
             log.info(f"fontmake stdout: {result.stdout}")
         raise RuntimeError(f"fontmake failed: {error_msg}")
 
-    # Find the generated variable font
-    # fontmake may create files directly in output_dir or in a subdirectory
-    variable_fonts = list(output_dir.rglob("*.ttf"))
-    if not variable_fonts:
-        raise RuntimeError(f"No variable font found in {output_dir}")
-
-    # Return the first variable font found
-    # (In practice, there should be only one)
-    return variable_fonts[0]
+    return _pick_variable_font(output_dir)
 
 
 # Guards state._MAPPED_FONT_CACHE.

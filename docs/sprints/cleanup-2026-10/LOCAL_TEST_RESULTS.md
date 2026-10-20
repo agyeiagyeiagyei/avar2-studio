@@ -598,3 +598,25 @@ timer in `schedule_shadow_rebuild` cover the shadow/transformed copies this
 import regenerates; nothing further was needed. **The multi-select broadcast
 half of S2 is still unmeasured** (it needs the UI: LCWD across three rows, then
 open Preview) — that is the one open piece.
+
+## S1(a′) — the review's two items (2026-10-20)
+
+**Hazard closed: the plain-fallback picker can no longer return a memo file.**
+`build_variable_font` ended with `output_dir.rglob("*.ttf")` and returned the
+first hit; the memo lives at `<build>/.relocation-memo/<key>.ttf`, inside that
+tree, so the fallback could hand back a relocated avar2 font from an earlier
+compile as "the plain build". The pick is now one function,
+`pipeline._pick_variable_font`, which skips the memo directory and takes the
+newest candidate; pinned by
+`test_the_plain_build_picker_never_returns_a_memo_file` (a memo entry with a
+deliberately newer mtime still loses to the real build output). The other
+pickers (`server.py` 509/514, `routes/build.py` 190, `build_jobs.py` 66,
+`pipeline.py` 1141) are flat `glob("*.ttf")` and cannot see the memo tree.
+
+**Proof added: the memo sits BEFORE gen-avar2.**
+`test_a_relocation_is_memoised_and_reused` now changes one mapping row's `out`
+between the two builds and requires `memo == "hit"` *and* the second font to
+carry a regenerated avar table — plus a direct check that every memo entry has
+**no** `avar` table while the built font has one. So a mapping-only edit costs
+a memo hit and still re-runs gen-avar2, which is why the output content matches
+an uncached run.
