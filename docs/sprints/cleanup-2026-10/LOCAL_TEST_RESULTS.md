@@ -210,6 +210,53 @@ target) so an unchanged retry costs 0 s instead of 27 s; (iii) only then
 consider a pruned-aware budget model, whose threshold would have to sit
 between the measured 1,467 (works, pruned) and 1,767 (fails) cases.
 
+## S1(b) — a failed relocation keeps the avar2 font (2026-10-20)
+
+Same recipe, same copy staging, `head 18c5d82` (S1(b) + the worker-boundary
+fix) versus the table above. Recipe now also applies the grade and
+Kinetikern entry (it used POST; both are PUT routes — fixed).
+
+| Stage | status / `origin_relocation_error` | axes | font | `g` tuples |
+| --- | --- | --- | --- | --- |
+| + control axis + braces (+ grade + KKRN) | ok / None | 13 | 10,894,284 B | 1,333 |
+| **+ 1 % ORIGIN nudge** | **degraded** / “glyph 'g' has too many variation tuples … (1767 tuples; dropping the 428 sub-visible ones was not enough)” | **13** | **792,256 B** | **86** |
+| + second nudge | degraded / same | 13 | 792,080 B | 86 |
+
+Bar (set by the review): after the nudge the served font must keep 13 axes
+and the avar2 table, `last_build_status` must not read `ok`, and health must
+carry the relocation error. All three hold:
+
+- `fontTools` on the served bytes: axes `XTRA XOPQ YOPQ LCWD YMOD TST2 GRAD
+  slnt ROND opsz wdth wght SPAC`, `avar` present, XOPQ default at the
+  compiled origin (the un-relocated resting style);
+- `/api/health`: `last_build_status: degraded`,
+  `origin_relocation_error: "glyph 'g' has too many variation tuples …"`,
+  `avar2_error: None` (the avar2 step itself did not fail);
+- `/api/font` HTTP 200, 792,080 B — versus **641,432 B / 10 axes** before the
+  fix, with the mapped axes gone.
+
+`degraded` is a third status on purpose: `failed` closes the build gate and
+would have stopped the designer nudging the ORIGIN row back (all mutating
+routes 409). The gate therefore stays open, and the amber banner says the
+preview rests at the compiled origin and how to clear it.
+
+**Status plumbing.** The first S1(b) run reported `degraded` with
+`origin_relocation_error: None` in health: builds run in a worker
+subprocess, and the field was missing from both transfer lists
+(`build_worker._apply_result`, `JobQueue._apply_build_state`). Added, and
+pinned by `test_the_relocation_error_survives_the_worker_boundary`.
+
+**Side finding 1 closed.** The Fontra catch-all now answers 405 (path exists
+for another method) or 404 (no such route) as JSON for studio `/api/`
+namespaces, derived from the URL map; non-studio paths still proxy.
+`tests/test_fontra_catchall.py` covers all three cases, and the recipe's own
+calls now use PUT.
+
+**Side finding 2 noted.** The baseline font size varies run to run
+(10,533,616 B / 10,472,360 B verifier / 10,894,284 B here after grade+KKRN) —
+the accumulated state differs per run and the SPAC injector's pruning is not
+byte-stable. A12 size comparisons should carry a tolerance.
+
 ## Part B — designer
 
 **NOT RUN.** B1–B10 need Glyphs 3, the Fontra UI, design apps and a real judgement of the

@@ -366,3 +366,22 @@ def test_recent_results_are_bounded(queue):
     assert queue.job_status("export-9") is None
     assert queue.job_status("export-10")["state"] == "finished"
     assert queue.job_status(f"export-{build_jobs.KEEP_RESULTS + 9}")["state"] == "finished"
+
+
+def test_the_relocation_error_survives_the_worker_boundary(tmp_path, monkeypatch):
+    """S1(b) reports the failed relocation through health, which is served by
+    the PARENT process — so the worker has to hand the field over in both
+    directions. It lives in two lists (`build_worker._apply_result` writes it
+    into the result, `JobQueue._apply_build_state` copies it back); a field
+    missing from either silently reads None in /api/health."""
+    from avar2_studio import build_worker
+
+    result = {}
+    build_worker._apply_result(result)
+    assert "last_origin_relocation_error" in result, sorted(result)
+
+    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", None)
+    queue = build_jobs.JobQueue(StubServer(tmp_path))
+    queue._apply_build_state({"success": True, "last_build_status": "degraded",
+                              "last_origin_relocation_error": "glyph 'g' overflow"})
+    assert state.LAST_ORIGIN_RELOCATION_ERROR == "glyph 'g' overflow"
