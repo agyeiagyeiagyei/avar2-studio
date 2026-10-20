@@ -284,8 +284,48 @@ def fontra_serverinfo_proxy():
 # /api/glyph-coverage / /api/control-axes/<tag> / etc. match
 # before this catch-all and stay on avar2-studio. Anything Fontra
 # requests through /api/ (export, etc.) falls through here.
+def _studio_api_namespaces() -> set:
+    """First path segments of avar2-studio's OWN /api/ routes.
+
+    Derived from the URL map so it stays correct as routes are added. Used to
+    keep the Fontra catch-all from swallowing requests to studio paths — a
+    wrong method or a typo there used to reach Fontra and come back as
+    ``503 {"error": "Fontra subprocess is not running"}``, which tells the
+    caller nothing (round-11 review, side finding 1)."""
+    from flask import current_app
+
+    namespaces = set()
+    for rule in current_app.url_map.iter_rules():
+        parts = str(rule.rule).split("/")
+        if len(parts) > 2 and parts[1] == "api" and parts[2] and "<" not in parts[2]:
+            namespaces.add(parts[2])
+    return namespaces
+
+
 @bp.route('/api/<path:rest>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def fontra_api_fallthrough(rest: str):
+    from flask import current_app
+
+    first = rest.split("/", 1)[0]
+    if first in _studio_api_namespaces():
+        # A studio path that did not match a route: wrong method or a typo.
+        # Answer like Flask would, in JSON, instead of proxying to Fontra.
+        path = f"/api/{rest}"
+        # Does the path exist for some OTHER method? Ask the URL map per
+        # method and ignore matches that land on a catch-all (they accept
+        # every method and would answer for any path).
+        adapter = current_app.url_map.bind("localhost")
+        for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+            try:
+                endpoint, _args = adapter.match(path, method=method)
+            except Exception:
+                continue
+            if endpoint.endswith(("fontra_api_fallthrough",
+                                  "fontra_root_fallthrough")):
+                continue
+            return jsonify({"error": f"Method {request.method} not allowed for "
+                                     f"{path}"}), 405
+        return jsonify({"error": f"No such API route: {path}"}), 404
     return _proxy_to_fontra(f"/api/{rest}")
 
 

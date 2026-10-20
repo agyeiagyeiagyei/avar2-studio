@@ -144,11 +144,12 @@ def main():
         code, body = call(url, f"/api/control-axes/{tag}/reseed", {})
         print(f"  reseed {tag} (brace layers on coverage glyphs): HTTP {code}")
         wait_idle(url)
-        code, body = call(url, f"/api/instances/{quote(GRADED_ROW)}/grade", {"pct": 0.25})
+        code, body = call(url, f"/api/instances/{quote(GRADED_ROW)}/grade",
+                          {"pct": 0.25}, method="PUT")
         print(f"  grade {GRADED_ROW}: HTTP {code} {str(body)[:80]}")
         wait_idle(url)
         code, body = call(url, "/api/kinetikern/instances/" + quote("Default 1 MaxOpsz"),
-                          {"looseness": 0.45})
+                          {"looseness": 0.45}, method="PUT")
         print(f"  kinetikern entry: HTTP {code} {str(body)[:80]}")
         wait_idle(url)
         build_once(url, "after accumulation")
