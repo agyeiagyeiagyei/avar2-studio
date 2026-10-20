@@ -23,7 +23,7 @@ import BuildVeil from './components/BuildVeil';
 // hooks/useStudioData, useTransforms, useControlAxes, useInstanceEditing);
 // what remains here is composition plus the mainTab view switch.
 function AppShell() {
-  const { building, buildStale, lastBuildStatus } = useBuildStatus();
+  const { building, buildJob, buildStale, lastBuildStatus } = useBuildStatus();
   const {
     loading, showLanding, setShowLanding, familyName, vfFamilyId, fontLoaded,
     fontUrl, builtFontFilename, sampleText, setSampleText, testerState,
@@ -45,10 +45,12 @@ function AppShell() {
   // Kick ONE rebuild when arriving there stale; build_stale clears
   // when the build lands, so this can't loop.
   useEffect(() => {
-    if (mainTab === 'preview' && buildStale && !building) {
+    // `building` excludes the WOFF2 compress job that follows a build; asking
+    // for a rebuild while one is queued only piles up behind it (S5).
+    if (mainTab === 'preview' && buildStale && !building && !buildJob) {
       api.buildFont().catch(() => {});
     }
-  }, [mainTab, buildStale, building]);
+  }, [mainTab, buildStale, building, buildJob]);
 
   // First load only: refreshes (a commit's loadData, a Load Font swap)
   // keep the mounted workspace instead of re-gating behind "Loading…".

@@ -3,9 +3,10 @@ import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 import { api } from '../api';
 import { registerPreviewFont } from '../fontLoad';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useTransforms } from '../hooks/useTransforms';
 
-function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, defaultOriginNames, axes }) {
+function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, defaultOriginNames, originMasterByRow, axes }) {
   // Per-row badge state (grade / rounding / slant) + save handlers come
   // from the useTransforms context, renamed to the old prop names so the
   // row rendering below is untouched.
@@ -21,11 +22,20 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
+  const { buildJob } = useBuildStatus();
 
   // Load font when available. The family id comes from /api/health so the
   // tool works on any .glyphs file, not just Crispy.
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) {
+      setFontReady(false);
+      return undefined;
+    }
+    // `building` clears as soon as the build lands, but the WOFF2 compress
+    // job runs AFTER it; asking for the cached WOFF2 in that window is a
+    // guaranteed 409 (and a console error per page load). Wait for the
+    // queue to be empty, not just for the font to be new.
+    if (buildJob) {
       setFontReady(false);
       return undefined;
     }
@@ -54,7 +64,7 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [fontUrl, fontLoaded, vfFamilyId]);
+  }, [fontUrl, fontLoaded, vfFamilyId, buildJob]);
 
   // Handle wheel scrolling during drag
   useEffect(() => {
@@ -186,6 +196,7 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
             onSaveInstanceSlant={onSaveInstanceSlant}
             onRemoveInstanceSlant={onRemoveInstanceSlant}
             isDefaultOrigin={!!defaultOriginNames?.has(instance.name)}
+            originMaster={originMasterByRow?.[instance.name] || null}
           />
         </div>
       ))}

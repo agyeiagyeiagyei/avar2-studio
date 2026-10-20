@@ -6,12 +6,30 @@ import RoundingBadge from './RoundingBadge';
 import SlantBadge from './SlantBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
+// S1(d): the ORIGIN tooltip says whether this row's parametric location is a
+// point the source actually interpolates. A row that sits ON a master relocates
+// for free; one that misses needs the instancer to synthesise the origin, which
+// is what ends in the gvar header overflow on a twin-heavy source.
+function originMasterSummary(master) {
+  if (!master) return '';
+  if (master.on_master) {
+    return ` Its parametric location sits on the compiled master “${master.nearest}”, so the origin is a point the source already interpolates.`;
+  }
+  const parts = Object.entries(master.delta || {})
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 4)
+    .map(([tag, value]) => `${tag} ${value > 0 ? '+' : ''}${value}`);
+  const gap = parts.length ? ` (${parts.join(', ')} font units)` : '';
+  return ` It does NOT sit on a compiled master: the nearest is “${master.nearest}”, off by${gap}. The build has to synthesise this origin with the instancer, which densifies gvar.`;
+}
+
 function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
   roundingEnabled, roundingPct, roundingDefaultPct,
   onSaveInstanceRounding, onRemoveInstanceRounding,
   slantEnabled, slantPct, slantDefaultPct, slantAxisMin,
   onSaveInstanceSlant, onRemoveInstanceSlant,
   isDefaultOrigin = false,
+  originMaster = null,
 }) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
@@ -211,7 +229,7 @@ function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingC
           {isDefaultOrigin && (
             <span
               className="origin-badge origin-badge-default"
-              title="This instance's mapping inputs all sit at the axis defaults, so its parametric values define the font's RESTING state: the build interpolates a real master here and compiles with it as the origin (avar2 cannot remap the default location). Move an axis default, or this row's inputs, to hand the origin to another instance."
+              title={`This instance's mapping inputs all sit at the axis defaults, so its parametric values define the font's RESTING state: the build interpolates a real master here and compiles with it as the origin (avar2 cannot remap the default location). Move an axis default, or this row's inputs, to hand the origin to another instance.${originMasterSummary(originMaster)}`}
               aria-label="default origin instance"
             >
               ORIGIN

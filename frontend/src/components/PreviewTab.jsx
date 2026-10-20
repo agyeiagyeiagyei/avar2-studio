@@ -3,6 +3,8 @@ import './PreviewTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
 import { registerPreviewFont } from '../fontLoad';
+import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
 
 // Font size stays in rem internally; the slider presents it in pt
 // (12pt = 1rem at the default 16px root — same convention as Sidebar).
@@ -83,6 +85,8 @@ function PreviewTab({
   // under a misleading "no avar2-mapped axes" empty state.
   const parametricPromoted = userAxes.length === 0 && parametricAxes.length > 0;
 
+  const { buildJob } = useBuildStatus();
+  const { originRelocationError } = useStudioData();
   const [coords, setCoords] = useState({});
   const [showParametric, setShowParametric] = useState(true);
 
@@ -190,10 +194,13 @@ function PreviewTab({
   // same global document.fonts as InstanceRows.
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) return;
+    // The WOFF2 compress job runs after the build: fetching the cached WOFF2
+    // while it is queued is a guaranteed 409 (S5).
+    if (buildJob) return;
     registerPreviewFont(vfFamilyId, fontUrl,
                         api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
       .catch(err => console.error('Preview: failed to load font:', err));
-  }, [fontUrl, fontLoaded, vfFamilyId]);
+  }, [fontUrl, fontLoaded, vfFamilyId, buildJob]);
 
   const setAxis = (tag, value) => {
     // Dragging a parametric slider is an explicit override: it stops
@@ -216,12 +223,31 @@ function PreviewTab({
     [axes, coords]
   );
 
+  // Degraded build (health.origin_relocation_error): the font's default could
+  // not be moved onto the ORIGIN row, so its avar2 table no longer anchors the
+  // resting state and driving the user axes renders the compiled origin
+  // instead of the authored style. Pin the parametric axes at the oracle's
+  // post-mapping values — the same technique the instance rows use — and hold
+  // the user axes at their defaults; the oracle is re-fetched from
+  // /api/mapped-location on every input change, so the canvas still follows
+  // the sliders (S1(c)).
+  const renderCoords = useMemo(() => {
+    if (!originRelocationError) return effectiveCoords;
+    const pinned = { ...effectiveCoords };
+    for (const a of userAxes) pinned[a.tag] = a.default;
+    for (const a of parametricAxes) {
+      const oracle = mappedParams[a.tag];
+      if (typeof oracle === 'number') pinned[a.tag] = oracle;
+    }
+    return pinned;
+  }, [originRelocationError, effectiveCoords, userAxes, parametricAxes, mappedParams]);
+
   // font-variation-settings uses the exact fvar tag, case-sensitively —
   // XTRA/XOPQ/YOPQ stay uppercase, crbr/wght stay as declared. (Matches
   // the working layer thumbnails; do NOT lowercase.)
   const fvs = useMemo(
-    () => (axes || []).map(a => `"${a.tag}" ${effectiveCoords[a.tag] ?? a.default}`).join(', '),
-    [axes, effectiveCoords]
+    () => (axes || []).map(a => `"${a.tag}" ${renderCoords[a.tag] ?? a.default}`).join(', '),
+    [axes, renderCoords]
   );
 
   // Export options: axes to flag HIDDEN in the exported fvar, and an
@@ -460,6 +486,17 @@ function PreviewTab({
           >
             ⚠ The avar2 build is failing, so this preview is the plain
             build — mapped axes are missing. Hover for the error.
+          </div>
+        )}
+
+        {originRelocationError && (
+          <div
+            className="preview-relocation-notice"
+            role="status"
+            title={originRelocationError}
+          >
+            Resting state is approximated by the mapping until the ORIGIN row is
+            back on a master; exports will say the same.
           </div>
         )}
 

@@ -510,3 +510,91 @@ save (`tests/test_avar2_default_relocation.py`, both memo tests).
    `stdout=DEVNULL, stderr=DEVNULL`, so every `log.info` inside a build is lost
    unless the supervisor copies it into the result. Any future "the log says"
    evidence for build-time behaviour needs a field, not a log line.
+
+## S4 — cached source loader in the read-only routes (2026-10-20)
+
+Seven route call sites parsed an 11 MB transformed `.glyphs` on every request.
+Six of them only ask the parsed font for names/axes and mutate the *file*
+through their own load, so they now use the mtime-keyed `load_source_cached`:
+`routes/instances.py` ×4 (the auto-save PUT, rename, promote-to-source, delete)
+and `routes/control_axes.py` ×2 (the glyph fingerprint, the axis name→tag map).
+The A18 pre-flight was already cached. The third location in the review,
+`routes/load.py`, turned out to be the upload route's own function name
+(`def load_source()`), not a parse site.
+
+Measured on the copy at 5072, `PUT /api/instance/<row>?csv_only=true`, five
+alternating values (so nothing dedupes), median of five:
+
+| | median |
+| --- | --- |
+| before (uncached `load_source`) | **2,951 ms** |
+| after (`load_source_cached`) | **6.5 ms** |
+
+**One behaviour had to be preserved.** `load_source_cached` called `stat()`
+before the cache lookup, so a *missing* path raised `FileNotFoundError` where
+the uncached loader raised from the parse — four writeback tests caught the
+difference (they point `GLYPHS_PATH` at a shadow that does not exist and expect
+the route's fallback). The cached loader now falls through to `load_source`
+when `stat()` fails, so "the source cannot be read" means the same thing on
+both paths (`tests/test_source_writeback_targets.py`, 4 tests).
+
+## S5 — idle means no build AND no compress (2026-10-20)
+
+`building` clears when the build lands, but the WOFF2 compress job runs after
+it, so a page load in that window asked for `/api/font?format=woff2` and got a
+409 (three console errors per load, A20). Three call sites now wait for the
+queue to be empty, not just for `building` to clear:
+
+- `InstanceRows.jsx` and `PreviewTab.jsx`: the preview-font registration is
+  skipped while `build_job` is set (and re-runs when it clears);
+- `App.jsx`: the "rebuild once when Preview opens stale" effect also requires
+  `buildJob == null`.
+
+The probe already treated `build_job` as busy (`ui_probe.py:71`).
+
+## S1(c) — the Preview under a degraded build (2026-10-20)
+
+When `/api/health` carries `origin_relocation_error`, the font's default could
+not be moved onto the ORIGIN row, so its own avar2 table no longer anchors the
+resting state: driving the user axes renders the compiled origin, not the
+authored style. `PreviewTab` now pins the parametric axes at
+`/api/mapped-location`'s post-mapping values (the oracle the tab already
+fetches for the slider read-outs — the same technique the instance rows use)
+and holds the user axes at their defaults, so the canvas still follows the
+sliders. A one-line amber notice under the axis panel says the resting state is
+approximated by the mapping until the ORIGIN row is back on a master, and that
+exports will say the same.
+
+## S1(d) — the ORIGIN badge tooltip (2026-10-20)
+
+`csv_io.origin_master_report()` now rides each matched row as
+`origin_master: {nearest, on_master, max_delta, delta}` — the nearest compiled
+master to the row's parametric `out` and the per-axis gap. The ORIGIN badge
+tooltip appends it: on a master it says the origin is a point the source
+already interpolates; off a master it names the nearest one and the largest
+gaps, and says the build has to synthesise the origin with the instancer (which
+is what densifies gvar).
+
+On the Crispy copy the ORIGIN row (`Default 400 MaxOpsz`, out XTRA 663.1 /
+XOPQ 202.5 / YOPQ 121.8) reports `nearest 47-1-1, on_master False, delta
+{XTRA 616.1, XOPQ 201.5, YOPQ 120.8}` — an interior point, which is why the
+relocation has to run at all. The 1 % nudge moves only the XOPQ term
+(201.5 → 203.5).
+
+## S2 — one build per import: does not reproduce at this head (2026-10-20)
+
+The review measured five builds for one config import (`…-7/-9/-11/-13/-15`).
+On this head the same action produces **exactly one**:
+
+| action | builds started |
+| --- | --- |
+| `POST /api/config/import` with the current bundle (dry_run false) | 1 |
+| the same import with one mapping cell changed (149.9 → 151.5) | 1 |
+
+Commands: `GET /api/config/export` → `{"bundle": <bundle>, "dry_run": false}`,
+then count `[jobs] build-… started` in the server log. The watcher's
+self-write suppression (time window + mtime watermark) plus the coalescing
+timer in `schedule_shadow_rebuild` cover the shadow/transformed copies this
+import regenerates; nothing further was needed. **The multi-select broadcast
+half of S2 is still unmeasured** (it needs the UI: LCWD across three rows, then
+open Preview) — that is the one open piece.

@@ -654,6 +654,19 @@ export function StudioDataProvider({ children }) {
   // rather than by a mapping). Mirrors the server's _is_default_row:
   // every authored in-cell equals its axis's declared default; a blank
   // cell sits at the default by definition.
+  // S1(d): per-row master proximity from /api/avar2/instances — whether the
+  // row's parametric out sits on a compiled master, and by how much it misses
+  // the nearest one. Feeds the ORIGIN badge tooltip.
+  const originMasterByRow = React.useMemo(() => {
+    const out = {};
+    for (const inst of avar2Instances || []) {
+      if (inst?.instance_name && inst.origin_master) {
+        out[inst.instance_name] = inst.origin_master;
+      }
+    }
+    return out;
+  }, [avar2Instances]);
+
   const defaultOriginNames = React.useMemo(() => {
     const meta = avar2Axes?.metadata || {};
     const defs = {};
@@ -724,6 +737,7 @@ export function StudioDataProvider({ children }) {
     previewOnlyAxisTags,
     controlAxisTags,
     defaultOriginNames,
+    originMasterByRow,
   };
 
   return (

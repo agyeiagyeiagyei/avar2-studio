@@ -30,7 +30,7 @@ def _source_glyph_sigs():
     if state._SOURCE_GLYPH_SIGS[0] == mtime:
         return state._SOURCE_GLYPH_SIGS[1]
     try:
-        font, _fmt = _source_font.load_source(state.ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source_cached(state.ORIGINAL_PATH)
         sigs = {g.name: _control_axes.glyph_masters_sig(font, g.name) for g in font.glyphs}
     except Exception as exc:
         log.warning(f"Warning: could not fingerprint source glyphs: {exc}")
@@ -517,7 +517,7 @@ def control_axis_reference_metrics(tag: str):
             # the sidecar and fvar speak tags. Accept both.
             name_to_tag = {}
             try:
-                src_font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
+                src_font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
                 for ax in _source_font.get_axes(src_font):
                     name_to_tag[str(ax.get("name") or "").lower()] = str(ax.get("tag") or "")
                     name_to_tag[str(ax.get("tag") or "").lower()] = str(ax.get("tag") or "")

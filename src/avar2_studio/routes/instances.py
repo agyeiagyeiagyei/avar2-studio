@@ -353,7 +353,10 @@ def update_instance(instance_name: str):
         or bool(data.get('csv_only'))
     )
 
-    font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
+    # Read-only: the parsed font is only asked for names and axes, and the
+    # source writes below go through their own load. The cached loader keeps
+    # a slider commit from re-parsing an 11 MB .glyphs (S4).
+    font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
     source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
     is_source_instance = instance_name in source_instance_names
     # GLYPHS_PATH is the TRANSFORMED SHADOW — its axis list includes the
@@ -567,7 +570,7 @@ def rename_instance(instance_name: str):
         return jsonify({"error": "New name is the same as current name"}), 400
 
     try:
-        font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
+        font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
         source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         is_source_instance = instance_name in source_instance_names
 
@@ -658,7 +661,7 @@ def add_instance_to_source(instance_name: str):
         # Promotion writes the ORIGINAL (the user's file) — loading and
         # saving the shadow here would both lose the write on the next
         # regen AND risk leaking shadow artifacts if saved elsewhere.
-        font, _fmt = _source_font.load_source(state.ORIGINAL_PATH)
+        font, _fmt = _source_font.load_source_cached(state.ORIGINAL_PATH)
         source_instance_names = {entry["name"] for entry in _source_font.get_source_instances(font)}
         if instance_name in source_instance_names:
             return jsonify({"error": f"Instance '{instance_name}' is already in the source file"}), 400
@@ -778,7 +781,7 @@ def delete_instance(instance_name: str):
         # to delete there; the default DELETE (API clients, older UIs) used
         # to fail with a 500 instead of removing its CSV row.
         if touches_source:
-            font, _fmt = _source_font.load_source(state.GLYPHS_PATH)
+            font, _fmt = _source_font.load_source_cached(state.GLYPHS_PATH)
             source_names = {entry["name"] for entry in
                             _source_font.get_source_instances(font)}
             if instance_name in source_names:

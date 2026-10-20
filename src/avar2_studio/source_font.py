@@ -99,11 +99,20 @@ _source_cache: Dict[str, Tuple[float, int, object, str]] = {}
 
 
 def load_source_cached(path: Path) -> Tuple[object, str]:
-    """``load_source`` for read-only callers, memoized by file version."""
+    """``load_source`` for read-only callers, memoized by file version.
+
+    A missing path falls through to ``load_source`` rather than raising from
+    ``stat()``: callers treat "the source cannot be read" as a normal outcome
+    (the A18 pre-flight, the writeback routes), and the cached loader must not
+    turn that into a different error than the uncached one.
+    """
     path = Path(path)
     if path.suffix.lower() != ".glyphs":
         return load_source(path)
-    st = path.stat()
+    try:
+        st = path.stat()
+    except OSError:
+        return load_source(path)
     key = str(path)
     entry = _source_cache.get(key)
     if entry and entry[0] == st.st_mtime and entry[1] == st.st_size:

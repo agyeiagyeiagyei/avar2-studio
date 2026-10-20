@@ -18,7 +18,7 @@ export default function InstancesTab() {
     axes, sampleText, setSampleText, familyName, fontSize, setFontSize,
     instances, masters, vfFamilyId, fontLoaded, fontUrl,
     avar2Mode, avar2Instances, avar2Axes, glyphsFileHasUnsavedChanges,
-    axisDefaults, defaultOriginNames, staticMode,
+    axisDefaults, defaultOriginNames, originMasterByRow, staticMode,
     handleAddAvar2Axis, handleUpdateAvar2Axis, handleDeleteAvar2Axis,
     handleUpdateAvar2Mapping, loadAvar2Data,
   } = useStudioData();
@@ -90,6 +90,7 @@ export default function InstancesTab() {
         onUpdateInstanceSource={handleUpdateInstanceSource}
         onDemoteFromSource={handleDemoteFromSource}
         disabledControlAxes={disabledControlAxes}
+        originMasterByRow={originMasterByRow}
         axisDefaults={axisDefaults}
         defaultOriginNames={defaultOriginNames}
         axes={axes}

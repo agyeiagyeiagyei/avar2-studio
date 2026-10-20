@@ -471,6 +471,39 @@ def compare_coordinates(
     return mismatches
 
 
+MASTER_TOLERANCE = 1.0   # font units: "sits on" a compiled master
+
+
+def origin_master_report(source_path: Path, out: Dict[str, float]) -> Optional[Dict]:
+    """Which compiled master is nearest to a mapping row's parametric ``out``,
+    and by how much per axis it misses it (S1(d), the ORIGIN badge tooltip).
+
+    A row whose out lands exactly on a master is what makes build-time
+    relocation cheap: the origin is already a point the source interpolates.
+    When it is not, the difference is what the relocation has to move, and the
+    designer can see it before the build overflows. ``None`` when the source
+    has no master carrying any of these tags.
+    """
+    if not out:
+        return None
+    font, _fmt = source_font.load_source_cached(source_path)
+    best = None
+    for master in source_font.get_masters(font):
+        shared = {tag: float(value) for tag, value in master["coordinates"].items()
+                  if tag in out}
+        if not shared:
+            continue
+        delta = {tag: round(float(out[tag]) - value, 2) for tag, value in shared.items()}
+        worst = max((abs(d) for d in delta.values()), default=0.0)
+        if best is None or worst < best[0]:
+            best = (worst, master["name"], delta)
+    if best is None:
+        return None
+    worst, name, delta = best
+    return {"nearest": name, "on_master": worst <= MASTER_TOLERANCE,
+            "max_delta": worst, "delta": delta}
+
+
 def match_instances(
     source_path: Path,
     csv_path: Path,
@@ -520,15 +553,17 @@ def match_instances(
                     out_axes[col] = decimal_val
 
         mismatches = compare_coordinates(glyphs_coords, out_axes, tolerance)
+        out_floats = {k: float(v) for k, v in out_axes.items()}
         results.append({
             "instance_name": instance_name,
             "glyphs_coordinates": glyphs_coords,
             "avar2_mapping": {
                 "in": in_axes,
-                "out": {k: float(v) for k, v in out_axes.items()},
+                "out": out_floats,
             },
             "match_status": "matched" if not mismatches else "mismatch",
             "coordinate_mismatches": mismatches,
+            "origin_master": origin_master_report(source_path, out_floats),
         })
 
     for instance_name, csv_row in csv_by_name.items():
