@@ -246,6 +246,54 @@ subprocess, and the field was missing from both transfer lists
 (`build_worker._apply_result`, `JobQueue._apply_build_state`). Added, and
 pinned by `test_the_relocation_error_survives_the_worker_boundary`.
 
+### The one number that did not add up: relocation INFLATES gvar
+
+The review read 13 axes / 792,256 B / `g` 86 tuples against 10,894,284 B /
+1,333 tuples one build earlier and concluded the served font had "the axes
+and the avar2 table but almost no variation data". The sizes are right; the
+conclusion is not. Measured on the staged source behind the still-degraded
+test server (`head e3f7551`, `fontTools 4.63`):
+
+| artifact | bytes | total tuples | `g` | axes | note |
+| --- | --- | --- | --- | --- | --- |
+| (i) fontc alone, same source + flags | 608,820 | 7,701 | 83 | 9 | `.avar2-studio/shadow/transformed/Crispy.glyphs` |
+| (ii) `out` after the failed relocation | 792,296 | 8,304 | 86 | 13 | `build/Crispy[…TST2…].ttf` |
+| (iii) `/api/font` (served) | 792,296 | 8,304 | 86 | 13 | **sha256 equal to (ii)** |
+
+So (ii) is the compile **plus** the avar2 step's created axes — `opsz`,
+`wdth`, `wght`, `SPAC` — and nothing was pruned on the way: the 603 extra
+tuples are the injected axis data (`SPAC` participates in 408 tuples, `LCWD`
+223, `GRAD` 3,065 …). The failure path writes no bytes at all: it closes the
+mutated in-memory font and skips its save, so `out` is still what steps 2–3
+wrote.
+
+The 10,533,616 B / 124,370-tuple font is the **relocated** one — a second
+copy of that exact build exists as `exports/default.ttf` with the same
+124,370 tuples. Relocation is what inflates gvar, because the instancer
+re-expresses every delta against the new default: a *feasible* 1-unit XOPQ
+relocation of the served 8,304-tuple font takes `g` from 86 to **213** and
+the total to **17,900**; at the recipe's 1 % target the instancer reported
+`g` at 1,767, and the successful pre-nudge build had 1,476. Those are the
+same order — the collapse is the *absence of relocation*, not lost data.
+
+The twins are live in the served font, not inert: tuple participation is
+`XOPQ` 6,313, `YOPQ` 6,081, `XTRA` 5,629, `slnt` 3,413, `ROND` 3,316,
+`GRAD` 3,065, `SPAC` 408, `LCWD` 223.
+
+Correction to the table above: its pre-nudge row (10,894,284 B / 1,333
+tuples) came from the earlier run. In the run that produced the 792 KB font
+the pre-nudge build was 10,533,616 B / 124,370 tuples / 12 axes (no `TST2` —
+the secondary axis arrived with the recipe's accumulate step). Comparing
+across runs is what made the two numbers look like a collapse of the same
+font.
+
+**Test now pins the bytes, not just the axes.**
+`test_a_relocation_that_cannot_fit_keeps_the_avar2_font` builds the same
+config a second time with `relocate_default=False` and requires the failed
+build's output to be **byte-identical** to it (plus tuple-dict equality and a
+non-empty gvar). If anything ever writes the half-instanced in-memory font,
+that assertion fails where "has an avar table" would have passed.
+
 **The degraded state is visible — proven live (answering the early note).**
 The note reads "the degraded state is invisible today"; the banner already
 shipped in `18c5d82` (`StatusBanners.jsx` reads `originRelocationError` from

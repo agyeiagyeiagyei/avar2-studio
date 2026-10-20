@@ -204,7 +204,27 @@ def test_a_relocation_that_cannot_fit_keeps_the_avar2_font(tmp_path, monkeypatch
     assert fvar["XTRA"].defaultValue == 94.0, (
         f"the default must stay at the compiled origin, got {fvar['XTRA'].defaultValue}")
     assert "avar" in tt, "the avar2 table must survive the failed relocation"
+    kept_tuples = {g: len(v) for g, v in tt["gvar"].variations.items()}
+    kept_bytes = out.read_bytes()
     tt.close()
+
+    # "Kept the un-relocated build" has to mean the VARIATION DATA is the
+    # compile's, not merely that the axes and the avar2 table are still there:
+    # the round-11 review rightly refused a 792 KB font whose gvar had shrunk
+    # 15x, because axes-with-no-deltas is as wrong for the preview as the
+    # 10-axis fallback, only quieter. Build the same config with the
+    # relocation switched off and require the two outputs to be identical —
+    # the failed attempt must leave nothing of itself on disk.
+    ref_dir = workdir / "ref"
+    ref_dir.mkdir()
+    reference = pipeline._build_in_process(config_path, ref_dir, str(FONTC),
+                                          relocate_default=False)
+    assert reference.read_bytes() == kept_bytes, (
+        "the failed relocation must leave the un-relocated compile untouched")
+    ref_tt = TTFont(str(reference))
+    assert {g: len(v) for g, v in ref_tt["gvar"].variations.items()} == kept_tuples
+    assert sum(kept_tuples.values()) > 0, "the kept font must carry variation data"
+    ref_tt.close()
 
     assert pipeline._build_status(report["error"]) == "degraded"
     assert pipeline._build_status(None) == "ok"
