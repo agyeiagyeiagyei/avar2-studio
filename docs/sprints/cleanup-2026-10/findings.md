@@ -1006,6 +1006,31 @@ The test now asserts what the review asked for and more: the failed build's
 output must be **byte-identical** to the same config built with
 `relocate_default=False`, with equal tuple dicts and a non-empty gvar.
 
+## Verifier: gvar-collapse note withdrawn (2026-10-20, `7d3d74e`/`a8316a6`) — S1(b) evidence accepted
+
+The agent's measurement is right and my premise was wrong: I compared
+the degraded font against the previous run's *relocated* font. fontc's
+own compile of this source is 608,820 B with `g` at 83 tuples; the
+avar2 step adds the created axes (792,296 B, 86 tuples); relocation is
+what inflates gvar ~15× to the 10.5 MB / 124,370-tuple font. The served
+degraded font is sha256-equal to the un-relocated `out`, the twins are
+live in it (slnt 3,413 and ROND 3,316 tuple participations), and the
+test now pins byte-identity with a `relocate_default=False` build. S1(b)
+is accepted on this evidence, pending the fresh-clone run at the
+checkpoint.
+
+Two consequences to carry forward:
+
+- **S1(a′) memo stores the relocated font**, which is the expensive
+  artifact (≈10 MB per entry, 27 s to make). Keep the latest two entries
+  per build dir and evict the rest; the key stays (compiled-font sha256,
+  target, `GVAR_PRUNE_TOL`). On a hit the build skips the instancer,
+  the header-fit AND the inflation, so the win is the whole 27 s.
+- **Docs:** ARCHITECTURE's "relocation densifies gvar ~7×" should
+  quote the measured Crispy figure (~15× with slant/rounding twins) and
+  say that the un-relocated compile is the small one — the next reader
+  will make my mistake otherwise.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
