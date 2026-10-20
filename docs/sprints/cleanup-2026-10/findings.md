@@ -957,6 +957,34 @@ Read the diffs; no live run yet (that comes with the S1 checkpoint).
   positive case (a Fontra-owned `/api/...` path still proxies) so the
   editor cannot regress silently.
 
+## Verifier note on the S1(b) live evidence (2026-10-20, `a89f7a7`/`fcf4122`) — one number does not add up
+
+The S1(b) table reports the served font after the nudge as **13 axes,
+792,256 B, `g` 86 tuples**, against 10,894,284 B and 1,333 tuples one
+build earlier. The S1(b) bar was "the un-relocated avar2 build: all
+axes, avar2 table, **~1,332-tuple gvar**". A 792 KB font cannot carry
+the slant/rounding twin deltas (7,597 twin layers), so what is being
+served is not the un-relocated compile — it is a font with the axes and
+the avar2 table but almost no variation data, i.e. slnt/ROND/LCWD/YMOD
+present and inert and every parametric region flattened. For the
+Preview that is as wrong as the 10-axis fallback, only quieter.
+
+Before S1(a′)/(c) build on it, the agent must establish which bytes end
+up at `out` when the instancer raises: the diff closes the mutated
+in-memory font and saves nothing, so the on-disk `out` should still be
+fontc's full compile unless something earlier in `_build_in_process`
+(the fix_font save/re-read, or a prior pass) rewrote it. Evidence
+required in the results: for the degraded build, `fontTools` tuple
+counts for `g`/`B`/`e` and the file size of (i) fontc's output, (ii)
+`out` after the failed relocation, (iii) the served font — all three
+should match the pre-nudge 1,333-tuple build within the SPAC injector's
+pruning. If they do not, S1(b) is not done. Also add that check to
+`test_a_relocation_that_cannot_fit_keeps_the_avar2_font` (tuple count of
+one heavy glyph equal to the un-relocated compile, not just "has avar").
+
+The worker-boundary fix (relocation error crossing the subprocess) and
+the catch-all cache/positive test are accepted as described.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
