@@ -1031,6 +1031,37 @@ Two consequences to carry forward:
   say that the un-relocated compile is the small one — the next reader
   will make my mistake otherwise.
 
+## Verifier early note on S1(a′) (2026-10-20, `f4a3e91`) — design accepted; one hazard, one proof to add
+
+Read the diff and the three tests. The key (content digest without
+`head`, exact per-axis window, prune tolerance, format version), the
+atomic store of successes and failures, the keep-2 eviction, the memo
+dir surviving the worker's job dir, and `origin_relocation_memo` in
+health are all as scoped. Two items before the checkpoint:
+
+1. **Hazard: the plain-fallback picker can now return a memo file.**
+   `build_variable_font(state.GLYPHS_PATH, state.BUILD_DIR, …)` ends
+   with `output_dir.rglob("*.ttf")` and returns `variable_fonts[0]`
+   (unordered). The memo lives at `<build>/.relocation-memo/<key>.ttf`
+   — a relocated avar2 font from an earlier compile — inside that tree.
+   Whenever the fallback runs in the stable build dir (in-process builds,
+   tests, any path where `BUILD_DIR` is not a throwaway job dir), the
+   fallback can hand back a cached relocated font as "the plain build".
+   Make every picker non-recursive or exclude `RELOCATION_MEMO_DIRNAME`
+   (`pipeline.py` ~1269 is the recursive one; `server.py` 509/514,
+   `routes/build.py` 190 and `build_jobs.py` 66 are flat and fine), and
+   add a test: with a memo entry present, the fallback returns the
+   fontmake/fontc output, never the memo file.
+2. **Proof that the memo sits before gen-avar2.** The store happens
+   right after the instancer, so a mapping-only edit must hit the memo
+   AND still regenerate the avar2 table. Add that to
+   `test_a_relocation_is_memoised_and_reused`: change one CSV `out`
+   value between the two builds → `memo == "hit"` and the second font's
+   avar2 mapping for that row differs from the first's. Live evidence
+   at the checkpoint: a sidebar save on Crispy → health shows
+   `origin_relocation_memo: "hit"` and the build's wall-clock versus the
+   previous miss (expect ≈27 s less).
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
