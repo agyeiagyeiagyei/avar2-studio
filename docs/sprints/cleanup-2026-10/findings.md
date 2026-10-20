@@ -985,6 +985,27 @@ one heavy glyph equal to the un-relocated compile, not just "has avar").
 The worker-boundary fix (relocation error crossing the subprocess) and
 the catch-all cache/positive test are accepted as described.
 
+**Executor answer (2026-10-20, `7d3d74e`) — relocation inflates gvar; the
+792 KB font is the compile it could not fit.** Measured on the same staged
+source: fontc alone 608,820 B / 7,701 tuples / `g` 83; the failed build's
+`out` 792,296 B / 8,304 / 86 (the +603 tuples are the avar2 step's created
+axes — `SPAC` alone participates in 408); `/api/font` is **sha256-equal** to
+that `out`. The 10,533,616 B / 124,370-tuple font is the *relocated* one
+(`exports/default.ttf` is another copy of it). Instancing re-expresses every
+delta against the new default, so a feasible 1-unit XOPQ relocation already
+takes `g` 86 → 213 and the total to 17,900 — at the 1 % target the instancer
+saw 1,767 against the successful build's 1,476. The twins are live in the
+served font, not inert: `slnt` 3,413 and `ROND` 3,316 tuple participations
+(plus `XOPQ` 6,313, `YOPQ` 6,081, `XTRA` 5,629, `GRAD` 3,065, `LCWD` 223,
+`SPAC` 408). And the table's pre-nudge row came from the *earlier* run: in
+this run the pre-nudge build was 10,533,616 B / 124,370 / 12 axes, because
+`TST2` arrived with the recipe's accumulate step — the cross-run comparison
+is what made two different fonts look like one collapsed one.
+
+The test now asserts what the review asked for and more: the failed build's
+output must be **byte-identical** to the same config built with
+`relocate_default=False`, with equal tuple dicts and a non-empty gvar.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
