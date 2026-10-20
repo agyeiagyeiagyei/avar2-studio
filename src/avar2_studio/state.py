@@ -50,6 +50,10 @@ LAST_AVAR2_ERROR: Optional[str] = None
 # avar2 font is still served (all axes, avar2 table) but its default is the
 # compiled origin, so LAST_BUILD_STATUS reports "degraded", not "ok".
 LAST_ORIGIN_RELOCATION_ERROR: Optional[str] = None
+# "hit"/"miss": whether the last build reused a memoised relocation. Carried
+# across the worker boundary for the same reason as the error above — the
+# worker's own log is discarded, so the field IS the evidence.
+LAST_ORIGIN_RELOCATION_MEMO: Optional[str] = None
 # Set when grade is declared but its braces could not be generated — the
 # built font is then missing its GRAD axis, which must not pass as ok.
 LAST_GRADE_ERROR: Optional[str] = None
@@ -96,6 +100,10 @@ OBSERVER = None  # Optional[watchdog.observers.Observer] — the source file wat
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
 PREVIEW_DIR: Optional[Path] = None  # Per-project workdir (sibling .avar2-studio/)
+# Relocation memo: the stable directory jobs write it to. A worker builds in a
+# throwaway job dir (only the font and the config are promoted back), so the
+# memo has to be told where to live or it dies with the job.
+RELOCATION_MEMO_DIR: Optional[Path] = None
 PREVIEW_CSV_PATH: Optional[Path] = None  # Path to preview CSV (sibling to .glyphs)
 PREVIEW_CONFIG_PATH: Optional[Path] = None  # Path to preview config (.avar2-studio/config.yaml)
 EDITING_INSTANCES: set = set()  # Track instances currently being edited (protected from sync)

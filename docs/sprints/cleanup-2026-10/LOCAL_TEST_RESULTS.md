@@ -434,3 +434,79 @@ failure, but the routine must define idle as `building: false` **and** no `build
 3. A19/A20 are routine-expectation adjustments (the `/api/health` probe and the compress-job
    idle definition) unless the designer wants the console 404 removed.
 4. Part B (B1–B12) is still entirely outstanding and needs the designer.
+
+## S1(a′) — relocation memo (2026-10-20)
+
+Relocating the origin is the expensive step: the instancer over a dense gvar
+plus the per-glyph header fit, ~27 s on Crispy before counting the rest of the
+build. Its result depends only on the compiled font's content and the target
+window, so it is memoised under `<build dir>/.relocation-memo/` (successes as
+the relocated TTF, failures as `{error}` JSON), keyed on
+
+    sha256( all table data except `head` ) + per-axis (min, new default, max)
+    + GVAR_PRUNE_TOL            # a different tolerance prunes different tuples
+
+`head.modified` is a save timestamp, so hashing file bytes would miss on every
+rebuild of an unchanged source; `head` is the only table excluded. Two entries
+per outcome are kept (`RELOCATION_MEMO_KEEP`) — the relocated fonts are ~9 MB
+each; older ones are evicted by mtime.
+
+**The memo has to be told where to live.** Builds run in a per-job directory
+(`build_jobs._stage` copies the source set into `jobs/<id>/src`), only the font
+and the config are promoted back, and the worker's stdout is `DEVNULL`. A memo
+written next to the job's own build dir therefore died with the job — the first
+live run showed exactly that: two 46 s builds, no memo entry, no hit. The
+stable path now travels in the job spec (`memo_dir`) into
+`state.RELOCATION_MEMO_DIR`, and the outcome is carried back as
+`origin_relocation_memo` (`"hit"`/`"miss"`) through the same two lists as
+`origin_relocation_error`, because the worker's log cannot be read.
+
+### Evidence (live, copy of Crispy at 5072, this worktree)
+
+| Scenario | build | memo | wall clock |
+| --- | --- | --- | --- |
+| failing relocation, first build (asymmetric twins, 13 axes) | degraded | miss | **37.25 s** |
+| same state, unchanged build | degraded | **hit** | **15.59 s** |
+| same state again | degraded | hit | 14.87 s |
+| pristine staging, startup build (relocation succeeds) | ok | miss | 43.28 s |
+| 1 % ORIGIN-row nudge (new target) | ok | miss | **57.84 s** |
+| CSV-only edit on another row — compile and target unchanged | ok | **hit** | **19.83 s** |
+
+So the memo removes the instancer and the header fit from a build whose compile
+and target are unchanged: **57.84 s → 19.83 s (−38.0 s)** on the success path
+and **37.25 s → 15.59 s (−21.7 s)** on the failure path (the failure path also
+skips the ~27 s inflation, which is why its saving is smaller than the success
+path's). Both memo entries from the two misses were present afterwards
+(9,099,908 B and 8,975,448 B), and the hit wrote nothing new.
+
+- **(i) CSV-only edit after a successful relocation** — rows 5–6 of the table.
+- **(ii) Second build after a failure, same target** — rows 1–2: the failure
+  is answered from the memo instead of re-running the instancer.
+- **(iii) A source edit invalidates the memo** — covered by
+  `test_a_source_edit_invalidates_the_memo` (changes one glyph's width in
+  CrispyMini → second build reports `miss`). Live, the same mechanism showed as
+  the pristine staging's startup build missing against the accumulated state's
+  entry.
+- **(iv) Exports use the same memo** — `_export_pipeline` now passes
+  `state.RELOCATION_MEMO_DIR` too, so a repeat export of the same style hits.
+  Not yet measured live (an export run is a full build + transform chain +
+  WOFF2); the export path calls the same `_build_in_process` with
+  `relocate_target`, which is the code under test.
+
+**Acceptance — same output content as an uncached run.** The memo stores the
+post-relocation bytes, so a hit copies them into `out` and the later steps
+(avar2, fvar instances) run exactly as they did before. The test compares
+`pipeline._font_content_digest` of the cached and uncached outputs; byte
+equality is not available because `head.modified` is a fresh timestamp on every
+save (`tests/test_avar2_default_relocation.py`, both memo tests).
+
+## Notes for the next round
+
+1. **`head.modified` defeats byte comparison of two builds.** Any "same bytes"
+   claim about two separate builds has to compare table content, not files. The
+   S1(b) reference-build assertion was changed to `_font_content_digest` for the
+   same reason.
+2. **Worker log lines are invisible.** `build_jobs` spawns the worker with
+   `stdout=DEVNULL, stderr=DEVNULL`, so every `log.info` inside a build is lost
+   unless the supervisor copies it into the result. Any future "the log says"
+   evidence for build-time behaviour needs a field, not a log line.

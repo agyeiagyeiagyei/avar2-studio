@@ -13,6 +13,7 @@ touchpoint here is ``state.JOBS`` (set by server.py at import time).
 
 import contextlib
 import gc
+import hashlib
 import json
 import os
 import shutil
@@ -427,6 +428,7 @@ def _run_build():
     # Cleared on every build: a stale relocation error would keep the studio
     # reporting "degraded" after the ORIGIN row was put back.
     state.LAST_ORIGIN_RELOCATION_ERROR = None
+    state.LAST_ORIGIN_RELOCATION_MEMO = None
     with _gc_paused():
         avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
@@ -654,11 +656,95 @@ def _fit_gvar_headers(font, tol: float = GVAR_PRUNE_TOL, log=None, headroom: int
     return removed
 
 
+RELOCATION_MEMO_DIRNAME = ".relocation-memo"
+RELOCATION_MEMO_KEEP = 2   # relocated fonts are ~10 MB each on a twin-heavy source
+
+
+def _font_content_digest(path: Path) -> str:
+    """sha256 over the font's table data, excluding ``head``.
+
+    ``head.modified`` is a timestamp, so hashing the file bytes would miss on
+    every rebuild of an unchanged source. Everything relocation reads —
+    ``glyf``/``gvar``/``fvar``/``HVAR`` — is covered, and so is everything the
+    fit prunes.
+    """
+    digest = hashlib.sha256()
+    font = TTFont(str(path))
+    try:
+        for tag in sorted(t for t in font.keys() if t not in ("GlyphOrder", "head")):
+            digest.update(tag.encode("ascii"))
+            digest.update(font.getTableData(tag))
+    finally:
+        font.close()
+    return digest.hexdigest()
+
+
+def _relocation_memo_key(font_path: Path, limits: Dict[str, tuple]) -> str:
+    """Identity of a relocation request: the compiled font's content, the
+    exact (min, new default, max) window per axis, and the pruning tolerance
+    (a different tolerance prunes different tuples, so it is part of the key)."""
+    payload = json.dumps({
+        "font": _font_content_digest(font_path),
+        "limits": {tag: [float(lo), float(default), float(hi)]
+                   for tag, (lo, default, hi) in sorted(limits.items())},
+        "tol": GVAR_PRUNE_TOL,
+        "format": 1,
+    }, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def _memo_lookup(memo_dir: Path, key: str):
+    """``("font", path)``, ``("error", message)`` or ``None``."""
+    font_path = memo_dir / f"{key}.ttf"
+    if font_path.exists():
+        return ("font", font_path)
+    error_path = memo_dir / f"{key}.json"
+    if error_path.exists():
+        try:
+            return ("error", json.loads(error_path.read_text(encoding="utf-8"))["error"])
+        except (OSError, ValueError, KeyError):
+            return None   # a half-written entry is a miss, never an invented error
+    return None
+
+
+def _memo_store(memo_dir: Path, key: str, source: Optional[Path],
+                error: Optional[str]) -> None:
+    """Record the outcome for ``key`` atomically, then evict the oldest."""
+    memo_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if error is None and source is not None:
+            tmp = memo_dir / f".{key}.ttf.tmp"
+            shutil.copyfile(source, tmp)
+            os.replace(tmp, memo_dir / f"{key}.ttf")
+        else:
+            tmp = memo_dir / f".{key}.json.tmp"
+            tmp.write_text(json.dumps({"error": error}), encoding="utf-8")
+            os.replace(tmp, memo_dir / f"{key}.json")
+    except OSError as exc:
+        # A memo that cannot be written costs the next build its shortcut;
+        # it must never cost this one its font.
+        log.info("  relocation: could not memoise this attempt: %s", exc)
+        return
+    _memo_evict(memo_dir)
+
+
+def _memo_evict(memo_dir: Path, keep: int = RELOCATION_MEMO_KEEP) -> None:
+    for suffix in (".ttf", ".json"):
+        entries = sorted(memo_dir.glob(f"*{suffix}"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+        for stale in entries[keep:]:
+            try:
+                stale.unlink()
+            except OSError as exc:
+                log.info("  relocation: could not evict %s: %s", stale.name, exc)
+
+
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                       default_overrides: Optional[Dict[str, float]] = None,
                       relocate_default: Optional[bool] = None,
                       relocate_target: Optional[Dict[str, float]] = None,
-                      relocation_report: Optional[Dict[str, Optional[str]]] = None) -> Path:
+                      relocation_report: Optional[Dict[str, Optional[str]]] = None,
+                      relocation_memo_dir: Optional[Path] = None) -> Path:
     """The gftools-builder pipeline, without gftools-builder.
 
     Profiling a rebuild put fontc at 0.06s and ``gftools builder`` at 9.5s:
@@ -824,28 +910,63 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                     f"default-location mapping row puts {tag} at {v}, outside "
                     f"its range [{ax.minValue}, {ax.maxValue}]")
             limits[tag] = (ax.minValue, v, ax.maxValue)
+        memo_dir = (Path(relocation_memo_dir) if relocation_memo_dir
+                    else out.parent / RELOCATION_MEMO_DIRNAME)
+        memo_key = None
+        memo = None
         if limits:
-            # A relocation that cannot fit gvar's per-glyph header ceiling is
-            # NOT a reason to lose the avar2 font: keep the un-relocated build
-            # (all axes, avar2 table, the compiled default) and report it, so
-            # the preview keeps its sliders and the ORIGIN row can be put
-            # back. Nothing was written yet — the instancer mutates in memory
-            # and the save happens after the fit.
-            try:
-                _instancer.instantiateVariableFont(font, limits, inplace=True,
-                                                   updateFontNames=False)
-                _fit_gvar_headers(font, log=log.info)
-            except Exception as exc:  # reported, never swallowed
-                relocation_error = " ".join(str(exc).split())
-                log.warning(
-                    "  relocation: cannot move the default to %s — keeping the "
-                    "un-relocated avar2 font: %s", target, relocation_error)
+            # Relocating the origin is the expensive step (~27 s on Crispy, and
+            # it densifies gvar ~17x), and its result depends only on the
+            # compiled font's content and the target window. So keep the result:
+            # a CSV row edit, a mapping change, or any other config touch that
+            # leaves the compile alone then costs nothing. Successes AND
+            # failures are memoised — the failure path is the one the designer
+            # hits repeatedly while walking the ORIGIN row back.
+            memo_key = _relocation_memo_key(out, limits)
+            memo = _memo_lookup(memo_dir, memo_key)
+            if relocation_report is not None:
+                relocation_report["memo"] = "hit" if memo is not None else "miss"
+            if memo is not None and memo[0] == "font":
                 font.close()
-                relocate_at_build = False
                 font = None
+                shutil.copyfile(memo[1], out)
+                log.info(
+                    "  relocation: memo hit — reusing the relocated font for %s "
+                    "(%d KB); instancer and header-fit skipped", target,
+                    memo[1].stat().st_size // 1024)
+            elif memo is not None:
+                font.close()
+                font = None
+                relocation_error = memo[1]
+                relocate_at_build = False
+                log.info(
+                    "  relocation: memo hit — the cached failure still stands for "
+                    "%s, instancer skipped: %s", target, relocation_error)
+            else:
+                # A relocation that cannot fit gvar's per-glyph header ceiling is
+                # NOT a reason to lose the avar2 font: keep the un-relocated build
+                # (all axes, avar2 table, the compiled default) and report it, so
+                # the preview keeps its sliders and the ORIGIN row can be put
+                # back. Nothing was written yet — the instancer mutates in memory
+                # and the save happens after the fit.
+                try:
+                    _instancer.instantiateVariableFont(font, limits, inplace=True,
+                                                       updateFontNames=False)
+                    _fit_gvar_headers(font, log=log.info)
+                except Exception as exc:  # reported, never swallowed
+                    relocation_error = " ".join(str(exc).split())
+                    log.warning(
+                        "  relocation: cannot move the default to %s — keeping the "
+                        "un-relocated avar2 font: %s", target, relocation_error)
+                    font.close()
+                    relocate_at_build = False
+                    font = None
+                    _memo_store(memo_dir, memo_key, None, relocation_error)
         if font is not None:
             font.save(str(out))
             font.close()
+            if memo is None and memo_key is not None:
+                _memo_store(memo_dir, memo_key, out, None)
 
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
     avar2_cfg = avar2_cfg_early
@@ -1001,7 +1122,8 @@ def _perform_avar2_build() -> Dict:
             try:
                 _report: Dict[str, Optional[str]] = {}
                 _build_in_process(config_to_update, workdir, fontc_path,
-                                  relocation_report=_report)
+                                  relocation_report=_report,
+                                  relocation_memo_dir=state.RELOCATION_MEMO_DIR)
             except Exception as e:
                 return _record_build_failure({
                     "success": False,
@@ -1014,6 +1136,7 @@ def _perform_avar2_build() -> Dict:
             result = _R()
             if _report.get("error"):
                 state.LAST_ORIGIN_RELOCATION_ERROR = _report["error"]
+            state.LAST_ORIGIN_RELOCATION_MEMO = _report.get("memo")
         project_fonts_dir = workdir.parent / "fonts" / "variable"
         produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not produced:
@@ -1066,7 +1189,8 @@ def _perform_avar2_build() -> Dict:
             # itself did not fail.
             state.LAST_AVAR2_ERROR = None
         return {"success": True, "font_path": str(state.VARIABLE_FONT_PATH),
-                "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR}
+                "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR,
+                "origin_relocation_memo": state.LAST_ORIGIN_RELOCATION_MEMO}
 
     finally:
         state.BUILDING = False
@@ -1343,7 +1467,8 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                 default_overrides=requested,
                 relocate_default=True,
                 relocate_target=mapped,
-                relocation_report=_export_report)
+                relocation_report=_export_report,
+                relocation_memo_dir=state.RELOCATION_MEMO_DIR)
             if _export_report.get("error"):
                 # An export asked for a specific resting style; shipping the
                 # un-relocated build instead would be a lie about the default.

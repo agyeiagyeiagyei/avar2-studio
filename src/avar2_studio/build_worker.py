@@ -56,7 +56,7 @@ class _Progress:
 def _apply_result(result):
     """Snapshot the shared build-state globals into the result."""
     for name in ("LAST_BUILD_STATUS", "LAST_BUILD_ERROR", "LAST_AVAR2_ERROR",
-                 "LAST_ORIGIN_RELOCATION_ERROR",
+                 "LAST_ORIGIN_RELOCATION_ERROR", "LAST_ORIGIN_RELOCATION_MEMO",
                  "LAST_GRADE_ERROR", "LAST_SOURCE_TRANSFORM_ERROR",
                  "LAST_TRANSFORM_ERROR", "LAST_ORIGIN_WARNING", "LAST_BUILD_TIME"):
         result[name.lower()] = getattr(state, name, None)
@@ -69,6 +69,8 @@ def _bind_server_globals(spec):
     state.ORIGINAL_PATH = src
     state.GLYPHS_PATH = src
     state.BUILD_DIR = Path(spec["job_dir"]) / "build"
+    state.RELOCATION_MEMO_DIR = (Path(spec["memo_dir"])
+                                 if spec.get("memo_dir") else None)
     state.USE_FONTC = bool(spec.get("use_fontc", True))
     # Lazy getters derive everything (preview dir, CSV, config, build dir)
     # from ORIGINAL_PATH — clear any memoized values so nothing leaks a

@@ -385,3 +385,10 @@ def test_the_relocation_error_survives_the_worker_boundary(tmp_path, monkeypatch
     queue._apply_build_state({"success": True, "last_build_status": "degraded",
                               "last_origin_relocation_error": "glyph 'g' overflow"})
     assert state.LAST_ORIGIN_RELOCATION_ERROR == "glyph 'g' overflow"
+    # S1(a'): whether the relocation came from the memo is the only evidence a
+    # memo hit happened — the worker's log is discarded — so it crosses too.
+    assert "last_origin_relocation_memo" in result, sorted(result)
+    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_MEMO", None)
+    queue._apply_build_state({"success": True, "last_build_status": "degraded",
+                              "last_origin_relocation_memo": "hit"})
+    assert state.LAST_ORIGIN_RELOCATION_MEMO == "hit"

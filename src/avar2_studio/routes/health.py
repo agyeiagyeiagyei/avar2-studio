@@ -71,6 +71,7 @@ def health():
             # could not be moved onto the ORIGIN row; last_build_status reads
             # "degraded". Revert the ORIGIN row to clear it.
             "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR,
+            "origin_relocation_memo": state.LAST_ORIGIN_RELOCATION_MEMO,
             "grade_error": state.LAST_GRADE_ERROR,
             "source_transform_error": state.LAST_SOURCE_TRANSFORM_ERROR,
             "origin_warning": state.LAST_ORIGIN_WARNING,

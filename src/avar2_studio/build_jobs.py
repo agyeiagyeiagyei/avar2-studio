@@ -476,8 +476,13 @@ class JobQueue:
             for ufo in orig.parent.glob("*.ufo"):
                 if ufo.is_dir():
                     shutil.copytree(str(ufo), str(src_dir / ufo.name))
+        # The relocation memo outlives the job dir: it lives next to the built
+        # fonts, which the supervisor promotes into.
+        from .pipeline import RELOCATION_MEMO_DIRNAME
         spec = {"job_id": self._job_id(job), "kind": job["kind"],
                 "job_dir": str(job["dir"]),
+                "memo_dir": str(Path(self.server._get_avar2_font_dir())
+                                / RELOCATION_MEMO_DIRNAME),
                 "original_path": str(src_dir / orig.name),
                 "use_fontc": bool(state.USE_FONTC),
                 "env": {k: os.environ.get(k) for k in ENV_KEYS},
@@ -550,7 +555,7 @@ class JobQueue:
 
     def _apply_build_state(self, result):
         for key in ("last_build_status", "last_build_error", "last_avar2_error",
-                    "last_origin_relocation_error",
+                    "last_origin_relocation_error", "last_origin_relocation_memo",
                     "last_grade_error", "last_source_transform_error",
                     "last_transform_error", "last_origin_warning", "last_build_time"):
             if key in result:

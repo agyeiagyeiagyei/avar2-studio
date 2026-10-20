@@ -47,18 +47,20 @@ def _evaluate(tt, user):
     return {t: round(denorm(t, renorm.get(t, 0.0)), 1) for t in ("XTRA", "XOPQ")}
 
 
-def _build(tmp_path, monkeypatch, mappings, sub="a"):
+def _build(tmp_path, monkeypatch, mappings, sub="a", report=None):
     workdir = tmp_path / sub / "work"
-    workdir.mkdir(parents=True)
+    workdir.mkdir(parents=True, exist_ok=True)
     src = tmp_path / sub / "CrispyMini.glyphs"
-    shutil.copy2(CRISPY_MINI, src)
+    if not src.exists():   # a second build must see the previous build's source
+        shutil.copy2(CRISPY_MINI, src)
     config_path = tmp_path / sub / "config.yaml"
     config_path.write_text(yaml.safe_dump({
         "sources": [str(src)],
         "avar2": {"CrispyMiniTest.ttf": mappings},
     }), encoding="utf-8")
     monkeypatch.setattr(pipeline, "_load_axis_metadata", lambda: METADATA)
-    return pipeline._build_in_process(config_path, workdir, str(FONTC))
+    return pipeline._build_in_process(config_path, workdir, str(FONTC),
+                                      relocation_report=report)
 
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
@@ -205,7 +207,6 @@ def test_a_relocation_that_cannot_fit_keeps_the_avar2_font(tmp_path, monkeypatch
         f"the default must stay at the compiled origin, got {fvar['XTRA'].defaultValue}")
     assert "avar" in tt, "the avar2 table must survive the failed relocation"
     kept_tuples = {g: len(v) for g, v in tt["gvar"].variations.items()}
-    kept_bytes = out.read_bytes()
     tt.close()
 
     # "Kept the un-relocated build" has to mean the VARIATION DATA is the
@@ -219,7 +220,8 @@ def test_a_relocation_that_cannot_fit_keeps_the_avar2_font(tmp_path, monkeypatch
     ref_dir.mkdir()
     reference = pipeline._build_in_process(config_path, ref_dir, str(FONTC),
                                           relocate_default=False)
-    assert reference.read_bytes() == kept_bytes, (
+    assert (pipeline._font_content_digest(reference)
+            == pipeline._font_content_digest(out)), (
         "the failed relocation must leave the un-relocated compile untouched")
     ref_tt = TTFont(str(reference))
     assert {g: len(v) for g, v in ref_tt["gvar"].variations.items()} == kept_tuples
@@ -228,3 +230,91 @@ def test_a_relocation_that_cannot_fit_keeps_the_avar2_font(tmp_path, monkeypatch
 
     assert pipeline._build_status(report["error"]) == "degraded"
     assert pipeline._build_status(None) == "ok"
+
+
+@pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
+def test_a_relocation_is_memoised_and_reused(tmp_path, monkeypatch):
+    """S1(a'): the instancer (~27 s on Crispy) runs once per (compiled font,
+    target window, tolerance) — a later build whose compile is unchanged reuses
+    the relocated font and must serve the very same bytes."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+    fits, instances = [], []
+    real_fit = pipeline._fit_gvar_headers
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers",
+                        lambda font, **kw: (fits.append(1), real_fit(font, **kw))[1])
+    from fontTools.varLib import instancer as _instancer_mod
+    real_instantiate = _instancer_mod.instantiateVariableFont
+
+    def counting_instantiate(*a, **kw):
+        instances.append(1)
+        return real_instantiate(*a, **kw)
+
+    monkeypatch.setattr(_instancer_mod, "instantiateVariableFont", counting_instantiate)
+
+    first_report = {}
+    first = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=first_report)
+    assert first_report.get("memo") == "miss", first_report
+    assert (len(fits), len(instances)) == (1, 1)
+
+    second_report = {}
+    second = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=second_report)
+    assert second_report.get("memo") == "hit", second_report
+    assert second_report.get("error") is None
+    assert (len(fits), len(instances)) == (1, 1), (
+        "a memo hit must skip both the instancer and the header fit")
+    assert (pipeline._font_content_digest(second)
+            == pipeline._font_content_digest(first)), (
+        "a memo hit must serve the same font content the uncached run produced")
+
+
+def test_a_failed_relocation_is_memoised(tmp_path, monkeypatch):
+    """The failure path is the one the designer hits repeatedly while walking
+    the ORIGIN row back: the second build must answer in one lookup instead of
+    paying the instancer again."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+    fits = []
+
+    def boom(font, log=None, **kwargs):
+        fits.append(1)
+        raise RuntimeError("glyph 'g' has too many variation tuples")
+
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers", boom)
+
+    first_report = {}
+    first = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=first_report)
+    first_bytes = first.read_bytes()
+    assert first_report.get("memo") == "miss", first_report
+    assert "too many variation tuples" in (first_report.get("error") or "")
+
+    second_report = {}
+    second = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=second_report)
+    assert second_report.get("memo") == "hit", second_report
+    assert second_report.get("error") == first_report["error"], (
+        "the cached verdict must be the same error, not a paraphrase")
+    assert len(fits) == 1, "the failed fit must not run twice for the same key"
+    assert second.read_bytes() == first_bytes
+
+
+@pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
+def test_a_source_edit_invalidates_the_memo(tmp_path, monkeypatch):
+    """The other half of the contract: the key is the COMPILED font's content,
+    so an edit that changes the compile must miss rather than serve a stale
+    relocated font."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+    first_report = {}
+    _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=first_report)
+    assert first_report.get("memo") == "miss", first_report
+
+    # A real content change: one glyph's advance width (Glyphs 3 spelling).
+    src = tmp_path / "a" / "CrispyMini.glyphs"
+    text = src.read_text(encoding="utf-8")
+    marker = "width = "
+    start = text.index(marker) + len(marker)
+    end = text.index(";", start)
+    width = int(text[start:end])
+    src.write_text(text[:start] + str(width + 7) + text[end:], encoding="utf-8")
+
+    second_report = {}
+    _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=second_report)
+    assert second_report.get("memo") == "miss", (
+        "a changed compile must not reuse the old relocated font")
