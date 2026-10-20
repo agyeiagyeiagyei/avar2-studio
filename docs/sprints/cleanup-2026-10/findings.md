@@ -1062,6 +1062,49 @@ health are all as scoped. Two items before the checkpoint:
    `origin_relocation_memo: "hit"` and the build's wall-clock versus the
    previous miss (expect ≈27 s less).
 
+## Verifier corrections + early note on `f24fc1c` (2026-10-20)
+
+**Two of my round-11 claims are withdrawn; the agent's measurements stand.**
+
+1. **A16 was not verified by me.** My round-11 script posted the raw
+   export bundle to `/api/config/import`; the route wants
+   `{bundle, dry_run}` and answered **400** to both calls (my log, lines
+   1266–1267). The script read the error body as "0 errors" and the
+   "all four sidecars byte-identical" result was vacuous — nothing had
+   been imported. The agent's A16 evidence (133 layers / 697 pins,
+   payload diff `[]`) is therefore the only A16 evidence so far; I re-run
+   A16 with the corrected script at the checkpoint (`dry_run` defaults
+   to true, so the apply call must say `false`).
+2. **"Five builds per import" is withdrawn.** Builds `-7…-15` on my log
+   sit between the lifecycle rename, the grade scenario and the
+   multi-select broadcast, not after the import (which never applied).
+   The agent's measurement — one import, one build — stands; S2 is
+   reduced to the multi-select-broadcast half, to be measured, and fixed
+   only if it shows more than one build.
+
+Lesson applied to my scripts: every API call now prints its HTTP status
+and fails the check on anything but 200.
+
+**Read-review of `f24fc1c` (S4, S5, S1(c), S1(d)):**
+
+- **S4 accepted**: six read-only sites on the cached loader; PUT
+  latency 2,951 → 6.5 ms median is the kind of number S4 was for. The
+  stat-fallthrough keeping the unreadable-source error identical on
+  both paths is right.
+- **S5 accepted** (font registration and the stale-Preview rebuild wait
+  for `build_job == null`).
+- **S1(c): one gap.** `renderCoords` pins every parametric axis to the
+  oracle under `origin_relocation_error`, including axes the designer
+  has explicitly overridden (`overrides` set). Keep an overridden axis
+  at its slider value: `pinned[a.tag] = overrides.has(a.tag) ?
+  effectiveCoords[a.tag] : oracle`. With the user axes held at their
+  defaults the avar2 delta is zero, so the override renders exactly —
+  this is the one mode where a direct parametric input is exact.
+- **S1(d) accepted**; `MASTER_TOLERANCE = 1.0` matches
+  `_fit_gvar_headers`' notion of sub-visible.
+- **Still open from the S1(a′) note:** the recursive fallback picker vs
+  the memo dir, and the memo-before-gen-avar2 test.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
