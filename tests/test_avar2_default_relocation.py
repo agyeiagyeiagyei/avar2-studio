@@ -158,3 +158,53 @@ def test_two_default_rows_fail_loudly(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "_load_axis_metadata", lambda: meta)
     with pytest.raises(RuntimeError, match="multiple mapping rows sit at the axis defaults"):
         pipeline._build_in_process(config_path, workdir, str(FONTC))
+
+
+
+@pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
+def test_a_relocation_that_cannot_fit_keeps_the_avar2_font(tmp_path, monkeypatch):
+    """S1(b): a relocation that overflows gvar's per-glyph header ceiling must
+    NOT cost the avar2 font.
+
+    The S1 recipe reproduces the overflow (one control axis with brace layers
+    plus a 1 % ORIGIN nudge). Before this, the studio answered by serving the
+    plain fallback — 10 axes, no avar2 table, `last_build_status: ok`. Now the
+    un-relocated build is kept (every axis, avar2 table, compiled default) and
+    the failure is reported: the report carries it, health exposes
+    `origin_relocation_error`, and the status reads "degraded" (not "ok", and
+    deliberately not "failed" — that would close the build gate and stop the
+    designer nudging the ORIGIN row back)."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+
+    def _boom(font, log=None, **kwargs):
+        raise RuntimeError("glyph 'g' has too many variation tuples")
+
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers", _boom)
+
+    workdir = tmp_path / "work"
+    workdir.mkdir(parents=True)
+    src = tmp_path / "CrispyMini.glyphs"
+    shutil.copy2(CRISPY_MINI, src)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "sources": [str(src)],
+        "avar2": {"CrispyMiniTest.ttf": MAPPINGS},
+    }), encoding="utf-8")
+    monkeypatch.setattr(pipeline, "_load_axis_metadata", lambda: METADATA)
+
+    report = {}
+    out = pipeline._build_in_process(config_path, workdir, str(FONTC),
+                                     relocation_report=report)
+    assert out.exists()
+    assert "too many variation tuples" in (report.get("error") or ""), report
+
+    tt = TTFont(str(out))
+    fvar = {a.axisTag: a for a in tt["fvar"].axes}
+    assert "wght" in fvar, f"the mapped axis must survive: {list(fvar)}"
+    assert fvar["XTRA"].defaultValue == 94.0, (
+        f"the default must stay at the compiled origin, got {fvar['XTRA'].defaultValue}")
+    assert "avar" in tt, "the avar2 table must survive the failed relocation"
+    tt.close()
+
+    assert pipeline._build_status(report["error"]) == "degraded"
+    assert pipeline._build_status(None) == "ok"

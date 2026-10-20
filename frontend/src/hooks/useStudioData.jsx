@@ -54,6 +54,10 @@ export function StudioDataProvider({ children }) {
   // plain fallback (no avar2 table / mapped axes). Surfaced on the
   // Preview tab so the fallback is never silent.
   const [avar2Error, setAvar2Error] = useState(null);
+  // Set when the avar2 font is served but its default could not be moved
+  // onto the ORIGIN row (health.origin_relocation_error); the preview keeps
+  // every axis, it just does not rest at the ORIGIN row's style.
+  const [originRelocationError, setOriginRelocationError] = useState(null);
   // Non-null ⇒ a source-stage transform (round corners / slant) failed
   // and the font was built WITHOUT it — surfaced as a banner so an
   // enabled-but-inert transform never passes silently.
@@ -195,6 +199,7 @@ export function StudioDataProvider({ children }) {
 
         applyHealth(health);
         setAvar2Error(health.avar2_error || null);
+        setOriginRelocationError(health.origin_relocation_error || null);
         setSourceTransformError(health.source_transform_error || null);
         setOriginWarning(health.origin_warning || null);
         setSessionLockLost(!!health.session_lock_lost);
@@ -371,6 +376,7 @@ export function StudioDataProvider({ children }) {
       lastBuildTimeRef.current = health.last_build_time || null;
       applyHealth(health);
       setAvar2Error(health.avar2_error || null);
+      setOriginRelocationError(health.origin_relocation_error || null);
       setSourceTransformError(health.source_transform_error || null);
       setOriginWarning(health.origin_warning || null);
 
@@ -681,6 +687,7 @@ export function StudioDataProvider({ children }) {
     loading,
     error, setError,
     avar2Error,
+    originRelocationError,
     sourceTransformError,
     originWarning,
     sampleText, setSampleText,

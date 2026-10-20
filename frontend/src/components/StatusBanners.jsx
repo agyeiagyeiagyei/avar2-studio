@@ -13,7 +13,7 @@ export default function StatusBanners() {
   const { building, lastBuildStatus, lastBuildError } = useBuildStatus();
   const {
     error, setError, sessionLockLost, originWarning,
-    sourceTransformError, avar2Error, buildFont,
+    sourceTransformError, avar2Error, originRelocationError, buildFont,
   } = useStudioData();
 
   return (
@@ -61,6 +61,13 @@ export default function StatusBanners() {
       {lastBuildStatus !== 'failed' && sourceTransformError && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
           A build transform failed and the font was built without it. {sourceTransformError}
+        </div>
+      )}
+      {originRelocationError && (
+        <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
+          The font cannot be relocated onto the ORIGIN row, so the preview rests
+          at the compiled origin instead. Every axis and mapping is intact —
+          put the ORIGIN row back to clear this. {originRelocationError}
         </div>
       )}
       {lastBuildStatus !== 'failed' && avar2Error && (

@@ -46,6 +46,10 @@ LAST_BUILD_ERROR: Optional[str] = None   # human-readable detail for "failed"
 # served instead. The fallback keeps LAST_BUILD_STATUS "ok", which made
 # avar2 failures invisible — the preview silently lost its mapped axes.
 LAST_AVAR2_ERROR: Optional[str] = None
+# Set when the built font could not be relocated onto the ORIGIN row: the
+# avar2 font is still served (all axes, avar2 table) but its default is the
+# compiled origin, so LAST_BUILD_STATUS reports "degraded", not "ok".
+LAST_ORIGIN_RELOCATION_ERROR: Optional[str] = None
 # Set when grade is declared but its braces could not be generated — the
 # built font is then missing its GRAD axis, which must not pass as ok.
 LAST_GRADE_ERROR: Optional[str] = None

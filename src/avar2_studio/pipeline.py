@@ -424,6 +424,9 @@ def _run_build():
     # the instancer relocation over a ~9MB gvar, fix/STAT) churns as many
     # temporaries as the source chain and showed the same
     # gc_collect_main-dominated profile once the heap had grown.
+    # Cleared on every build: a stale relocation error would keep the studio
+    # reporting "degraded" after the ORIGIN row was put back.
+    state.LAST_ORIGIN_RELOCATION_ERROR = None
     with _gc_paused():
         avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
@@ -654,7 +657,8 @@ def _fit_gvar_headers(font, tol: float = GVAR_PRUNE_TOL, log=None, headroom: int
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                       default_overrides: Optional[Dict[str, float]] = None,
                       relocate_default: Optional[bool] = None,
-                      relocate_target: Optional[Dict[str, float]] = None) -> Path:
+                      relocate_target: Optional[Dict[str, float]] = None,
+                      relocation_report: Optional[Dict[str, Optional[str]]] = None) -> Path:
     """The gftools-builder pipeline, without gftools-builder.
 
     Profiling a rebuild put fontc at 0.06s and ``gftools builder`` at 9.5s:
@@ -801,6 +805,7 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     relocate_at_build = relocate_default
     target = relocate_target if relocate_target is not None else (
         (default_rows[0].get("out") or {}) if (avar2_cfg_early and default_rows) else {})
+    relocation_error = None
     if relocate_at_build and target:
         from fontTools.varLib import instancer as _instancer
         font = _TTFont(str(out))
@@ -820,11 +825,27 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                     f"its range [{ax.minValue}, {ax.maxValue}]")
             limits[tag] = (ax.minValue, v, ax.maxValue)
         if limits:
-            _instancer.instantiateVariableFont(font, limits, inplace=True,
-                                               updateFontNames=False)
-            _fit_gvar_headers(font, log=log.info)
-        font.save(str(out))
-        font.close()
+            # A relocation that cannot fit gvar's per-glyph header ceiling is
+            # NOT a reason to lose the avar2 font: keep the un-relocated build
+            # (all axes, avar2 table, the compiled default) and report it, so
+            # the preview keeps its sliders and the ORIGIN row can be put
+            # back. Nothing was written yet — the instancer mutates in memory
+            # and the save happens after the fit.
+            try:
+                _instancer.instantiateVariableFont(font, limits, inplace=True,
+                                                   updateFontNames=False)
+                _fit_gvar_headers(font, log=log.info)
+            except Exception as exc:  # reported, never swallowed
+                relocation_error = " ".join(str(exc).split())
+                log.warning(
+                    "  relocation: cannot move the default to %s — keeping the "
+                    "un-relocated avar2 font: %s", target, relocation_error)
+                font.close()
+                relocate_at_build = False
+                font = None
+        if font is not None:
+            font.save(str(out))
+            font.close()
 
     # 4. avar2  (gftools-gen-avar2 --inplace in <avar2 section>), shim applied
     avar2_cfg = avar2_cfg_early
@@ -888,7 +909,21 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
         font.save(str(out))
         font.close()
 
+    if relocation_report is not None:
+        relocation_report["error"] = relocation_error
     return out
+
+
+def _build_status(relocation_error: Optional[str]) -> str:
+    """The status a *successful* build reports.
+
+    "degraded" when the avar2 font was served but its default could not be
+    relocated onto the ORIGIN row — the preview keeps every axis and the
+    avar2 table, but it does not rest at the ORIGIN row's style. Deliberately
+    not "failed": that closes the build gate and would stop the designer
+    nudging the ORIGIN row back (round-11 review, S1(b)).
+    """
+    return "degraded" if relocation_error else "ok"
 
 
 def _perform_avar2_build() -> Dict:
@@ -964,7 +999,9 @@ def _perform_avar2_build() -> Dict:
                 })
         else:
             try:
-                _build_in_process(config_to_update, workdir, fontc_path)
+                _report: Dict[str, Optional[str]] = {}
+                _build_in_process(config_to_update, workdir, fontc_path,
+                                  relocation_report=_report)
             except Exception as e:
                 return _record_build_failure({
                     "success": False,
@@ -975,6 +1012,8 @@ def _perform_avar2_build() -> Dict:
             class _R:  # the post-build code reads .stdout for its error text
                 stdout = ""
             result = _R()
+            if _report.get("error"):
+                state.LAST_ORIGIN_RELOCATION_ERROR = _report["error"]
         project_fonts_dir = workdir.parent / "fonts" / "variable"
         produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not produced:
@@ -1020,9 +1059,14 @@ def _perform_avar2_build() -> Dict:
 
         state.VARIABLE_FONT_PATH = _apply_transform_chain(font_file)
         state.LAST_BUILD_TIME = time.time()
-        state.LAST_BUILD_STATUS = "ok"
         state.LAST_BUILD_ERROR = None
-        return {"success": True, "font_path": str(state.VARIABLE_FONT_PATH)}
+        state.LAST_BUILD_STATUS = _build_status(state.LAST_ORIGIN_RELOCATION_ERROR)
+        if state.LAST_ORIGIN_RELOCATION_ERROR:
+            # The avar2 font is served and every axis is there; the avar2 step
+            # itself did not fail.
+            state.LAST_AVAR2_ERROR = None
+        return {"success": True, "font_path": str(state.VARIABLE_FONT_PATH),
+                "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR}
 
     finally:
         state.BUILDING = False
@@ -1293,10 +1337,19 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                 raise RuntimeError("Export build failed: %s"
                                    % (result.stderr or result.stdout or "")[-800:])
         else:
-            _build_in_process(export_config, export_workdir, fontc_path,
-                              default_overrides=requested,
-                              relocate_default=True,
-                              relocate_target=mapped)
+            _export_report: Dict[str, Optional[str]] = {}
+            _build_in_process(
+                export_config, export_workdir, fontc_path,
+                default_overrides=requested,
+                relocate_default=True,
+                relocate_target=mapped,
+                relocation_report=_export_report)
+            if _export_report.get("error"):
+                # An export asked for a specific resting style; shipping the
+                # un-relocated build instead would be a lie about the default.
+                raise RuntimeError(
+                    "Cannot relocate the default to the requested location: "
+                    + str(_export_report["error"]))
         produced = []
         for candidate in (export_workdir / "fonts", export_workdir.parent / "fonts", export_dir / "fonts"):
             produced += list(candidate.glob("**/*.ttf")) if candidate.exists() else []

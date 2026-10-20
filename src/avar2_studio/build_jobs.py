@@ -550,6 +550,7 @@ class JobQueue:
 
     def _apply_build_state(self, result):
         for key in ("last_build_status", "last_build_error", "last_avar2_error",
+                    "last_origin_relocation_error",
                     "last_grade_error", "last_source_transform_error",
                     "last_transform_error", "last_origin_warning", "last_build_time"):
             if key in result:

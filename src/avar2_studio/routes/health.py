@@ -55,6 +55,10 @@ def health():
             # Non-null ⇒ the served font is the plain fallback build;
             # the avar2 build is failing for this reason.
             "avar2_error": state.LAST_AVAR2_ERROR,
+            # Non-null ⇒ the avar2 font IS served (all axes) but its default
+            # could not be moved onto the ORIGIN row; last_build_status reads
+            # "degraded". Revert the ORIGIN row to clear it.
+            "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR,
             "grade_error": state.LAST_GRADE_ERROR,
             "source_transform_error": state.LAST_SOURCE_TRANSFORM_ERROR,
             "origin_warning": state.LAST_ORIGIN_WARNING,
