@@ -620,3 +620,34 @@ carry a regenerated avar table — plus a direct check that every memo entry has
 **no** `avar` table while the built font has one. So a mapping-only edit costs
 a memo hit and still re-runs gen-avar2, which is why the output content matches
 an uncached run.
+
+## S1(c) — overrides win (round-11 correction, 2026-10-20)
+
+`renderCoords` pinned *every* parametric axis to the oracle, including ones the
+designer had dragged. The mapping now lives in `frontend/src/preview-coords.js`
+(`previewRenderCoords`), where an overridden axis keeps its slider value:
+
+    pinned[tag] = overrides.has(tag) || oracle is not a number
+                  ? effectiveCoords[tag]      // explicit input / no oracle
+                  : oracle                    // follow the mapping
+
+With the user axes held at their defaults the avar2 delta is zero, so the
+override renders exactly — the one mode where a direct parametric input is
+exact. Pinned by `frontend/src/preview-coords.spec.mjs` (chained into
+`npm run test:unit`): healthy pass-through, degraded pinning, override wins,
+missing oracle falls back, tag case preserved.
+
+## S2 — the broadcast half, measured through the UI (2026-10-20)
+
+`/private/tmp/av2-routine/s2_broadcast.py` drives the real page on the 5072
+copy (multi-select rows 1–3, drag LCWD, open Preview) and counts
+`[jobs] build-… started`:
+
+| step | PUTs | builds |
+| --- | --- | --- |
+| LCWD broadcast over 3 multi-selected rows | 3 (one per row) | **0** |
+| opening Preview (stale) | — | **1** |
+| whole action | 3 | **1** |
+
+So S2 is met in both halves: one config import → one build, and a 3-row
+broadcast plus Preview → one build.

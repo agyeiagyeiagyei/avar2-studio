@@ -5,6 +5,7 @@ import { api } from '../api';
 import { registerPreviewFont } from '../fontLoad';
 import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useStudioData } from '../hooks/useStudioData';
+import { previewRenderCoords, variationSettings } from '../preview-coords';
 
 // Font size stays in rem internally; the slider presents it in pt
 // (12pt = 1rem at the default 16px root — same convention as Sidebar).
@@ -231,22 +232,17 @@ function PreviewTab({
   // the user axes at their defaults; the oracle is re-fetched from
   // /api/mapped-location on every input change, so the canvas still follows
   // the sliders (S1(c)).
-  const renderCoords = useMemo(() => {
-    if (!originRelocationError) return effectiveCoords;
-    const pinned = { ...effectiveCoords };
-    for (const a of userAxes) pinned[a.tag] = a.default;
-    for (const a of parametricAxes) {
-      const oracle = mappedParams[a.tag];
-      if (typeof oracle === 'number') pinned[a.tag] = oracle;
-    }
-    return pinned;
-  }, [originRelocationError, effectiveCoords, userAxes, parametricAxes, mappedParams]);
+  const renderCoords = useMemo(() => previewRenderCoords({
+    degraded: Boolean(originRelocationError),
+    effectiveCoords, userAxes, parametricAxes, mappedParams, overrides,
+  }), [originRelocationError, effectiveCoords, userAxes, parametricAxes,
+       mappedParams, overrides]);
 
   // font-variation-settings uses the exact fvar tag, case-sensitively —
   // XTRA/XOPQ/YOPQ stay uppercase, crbr/wght stay as declared. (Matches
   // the working layer thumbnails; do NOT lowercase.)
   const fvs = useMemo(
-    () => (axes || []).map(a => `"${a.tag}" ${renderCoords[a.tag] ?? a.default}`).join(', '),
+    () => variationSettings(axes || [], renderCoords),
     [axes, renderCoords]
   );
 
