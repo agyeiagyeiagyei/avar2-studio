@@ -173,6 +173,43 @@ This is what S1(a) must catch before the instancer and what S1(b) must not
 make worse: a 641 KB unmapped font instead of the 10.8 MB avar2 font with
 its axes intact.
 
+### S1(a) measurement — the instancer is the cost, and no cheap exact check exists
+
+Before writing the pre-check, measured on the two calibration fonts
+(`s1_estimate_probe.py`, fontTools 4.63.0, both with `avar2` stripped as the
+pipeline does):
+
+| Font | `g` before | `instantiateVariableFont` (XOPQ 202.5 → 187.89) | `g` after |
+| --- | --- | --- | --- |
+| 12-axis pristine (`/tmp/calib-12axis.ttf`, 10,533,616 B) | 1,476 | **27.3 s** | 2,036 |
+| 13-axis with `TST2` + braces (`/tmp/calib-13axis.ttf`, 10,853,032 B) | 1,332 | **27.3 s** | 1,824 |
+
+Three things this settles:
+
+1. **The instancer is ~27 s of a ~45 s build** — the pre-check is worth
+   having, and it is also the only expensive step that a failing relocation
+   wastes.
+2. **No cheap exact pre-check exists.** The cost is gvar itself, not the
+   other tables: stripping everything except `fvar/gvar/glyf/loca/head/maxp`
+   still takes 27.2 s (and fails without `hmtx`). So "run the instancer on a
+   pared clone" is not cheaper.
+3. **The split is not predictable from a cheap rule.** Measured candidates
+   against the real post-count on the 13-axis font (`g`): base+involved
+   2,344 (real 1,824), base+spans 1,622, base+peak-between 1,787. Only the
+   last is a true lower bound, and on the pristine font the real post-count
+   (2,036) is *above* the budget too — that build succeeds only because
+   `_fit_gvar_headers` then prunes ~569 sub-visible tuples down to 1,467.
+   A gate on the pre-prune count would therefore refuse a build that works.
+
+So S1(a) cannot be a sound cheap pre-check in its current shape. Proposed
+instead, for the verifier's call: (i) **S1(b) first** — on failure serve the
+un-relocated avar2 font (13 axes, avar2 table, ~1,332-tuple gvar) instead of
+the 10-axis 641 KB fallback, which removes the damage; (ii) make the failing
+case *cheap* by **memoizing the relocation** on (source mtime, sidecars,
+target) so an unchanged retry costs 0 s instead of 27 s; (iii) only then
+consider a pruned-aware budget model, whose threshold would have to sit
+between the measured 1,467 (works, pruned) and 1,767 (fails) cases.
+
 ## Part B — designer
 
 **NOT RUN.** B1–B10 need Glyphs 3, the Fontra UI, design apps and a real judgement of the
