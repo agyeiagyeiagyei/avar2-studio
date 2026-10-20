@@ -246,6 +246,38 @@ subprocess, and the field was missing from both transfer lists
 (`build_worker._apply_result`, `JobQueue._apply_build_state`). Added, and
 pinned by `test_the_relocation_error_survives_the_worker_boundary`.
 
+**The degraded state is visible — proven live (answering the early note).**
+The note reads "the degraded state is invisible today"; the banner already
+shipped in `18c5d82` (`StatusBanners.jsx` reads `originRelocationError` from
+`useStudioData`). Loaded against the still-degraded test server
+(`/private/tmp/av2-routine/ui-shots/s1b-banner.png`), the page renders exactly
+one amber banner:
+
+> The font cannot be relocated onto the ORIGIN row, so the preview rests at
+> the compiled origin instead. Every axis and mapping is intact — put the
+> ORIGIN row back to clear this. *glyph 'g' has too many variation tuples for
+> OpenType's per-glyph gvar limit after relocating the default (1767 tuples;
+> dropping the 427 sub-visible ones was not enough). Export at the resting
+> style, or reduce twin masters (disable slant or rounding) for this export.*
+
+…while `REBUILD` and every slider stay live (that is the difference from
+`failed`). Repro: `get_by_role`-free probe — `document.querySelectorAll
+('.error-banner')` yields one node whose `innerText` is the text above.
+
+That probe found a second defect of my own making: the pre-existing
+`origin_warning` banner ("Build-time default relocation is off …") also
+appears on this path — the failed relocation sets `relocate_at_build = False`
+— so the first build of the fix showed **two** amber boxes saying the same
+thing with different words. `originWarning` is now suppressed while
+`originRelocationError` is set (that banner keeps its own job: no row at the
+axis defaults). One banner per condition, verified by re-running the probe
+(1 node, text above).
+
+**Status enum documented.** `routes/health.py`'s docstring now lists `ok` /
+`degraded` / `failed` with what each means for the gate, and ARCHITECTURE §5
+says the same next to the 409 rule. The Fontra catch-all's namespace set is
+cached on `current_app.extensions` instead of being rebuilt per request.
+
 **Side finding 1 closed.** The Fontra catch-all now answers 405 (path exists
 for another method) or 404 (no such route) as JSON for studio `/api/`
 namespaces, derived from the URL map; non-studio paths still proxy.

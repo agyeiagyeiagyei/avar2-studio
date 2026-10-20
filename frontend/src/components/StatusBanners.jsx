@@ -53,7 +53,10 @@ export default function StatusBanners() {
           </div>
         </div>
       )}
-      {lastBuildStatus !== 'failed' && originWarning && (
+      {/* The relocation-failure banner below carries the specific reason,
+          so the generic "relocation is off" note would be a second amber box
+          saying the same thing. */}
+      {lastBuildStatus !== 'failed' && originWarning && !originRelocationError && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
           {originWarning}
         </div>
