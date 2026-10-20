@@ -312,6 +312,11 @@ changing the transform set rebuilds from source.
   point splits every region around it: ≈7× gvar (57 KB → 495 KB), ≈15×
   per-glyph tuple counts (H: 55 → 838). It is intrinsic, not an
   inefficiency, and it is why Kinetikern cannot be a sparse master.
+  Whole-font, on Crispy with the slant/rounding twins: un-relocated
+  compile 608,820 B / 7,701 tuples, relocated 10,533,616 B / 124,370
+  (≈17×). **The small font is the un-relocated one** — a build that
+  could not fit the relocation is not a font with its deltas missing, so
+  never read its size as damage (the round-11 review did; §5 `degraded`).
 - **Zero-anchored avar2 tents / the valley.** A row at the input default
   cannot be expressed; dropping it instead of relocating collapses the
   whole neighbourhood of the default toward the compiled corner
