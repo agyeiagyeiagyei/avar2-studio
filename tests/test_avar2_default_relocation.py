@@ -359,3 +359,54 @@ def test_the_plain_build_picker_never_returns_a_memo_file(tmp_path):
     os.utime(cached, (time.time() + 60, time.time() + 60))  # newer on purpose
     assert pipeline._pick_variable_font(out) == built
     assert "memo" not in str(pipeline._pick_variable_font(out))
+
+
+def test_the_degraded_oracle_uses_the_authored_mapping(tmp_path, monkeypatch):
+    """S1(c), round-12 review: under `origin_relocation_error` the served font's
+    avar table is anchored on the compiled origin (avar2 cannot remap the
+    default), so /api/mapped-location must evaluate the AUTHORED mapping — with
+    the parametric defaults moved onto the ORIGIN row's out. Otherwise the
+    Preview at the ORIGIN inputs renders the compiled origin exactly where the
+    authored row should be."""
+    authored = {
+        "axes": {"wght": [1.0, 400.0, 1000.0], "XTRA": [47.0, 663.1, 1715.0]},
+        "segments": {"wght": [[-1.0, -1.0], [0.0, 0.0], [0.5, 0.25], [1.0, 1.0]],
+                     "XTRA": [[-1.0, -1.0], [0.0, 0.0], [1.0, 1.0]]},
+    }
+    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", "over the ceiling")
+    monkeypatch.setattr(state, "LAST_ORIGIN_AUTHORED_AVAR", authored)
+
+    # At the ORIGIN row's own inputs the parametric axis must read its authored
+    # out (663.1), not the compiled default (47).
+    mapped = pipeline._evaluate_mapped_location({})
+    assert mapped["XTRA"] == 663.1, mapped
+    assert mapped["wght"] == 400.0, mapped
+
+    # A mapped stop still maps: wght at 700 normalises to 0.5, the segment map
+    # takes it to 0.25, and wght denormalises back to 550.
+    halfway = pipeline._evaluate_mapped_location({"wght": 700.0})
+    assert abs(halfway["wght"] - 550.0) < 1.0, halfway
+    assert halfway["XTRA"] == 663.1, halfway
+
+    # With no relocation error the authored table is ignored (the built font's
+    # own avar is the truth).
+    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", None)
+    monkeypatch.setattr(state, "LAST_ORIGIN_AUTHORED_AVAR", None)
+
+
+def test_a_degraded_build_records_the_authored_mapping(tmp_path, monkeypatch):
+    """The degraded build itself must produce the table the oracle uses, with
+    the parametric defaults at the ORIGIN row's out."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+
+    def _boom(font, log=None, **kwargs):
+        raise RuntimeError("glyph 'g' has too many variation tuples")
+
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers", _boom)
+    report = {}
+    _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=report)
+    assert report.get("authored_avar"), report
+    axes = report["authored_avar"]["axes"]
+    assert axes["XTRA"][1] == 800.0, axes    # MAPPINGS' ORIGIN row out
+    assert axes["XOPQ"][1] == 300.0, axes
+    assert report["authored_avar"]["segments"], report["authored_avar"]

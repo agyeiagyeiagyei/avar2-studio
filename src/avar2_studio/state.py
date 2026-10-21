@@ -54,6 +54,11 @@ LAST_ORIGIN_RELOCATION_ERROR: Optional[str] = None
 # across the worker boundary for the same reason as the error above — the
 # worker's own log is discarded, so the field IS the evidence.
 LAST_ORIGIN_RELOCATION_MEMO: Optional[str] = None
+# The AUTHORED mapping (axes triples + avar segments) with the parametric
+# defaults moved onto the ORIGIN row's out, computed only when the relocation
+# failed: the served table is anchored on the compiled origin, so this is what
+# /api/mapped-location must evaluate (S1(c)).
+LAST_ORIGIN_AUTHORED_AVAR: Optional[Dict] = None
 # Set when grade is declared but its braces could not be generated — the
 # built font is then missing its GRAD axis, which must not pass as ok.
 LAST_GRADE_ERROR: Optional[str] = None

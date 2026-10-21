@@ -429,6 +429,7 @@ def _run_build():
     # reporting "degraded" after the ORIGIN row was put back.
     state.LAST_ORIGIN_RELOCATION_ERROR = None
     state.LAST_ORIGIN_RELOCATION_MEMO = None
+    state.LAST_ORIGIN_AUTHORED_AVAR = None
     with _gc_paused():
         avar2_result = _perform_avar2_build()
     if avar2_result.get("success"):
@@ -701,15 +702,20 @@ def _memo_lookup(memo_dir: Path, key: str):
     error_path = memo_dir / f"{key}.json"
     if error_path.exists():
         try:
-            return ("error", json.loads(error_path.read_text(encoding="utf-8"))["error"])
+            payload = json.loads(error_path.read_text(encoding="utf-8"))
+            return ("error", payload["error"], payload.get("authored_avar"))
         except (OSError, ValueError, KeyError):
             return None   # a half-written entry is a miss, never an invented error
     return None
 
 
 def _memo_store(memo_dir: Path, key: str, source: Optional[Path],
-                error: Optional[str]) -> None:
-    """Record the outcome for ``key`` atomically, then evict the oldest."""
+                error: Optional[str], extra: Optional[Dict] = None) -> None:
+    """Record the outcome for ``key`` atomically, then evict the oldest.
+
+    A failure's payload also carries the authored-mapping table the degraded
+    oracle needs, so a memo hit does not silently lose it.
+    """
     memo_dir.mkdir(parents=True, exist_ok=True)
     try:
         if error is None and source is not None:
@@ -718,7 +724,9 @@ def _memo_store(memo_dir: Path, key: str, source: Optional[Path],
             os.replace(tmp, memo_dir / f"{key}.ttf")
         else:
             tmp = memo_dir / f".{key}.json.tmp"
-            tmp.write_text(json.dumps({"error": error}), encoding="utf-8")
+            tmp.write_text(json.dumps({"error": error,
+                                       "authored_avar": (extra or {}).get("authored_avar")}),
+                           encoding="utf-8")
             os.replace(tmp, memo_dir / f"{key}.json")
     except OSError as exc:
         # A memo that cannot be written costs the next build its shortcut;
@@ -939,6 +947,8 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                 font = None
                 relocation_error = memo[1]
                 relocate_at_build = False
+                if relocation_report is not None:
+                    relocation_report["authored_avar"] = memo[2]
                 log.info(
                     "  relocation: memo hit — the cached failure still stands for "
                     "%s, instancer skipped: %s", target, relocation_error)
@@ -961,7 +971,19 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                     font.close()
                     relocate_at_build = False
                     font = None
-                    _memo_store(memo_dir, memo_key, None, relocation_error)
+                    # The served table is anchored on the compiled origin now,
+                    # so /api/mapped-location needs the authored one (S1(c)).
+                    try:
+                        authored = _authored_mapping_table(out, avar2_cfg_early,
+                                                           target)
+                    except Exception as exc:  # never fail a build over this
+                        authored = None
+                        log.warning("  relocation: could not model the authored "
+                                    "mapping for the degraded preview: %s", exc)
+                    if relocation_report is not None:
+                        relocation_report["authored_avar"] = authored
+                    _memo_store(memo_dir, memo_key, None, relocation_error,
+                                {"authored_avar": authored})
         if font is not None:
             font.save(str(out))
             font.close()
@@ -1137,6 +1159,7 @@ def _perform_avar2_build() -> Dict:
             if _report.get("error"):
                 state.LAST_ORIGIN_RELOCATION_ERROR = _report["error"]
             state.LAST_ORIGIN_RELOCATION_MEMO = _report.get("memo")
+            state.LAST_ORIGIN_AUTHORED_AVAR = _report.get("authored_avar")
         project_fonts_dir = workdir.parent / "fonts" / "variable"
         produced = sorted(project_fonts_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not produced:
@@ -1190,7 +1213,8 @@ def _perform_avar2_build() -> Dict:
             state.LAST_AVAR2_ERROR = None
         return {"success": True, "font_path": str(state.VARIABLE_FONT_PATH),
                 "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR,
-                "origin_relocation_memo": state.LAST_ORIGIN_RELOCATION_MEMO}
+                "origin_relocation_memo": state.LAST_ORIGIN_RELOCATION_MEMO,
+                "origin_authored_avar": state.LAST_ORIGIN_AUTHORED_AVAR}
 
     finally:
         state.BUILDING = False
@@ -1286,12 +1310,127 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
 _MAPPED_FONT_LOCK = threading.Lock()
 
 
+def _authored_mapping_table(font_path: Path, avar2_cfg: List[Dict],
+                            target: Dict[str, float]) -> Optional[Dict]:
+    """The mapping the AUTHORED rows describe, with the parametric defaults
+    moved onto the ORIGIN row's out — i.e. the avar table the font would carry
+    if the relocation had been possible.
+
+    A degraded build's real table is generated around the compiled origin and
+    cannot express the default row at all (ADR 0001), so
+    /api/mapped-location would echo the compiled origin exactly where the
+    ORIGIN row should be — the one place the designer looks first. This needs
+    only ``fvar`` to build: no gvar, milliseconds. Returns
+    ``{axes: {tag: [min, default, max]}, segments: {tag: [[from, to]…]}}``.
+    """
+    from gftools.scripts import gen_avar2 as _gen_avar2
+
+    font = TTFont(str(font_path))
+    try:
+        axes_by_tag = {a.axisTag: a for a in font["fvar"].axes}
+        for tag, value in (target or {}).items():
+            axis = axes_by_tag.get(tag)
+            if axis is None:
+                continue
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            if axis.minValue <= v <= axis.maxValue:
+                axis.defaultValue = v
+        # The build patches gen_fvar_axes so the mapping's in: axes (which all
+        # exist in the built font) cannot be created a second time; mirror it.
+        original_axes = _gen_avar2.gen_fvar_axes
+
+        def _no_new_axes(font_, mapping):
+            existing = {a.axisTag for a in font_["fvar"].axes}
+            filtered = [{**m, "in": {k: v for k, v in (m.get("in") or {}).items()
+                                     if k not in existing}}
+                        for m in mapping]
+            return original_axes(font_, filtered)
+
+        _gen_avar2.gen_fvar_axes = _no_new_axes
+        try:
+            _gen_avar2.gen_avar2_mapping(font, avar2_cfg)
+        finally:
+            _gen_avar2.gen_fvar_axes = original_axes
+        avar = font.get("avar")
+        if avar is None:
+            return None
+        return {
+            "axes": {a.axisTag: [float(a.minValue), float(a.defaultValue),
+                                 float(a.maxValue)]
+                     for a in font["fvar"].axes},
+            # fontTools stores an axis's segment map as a FLAT list of
+            # from/to pairs ([from0, to0, from1, to1, …]); accept explicit
+            # pairs too so the shape cannot silently change under us.
+            "segments": {tag: _segment_pairs(segs)
+                         for tag, segs in (avar.segments or {}).items()},
+        }
+    finally:
+        font.close()
+
+
+def _segment_pairs(segs) -> List[List[float]]:
+    """Normalise an avar axis's segment map to ``[[from, to], …]``."""
+    values = list(segs or [])
+    if values and isinstance(values[0], (list, tuple)):
+        return [[float(a), float(b)] for a, b in values]
+    flat = [float(v) for v in values]
+    return [[flat[i], flat[i + 1]] for i in range(0, len(flat) - 1, 2)]
+
+
+def _piecewise_map(value: float, segments) -> float:
+    """One avar axis's segment map at ``value`` (identity outside the map)."""
+    prev_from = prev_to = 0.0
+    for start, end in segments:
+        if value == start:
+            return end
+        if value < start:
+            if start == prev_from:
+                return end
+            return prev_to + (end - prev_to) * (value - prev_from) / (start - prev_from)
+        prev_from, prev_to = start, end
+    return value
+
+
+def _evaluate_authored_mapped_location(coords: Dict, data: Dict) -> Dict[str, float]:
+    """Evaluate the AUTHORED mapping (see ``_authored_mapping_table``)."""
+    from fontTools.varLib.models import normalizeLocation
+
+    axes = {tag: tuple(triple) for tag, triple in data["axes"].items()}
+    loc = {}
+    for tag, (lo, default, hi) in axes.items():
+        try:
+            v = float(coords.get(tag, default))
+        except (TypeError, ValueError):
+            v = default
+        loc[tag] = max(lo, min(hi, v))
+    norm = normalizeLocation(loc, axes)
+    mapped = {tag: _piecewise_map(norm.get(tag, 0.0), segs)
+              for tag, segs in data.get("segments", {}).items()}
+    out = {}
+    for tag, (lo, default, hi) in axes.items():
+        n = mapped.get(tag, norm.get(tag, 0.0))
+        out[tag] = round(default + n * ((hi - default) if n > 0 else (default - lo)), 2)
+    return out
+
+
 def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     """Evaluate the built font's avar table at a user-space location;
     returns every fvar axis's effective post-mapping value in user
     space. Shared by /api/mapped-location (slider reflection) and
-    /api/export-font (default relocation)."""
+    /api/export-font (default relocation).
+
+    Under a degraded build (the default could not be relocated) the built
+    table is anchored on the compiled origin, so the AUTHORED mapping is
+    evaluated instead — that is what the designer authored and what the
+    Preview pins to (S1(c), round-12 review)."""
     from fontTools.varLib.models import normalizeLocation
+
+    authored = state.LAST_ORIGIN_AUTHORED_AVAR
+    if authored and state.LAST_ORIGIN_RELOCATION_ERROR:
+        return _evaluate_authored_mapped_location(coords, authored)
 
     with _MAPPED_FONT_LOCK:
         key = (str(state.VARIABLE_FONT_PATH), state.VARIABLE_FONT_PATH.stat().st_mtime)

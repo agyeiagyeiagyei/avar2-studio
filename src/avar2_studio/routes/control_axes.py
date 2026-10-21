@@ -230,6 +230,10 @@ def open_control_axis_in_editor(tag: str):
 
     try:
         port = server._ensure_fontra_running(content_root, watch_file=target_path)
+    except server.FontraUnavailable as exc:
+        # A fresh install without Fontra: say what to install (503, not 500 —
+        # nothing is broken, an optional extra is missing).
+        return jsonify({"error": str(exc), "optional_dependency": "fontra"}), 503
     except Exception as exc:
         return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
 

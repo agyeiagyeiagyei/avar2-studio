@@ -759,3 +759,54 @@ nothing. They stay open for the verifier's fresh-clone run.
    re-attaching the sidecars). My first A17/A18 attempts reported "0 builds" and
    "truncation did not fail" for exactly this reason; both were harness order,
    not product behaviour.
+
+## S1(c) — the oracle evaluates the AUTHORED mapping (round-12 finding 1, 2026-10-21)
+
+The review is right, and my drift probe could not have caught it: it compared
+the canvas with the oracle **the tab itself fetched** (self-consistent by
+construction) and, with auto-opsz on, never sat at the default inputs — so it
+never compared against the authored row.
+
+**Fix.** `pipeline._authored_mapping_table()` builds the mapping the authored
+rows describe with the parametric defaults moved onto the ORIGIN row's `out` —
+the table the font would carry if the relocation had been possible. It needs
+only `fvar` (no gvar), costs milliseconds, and runs when the relocation fails;
+`/api/mapped-location` evaluates it instead of the built table whenever
+`origin_relocation_error` is set. The result travels as `{axes, segments}`
+through the build report → `state.LAST_ORIGIN_AUTHORED_AVAR` → the worker and
+job transfer lists, and the failure's memo entry carries it too, so a memo hit
+does not lose it.
+
+**Tests (acceptance iii).**
+`test_the_degraded_oracle_uses_the_authored_mapping`: at the ORIGIN inputs the
+parametric axis reads its **authored out** (663.1) rather than the compiled
+default (47.0), a mapped stop still maps (wght 700 → 550), and the authored
+data is ignored when there is no relocation error.
+`test_a_degraded_build_records_the_authored_mapping`: the degraded build's own
+report carries the ORIGIN row's out (XTRA 800, XOPQ 300) as the parametric
+defaults, with non-empty segments.
+
+**Live acceptance (i)/(ii): not yet reproduced here.** My staged copies
+inherit the Crispy repo's `.avar2-studio` studio staging, which already
+declares a `TST2` axis; the recipe then adds a second one and the build now
+fails *earlier* (`avar2_error … 'TST2'`, 11 axes, 697,316 B, status `ok`), so
+it no longer reaches `degraded`. The verifier's own copies (`crispy-r12…`) do
+not carry that residue, so (i)/(ii) are cleanest there — or from a staging made
+without `.avar2-studio`.
+
+*(Checked while investigating: the Crispy working tree's dirty files are
+pre-existing WIP — mtimes Oct 10–16, before this session. Nothing here wrote to
+`~/Documents/Crispy`; every staging lives under `/private/tmp/av2-routine`.)*
+
+## Finding 2 — open-editor says what is missing (2026-10-21)
+
+`server.FontraUnavailable` is raised from `_ensure_fontra_running` **before any
+spawn** when `fontra` or `fontra_glyphs` is not importable; the route answers
+**503** with `Fontra is not installed: pip install git+…fontra… fontra-glyphs`
+and `optional_dependency: "fontra"`, instead of "fontra exited immediately
+(exit code 1)".
+
+`tests/test_open_editor_fontra.py`: with `find_spec` answering like a clean
+venv, `POST /api/control-axes/XTRA/open-editor` returns 503 with that message
+and **nothing is spawned** (a stub `Popen` fails the test if it is), and
+`_ensure_fontra_running` raises the same diagnosis for any future caller.

@@ -703,6 +703,15 @@ def _get_glyphs_axis_tags() -> set:
 # ----------------------------------------------------------------------
 
 
+class FontraUnavailable(RuntimeError):
+    """Fontra is an optional dependency and is not installed in this venv.
+
+    Raising this instead of spawning-and-reporting an exit code is the
+    difference between "pip install fontra" and "fontra exited immediately
+    (exit code 1)" — the round-12 review met the latter on a fresh install.
+    """
+
+
 def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None) -> int:
     """Ensure a Fontra subprocess is running and serving the given
     folder as its filesystem project root. If a process is already
@@ -722,9 +731,19 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
     The ``.designspace`` / ``.ufo`` backends are bundled with
     Fontra itself.
     """
+    import importlib.util
     import subprocess
     import time
 
+    if importlib.util.find_spec("fontra") is None:
+        raise FontraUnavailable(
+            "Fontra is not installed: pip install "
+            "git+https://github.com/fontra/fontra.git "
+            "git+https://github.com/fontra/fontra-glyphs.git")
+    if importlib.util.find_spec("fontra_glyphs") is None:
+        raise FontraUnavailable(
+            "fontra-glyphs is not installed: pip install "
+            "git+https://github.com/fontra/fontra-glyphs.git")
 
     content_root = content_root.resolve()
 
