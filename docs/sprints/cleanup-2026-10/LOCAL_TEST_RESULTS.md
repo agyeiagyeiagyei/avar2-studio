@@ -864,3 +864,38 @@ already are (they reached `degraded` with 14 axes). Recommend running
 *(Environment note: `/private/tmp` was wiped twice today, taking the scratch
 with it. Every staging is recreated from `~/Documents/Crispy/sources`, which
 remains untouched — its dirty files predate this session.)*
+
+### S1(c) round-12 note 3 — served defaults are translated, not taken as overrides
+
+The oracle now evaluates the **authored** model (whole-`fvar`+`avar` mini font,
+`.authored.ttf`) — but the Preview sends **every** axis, with the
+non-overridden parametric axes at the *served* font's `fvar` defaults. On
+Crispy those served defaults are the axis minimums, while in the authored
+model the defaults have moved onto the ORIGIN row's `out`. Taken literally, an
+echoed served default normalises to −1 and the whole mapping clamps at the
+minimum — which is exactly the round-12 live symptom.
+
+`_translate_served_defaults()` now rewrites the incoming coordinate dict before
+evaluation: for every axis whose default *moved* between served and authored,
+a value equal to the served default (within 1e-6) becomes the authored
+default. Anything else is an explicit override and stays absolute. Skipped
+when `state.VARIABLE_FONT_PATH` is unset (nothing served to translate from).
+
+`tests/test_avar2_default_relocation.py::test_the_degraded_oracle_handles_the_full_coordinate_dict`
+sends the dict exactly as `PreviewTab` builds it and pins the acceptance table:
+
+| inputs (all axes, served defaults unless noted) | XTRA | XOPQ |
+| --- | --- | --- |
+| none overridden (ORIGIN) | 800 | 300 |
+| `wght = 900` (Default/MaxOpsz row) | 400 | 700 |
+| `wght = 1` (Narrow/MinOpsz row) | 3000 | 10 |
+
+within 1 u, and the test first asserts the served defaults really are the
+*unmoved* ones (so it cannot pass for the wrong reason).
+
+Gates at this state: `ruff check src tests` clean; `pytest tests/ -q` →
+**562 passed** (561 + the new test), 3/3 consecutive runs of the relocation
+file green (12 passed).
+
+Live acceptance (iv) still wants the verifier's `crispy-r12` copies, for the
+staging reasons recorded above.

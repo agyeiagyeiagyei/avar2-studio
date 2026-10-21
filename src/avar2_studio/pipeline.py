@@ -1437,6 +1437,47 @@ def _evaluate_with_font(tt, coords: Dict) -> Dict[str, float]:
     return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
 
 
+def _load_mapped_font(cache: Dict, path: Path, lazy: bool = True):
+    """One TTFont per (path, mtime) in ``cache`` (a {"key", "font"} dict)."""
+    with _MAPPED_FONT_LOCK:
+        try:
+            key = (str(path), Path(path).stat().st_mtime)
+        except OSError:
+            raise
+        if cache.get("key") != key:
+            cache["font"] = TTFont(str(path), lazy=lazy)
+            cache["key"] = key
+        return cache["font"]
+
+
+def _translate_served_defaults(coords: Dict, served, authored) -> Dict:
+    """Re-express the served font's axis defaults at the AUTHORED defaults.
+
+    Callers send every axis (the Preview tab does), with the non-overridden
+    parametric axes sitting at the SERVED font's fvar defaults — on Crispy
+    those are the axis minimums (XOPQ 1, XTRA 47, YOPQ 1). In the authored
+    model those axes' defaults have moved onto the ORIGIN row's out, so a
+    coordinate equal to the served default is not an override at all — it means
+    "unset" — and must be translated, or it normalises to −1 and the whole
+    mapping clamps at the minimum (round-12 live check). Any other value is an
+    explicit override and stays absolute.
+    """
+    served_defaults = {a.axisTag: float(a.defaultValue) for a in served["fvar"].axes}
+    authored_defaults = {a.axisTag: float(a.defaultValue) for a in authored["fvar"].axes}
+    out = dict(coords)
+    for tag, served_default in served_defaults.items():
+        if tag not in authored_defaults or tag not in out:
+            continue
+        try:
+            value = float(out[tag])
+        except (TypeError, ValueError):
+            continue
+        moved = abs(authored_defaults[tag] - served_default) > 1e-6
+        if moved and abs(value - served_default) <= 1e-6:
+            out[tag] = authored_defaults[tag]
+    return out
+
+
 def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     """Evaluate the built font's avar table at a user-space location;
     returns every fvar axis's effective post-mapping value in user
@@ -1445,23 +1486,26 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
 
     Under a degraded build (the default could not be relocated) the built
     table is anchored on the compiled origin, so the AUTHORED mapping — the
-    mini font carrying the whole authored avar — is evaluated instead. That is
-    what the designer authored and what the Preview pins to (S1(c))."""
+    mini font carrying the whole authored avar — is evaluated instead, after
+    translating any coordinate that merely echoes the served font's default
+    (see ``_translate_served_defaults``). That is what the designer authored
+    and what the Preview pins to (S1(c))."""
     authored = state.LAST_ORIGIN_AUTHORED_AVAR
     if authored and state.LAST_ORIGIN_RELOCATION_ERROR and Path(authored).exists():
-        with _MAPPED_FONT_LOCK:
-            key = ("authored", str(authored), Path(authored).stat().st_mtime)
-            if state._MAPPED_FONT_CACHE["key"] != key:
-                state._MAPPED_FONT_CACHE["font"] = TTFont(str(authored), lazy=False)
-                state._MAPPED_FONT_CACHE["key"] = key
-            return _evaluate_with_font(state._MAPPED_FONT_CACHE["font"], coords)
+        authored_tt = _load_mapped_font(state._AUTHORED_FONT_CACHE, Path(authored),
+                                        lazy=False)
+        # Translate the served font's defaults only when we can read them; a
+        # caller with no built font (tests, a failed first build) then gets the
+        # authored model evaluated as sent, which is the old behaviour.
+        served_path = state.VARIABLE_FONT_PATH
+        if served_path and Path(served_path).exists():
+            served_tt = _load_mapped_font(state._MAPPED_FONT_CACHE, served_path)
+            coords = _translate_served_defaults(coords, served_tt, authored_tt)
+        return _evaluate_with_font(authored_tt, coords)
 
-    with _MAPPED_FONT_LOCK:
-        key = (str(state.VARIABLE_FONT_PATH), state.VARIABLE_FONT_PATH.stat().st_mtime)
-        if state._MAPPED_FONT_CACHE["key"] != key:
-            state._MAPPED_FONT_CACHE["font"] = TTFont(str(state.VARIABLE_FONT_PATH), lazy=True)
-            state._MAPPED_FONT_CACHE["key"] = key
-        return _evaluate_with_font(state._MAPPED_FONT_CACHE["font"], coords)
+    return _evaluate_with_font(
+        _load_mapped_font(state._MAPPED_FONT_CACHE, state.VARIABLE_FONT_PATH),
+        coords)
 
 
 def _apply_hidden_axes(path: Path, hidden_tags) -> None:

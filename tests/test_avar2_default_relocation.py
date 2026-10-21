@@ -450,3 +450,48 @@ def test_the_authored_table_is_evicted_with_its_memo_entry(tmp_path):
     assert "cccc.authored.ttf" in names and "bbbb.authored.ttf" in names, names
     assert "aaaa.authored.ttf" not in names, "the sidecar follows its entry"
     assert not orphan.exists(), "an authored file with no entry is garbage"
+
+
+def test_the_degraded_oracle_handles_the_full_coordinate_dict(tmp_path, monkeypatch):
+    """The Preview sends EVERY axis, with the non-overridden parametric axes at
+    the SERVED font's fvar defaults — on Crispy those are the axis minimums. In
+    the authored model those defaults have moved onto the ORIGIN row's out, so
+    an echoed served default must be translated, not taken as an override: it
+    otherwise normalises to −1 and the whole mapping clamps at the minimum
+    (round-12 live check)."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+
+    def _boom(font, log=None, **kwargs):
+        raise RuntimeError("glyph 'g' has too many variation tuples")
+
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers", _boom)
+    report = {}
+    out = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=report)
+    authored = report.get("authored_avar")
+    assert authored, report
+
+    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", "over the ceiling")
+    monkeypatch.setattr(state, "LAST_ORIGIN_AUTHORED_AVAR", authored)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", out)
+    state._MAPPED_FONT_CACHE["key"] = None
+    state._AUTHORED_FONT_CACHE["key"] = None
+
+    served = TTFont(str(out))
+    full = {a.axisTag: a.defaultValue for a in served["fvar"].axes}
+    served.close()
+    # The served defaults really are the *unmoved* ones, otherwise this test
+    # would pass for the wrong reason.
+    assert abs(full["XTRA"] - 800.0) > 1, full
+    assert abs(full["XOPQ"] - 300.0) > 1, full
+
+    at_default = pipeline._evaluate_mapped_location(dict(full))
+    assert abs(at_default["XTRA"] - 800.0) < 1.0, at_default
+    assert abs(at_default["XOPQ"] - 300.0) < 1.0, at_default
+
+    at_high = pipeline._evaluate_mapped_location({**full, "wght": 900.0})
+    assert abs(at_high["XTRA"] - 400.0) < 1.0, at_high
+    assert abs(at_high["XOPQ"] - 700.0) < 1.0, at_high
+
+    at_low = pipeline._evaluate_mapped_location({**full, "wght": 1.0})
+    assert abs(at_low["XTRA"] - 3000.0) < 1.0, at_low
+    assert abs(at_low["XOPQ"] - 10.0) < 1.0, at_low

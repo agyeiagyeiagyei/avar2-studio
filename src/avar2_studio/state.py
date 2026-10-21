@@ -120,6 +120,10 @@ _CSV_MODIFICATION_TIMES: Dict[str, float] = {}
 # slider tick would dwarf the actual avar evaluation. Keyed on
 # (path, mtime) so rebuilds invalidate naturally.
 _MAPPED_FONT_CACHE: Dict[str, object] = {"key": None, "font": None}
+# The authored-mapping mini font a degraded build evaluates (S1(c));
+# same {"key", "font"} shape, separate slot so the two never evict each
+# other.
+_AUTHORED_FONT_CACHE: Dict[str, object] = {"key": None, "font": None}
 
 _SOURCE_GLYPH_SIGS: "tuple" = (None, {})   # (source mtime_ns, {glyph: sig})
 
