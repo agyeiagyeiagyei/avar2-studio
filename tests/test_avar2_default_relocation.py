@@ -361,37 +361,46 @@ def test_the_plain_build_picker_never_returns_a_memo_file(tmp_path):
     assert "memo" not in str(pipeline._pick_variable_font(out))
 
 
-def test_the_degraded_oracle_uses_the_authored_mapping(tmp_path, monkeypatch):
-    """S1(c), round-12 review: under `origin_relocation_error` the served font's
-    avar table is anchored on the compiled origin (avar2 cannot remap the
-    default), so /api/mapped-location must evaluate the AUTHORED mapping — with
-    the parametric defaults moved onto the ORIGIN row's out. Otherwise the
-    Preview at the ORIGIN inputs renders the compiled origin exactly where the
-    authored row should be."""
-    authored = {
-        "axes": {"wght": [1.0, 400.0, 1000.0], "XTRA": [47.0, 663.1, 1715.0]},
-        "segments": {"wght": [[-1.0, -1.0], [0.0, 0.0], [0.5, 0.25], [1.0, 1.0]],
-                     "XTRA": [[-1.0, -1.0], [0.0, 0.0], [1.0, 1.0]]},
-    }
+def test_the_degraded_oracle_uses_the_whole_authored_avar(tmp_path, monkeypatch):
+    """S1(c), round-12 review: under `origin_relocation_error` the oracle must
+    evaluate the authored mapping — the WHOLE avar table, VarStore included, as
+    the built font's own path does. Serialising avar1 segment maps loses the
+    avar2 mapping, which would return the ORIGIN row's out at every input."""
+    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "1")
+
+    def _boom(font, log=None, **kwargs):
+        raise RuntimeError("glyph 'g' has too many variation tuples")
+
+    monkeypatch.setattr(pipeline, "_fit_gvar_headers", _boom)
+    report = {}
+    _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=report)
+    authored = report.get("authored_avar")
+    assert authored and Path(authored).exists(), report
+    tiny = TTFont(authored)
+    assert {"fvar", "avar"} <= {t for t in tiny.keys() if t != "GlyphOrder"}
+    assert tiny["avar"].majorVersion == 2, "the VarStore must survive the copy"
+    tiny.close()
+
     monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", "over the ceiling")
     monkeypatch.setattr(state, "LAST_ORIGIN_AUTHORED_AVAR", authored)
 
-    # At the ORIGIN row's own inputs the parametric axis must read its authored
-    # out (663.1), not the compiled default (47).
-    mapped = pipeline._evaluate_mapped_location({})
-    assert mapped["XTRA"] == 663.1, mapped
-    assert mapped["wght"] == 400.0, mapped
+    # At the ORIGIN row's own inputs the parametric axes read that row's out.
+    at_default = pipeline._evaluate_mapped_location({})
+    assert abs(at_default["XTRA"] - 800.0) < 1.0, at_default
+    assert abs(at_default["XOPQ"] - 300.0) < 1.0, at_default
 
-    # A mapped stop still maps: wght at 700 normalises to 0.5, the segment map
-    # takes it to 0.25, and wght denormalises back to 550.
-    halfway = pipeline._evaluate_mapped_location({"wght": 700.0})
-    assert abs(halfway["wght"] - 550.0) < 1.0, halfway
-    assert halfway["XTRA"] == 663.1, halfway
+    # At another authored row's inputs they must MOVE to that row's out — this
+    # is what the segment-only version could not do.
+    at_stop = pipeline._evaluate_mapped_location({"wght": 900.0})
+    assert abs(at_stop["XTRA"] - 400.0) < 1.0, at_stop
+    assert abs(at_stop["XOPQ"] - 700.0) < 1.0, at_stop
+    assert abs(at_stop["XTRA"] - at_default["XTRA"]) > 100, "the axis must move"
 
-    # With no relocation error the authored table is ignored (the built font's
-    # own avar is the truth).
-    monkeypatch.setattr(state, "LAST_ORIGIN_RELOCATION_ERROR", None)
-    monkeypatch.setattr(state, "LAST_ORIGIN_AUTHORED_AVAR", None)
+    # A second authored row, on the other side of the default: acceptance (ii)
+    # asks for two, so one moving axis cannot be a coincidence.
+    at_low = pipeline._evaluate_mapped_location({"wght": 1.0})
+    assert abs(at_low["XTRA"] - 3000.0) < 1.0, at_low
+    assert abs(at_low["XOPQ"] - 10.0) < 1.0, at_low
 
 
 def test_a_degraded_build_records_the_authored_mapping(tmp_path, monkeypatch):
@@ -405,8 +414,39 @@ def test_a_degraded_build_records_the_authored_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "_fit_gvar_headers", _boom)
     report = {}
     _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=report)
-    assert report.get("authored_avar"), report
-    axes = report["authored_avar"]["axes"]
-    assert axes["XTRA"][1] == 800.0, axes    # MAPPINGS' ORIGIN row out
-    assert axes["XOPQ"][1] == 300.0, axes
-    assert report["authored_avar"]["segments"], report["authored_avar"]
+    authored = Path(report.get("authored_avar") or "")
+    assert authored.exists(), report
+    tiny = TTFont(str(authored))
+    axes = {a.axisTag: a for a in tiny["fvar"].axes}
+    assert axes["XTRA"].defaultValue == 800.0, axes.keys()   # ORIGIN row's out
+    assert axes["XOPQ"].defaultValue == 300.0
+    assert tiny["avar"].majorVersion == 2
+    tiny.close()
+
+
+def test_the_authored_table_is_evicted_with_its_memo_entry(tmp_path):
+    """`<key>.authored.ttf` is a sidecar of a failure entry, not an outcome:
+    it must not count against the keep-2 budget, and it must go when its entry
+    goes (otherwise the degraded oracle outlives the verdict it belongs to)."""
+    memo = tmp_path / pipeline.RELOCATION_MEMO_DIRNAME
+    memo.mkdir()
+    now = time.time()
+    for i, key in enumerate(("aaaa", "bbbb", "cccc")):
+        entry = memo / f"{key}.json"
+        entry.write_text("{}", encoding="utf-8")
+        os.utime(entry, (now + i, now + i))
+        sidecar = memo / f"{key}{pipeline.AUTHORED_SUFFIX}"
+        sidecar.write_bytes(b"x")
+        os.utime(sidecar, (now + i, now + i))
+    orphan = memo / f"dddd{pipeline.AUTHORED_SUFFIX}"
+    orphan.write_bytes(b"x")
+    os.utime(orphan, (now + 9, now + 9))     # newest of all, still an orphan
+
+    pipeline._memo_evict(memo)
+
+    names = sorted(p.name for p in memo.iterdir())
+    assert "cccc.json" in names and "bbbb.json" in names, names
+    assert "aaaa.json" not in names, "the oldest entry must be evicted"
+    assert "cccc.authored.ttf" in names and "bbbb.authored.ttf" in names, names
+    assert "aaaa.authored.ttf" not in names, "the sidecar follows its entry"
+    assert not orphan.exists(), "an authored file with no entry is garbage"

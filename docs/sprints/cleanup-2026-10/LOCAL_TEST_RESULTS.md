@@ -810,3 +810,57 @@ and `optional_dependency: "fontra"`, instead of "fontra exited immediately
 venv, `POST /api/control-axes/XTRA/open-editor` returns 503 with that message
 and **nothing is spawned** (a stub `Popen` fails the test if it is), and
 `_ensure_fontra_running` raises the same diagnosis for any future caller.
+
+## S1(c) again — the oracle now evaluates the WHOLE authored avar (2026-10-21)
+
+The round-12 note is right: my `_authored_mapping_table` serialised only
+`avar.segments` (the avar **1** per-axis maps) and the mapping that moves the
+parametric axes lives in the avar **2** `VarStore`, so the oracle returned the
+ORIGIN row's `out` at *every* input — and my unit test encoded that by using a
+hand-written segment table and asserting the axis did not move.
+
+**What changed.** `_write_authored_mapping_font()` generates the authored
+mapping (parametric defaults moved onto the ORIGIN row's `out`) and saves the
+font **whole** as `<memo dir>/<key>.authored.ttf`; `fvar` and `avar` have to
+come out of one object or the VarStore's RegionAxisCount stops matching the
+axis list. `/api/mapped-location` loads that mini font and evaluates it through
+`_evaluate_with_font` — the *same* function the built font uses, so the healthy
+and degraded paths cannot drift apart in how they evaluate. It is cached per
+(authored path, mtime), and the failure memo carries the path, so a memo hit
+keeps it.
+
+**Sidecar, not entry.** `<key>.authored.ttf` lives beside the memo entries and
+`_memo_evict` now (a) does not count it against the keep-2 budget and (b) drops
+it when its entry goes, plus any orphan whose entry is already gone.
+
+**Acceptance at unit level** (`tests/test_avar2_default_relocation.py`):
+
+- (i) at the ORIGIN inputs the parametric axes read the row's `out`
+  (XTRA 800 / XOPQ 300 on crispy-mini) — within 1 u;
+- (ii) at **two** other authored rows' inputs they read *those* rows' `out`
+  (wght 900 → 400/700, wght 1 → 3000/10) — within 1 u;
+- (iii) the table is a real gen-avar2 one: `avar.majorVersion == 2`, and the
+  parametric axis demonstrably **moves** with wght (> 100 units), which the
+  segment-only version could not do;
+- eviction: the authored sidecar survives while its entry lives and goes with
+  it.
+
+**Live acceptance (iv) — not run here, and the two ways my staging fails to
+reproduce `degraded` are worth recording:**
+
+1. *With* the repo's `.avar2-studio` (the normal staging): it already declares
+   a `TST2` axis, so the recipe adds a second one and the build fails earlier
+   (`avar2_error … 'TST2'`, 11 axes, 697 KB, status `ok`) instead of degrading.
+2. *Without* `.avar2-studio`: the axis metadata is missing, so the generated
+   axes take default = min (opsz 14, wdth 5, wght 1), no row sits at the
+   defaults, the relocation has no target and never runs — status `ok`,
+   792 KB, `origin_warning: None`.
+
+So (iv) wants a staging that keeps `.avar2-studio/axis-metadata.json` but not
+the shadow/control residue — which the verifier's own `crispy-r12` copies
+already are (they reached `degraded` with 14 axes). Recommend running
+`degraded_preview.py` + the drift probe there.
+
+*(Environment note: `/private/tmp` was wiped twice today, taking the scratch
+with it. Every staging is recreated from `~/Documents/Crispy/sources`, which
+remains untouched — its dirty files predate this session.)*

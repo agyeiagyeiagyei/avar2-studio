@@ -100,6 +100,42 @@ def _suppress_watcher(original: bool = False) -> None:
         state._SELF_WRITE_WATERMARK = now
 
 
+def _install_gen_fvar_axes_shim(declared: Dict[str, tuple]):
+    """Patch gen_avar2's gen_fvar_axes with the build's fix and return the
+    original to restore.
+
+    The upstream bug appends an fvar axis for every mapping ``in:`` tag even
+    when the font already has it (deltas applied twice) and sets
+    default = min for what it creates. This drops the existing tags and gives
+    created axes their declared range. Used by step 4 and by the degraded
+    oracle, so an authored table is generated exactly like the real one.
+    """
+    from gftools.scripts import gen_avar2 as _gen_avar2
+
+    original = _gen_avar2.gen_fvar_axes
+
+    def _fixed_gen_fvar_axes(font, mapping):
+        existing = {str(a.axisTag) for a in font["fvar"].axes}
+        filtered = [{**m, "in": {k: v for k, v in (m.get("in") or {}).items()
+                                 if k not in existing}}
+                    for m in mapping]
+        result = original(font, filtered)
+        for a in font["fvar"].axes:
+            tag = str(a.axisTag)
+            if tag in existing or tag not in declared:
+                continue
+            try:
+                lo, d, hi = (float(v) for v in declared[tag])
+            except (TypeError, ValueError):
+                continue
+            if lo <= d <= hi:
+                a.minValue, a.defaultValue, a.maxValue = lo, d, hi
+        return result
+
+    _gen_avar2.gen_fvar_axes = _fixed_gen_fvar_axes
+    return original
+
+
 @contextlib.contextmanager
 def _gc_paused():
     """Pause CPython's cyclic GC for a build-critical section: glyphsLib
@@ -659,6 +695,7 @@ def _fit_gvar_headers(font, tol: float = GVAR_PRUNE_TOL, log=None, headroom: int
 
 RELOCATION_MEMO_DIRNAME = ".relocation-memo"
 RELOCATION_MEMO_KEEP = 2   # relocated fonts are ~10 MB each on a twin-heavy source
+AUTHORED_SUFFIX = ".authored.ttf"   # sidecar of a failure entry: the authored avar
 
 
 def _font_content_digest(path: Path) -> str:
@@ -737,14 +774,34 @@ def _memo_store(memo_dir: Path, key: str, source: Optional[Path],
 
 
 def _memo_evict(memo_dir: Path, keep: int = RELOCATION_MEMO_KEEP) -> None:
+    """Keep the newest ``keep`` outcomes per kind.
+
+    ``<key>.authored.ttf`` is a SIDECAR of a failure entry (the whole authored
+    avar the degraded oracle evaluates), not an outcome of its own: it must not
+    count against ``keep``, and it goes when its entry goes.
+    """
+    entries = list(memo_dir.glob("*"))
+    authored = {p.name[: -len(AUTHORED_SUFFIX)]: p
+                for p in entries if p.name.endswith(AUTHORED_SUFFIX)}
+    outcomes = [p for p in entries if p.name not in
+                {a.name for a in authored.values()}]
+    live_keys = set()
     for suffix in (".ttf", ".json"):
-        entries = sorted(memo_dir.glob(f"*{suffix}"),
-                         key=lambda p: p.stat().st_mtime, reverse=True)
-        for stale in entries[keep:]:
+        kind = sorted((p for p in outcomes if p.suffix == suffix),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+        live_keys |= {p.stem for p in kind[:keep]}
+        for stale in kind[keep:]:
             try:
                 stale.unlink()
             except OSError as exc:
                 log.info("  relocation: could not evict %s: %s", stale.name, exc)
+    for key, path in authored.items():
+        if key in live_keys:
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            log.info("  relocation: could not evict %s: %s", path.name, exc)
 
 
 def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
@@ -973,13 +1030,16 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
                     font = None
                     # The served table is anchored on the compiled origin now,
                     # so /api/mapped-location needs the authored one (S1(c)).
+                    authored_path = memo_dir / f"{memo_key}{AUTHORED_SUFFIX}"
                     try:
-                        authored = _authored_mapping_table(out, avar2_cfg_early,
-                                                           target)
+                        ok = _write_authored_mapping_font(
+                            out, avar2_cfg_early, target, authored_path,
+                            _declared_axis_ranges(default_overrides))
                     except Exception as exc:  # never fail a build over this
-                        authored = None
+                        ok = False
                         log.warning("  relocation: could not model the authored "
                                     "mapping for the degraded preview: %s", exc)
+                    authored = str(authored_path) if ok else None
                     if relocation_report is not None:
                         relocation_report["authored_avar"] = authored
                     _memo_store(memo_dir, memo_key, None, relocation_error,
@@ -1010,26 +1070,7 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
             "resting on the ORIGIN row.")
     if avar2_cfg:
         declared = _declared_axis_ranges(default_overrides)
-        _orig = _gen_avar2.gen_fvar_axes
-
-        def _fixed_gen_fvar_axes(font, mapping):
-            existing = {str(a.axisTag) for a in font["fvar"].axes}
-            filtered = [{**m, "in": {k: v for k, v in (m.get("in") or {}).items() if k not in existing}}
-                        for m in mapping]
-            result = _orig(font, filtered)
-            for a in font["fvar"].axes:
-                tag = str(a.axisTag)
-                if tag in existing or tag not in declared:
-                    continue
-                try:
-                    lo, d, hi = (float(v) for v in declared[tag])
-                except (TypeError, ValueError):
-                    continue
-                if lo <= d <= hi:
-                    a.minValue, a.defaultValue, a.maxValue = lo, d, hi
-            return result
-
-        _gen_avar2.gen_fvar_axes = _fixed_gen_fvar_axes
+        _orig = _install_gen_fvar_axes_shim(declared)
         try:
             font = _TTFont(str(out))
             _gen_avar2.gen_avar2_mapping(font, avar2_cfg)
@@ -1310,24 +1351,30 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
 _MAPPED_FONT_LOCK = threading.Lock()
 
 
-def _authored_mapping_table(font_path: Path, avar2_cfg: List[Dict],
-                            target: Dict[str, float]) -> Optional[Dict]:
-    """The mapping the AUTHORED rows describe, with the parametric defaults
-    moved onto the ORIGIN row's out — i.e. the avar table the font would carry
+def _write_authored_mapping_font(font_path: Path, avar2_cfg: List[Dict],
+                                 target: Dict[str, float], dest: Path,
+                                 declared: Optional[Dict] = None) -> bool:
+    """Write the mapping the AUTHORED rows describe, with the parametric
+    defaults moved onto the ORIGIN row's out — the table the font would carry
     if the relocation had been possible.
 
     A degraded build's real table is generated around the compiled origin and
-    cannot express the default row at all (ADR 0001), so
-    /api/mapped-location would echo the compiled origin exactly where the
-    ORIGIN row should be — the one place the designer looks first. This needs
-    only ``fvar`` to build: no gvar, milliseconds. Returns
-    ``{axes: {tag: [min, default, max]}, segments: {tag: [[from, to]…]}}``.
+    cannot express the default row at all (ADR 0001), so /api/mapped-location
+    would echo the compiled origin exactly where the ORIGIN row should be.
+    The mapping that moves the parametric axes lives in the avar2 VarStore, so
+    the WHOLE table has to be carried: serialising avar1 segment maps loses it
+    (round-12 review). The font is therefore saved whole — fvar and avar must
+    come from one object or the VarStore's RegionAxisCount stops matching the
+    axis list — which costs the size of the compile and only happens when a
+    relocation fails. The result is evaluated by the same code path as the
+    built font.
     """
     from gftools.scripts import gen_avar2 as _gen_avar2
 
     font = TTFont(str(font_path))
     try:
         axes_by_tag = {a.axisTag: a for a in font["fvar"].axes}
+        moved = {}
         for tag, value in (target or {}).items():
             axis = axes_by_tag.get(tag)
             if axis is None:
@@ -1338,67 +1385,38 @@ def _authored_mapping_table(font_path: Path, avar2_cfg: List[Dict],
                 continue
             if axis.minValue <= v <= axis.maxValue:
                 axis.defaultValue = v
-        # The build patches gen_fvar_axes so the mapping's in: axes (which all
-        # exist in the built font) cannot be created a second time; mirror it.
-        original_axes = _gen_avar2.gen_fvar_axes
+                moved[tag] = v
 
-        def _no_new_axes(font_, mapping):
-            existing = {a.axisTag for a in font_["fvar"].axes}
-            filtered = [{**m, "in": {k: v for k, v in (m.get("in") or {}).items()
-                                     if k not in existing}}
-                        for m in mapping]
-            return original_axes(font_, filtered)
-
-        _gen_avar2.gen_fvar_axes = _no_new_axes
+        # Same shim as step 4, so the authored table is generated exactly like
+        # the real one (no duplicate axes, declared ranges for what it creates).
+        original_axes = _install_gen_fvar_axes_shim(declared or {})
         try:
             _gen_avar2.gen_avar2_mapping(font, avar2_cfg)
         finally:
             _gen_avar2.gen_fvar_axes = original_axes
-        avar = font.get("avar")
-        if avar is None:
-            return None
-        return {
-            "axes": {a.axisTag: [float(a.minValue), float(a.defaultValue),
-                                 float(a.maxValue)]
-                     for a in font["fvar"].axes},
-            # fontTools stores an axis's segment map as a FLAT list of
-            # from/to pairs ([from0, to0, from1, to1, …]); accept explicit
-            # pairs too so the shape cannot silently change under us.
-            "segments": {tag: _segment_pairs(segs)
-                         for tag, segs in (avar.segments or {}).items()},
-        }
+        if font.get("avar") is None:
+            return False
+        # Save the WHOLE font: fvar and avar must come from one object or the
+        # VarStore's RegionAxisCount stops matching the axis list (round-12
+        # review). ~the size of the compile, and only written when a
+        # relocation fails.
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        font.save(str(dest))
+        return True
     finally:
         font.close()
 
 
-def _segment_pairs(segs) -> List[List[float]]:
-    """Normalise an avar axis's segment map to ``[[from, to], …]``."""
-    values = list(segs or [])
-    if values and isinstance(values[0], (list, tuple)):
-        return [[float(a), float(b)] for a, b in values]
-    flat = [float(v) for v in values]
-    return [[flat[i], flat[i + 1]] for i in range(0, len(flat) - 1, 2)]
+def _evaluate_with_font(tt, coords: Dict) -> Dict[str, float]:
+    """avar-evaluate ``coords`` on ``tt`` (normalise → renormalise → denormalise).
 
-
-def _piecewise_map(value: float, segments) -> float:
-    """One avar axis's segment map at ``value`` (identity outside the map)."""
-    prev_from = prev_to = 0.0
-    for start, end in segments:
-        if value == start:
-            return end
-        if value < start:
-            if start == prev_from:
-                return end
-            return prev_to + (end - prev_to) * (value - prev_from) / (start - prev_from)
-        prev_from, prev_to = start, end
-    return value
-
-
-def _evaluate_authored_mapped_location(coords: Dict, data: Dict) -> Dict[str, float]:
-    """Evaluate the AUTHORED mapping (see ``_authored_mapping_table``)."""
+    Shared by the built font and the authored-mapping mini font, so a degraded
+    build and a healthy one cannot drift apart in HOW they evaluate.
+    """
     from fontTools.varLib.models import normalizeLocation
 
-    axes = {tag: tuple(triple) for tag, triple in data["axes"].items()}
+    axes = {a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
+            for a in tt["fvar"].axes}
     loc = {}
     for tag, (lo, default, hi) in axes.items():
         try:
@@ -1407,13 +1425,16 @@ def _evaluate_authored_mapped_location(coords: Dict, data: Dict) -> Dict[str, fl
             v = default
         loc[tag] = max(lo, min(hi, v))
     norm = normalizeLocation(loc, axes)
-    mapped = {tag: _piecewise_map(norm.get(tag, 0.0), segs)
-              for tag, segs in data.get("segments", {}).items()}
-    out = {}
-    for tag, (lo, default, hi) in axes.items():
-        n = mapped.get(tag, norm.get(tag, 0.0))
-        out[tag] = round(default + n * ((hi - default) if n > 0 else (default - lo)), 2)
-    return out
+    avar = tt.get("avar")
+    renorm = avar.renormalizeLocation(norm, tt) if avar is not None else norm
+
+    def _denorm(tag, n):
+        lo, default, hi = axes[tag]
+        return default + n * ((hi - default) if n > 0 else (default - lo))
+
+    # Axes absent from the renormalized dict sit at their default (normalized
+    # 0) — emit them too so the caller needn't guess.
+    return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
 
 
 def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
@@ -1423,44 +1444,24 @@ def _evaluate_mapped_location(coords: Dict) -> Dict[str, float]:
     /api/export-font (default relocation).
 
     Under a degraded build (the default could not be relocated) the built
-    table is anchored on the compiled origin, so the AUTHORED mapping is
-    evaluated instead — that is what the designer authored and what the
-    Preview pins to (S1(c), round-12 review)."""
-    from fontTools.varLib.models import normalizeLocation
-
+    table is anchored on the compiled origin, so the AUTHORED mapping — the
+    mini font carrying the whole authored avar — is evaluated instead. That is
+    what the designer authored and what the Preview pins to (S1(c))."""
     authored = state.LAST_ORIGIN_AUTHORED_AVAR
-    if authored and state.LAST_ORIGIN_RELOCATION_ERROR:
-        return _evaluate_authored_mapped_location(coords, authored)
+    if authored and state.LAST_ORIGIN_RELOCATION_ERROR and Path(authored).exists():
+        with _MAPPED_FONT_LOCK:
+            key = ("authored", str(authored), Path(authored).stat().st_mtime)
+            if state._MAPPED_FONT_CACHE["key"] != key:
+                state._MAPPED_FONT_CACHE["font"] = TTFont(str(authored), lazy=False)
+                state._MAPPED_FONT_CACHE["key"] = key
+            return _evaluate_with_font(state._MAPPED_FONT_CACHE["font"], coords)
 
     with _MAPPED_FONT_LOCK:
         key = (str(state.VARIABLE_FONT_PATH), state.VARIABLE_FONT_PATH.stat().st_mtime)
         if state._MAPPED_FONT_CACHE["key"] != key:
             state._MAPPED_FONT_CACHE["font"] = TTFont(str(state.VARIABLE_FONT_PATH), lazy=True)
             state._MAPPED_FONT_CACHE["key"] = key
-        tt = state._MAPPED_FONT_CACHE["font"]
-
-        axes = {
-            a.axisTag: (a.minValue, a.defaultValue, a.maxValue)
-            for a in tt["fvar"].axes
-        }
-        loc = {}
-        for tag, (lo, d, hi) in axes.items():
-            try:
-                v = float(coords.get(tag, d))
-            except (TypeError, ValueError):
-                v = d
-            loc[tag] = max(lo, min(hi, v))
-        norm = normalizeLocation(loc, axes)
-        avar = tt.get("avar")
-        renorm = avar.renormalizeLocation(norm, tt) if avar is not None else norm
-
-    def _denorm(tag, n):
-        lo, d, hi = axes[tag]
-        return d + n * ((hi - d) if n > 0 else (d - lo))
-
-    # Axes absent from the renormalized dict sit at their default
-    # (normalized 0) — emit them too so the caller needn't guess.
-    return {tag: round(_denorm(tag, renorm.get(tag, 0.0)), 2) for tag in axes}
+        return _evaluate_with_font(state._MAPPED_FONT_CACHE["font"], coords)
 
 
 def _apply_hidden_axes(path: Path, hidden_tags) -> None:
