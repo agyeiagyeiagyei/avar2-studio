@@ -47,6 +47,42 @@ preview table and `LAST_ORIGIN_WARNING` says so. The flag is read from
 the environment only (it is forwarded to the build worker through
 `build_jobs.ENV_KEYS`); making it a per-build parameter is decision 0007.
 
+## Amendment (2026-10-20): what "the relocation cannot fit" now does
+
+Sprint cleanup-2026-10 attacked the one failure mode this decision always
+carried: on a twin-heavy source (slant + rounding brace layers) relocating the
+origin to an interior row densifies gvar past OpenType's **64 KB per-glyph
+tuple header** limit, and `fontTools` then refuses the save. The build used to
+answer by serving the plain fallback — axes and mappings gone, status still
+`ok` — which was the worst of both worlds.
+
+Two things changed, neither of them the decision itself:
+
+1. **(b) The failure keeps the avar2 font.** The relocation runs on the
+   compiled font in memory and the save happens after the fit, so a failure
+   simply keeps what is on disk: every axis, the avar2 table, the compiled
+   default. `LAST_BUILD_STATUS` reports **`degraded`** (a third status, not
+   `failed`): the preview is wrong about the resting style but every mapping is
+   intact — and `failed` would close the build gate and stop the designer
+   nudging the ORIGIN row back, which is the only way out. `origin_relocation_error`
+   in `/api/health` carries the reason and the UI shows it.
+2. **(c) The Preview approximates the resting state under (b).** With the
+   default stuck at the compiled origin, the font's own avar2 table cannot
+   anchor the resting style, so the Preview pins the parametric axes at
+   `/api/mapped-location`'s post-mapping values for the current inputs and
+   holds the user axes at their defaults — the same technique the instance rows
+   use — with a notice saying the resting state is approximated by the mapping
+   until the ORIGIN row is back on a master. An axis the designer drags is an
+   explicit override and renders exactly (user axes at defaults ⇒ the avar2
+   delta is zero).
+
+The cost of the relocation is now paid once per (compiled font, target): the
+result — success *or* the failure verdict — is memoised in
+`<build dir>/.relocation-memo/`, keyed on a digest of the compiled font's tables
+(`head` excluded: it carries a timestamp), the exact per-axis window and the
+prune tolerance. On Crispy an unchanged-compile build drops from 57.8 s to
+19.8 s, and the failure case from 37.3 s to 15.6 s.
+
 ## Consequences
 
 - Relocating the origin to an interior point while preserving rendering

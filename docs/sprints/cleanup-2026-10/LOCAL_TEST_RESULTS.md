@@ -651,3 +651,48 @@ copy (multi-select rows 1–3, drag LCWD, open Preview) and counts
 
 So S2 is met in both halves: one config import → one build, and a 3-row
 broadcast plus Preview → one build.
+
+## S1(c) — drift probe on a reproducing degraded build (2026-10-21)
+
+Fresh scratch (`/private/tmp/av2-routine` was cleared overnight), pristine
+Crispy copy restaged, then `s1_recipe.py` re-ran the round-10 recipe to reach
+the failure for real: control axis TST2 + seeded braces + grade + Kinetikern →
+`ok`, 13 axes, 10,894,284 B, `g` 1,333 tuples; ORIGIN nudge
+(XOPQ 202.5 → 187.89) → **`degraded`**, 13 axes, 792,256 B, `g` 86; second
+nudge → same. So the state the probe runs against is the one the review
+objects to, not a synthetic one.
+
+`/private/tmp/av2-routine/drift_probe.py` drives the Preview tab at three wght
+inputs and compares three things: the oracle **the tab itself fetched** (its own
+`/api/mapped-location` request/response, captured from the network), what the
+sample element actually renders with (computed `font-variation-settings`), and
+the rendered advance of `g`/`e`/`B` against fontTools instancing the served
+font at those same coordinates:
+
+| wght | applied XOPQ | oracle XOPQ | gap | user axes at defaults | drift g / e / B (font units) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 15.00 | 15.00 | **0.00** | yes | 0.09 / 0.03 / 0.03 |
+| 400 | 170.16 | 170.16 | **0.00** | yes | 0.12 / 0.00 / 0.00 |
+| 1000 | 597.92 | 597.92 | **0.00** | yes | 0.12 / 0.12 / 0.03 |
+
+Worst render drift **0.12 font units** against the 3-unit bar; the notice
+(“.preview-relocation-notice”) renders once, screenshot
+`/private/tmp/av2-routine/ui-shots/s1c-notice.png`.
+
+**Correction to my first attempt at this probe**, worth recording because it
+looks like a bug and is not: it re-requested `/api/mapped-location` with only
+`{"wght": value}` and got *different* numbers from the page (e.g. 618.79 vs
+597.92 at wght 1000). The tab sends **every** axis — the parametric ones at
+their fvar defaults (XTRA 47, XOPQ 1, YOPQ 1…), not at the ORIGIN row's out —
+and the mapping is evaluated there. The page is self-consistent: it applies the
+oracle it asked for, exactly. A future probe must capture the tab's own request
+rather than re-deriving it.
+
+## ADR 0001 — amendment for (b)/(c) (2026-10-21)
+
+`docs/decisions/0001-build-time-default-relocation.md` gained the amendment
+paragraph the S1 spec asked for: why a relocation that cannot fit keeps the
+avar2 font and reports `degraded` (rather than `failed`, which would close the
+build gate the designer needs to walk the ORIGIN row back), how the Preview
+approximates the resting state under it, and the memo that pays the relocation
+cost once per (compiled font, target).
