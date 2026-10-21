@@ -1105,6 +1105,78 @@ and fails the check on anything but 200.
 - **Still open from the S1(a′) note:** the recursive fallback picker vs
   the memo dir, and the memo-before-gen-avar2 test.
 
+## Verifier review of round 12 — S1 checkpoint `1555212` (2026-10-21): all VERIFIED except S1(c)
+
+Fresh clone of `1555212` (`verify-r12/repo`, own venv), live smoke from
+it on port 5071 against copies staged per the routine (`crispy-r12`,
+`-r12b`, `-r12c`), static demo built from the clone on 5075.
+
+**Gates.** pytest 554 passed, 2 skipped; `ruff check src tests` clean;
+lint 0 errors; typecheck; `test:unit` all passed (incl.
+`transforms-context`, `preview-coords`); build OK; kinetikern2 53
+passed; fontc-web all 18 test binaries ok.
+
+| Item | Verdict | Evidence (verifier's own run) |
+| --- | --- | --- |
+| A19 static demo | VERIFIED | 8 rows, wght 100 → 753.1 drives `font-variation-settings`, **0** `/api/*` requests, **0** console errors |
+| A16 config round-trip | VERIFIED | corrected script: export 200, dry-run 200 and apply 200 (`ok: true`, 0 errors, 196 warnings), all four sidecars **byte-identical**, 133 layers / 697 pins |
+| S2 one build per import | VERIFIED | the import added exactly one build to the log |
+| S1(a′) relocation memo | VERIFIED | ORIGIN row nudged: build `miss` 42.9 s, then compile-unchanged builds `hit` 19.3 / 19.3 / 19.4 s (≈23 s saved each); after A18's restore the rebuild hit the memo too (18.8 s) — the content key survives a restore |
+| A18 gate | VERIFIED | truncation → builds fail in 0.13 s, restore → one build `ok` |
+| S1(b) degraded keeps the avar2 font | VERIFIED | recipe: `degraded`, 14 axes kept through two nudges, `origin_relocation_error` set |
+| S1(d), S4, S5, catch-all | VERIFIED | probe scenarios + console-clean PASS after the env fix below |
+| A11 open-editor | NOT VERIFIABLE in a fresh venv | see finding 2; the agent's PASS (Fontra installed) stands |
+| **S1(c) degraded Preview** | **FAILED at the resting state** | finding 1 |
+
+**Finding 1 — S1(c) shows the compiled origin exactly where it should
+show the ORIGIN row.** `degraded_preview.py` (scratchpad): degraded
+build, Preview at the ORIGIN row's own inputs (opsz 144, wdth 100,
+wght 400). Rendered `font-variation-settings`: `XOPQ 1, XTRA 47,
+YOPQ 1` (the fvar defaults) against the row's out `XOPQ 161.98, XTRA
+663.1, YOPQ 121.8` — off by 161/616/121 units; the notice renders.
+Root cause: `/api/mapped-location` evaluates the **built font's** avar
+table (`routes/avar2.py`, docstring: "Evaluate the BUILT font's avar
+table"). In a degraded build that table was generated around the
+compiled origin, and avar2 cannot remap the default location — the
+reason relocation exists (ADR 0001). So the oracle returns the compiled
+origin at the default inputs and a mapping anchored on the wrong point
+around it. The agent's drift probe compared the canvas with the oracle
+the tab fetched (self-consistent by construction) at wght 1/400/1000
+with auto-opsz on, so it never sat on the default location and never
+compared against the authored row.
+
+Required fix (smallest that keeps the planned behaviour): under
+`origin_relocation_error`, the oracle must evaluate the **authored**
+mapping as if the default had been relocated. The data is all there and
+none of it needs gvar: take the built font's `fvar`, move the parametric
+defaults to the ORIGIN row's out, run the same gen-avar2 step on that
+`fvar`-only font, and evaluate `mapped-location` against the resulting
+avar table (cache it per build; it costs milliseconds). Rendering the
+pinned absolute parametric values on the un-relocated gvar is then
+exact, because gvar interpolates absolute locations regardless of where
+the default sits. Acceptance: (i) the verifier's `degraded_preview.py`
+— at the ORIGIN inputs the applied parametric values equal the row's
+out within 1 u; (ii) the drift probe redone against the **authored**
+rows, not the oracle: at the default location and at two mapped stops,
+canvas vs fontTools instancing of the served font at the authored out
+≤ 3 u; (iii) a unit test on the oracle in degraded mode.
+
+**Finding 2 — a fresh install's open-editor says "fontra exited
+immediately (exit code 1)".** Fontra is optional (not a dependency;
+`doctor` checks `find_spec("fontra")`), so in a clean venv
+`POST /api/control-axes/<tag>/open-editor` answers 500 with a message
+that hides the cause. Pre-existing, minor: answer with the doctor's
+diagnosis instead (`Fontra is not installed: pip install fontra
+fontra-glyphs`), status 503, before spawning. Test: with `fontra`
+unimportable, the route returns that message.
+
+**Harness note (mine).** My first servers this round ran without the
+SPAC injector and the Kinetikern engine: zsh expands `$HOME` in a
+prefix assignment against the new `HOME`, the same trap the agent
+recorded. That produced the kinetikern/console-clean FAILs and the
+smaller fonts in the recipe run; re-run with absolute paths, both PASS
+(server env checked). The memo timings are relative and stand.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
