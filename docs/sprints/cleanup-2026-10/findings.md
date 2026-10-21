@@ -1255,6 +1255,25 @@ coordinate dict exactly as `PreviewTab` builds it (every axis, served
 defaults) and expects the three rows' outs within 1 u; then the
 verifier re-runs `s1c_check.py` live.
 
+## Verifier: S1(c) VERIFIED live on `f08b002` (2026-10-21) — S1 closed
+
+`verify-r13` clone at `f08b002`: pytest 562 passed, ruff clean. Fresh
+Crispy copy staged per the routine, engines in the server env, recipe →
+`degraded` (glyph `g` over the header limit). `s1c_check.py`:
+
+| check | XOPQ / XTRA / YOPQ gap to the authored row |
+| --- | --- |
+| oracle at `Default 400 MaxOpsz` (ORIGIN) inputs | 0.0 / 0.0 / 0.0 |
+| oracle at `Default 900 MaxOpsz` inputs | −0.02 / −0.11 / 0.0 |
+| oracle at `Narrow 1 MinOpsz` inputs | 0.0 / 0.01 / 0.0 |
+| Preview tab at the ORIGIN inputs (rendered fvs) | 0.0 / 0.0 / 0.0, notice shown |
+
+All within the 1 u bar. With round 12's results this closes S1 (a′,
+b, c, d) and the sprint scope S0–S6: **VERIFIED_HEAD `f08b002`**. Open
+for the user only: Part B, pushing fontra-embed `shared-studio-shim`,
+merging `cleanup-2026-10` into `github-pages`, and the CI/Pages runs a
+push confirms.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

@@ -1,6 +1,6 @@
-STATE: working
-ROUND: 12
-HEAD: 1555212
-VERIFIED_HEAD: 1555212 (every S0–S5 item except S1(c))
-NEXT: S1(c) — under origin_relocation_error the mapping oracle must evaluate the authored mapping as if relocated (fvar-only gen-avar2 with the parametric defaults at the ORIGIN out), acceptance in the round-12 review; plus open-editor's 'Fontra not installed' message. Then checkpoint.
-APPROVED: the S1(c) oracle fix and the open-editor message as written in the round-12 review; the verifier reviews the checkpoint
+STATE: verified-complete
+ROUND: 13
+HEAD: f08b002
+VERIFIED_HEAD: f08b002
+NEXT: user only — Part B (LOCAL_TEST_ROUTINE.md B1–B12); push fontra-embed shared-studio-shim; merge cleanup-2026-10 into github-pages; confirm CI/Pages after the push
+APPROVED: nothing pending — S0–S6 verified; the agent has no open items
