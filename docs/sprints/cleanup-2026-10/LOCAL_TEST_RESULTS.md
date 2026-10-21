@@ -696,3 +696,66 @@ avar2 font and reports `degraded` (rather than `failed`, which would close the
 build gate the designer needs to walk the ORIGIN row back), how the Preview
 approximates the resting state under it, and the memo that pays the relocation
 cost once per (compiled font, target).
+
+## Part A self-run at the S1 checkpoint (2026-10-21)
+
+Fresh scratch, pristine Crispy copy restaged (`sources/` + sidecars +
+`.avar2-studio`), server on 5072 with the SPAC injector and Kinetikern dylib.
+
+**A1 launch gate — PASS**
+
+```
+origin_warning: None
+font_built: True | last_build_status: 'ok'
+relocation_error: None | memo: 'miss'
+font: Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf
+      10,533,616 B | 12 axes | opsz default 144 | 30 rows
+```
+
+**A2–A16, A20 (`ui_probe.py`, one run): 16/16 PASS, exit 0, 17 screenshots**
+(`/private/tmp/av2-routine/ui-shots/`):
+
+| scenario | A# | scenario | A# |
+| --- | --- | --- | --- |
+| select-no-save | A3 | flyout-source | A7 |
+| preview-no-build | A4 | lifecycle | A8 |
+| sidebar-edit-saves | A5 | multi-broadcast | A9 |
+| console-clean | A20 | grade | A10 |
+| first-load | A2 | control-axis | A11 |
+| sync-dots | A6 | kinetikern | A13 |
+| export | A12 | tester | A14 |
+| config-roundtrip | A16 | load-font | A15 |
+
+**A17 watcher — PASS**: an external save of the source (new bytes + new mtime)
+started **exactly one** build (`first seen after 46.3 s`, status `ok`).
+
+**A18 build gate — PASS**:
+
+```
+baseline:  status='ok'     font=HTTP 200 10,533,616 B PUT=200
+truncated: status='failed' (2 s) error="The source file cannot be read: Expected
+           terminating ')' ..." font=HTTP 200 10,533,616 B PUT=409
+restored:  status='ok'     (36 s)  font=HTTP 200 10,533,616 B PUT=200
+```
+
+The last-good font keeps serving through the failure (same byte count), every
+mutating route answers 409, and the save recovers the build.
+
+**Not run this session: A19 (static demo) and A21 (clean install).** Both need
+artifacts this scratch does not have — A19 a served static build, A21 a fresh
+venv install of the wheel — and faking them from the dev server would prove
+nothing. They stay open for the verifier's fresh-clone run.
+
+### Two traps this run found (both in the harness, not the product)
+
+1. **A18's restore must bump the mtime.** `shutil.copy2` restores the *old*
+   mtime, so the watcher correctly ignored the "restored" write and the studio
+   stayed `failed` for the whole 181 s timeout. `os.utime(path, None)` after the
+   copy makes it a real external save again (recovered in 36 s).
+2. **A15 leaves the studio on the uploaded copy.** `load-font` uploads the
+   staged `.glyphs` (no sidecars), so the studio drops to the bare 3-axis source
+   and a 68 KB font. A17/A18 run immediately afterwards measured *that* source,
+   not the copy — they must run against a server started on the copy (or after
+   re-attaching the sidecars). My first A17/A18 attempts reported "0 builds" and
+   "truncation did not fail" for exactly this reason; both were harness order,
+   not product behaviour.
