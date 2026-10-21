@@ -1274,6 +1274,50 @@ for the user only: Part B, pushing fontra-embed `shared-studio-shim`,
 merging `cleanup-2026-10` into `github-pages`, and the CI/Pages runs a
 push confirms.
 
+## Designer Part B finding (2026-10-21) — two flyout bugs on promote-to-source (agent to fix)
+
+Found by the designer during B2 on the verifier's sanitised studio (port
+5071, copy of the current `Crispy.glyphs` with no transforms, grade or
+Kinetikern). Row `Default 1 MinOpsz` (studio-only). Server log
+evidence: three `PUT /api/instance/Default%201%20MinOpsz?csv_only=true`
+auto-saves, the last at 23:17:28 (XOPQ 15 → 16), then
+`POST /api/instance/Default%201%20MinOpsz/add-to-source` at 23:17:34.
+Afterwards the mappings file, the promoted source instance and the
+studio row all agree (XTRA 630.9, XOPQ 16, YOPQ 16, SPAC 51.2), yet the
+row's dot stays **red** and the flyout now offers "Save to avar2
+studio": the designer's last XTRA and SPAC drags were never written.
+
+**F1 — "Save to source file" on a studio row promotes the last
+auto-saved values, not the values on screen.**
+`handleAddInstanceToSource` (`hooks/useInstanceEditing.jsx`) calls
+`api.addInstanceToSource(name)` without flushing the pending debounced
+auto-save (800 ms). The promotion flips the row to `origin: source`,
+and the auto-save effect returns early for source rows by design, so
+the pending draft is dropped from every save path and can only be
+recovered through the flyout's studio save. It also refreshes only
+`instances`, not `avar2Instances` or the row's original coordinates.
+Fix: before promoting, cancel the auto-save timer and save the current
+draft (the same csv-only PUT the timer would have sent), await it, then
+promote, then refresh both row caches and reseed the editing baseline
+from the refreshed row. Test: a node spec or probe scenario that edits
+a studio row and clicks "Save to source file" within the debounce
+window → the source instance and the mappings file carry the on-screen
+values and the dot is green, not red.
+
+**F2 — SPAC can never reach the source, and the flyout does not say
+so.** SPAC is a mapping-only value (a column in the mappings file; no
+axis in the `.glyphs`). A source save therefore cannot carry it, so any
+SPAC draft on a source row stays red after "Save to source file". Fix:
+the source save also writes the row's SPAC (and any other
+mapping-only values) to the studio in the same action, and the flyout
+copy says that SPAC is saved in the studio, not the source file. Test:
+edit SPAC + XTRA on a source row, "Save to source file" → XTRA in the
+`.glyphs`, SPAC in the mappings file, dot green.
+
+Both are pre-existing behaviours exposed by Part B, not sprint
+regressions; one commit each with its test, then the verifier re-runs
+the designer's sequence on a fresh copy.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not

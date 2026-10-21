@@ -1,6 +1,6 @@
-STATE: verified-complete
-ROUND: 13
+STATE: working
+ROUND: 14
 HEAD: f08b002
 VERIFIED_HEAD: f08b002
-NEXT: user only — Part B (LOCAL_TEST_ROUTINE.md B1–B12); push fontra-embed shared-studio-shim; merge cleanup-2026-10 into github-pages; confirm CI/Pages after the push
-APPROVED: nothing pending — S0–S6 verified; the agent has no open items
+NEXT: fix the two Part B flyout bugs in findings.md ("Designer Part B finding (2026-10-21)"): F1 promote-to-source flushes the pending draft first; F2 SPAC saves to the studio with a source save and the flyout says so. One commit each with its test, then STATE: checkpoint.
+APPROVED: F1 and F2 as written; the verifier re-runs the designer's sequence at the checkpoint
