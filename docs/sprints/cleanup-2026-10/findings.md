@@ -1217,6 +1217,44 @@ gen-avar2 table, asserting a parametric axis moves with wght; (iv) the
 verifier's `degraded_preview.py` at the ORIGIN inputs and the drift
 probe against authored rows ≤ 3 u.
 
+## Verifier live check of `2f51aad` (2026-10-21) — S1(c) still FAILS end to end; cause is the inputs, not the table
+
+Fresh clone of `2f51aad` (`verify-r13`): pytest 559 passed / 2 skipped,
+ruff clean, lint 0 errors, typecheck, `test:unit`, build all green. Own
+copy staged per the routine, engines confirmed in the server's env, the
+recipe reaches `degraded` after the nudge (XOPQ 173.28; error on glyph
+`g`). The memo dir holds the `.authored.ttf` sidecars as described.
+
+Acceptance (`s1c_check.py`, verifier scratchpad) — every check FAILS by
+the same pattern:
+
+| inputs (row) | oracle XOPQ / XTRA / YOPQ | row out | returned value |
+| --- | --- | --- | --- |
+| Default 400 MaxOpsz (ORIGIN) | gap −172.28 / −616.1 / −120.8 | 173.28 / 663.1 / 121.8 | **1 / 47 / 1** |
+| Default 900 MaxOpsz | gap −296.18 / −642.22 / −144.78 | 297.18 / 689.22 / 145.78 | **1 / 47 / 1** |
+| Narrow 1 MinOpsz | gap −11 / −101.9 / −11 | 12 / 148.9 / 12 | **1 / 47 / 1** |
+| Preview tab at the ORIGIN inputs (rendered fvs) | same as row 1 | | **1 / 47 / 1**, notice shown |
+
+The oracle returns exactly the parametric axes' **minimums**, at every
+input. Root cause: the Preview (and my check, which copies it — the
+agent recorded this in round 11) sends **every** axis, with the
+non-overridden parametric axes at the **served** font's fvar defaults.
+On Crispy those defaults are the axis minimums (XOPQ 1, XTRA 47, YOPQ
+1). In the authored model the parametric defaults have moved to the
+ORIGIN out, so an explicit `XOPQ=1` there normalises to −1; the avar2
+deltas add on top and the result clamps at −1 → the minimum. The
+unit tests pass because they send only the user axes, which leaves the
+parametric axes at the authored defaults.
+
+Required (server-side, so every caller is right): when evaluating the
+authored model, translate each incoming coordinate that equals the
+**served** font's default for an axis whose default moved into the
+**authored** default before evaluating; any other value (an explicit
+override) stays absolute. Add a unit test that sends the full
+coordinate dict exactly as `PreviewTab` builds it (every axis, served
+defaults) and expects the three rows' outs within 1 u; then the
+verifier re-runs `s1c_check.py` live.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
