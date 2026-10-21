@@ -1177,6 +1177,46 @@ recorded. That produced the kinetikern/console-clean FAILs and the
 smaller fonts in the recipe run; re-run with absolute paths, both PASS
 (server env checked). The memo timings are relative and stand.
 
+## Verifier note on `4936c8e` (2026-10-21) — the authored oracle drops the avar2 part; S1(c) still FAILED
+
+Read-review plus one measurement. The open-editor fix (503 with the pip
+line, nothing spawned) is **accepted**.
+
+The S1(c) oracle is not. `_authored_mapping_table` runs gen-avar2 on the
+`fvar`-only font correctly, then serialises only `avar.segments` — the
+avar **1** per-axis segment maps — and `_evaluate_authored_mapped_location`
+evaluates only those. The mapping that moves the parametric axes with
+wght/wdth/opsz lives in the avar **2** `VarStore`, which is dropped.
+Measured on a built Crispy font from this checkpoint:
+
+```
+avar majorVersion: 2
+parametric axes with a non-identity segment map: []      (XOPQ/XTRA/YOPQ all identity)
+avar2 VarStore present: True | regions: 28
+full avar2 at wght 900: XOPQ normalized 0.0903 | segments-only: 0.0
+```
+
+So the degraded oracle returns the ORIGIN row's out at the ORIGIN inputs
+(which is why the new test passes) and **the same out at every other
+input**: the Preview would render the ORIGIN style at wght 1 and wght
+1000 alike. The new unit test encodes this — at wght 700 it asserts
+`XTRA == 663.1`, i.e. that the parametric axis does not move — and it
+uses a hand-written segment table rather than a gen-avar2 one, so it
+cannot see the VarStore.
+
+Required: keep the whole avar table. Smallest change: write the
+`fvar`+`avar` of the authored build as a tiny TTF (or the compiled table
+bytes) next to the memo entry, and evaluate it exactly as
+`_evaluate_mapped_location` already evaluates the built font
+(`avar.renormalizeLocation`), so both paths share one evaluator.
+Acceptance, all on Crispy in a degraded build: (i) at the ORIGIN inputs
+the oracle returns the row's out within 1 u; (ii) at two other authored
+rows' inputs (e.g. `Default 900 MaxOpsz`, `Narrow 1 MinOpsz`) it returns
+those rows' out within 1 u; (iii) the unit test built from a real
+gen-avar2 table, asserting a parametric axis moves with wght; (iv) the
+verifier's `degraded_preview.py` at the ORIGIN inputs and the drift
+probe against authored rows ≤ 3 u.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
