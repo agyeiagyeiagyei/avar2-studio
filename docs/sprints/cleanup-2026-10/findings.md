@@ -1318,6 +1318,56 @@ Both are pre-existing behaviours exposed by Part B, not sprint
 regressions; one commit each with its test, then the verifier re-runs
 the designer's sequence on a fresh copy.
 
+## Verifier re-run of the designer's B2 sequence at `72271f4` (2026-10-22) — data fixed, dot still red (F3); lint error
+
+Gates on `72271f4` (`verify-r13` clone): pytest 564 passed, ruff clean,
+typecheck, `test:unit`, build green. **Lint: 1 error** (see below).
+
+Live, port 5073, fresh copy staged per the routine **plus the
+designer's 5071 transforms state** (only `spac_widthaware` on — the
+designer had switched it on at 23:16 before the original report, which
+is why the sidebar showed a SPAC slider). Script `partb_f1f2.py`
+(verifier scratchpad):
+
+| case | on screen | persisted | dot |
+| --- | --- | --- | --- |
+| F1: studio row `Default 1 MinOpsz`, drag XTRA + SPAC, "Save to source file (promote)" inside the debounce | XTRA 828.5, SPAC 70.6 | source XTRA 828.5; mappings XTRA 828.5, SPAC 70.6 | **red** |
+| F2: source row `Default 400 MaxOpsz`, drag SPAC, "Save to source file" (confirm accepted) | SPAC 16.8 | mappings SPAC 16.8 | **red** |
+
+So **F1 and F2 are fixed for the data** — every value on screen reached
+its home — but the dot still reads red, which is the symptom the
+designer reported.
+
+**F3 — the sync dot compares SPAC by exact key case.**
+`getInstanceSyncStatus` builds `persisted` from `source_coordinates`
+(no SPAC), the mappings `in` map and `out` map. The mappings file's
+`in` keys are normalised to lowercase (`csv_io.normalize_in_axis_name`:
+unknown columns → `.lower()`, so `spac`), while the row's coordinates
+and the slider use the fvar tag `SPAC` (`/api/instances` returns
+`{'SPAC': 51.2, …}`). The dirty check is `!(k in persisted)` with exact
+case, so any draft carrying `SPAC` — including the baseline F1 now
+reseeds from the refreshed row — is "a value with no persisted home"
+and the dot is red for good whenever the SPAC transform is on. Fix:
+compare keys case-insensitively when building/reading `persisted` (the
+same rule `instance-sync.js` should own), and add the case to
+`e2e/instance-sync.spec.mjs`: edits `{SPAC: 70.6}` against in
+`{spac: 70.6}` → clean. Then the verifier re-runs `partb_f1f2.py`;
+acceptance is green on both rows.
+
+**Lint error since `5527ecc`:** `frontend/src/preview-coords.spec.mjs:59`
+`'console' is not defined` (no-undef) — the spec lives under `src/`, so
+the e2e node globals do not apply. Move it to `e2e/` with the other
+specs or give it the node globals. **Correction of my own reports:** my
+rounds 12 and 13 recorded "lint 0 errors"; my grep read the
+"0 errors … fixable with --fix" line, not the totals line. The error has
+been there since `5527ecc`; the CI `pages.yml` lint step would fail on
+it.
+
+**UI copy (F2 note):** "SPAC is saved in the studio’s mappings file, not
+the source." The interface rule is no file-format internals: write "SPAC
+is saved in the studio, not the source file." (also in the button
+tooltip).
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
