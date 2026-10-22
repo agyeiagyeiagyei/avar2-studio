@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs && node e2e/export-poll.spec.mjs && node e2e/build-wait.spec.mjs && node e2e/api-parity.spec.mjs && node e2e/instance-sync.spec.mjs && node e2e/transforms-context.spec.mjs && node src/preview-coords.spec.mjs"
+    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs && node e2e/export-poll.spec.mjs && node e2e/build-wait.spec.mjs && node e2e/api-parity.spec.mjs && node e2e/instance-sync.spec.mjs && node e2e/promote-flush.spec.mjs && node e2e/transforms-context.spec.mjs && node src/preview-coords.spec.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { csvDivergesFromSource } from '../instance-sync';
+import { promoteStudioRow } from '../promote-flush';
 import { useBuildStatus } from './useBuildStatus';
 import { useStudioData } from './useStudioData';
 import { useTransforms } from './useTransforms';
@@ -853,16 +854,47 @@ export function InstanceEditingProvider({ children }) {
   const handleAddInstanceToSource = useCallback(async (instanceName) => {
     try {
       setError(null);
-      await api.addInstanceToSource(instanceName);
+      // F1 (findings.md, Designer Part B): a drag that is still inside
+      // the 800 ms auto-save window lives only in editing state. The
+      // promotion flips this row to origin:"source", which switches the
+      // studio auto-save off by design, so the draft has to be flushed
+      // BEFORE the promote call or it is dropped from every save path.
+      clearTimeout(autoSaveTimer.current);
+      const isSelected = !!selectedInstance && selectedInstance.name === instanceName;
+      const draft = isSelected
+        ? editingCoordinates
+        : (instanceEditingCoordinates[instanceName] || {});
+      const { instances: refreshedInstances } = await promoteStudioRow(instanceName, {
+        api,
+        coords: draft,
+        previewOnlyTags: previewOnlyAxisTags,
+        pending: autoSaveChain.current,
+      });
       // Refresh the instance list so the badge disappears and the
       // origin flips from "studio" to "source".
-      const refreshed = await api.getInstances();
-      setInstances(refreshed.instances || []);
+      setInstances(refreshedInstances);
+      // The sync dot judges "persisted" against the avar2 mappings
+      // cache; refreshing only `instances` left a promoted row red.
+      await loadAvar2Data();
+      // Reseed the editing baseline from the refreshed row: the draft is
+      // persisted now, and a stale baseline would read as a fake diff.
+      const promoted = refreshedInstances.find(inst => inst.name === instanceName);
+      if (promoted) {
+        const baseline = { ...promoted.coordinates };
+        if (isSelected) {
+          setSelectedInstance(promoted);
+          setEditingCoordinates(baseline);
+          setOriginalCoordinates(baseline);
+        }
+        setInstanceEditingCoordinates(prev => ({ ...prev, [instanceName]: { ...baseline } }));
+        setInstanceOriginalCoordinates(prev => ({ ...prev, [instanceName]: { ...baseline } }));
+      }
     } catch (err) {
       console.error('Failed to add instance to source:', err);
       setError(err.message || 'Failed to add instance to source');
     }
-  }, [setError, setInstances]);
+  }, [setError, setInstances, selectedInstance, editingCoordinates, instanceEditingCoordinates,
+      previewOnlyAxisTags, loadAvar2Data]);
 
   const handleConfirmDelete = useCallback(async (deleteFromGlyphs) => {
     if (!instanceToDelete) return;
