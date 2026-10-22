@@ -58,8 +58,8 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
   const isStudioOnly = instanceOrigin === 'studio';
   const sourceLabel = isStudioOnly ? 'Save to source file (promote)' : 'Save to source file';
   const sourceTitle = isStudioOnly
-    ? 'Promote this studio-only instance into the source file (.glyphs / .designspace). The row gains the SRC badge afterwards.'
-    : 'Write the edited coordinates back to the source file (.glyphs / .designspace). The SRC instance is permanently modified.';
+    ? 'Promote this studio-only instance into the source file (.glyphs / .designspace). The row gains the SRC badge afterwards. Per-instance SPAC has no axis in the source, so it is saved in the studio’s mappings file.'
+    : 'Write the edited coordinates back to the source file (.glyphs / .designspace). The SRC instance is permanently modified. Per-instance SPAC has no axis in the source, so it is saved in the studio’s mappings file.';
 
   // Only show "Save to avar2-studio" when there's something to save —
   // i.e. local edits are pending (red state). Hiding it in green/orange
@@ -105,6 +105,13 @@ function InstanceFlyout({ isOpen, onClose, onUpdateStudio, onUpdateSource, onDem
         >
           {sourceLabel}
         </button>
+      )}
+      {showSaveToSource && (
+        // F2 (findings.md, Designer Part B): SPAC is mapping-only. Saying
+        // so here stops the red dot reading as a failed save.
+        <div className="flyout-note">
+          SPAC is saved in the studio’s mappings file, not the source.
+        </div>
       )}
       {showDemote && (
         <button

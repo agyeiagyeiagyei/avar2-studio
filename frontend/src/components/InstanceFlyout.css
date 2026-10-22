@@ -61,6 +61,19 @@
   background: var(--red-50);
 }
 
+/* F2: mapping-only note under "Save to source file". The flyout clips to
+   nowrap, so the note opts back into wrapping and a readable width. */
+.flyout-note {
+  padding: 0.35rem 0.85rem 0.5rem;
+  border-top: 1px solid var(--zinc-100);
+  font-size: 0.575rem;
+  font-family: var(--font-mono);
+  color: var(--zinc-500);
+  white-space: normal;
+  max-width: 13rem;
+  line-height: 1.25;
+}
+
 /* Grade section — per-instance grade% (shown when the Grade transform is on) */
 .flyout-grade {
   border-top: 1px solid var(--zinc-100);

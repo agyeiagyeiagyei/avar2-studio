@@ -1352,3 +1352,51 @@ bar; findings rounds still get written so a second reviewer can re-check.
 - Residual (proposed follow-up, not in this sprint's backlog): an export
   option that compiles without the twin masters (slant/ROND) so far
   interior styles fit the header limit — the message already points at it.
+
+## Part B flyout fixes F1 + F2 (findings.md, Designer Part B, 2026-10-21)
+
+Executor: agent. Two pre-existing behaviours exposed by the designer's B2
+sequence, fixed one commit each with a test.
+
+**F1 — promote flushes the pending auto-save draft** (`f01f856`).
+`handleAddInstanceToSource` called `POST /add-to-source` without flushing
+the 800 ms debounced auto-save; the promotion flips the row to
+`origin:"source"`, so the auto-save effect then returns early and the draft
+was dropped. The ordering now lives in `frontend/src/promote-flush.js` —
+strip preview-only axes → flush with the same csv-only PUT the timer would
+have sent (queued behind `autoSaveChain`, since each commit rewrites the
+whole CSV) → promote → return the refreshed rows; a failed flush throws
+before the promote. The hook cancels the pending timer, refreshes both row
+caches (instances + the avar2 mappings the sync dot judges) and reseeds the
+editing baseline from the refreshed row.
+
+Evidence:
+- `node e2e/promote-flush.spec.mjs` — 18 checks green: call order
+  `updateInstance → addInstanceToSource → getInstances`, the `csvOnly` flag,
+  preview-axis stripping (SPAC kept), flush queued behind a 25 ms pending
+  chain, empty draft → no PUT, failed flush → promote never called.
+  Added to `npm run test:unit` (chain exits 0).
+- `npm run build` green; `eslint` clean on the touched files.
+
+**F2 — a source save carries the mapping-only values to the studio**
+(`PUT /api/instance/<name>` in `routes/instances.py`). SPAC has no axis in
+the source, so `update_instance_in_glyphs` cannot carry it and the
+source→CSV sync only refreshes axis columns; the full source save left it
+behind and the row stayed red. The endpoint now derives
+`mapping_only = csv_coordinates − glyphs_coordinates` and writes those cells
+in the CSV row even when the row is a source instance, while the axis
+columns stay the sync's job (the row is NOT added to `skip_instances`).
+The flyout says so in copy: a muted note under "Save to source file" —
+"SPAC is saved in the studio's mappings file, not the source" — and the
+button tooltip carries the same sentence.
+
+Evidence:
+- `tests/test_source_save_spac.py` — **fails on the pre-fix route**
+  (`SPAC == "63.5"` assertion, value stayed `51.2`) and passes after it;
+  the writeback payload pinned to `{"XTRA": 700.0}` (SPAC never sent to the
+  .glyphs), the row not skipped by the sync, and an untouched SPAC
+  surviving a later source save.
+- `pytest tests/test_source_save_spac.py tests/test_instance_spac_persistence.py
+  tests/test_source_writeback_targets.py -q` → 8 passed.
+- Full gates: `ruff check src tests` clean; `pytest tests/ -q` → **564
+  passed**; `npm run test:unit` green; `npm run build` green.

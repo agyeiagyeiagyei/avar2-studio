@@ -378,6 +378,10 @@ def update_instance(instance_name: str):
         tag: value for tag, value in coordinates.items()
         if tag in source_axis_tags or tag == 'SPAC'
     }
+    # What only the studio can store: values with no source axis behind
+    # them. A full source save still has to write these, or they are lost.
+    mapping_only = {tag: value for tag, value in csv_coordinates.items()
+                    if tag not in glyphs_coordinates}
 
     # Per-instance CONTROL-axis values (ymod/lcwd) persist in the control
     # sidecar, never as CSV columns (see
@@ -449,14 +453,19 @@ def update_instance(instance_name: str):
                 #     for a source instance — e.g. the flyout's "Update in
                 #     avar2-studio" path).
                 # For a source instance with csv_only_flag=false, the
-                # bottom-of-function sync from source → CSV handles it.
+                # bottom-of-function sync from source → CSV handles the axis
+                # columns. The MAPPING-ONLY values (SPAC) have no axis in the
+                # source file, so that sync can never carry them: write them
+                # here, or a SPAC draft stays local and the row stays red
+                # after "Save to source file" (findings.md, F2).
                 should_write_csv_row = csv_only_flag or (not is_source_instance)
+                write_values = csv_coordinates if should_write_csv_row else mapping_only
                 instance_updated = False
                 updated_count = 0
                 for row in rows:
                     if row.get("Instance Name", "").strip() == instance_name:
-                        if should_write_csv_row:
-                            for tag, value in csv_coordinates.items():
+                        if write_values:
+                            for tag, value in write_values.items():
                                 col = tag.upper()
                                 if col not in fieldnames:
                                     if col == 'SPAC':
