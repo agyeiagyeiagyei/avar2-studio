@@ -44,3 +44,43 @@ export const csvDivergesFromSource = (csvCoords, sourceCoords) => {
   if (Object.keys(subset).length === 0) return false;
   return !sameCoords(csvCoords, subset);
 };
+
+/**
+ * Look a draft axis up in the persisted union, IGNORING KEY CASE.
+ *
+ * The mappings CSV lowercases every column it does not recognise
+ * (`csv_io.normalize_in_axis_name` → `spac`), while the app, the sliders and
+ * `/api/instances` use the fvar tag (`SPAC`). An exact-case `k in persisted`
+ * therefore called a persisted SPAC "a value with no persisted home" and the
+ * dot stayed red for good whenever the SPAC transform was on (findings.md,
+ * F3). Returns `{ found, value }`.
+ */
+export const persistedValue = (persisted, key) => {
+  if (!persisted || key === undefined || key === null) return { found: false };
+  if (key in persisted) return { found: true, value: persisted[key] };
+  const want = String(key).toUpperCase();
+  for (const k of Object.keys(persisted)) {
+    if (String(k).toUpperCase() === want) return { found: true, value: persisted[k] };
+  }
+  return { found: false };
+};
+
+/**
+ * True when the row's local draft disagrees with anything persisted.
+ * `previewOnlyTags` never persist, so they never make a row dirty.
+ */
+export const editsAreDirty = (edits, persisted, previewOnlyTags = new Set()) => {
+  for (const k of Object.keys(edits || {})) {
+    if (previewOnlyTags.has(String(k).toLowerCase())) continue;
+    const home = persistedValue(persisted, k);
+    if (!home.found) return true;            // value with no persisted home
+    const ve = Number(edits[k]);
+    const vp = Number(home.value);
+    if (!Number.isFinite(ve) || !Number.isFinite(vp)) {
+      if (edits[k] !== home.value) return true;
+    } else if (Math.abs(ve - vp) > 0.01) {
+      return true;
+    }
+  }
+  return false;
+};

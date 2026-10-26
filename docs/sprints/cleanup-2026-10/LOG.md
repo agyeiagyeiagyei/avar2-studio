@@ -1400,3 +1400,47 @@ Evidence:
   tests/test_source_writeback_targets.py -q` → 8 passed.
 - Full gates: `ruff check src tests` clean; `pytest tests/ -q` → **564
   passed**; `npm run test:unit` green; `npm run build` green.
+
+## Round 15 — F3 (SPAC key case), the preview-coords lint error, flyout copy
+
+**F3 — the sync dot compared SPAC by exact key case.** `getInstanceSyncStatus`
+now delegates dirtiness to `instance-sync.js`, which owns one rule:
+`persistedValue(persisted, key)` looks a draft axis up in the persisted union
+case-insensitively (exact key first), and `editsAreDirty(edits, persisted,
+previewOnlyTags)` is the per-key dirty check. The CSV lowercases columns it
+does not recognise (`csv_io.normalize_in_axis_name` → `spac`) while the row,
+the sliders and /api/instances use the fvar tag (`SPAC`); `!(k in persisted)`
+therefore called a persisted SPAC "a value with no persisted home" and the dot
+stayed red for good whenever the SPAC transform was on.
+
+Evidence:
+- `e2e/instance-sync.spec.mjs` (in `test:unit`): `{SPAC: 70.6}` against
+  `in {spac: 70.6}` → clean; the reverse case → clean; a real SPAC difference
+  → dirty; a key with no persisted home → dirty; preview-only axes → clean;
+  float32 noise tolerated. 16 checks green.
+- Live, port 5075, fresh copy of `examples/crispy-mini` (which ships
+  `spac_widthaware` enabled, the state the designer had): selected
+  `Ultra Wide Thin 144`, dragged SPAC 25 → dot `sync-status-red`; "Save to
+  source file (promote)" → row gains the SRC badge and the dot reads
+  `sync-status-green`. Server truth after the save: `/api/avat2/instances` →
+  `in {"opsz":144,"spac":25,"wdth":200}` (lowercase `spac`), `/api/instances`
+  → `coordinates {"SPAC":25.0,…}` with `source_coordinates` carrying no SPAC.
+  That is exactly the key-case pair that used to force red.
+
+**Lint error since `5527ecc`** — `frontend/src/preview-coords.spec.mjs:59`
+`'console' is not defined` (no-undef; under `src/` the eslint config treats
+the file as browser code). Moved to `frontend/e2e/preview-coords.spec.mjs`
+with the other node specs, import path updated, `test:unit` chain repointed.
+Evidence: `node_modules/.bin/eslint .` → **0 errors, 34 warnings** (totals
+line; warnings all pre-existing). The verifier's note that earlier rounds
+read the "0 errors … fixable" line instead of the totals is correct — this
+round quotes the totals line.
+
+**Flyout copy (F2 note)** — the interface rule forbids file-format internals:
+the note under "Save to source file" and the button tooltip now both read
+"SPAC is saved in the studio, not the source file." Evidence: live flyout on
+the same staging — note text matched exactly; tooltip matched.
+
+Gates at this state: `ruff check src tests` clean; `pytest tests/ -q` → 564
+passed; `eslint .` 0 errors; `tsc --noEmit` clean; `npm run test:unit` green
+(10 chains); `npm run build` green.

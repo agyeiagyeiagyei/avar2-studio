@@ -10,7 +10,7 @@
  * Usage: node e2e/instance-sync.spec.mjs
  */
 
-import { sameCoords, csvDivergesFromSource } from '../src/instance-sync.js';
+import { sameCoords, csvDivergesFromSource, editsAreDirty, persistedValue } from '../src/instance-sync.js';
 
 let failures = 0;
 const check = (name, cond, extra = '') => {
@@ -42,6 +42,29 @@ check('sameCoords ignores key order', sameCoords({ a: 1, b: 2 }, { b: 2, a: 1 })
 check('sameCoords rejects a different key count', sameCoords({ a: 1 }, { a: 1, b: 0 }) === false);
 check('sameCoords compares non-numbers literally',
       sameCoords({ a: 'x' }, { a: 'y' }) === false);
+
+// F3 (findings.md, verifier re-run at 72271f4): the dot compared SPAC by
+// exact key case. The mappings CSV lowercases the column (`in: {spac: …}`)
+// while the row, the sliders and /api/instances use the fvar tag (`SPAC`),
+// so every SPAC draft read as "no persisted home" and the row stayed red
+// for good whenever the SPAC transform was on.
+console.log('\nsync dot: persisted keys compare case-insensitively (F3)');
+check('edits {SPAC} against in {spac} is CLEAN',
+      editsAreDirty({ SPAC: 70.6 }, { wght: 400, spac: 70.6 }) === false);
+check('the lowercase draft reads the same way',
+      editsAreDirty({ spac: 70.6 }, { SPAC: 70.6, wght: 400 }) === false);
+check('a real SPAC difference is still dirty',
+      editsAreDirty({ SPAC: 70.6 }, { spac: 51.2 }) === true);
+check('a key with genuinely no persisted home is dirty',
+      editsAreDirty({ SPAC: 70.6 }, { wght: 400 }) === true);
+check('preview-only axes never make a row dirty',
+      editsAreDirty({ GRAD: 12 }, { wght: 400 }, new Set(['grad'])) === false);
+check('persistedValue finds the exact key first, then case-insensitively',
+      persistedValue({ wght: 1, SPAC: 2 }, 'wght').value === 1
+      && persistedValue({ spac: 3 }, 'SPAC').value === 3
+      && persistedValue({ wght: 1 }, 'SPAC').found === false);
+check('editsAreDirty tolerates float32 noise',
+      editsAreDirty({ XTRA: 663.1000061035156 }, { XTRA: 663.1 }) === false);
 
 if (failures) {
   console.error(`\n${failures} failure(s)`);

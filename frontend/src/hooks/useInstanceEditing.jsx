@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { csvDivergesFromSource } from '../instance-sync';
+import { csvDivergesFromSource, editsAreDirty } from '../instance-sync';
 import { promoteStudioRow } from '../promote-flush';
 import { useBuildStatus } from './useBuildStatus';
 import { useStudioData } from './useStudioData';
@@ -142,15 +142,12 @@ export function InstanceEditingProvider({ children }) {
     const csvCoords = Object.keys(csvOut).length > 0 ? csvOut : null;
 
     if (edits && Object.keys(edits).length > 0) {
-      const dirty = Object.keys(edits).some(k => {
-        if (previewOnlyAxisTags.has(String(k).toLowerCase())) return false;   // preview-only axis — never persisted
-        if (!(k in persisted)) return true;          // value with no persisted home
-        const ve = Number(edits[k]);
-        const vp = Number(persisted[k]);
-        if (!Number.isFinite(ve) || !Number.isFinite(vp)) return edits[k] !== persisted[k];
-        return Math.abs(ve - vp) > 0.01;
-      });
-      if (dirty) return 'red';   // local edits not persisted
+      // Key case is not significant here: the mappings CSV lowercases an
+      // unknown column (`spac`) while the drafts carry the fvar tag
+      // (`SPAC`). See instance-sync.js / findings.md F3.
+      if (editsAreDirty(edits, persisted, previewOnlyAxisTags)) {
+        return 'red';   // local edits not persisted
+      }
     }
 
     if (instance.origin === 'studio') {

@@ -1,9 +1,13 @@
 /**
  * S1(c): the Preview's coordinate mapping. Run with
- *   node src/preview-coords.spec.mjs
+ *   node e2e/preview-coords.spec.mjs
+ *
+ * Lives under e2e/ with the other node specs: under src/ the eslint config
+ * treats it as browser code, where `console`/`process` are undefined
+ * (no-undef — the one lint error that stood since 5527ecc).
  */
 import assert from 'node:assert/strict';
-import { previewRenderCoords, variationSettings } from './preview-coords.js';
+import { previewRenderCoords, variationSettings } from '../src/preview-coords.js';
 
 const axes = [
   { tag: 'wght', default: 400 },
