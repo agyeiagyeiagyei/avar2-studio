@@ -1368,6 +1368,28 @@ the source." The interface rule is no file-format internals: write "SPAC
 is saved in the studio, not the source file." (also in the button
 tooltip).
 
+## Verifier: F1, F2 and F3 VERIFIED at `e325040` (2026-10-26) — Part B's B2 flow passes
+
+Fresh clone of `e325040` (`verify-r15`; the previous clone in `/tmp` was
+broken by macOS's periodic temp cleanup, so its first run here was
+discarded). Gates read by exit code this time: pytest 562 passed /
+2 skipped; `ruff check src tests` clean; **eslint 0 errors** (34
+warnings, exit 0); typecheck ok; `test:unit` exit 0; build OK.
+
+Designer's B2 sequence live on port 5073, fresh copy staged per the
+routine with only the SPAC transform on (the designer's 5071 state),
+`partb_f1f2.py`:
+
+| case | on screen | persisted | dot |
+| --- | --- | --- | --- |
+| F1: studio row `Default 1 MinOpsz`, XTRA + SPAC dragged, "Save to source file (promote)" inside the debounce | XTRA 828.5, SPAC 70.6 | source XTRA 828.5; mappings XTRA 828.5, SPAC 70.6 | **green** |
+| F2: source row `Default 400 MaxOpsz`, SPAC dragged, "Save to source file" (confirm accepted) | SPAC 16.8 | mappings SPAC 16.8 | **green** |
+
+Flyout note reads "SPAC is saved in the studio, not the source file."
+**VERIFIED_HEAD `e325040`.** Remaining items are the designer's: the
+rest of Part B, the fontra-embed push, the merge into `github-pages`,
+and the CI/Pages runs a push confirms.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
