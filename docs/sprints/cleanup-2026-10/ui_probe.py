@@ -572,9 +572,17 @@ def scenario_control_axis(s):
     s.page.fill("#ctl-max", "100")
     before = health(s.url).get("last_build_time")
     s.page.click(".add-control-axis-modal .btn-confirm")
+    # The write regenerates the shadow under SIDECAR_LOCK, so /api/axes can
+    # block for minutes on Crispy (the request times out, not the axis).
+    # Health does not take the lock: retry the read through its timeouts.
     t0 = time.time()
-    while time.time() - t0 < 30:
-        axes = api_json(s.url, "/api/axes")["axes"]
+    axes = []
+    while time.time() - t0 < 300:
+        try:
+            axes = api_json(s.url, "/api/axes")["axes"]
+        except (TimeoutError, OSError):
+            time.sleep(2)
+            continue
         if any(a["tag"].lower() == tag.lower() for a in axes):
             break
         time.sleep(1)
