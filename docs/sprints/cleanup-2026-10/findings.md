@@ -1812,3 +1812,41 @@ One commit per item with its test, after the Phase C review below is
 closed; the verifier then re-runs the designer's B7 sequence on a
 fresh copy (apply on one style → badge, Transforms toggle, dropdown
 text, Revert, size-on-pick).
+
+## CI0 approved (user decision 2026-10-28) — the python and rust CI jobs green on a plain runner
+
+Scope for the agent, after P1–P3 and K1–K4 (it may be interleaved while
+a CI run is pending — each fix needs the real runner to confirm). The
+three failures, red on every push since `2f51aad` (CI log of run
+40680788452 and earlier runs are the evidence; none reproduces on a
+developer machine, so root-cause each on the runner, not by guessing):
+
+- **CI0a — `tests/test_worker_shadow.py::test_a_shadow_drawing_survives_the_worker_build`**
+  fails with `Font build failed: …[Errno 2] No such file or directory:
+  'fontmake' (avar2 build also failed: Preview config not found)`. The
+  runner has fontc (`cli-build` passes with it), so the avar2 build path
+  is what fails there — "Preview config not found" — and only then does
+  the fontmake fallback get tried. Find what the test takes from a
+  developer machine that a plain `pip install -e .[dev]` checkout lacks,
+  and make the test self-contained. Skipping is not the fix: this test
+  is the worker-subprocess guarantee (ADR 0003).
+- **CI0b — `tests/test_glyphs_launcher.py::test_open_starts_the_studio_on_the_first_free_port_and_stop_ends_it`**
+  fails with `no callback within 20.0s`. Establish whether the callback
+  never fires on the runner or merely arrives late (the log's timings
+  tell); a fixed 20 s wait on a shared runner is not a test of the
+  launcher. Bound the wait on the studio's own readiness signal, not a
+  clock.
+- **CI0c — rust `clamp_drops_stranded_sources` (`wasm/fontc-web/tests/clamp_oracle.rs:221`)**
+  fails because the oracle shells out to fontmake, which the rust jobs
+  do not install. Install it in those jobs (it is the oracle, so the
+  comparison is the point) rather than skip.
+
+Acceptance: the `Test` workflow fully green (python ×2, rust ×2,
+frontend, cli-build) on the checkpoint push, on both runners; the agent
+cites the run id in `LOCAL_TEST_RESULTS.md`, and the verifier reads the
+run, not the claim. `cli-build` keeps its semantics (C5). No test is
+marked skip/xfail to get there.
+
+User-owned, no agent action: the `instances.fix` Thin–Black ladder vs
+the studio's named styles — the designer is taking that to the Google
+Fonts team.
