@@ -1709,3 +1709,24 @@ Commands + results:
   `Crispy[GRAD,LCWD,XOPQ,XTRA,YMOD,YOPQ].ttf` — axes `XTRA XOPQ YOPQ LCWD YMOD GRAD
   opsz wdth wght` (no ROND / slnt / SPAC), 9 named instances, STAT present; checkout
   `git status --porcelain --ignored` → 0 lines.
+
+## Phase C review — P1 + P2
+
+**P1** — `tests/test_fontra_port.py` asserted `importlib.util.find_spec("fontra") is
+not None` on top of a stubbed launcher, which only coupled the test to this venv: it
+failed on every plain `pip install -e .[dev]` clone and in both CI python jobs since
+`65d2039`. Assert (and its comment + unused import) removed; the test still pins the
+port in the response. `pytest tests/test_fontra_port.py -q` → 5 passed.
+
+**P2** — an existing but unparseable source used to reach the build and exit 1 with
+`error: build failed: The source file cannot be read: 'str' object has no attribute
+'keys'`. The CLI now probes the source with the cached loader right after applying it and
+exits **2** with `error: <name> could not be read: <parse message>`, cancelling the
+auto-build `_apply_source_path` queued.
+
+Commands + results:
+- `pytest tests/test_cli_failures.py tests/test_fontra_port.py -q` → 13 passed;
+  `ruff check src tests` clean; `pytest tests/ -q` → **632 passed**.
+- Live `~/avar2-agent/p2` (garbage `.glyphs` + valid metadata sibling): exit **2**,
+  `error: Crispy.glyphs could not be read: Unexpected character after key at line 1:
+  'a'`; no `out/`; no build worker left running.

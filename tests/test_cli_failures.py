@@ -128,3 +128,26 @@ def test_the_degraded_message_is_printed_prefixed(clean_state, tmp_path, monkeyp
     err = capsys.readouterr().err
     assert "error: origin relocation failed" in err
     assert "over the gvar ceiling" in err
+
+
+def test_an_unreadable_source_exits_2_with_a_readable_message(
+        clean_state, tmp_path, monkeypatch, capsys):
+    """P2 — an existing but unparseable source is a LOAD error (exit 2), and
+    the message names the file and the parse problem, never a Python attribute
+    error from deep inside the build."""
+    from avar2_studio import server
+
+    project = tmp_path / "checkout"
+    project.mkdir()
+    source = project / "Crispy.glyphs"
+    source.write_text("this is not a glyphs file\n", encoding="utf-8")
+    (project / "Crispy-axis-metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(server, "_apply_source_path", lambda p: None)
+    clean_state.GLYPHS_PATH = source
+
+    rc = cli._build([str(source), "--out", str(tmp_path / "out")])
+
+    assert rc == 2, "bad input must exit 2, not 1"
+    err = capsys.readouterr().err
+    assert "Crispy.glyphs could not be read:" in err
+    assert "build failed" not in err, err

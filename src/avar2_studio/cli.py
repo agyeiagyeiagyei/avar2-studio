@@ -197,6 +197,22 @@ def _build(argv) -> int:
         print(f"error: could not load {args.source}: {exc}", file=sys.stderr)
         return 2
 
+    # A source that exists but does not parse is a LOAD error (exit 2), not a
+    # build failure: say so here, with the parse message, instead of letting a
+    # worker burn a build and report the generic "source cannot be read"
+    # (P2). The cached loader means the build reuses this parse.
+    if state.GLYPHS_PATH is not None:
+        try:
+            from . import source_font as _source_font
+            _source_font.load_source_cached(state.GLYPHS_PATH)
+        except Exception as exc:
+            flat = " | ".join(ln for ln in str(exc).splitlines() if ln.strip())
+            print(f"error: {args.source.name} could not be read: {flat}", file=sys.stderr)
+            # _apply_source_path queues a build on load; this source can never
+            # build, so don't leave a worker running behind an exit-2 CLI.
+            state.JOBS.cancel_all()
+            return 2
+
     # The build runs in a worker subprocess (docs/decisions/0003-worker-subprocess-finish-then-rebuild.md);
     # wait for the queue to drain before reading the outcome globals.
     server.JOBS.wait_for_idle()
