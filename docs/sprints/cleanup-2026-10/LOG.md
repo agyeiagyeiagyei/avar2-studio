@@ -1815,3 +1815,28 @@ Commands + results:
 - `pytest tests/test_glyphs_launcher.py -q` → 5 passed in 4.0 s (was 8.6 s).
 - `node e2e/api-parity.spec.mjs` → all passed.
 - Next: a fresh workflow run is the acceptance for CI0.
+
+## Checkpoint ROUND 18
+
+All of the approved queue is in at `4d96107` (one commit each, K2–K4 sharing
+one because they are one file's copy and layout): P3 `14a0d73`, P1 `6689b6`,
+P2 `393e093`, K1 route `619da0f`, K2–K4 `056a551`, K1 UI `0ee5c90` (+
+`944fd13` for the badge timing the probe found), CI0 `0169274` (+
+`2237df9` for the parity entry and the reverse DNS).
+
+Verification at this state:
+- Test workflow run `40721221145` (commit `2237df9`): **all six jobs green**
+  — python (ubuntu, macos), rust (ubuntu, macos), frontend, cli-build. That is
+  CI0's acceptance.
+- Loop run `20261028-225007`: staged copy git-clean (0 lines before and after
+  the build), `avar2-studio build` from the installed package exit 0, studio
+  on 5072 / Fontra 8002 idle at probe time, `ui_probe.py all` **PASS 16 /
+  FAIL 0** (the kinetikern scenario now covers K1's badge, the Transforms
+  toggle and the off/on round trip).
+- `pytest tests/ -q` → 637 passed; `ruff check src tests` clean; frontend
+  `eslint .` 0 errors, `tsc --noEmit` clean, `npm run test:unit` all pass,
+  `npm run build` green.
+
+Not verified locally, stated plainly: `cargo test` (the fontations stack is a
+10+ minute cold build) — CI ran it, and both rust legs are green, including
+`clamp_drops_stranded_sources` with fontmake installed.
