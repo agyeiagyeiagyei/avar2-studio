@@ -628,6 +628,16 @@ def scenario_kinetikern(s):
     entry = next((e for e in data["instances"] if e.get("name") == row_name), None)
     assert entry is not None, (row_name, data)
     s.shot("a13-after-apply")
+    # K3/K4: after an apply the option text says "spaced -0.60", the Revert
+    # button names its style, and the Font Size control lives in .kk-main.
+    option_text = s.page.locator(f".kk-instance option[value='{row_name}']").inner_text()
+    print("    option text:", option_text)
+    assert "spaced" in option_text, option_text
+    revert_text = s.page.locator(".kk-btn:has-text('Revert')").inner_text()
+    print("    revert label:", revert_text)
+    assert row_name in revert_text, revert_text
+    assert s.page.locator(".kk-main .font-size-control").count() == 1, \
+        "the Font Size control must sit in .kk-main"
     before = health(s.url).get("last_build_time")
     s.page.click(".kk-btn:has-text('Revert')")
     wait_new_build(s, before, timeout=240)

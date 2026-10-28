@@ -36,9 +36,13 @@ with every other axis at its default — the secondary and transform axes
 only change how the panes render.
 
 - **Apply** stores the proposal for that style and rebuilds.
-- **Revert** drops it and rebuilds.
-- **Apply to all…** spaces every style that has parametric coordinates at
-  one looseness in one go, which keeps the family consistent (one rebuild).
+- **Revert** drops it and rebuilds; the button names the style it will revert.
+- **Apply −0.60 to all…** (the button carries the slider's value) spaces
+  every style that has parametric coordinates at that one looseness in one
+  go, which keeps the family consistent (one rebuild). All means all: it
+  **replaces each style's own looseness**, and the confirm names the styles
+  it will re-space and the value they will become. The per-glyph deltas are
+  still recomputed per style.
 - **Custom…** spaces any parametric location you name; the entry then
   carries that `location` instead of following a style.
 

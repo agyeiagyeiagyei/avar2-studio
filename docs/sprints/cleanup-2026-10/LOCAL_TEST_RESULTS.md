@@ -920,3 +920,48 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 | P1 | PASS | `tests/test_fontra_port.py` no longer asserts that Fontra is importable — the launcher is stubbed, so the assert only coupled the test to the venv and failed on a plain `pip install -e .[dev]` clone (the verifier's 1 failed / 627 passed, and both CI python jobs since `65d2039`). `pytest tests/test_fontra_port.py -q` → 5 passed. |
 | P2 | PASS | An existing but unparseable source is a **LOAD** error: `avar2-studio build` probes the source with the cached loader after applying it and exits **2** with `error: Crispy.glyphs could not be read: <parse message>` — before a worker burns a build on it (the queued auto-build is cancelled), never `build failed: … object has no attribute …`. Unit: `tests/test_cli_failures.py::test_an_unreadable_source_exits_2_with_a_readable_message`. Live (`~/avar2-agent/p2`, a one-line garbage `.glyphs` beside a valid metadata sibling): exit **2**, `error: Crispy.glyphs could not be read: Unexpected character after key at line 1: 'a'`, no output directory, no worker left running. |
 | K1 (route) | PASS | `PUT /api/kinetikern` (designer B7 K1, backend half): `{enabled: bool}` → `sidecar.set_enabled`, and one `schedule_shadow_rebuild` **only when the value changes** (a redundant PUT must not queue a build). 400 without the `enabled` key or without a source; a non-bool is coerced with `bool()`. `tests/test_kinetikern_enabled_route.py` → 3 passed (400 missing key, 400 no source, on→off schedules once / repeat schedules none / off→on schedules again). The new rule shows up in `tests/test_url_map_snapshot.py` as its own entry (`'/api/kinetikern OPTIONS,PUT'`) — the contract snapshot gained a rule, it did not change one. The UI half (Transforms-menu toggle + per-row badge) is a separate commit. |
+| K2 | PASS | "Apply to all…" makes the overwrite visible instead of skipping tuned styles: the button carries the slider's value (`Apply −0.60 to all…`) and the confirm names every style that already has its own looseness and what it will become. `frontend/src/kinetikern-copy.js` (`applyAllLabel`, `applyAllConfirm`, `spacedStyles`) + `e2e/kinetikern-copy.spec.mjs` (chained into `test:unit`): negative/zero/positive labels, one tuned style → "Default 400 MinOpsz (-0.60) … will be re-spaced at 0.00", plural for two, nothing tuned → the plain confirm. Guide updated (`docs/guides/kinetikern.md`: it replaces each style's own looseness). No route change. |
+| K3 | PASS | Spaced styles are marked with words, not a bare "●": the dropdown reads `Default 400 MinOpsz · spaced −0.60`, the Revert button reads `Revert Default 400 MinOpsz` (its title still explains the build-disabled state), and the slider sync effect now also depends on `entry?.looseness`, so a copy whose initially selected style is the spaced one shows that value on mount. `instanceOptionLabel` / `revertLabel` pinned in `e2e/kinetikern-copy.spec.mjs` (spaced / unspaced option text, no dot marker, Revert naming). |
+| K4 | PASS (pure half + placement) | (a) the Font Size control moved from the left column into `.kk-main` above the before/after panes, next to the sample text (still the shared value); (b) `pickInstance` sets the size from the style's `opsz` via `fontSizeForStyle` (clamped to 9–144 pt; no opsz → unchanged; Custom leaves it alone), and a manual slider move afterwards wins until the next pick. Spec cases in `e2e/kinetikern-copy.spec.mjs`: opsz 72 → 72, 144 → 144, 4 → 9 (clamped), no opsz → null. The placement is asserted in `ui_probe.py`'s kinetikern scenario (`.kk-main .font-size-control` present, plus the K3 option/Revert text after an apply). |
+
+### Loop run 2026-10-28T10:43:55Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261028-172608/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **1** line(s) before the CLI build, **1** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261028-172608/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 14 / FAIL 2 (log: `/Users/agyei/avar2-agent/runs/20261028-172608/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261028-172608/shots`)
+
+  Failing scenarios:
+  - FAIL control-axis: timed out
+  - FAIL load-font: Page.click: Timeout 30000ms exceeded.
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+<!-- run 2026-10-28T11:00:01Z discarded: the probe was killed (exit 143)
+     by the executor's own cleanup pkill, so it produced no verdict. -->
+
+### Loop run 2026-10-28T11:14:39Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261028-180003/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261028-180003/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 15 / FAIL 1 (log: `/Users/agyei/avar2-agent/runs/20261028-180003/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261028-180003/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+
+  Failing scenarios:
+  - FAIL load-font: [Errno 2] No such file or directory: '/Users/agyei/avar2-agent/runs/20261028-180003/checkout/src/.avar2-studio/axis-metadata.json'
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### Loop run 2026-10-28T11:31:51Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261028-181713/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261028-181713/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **0** — PASS 16 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261028-181713/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261028-181713/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`

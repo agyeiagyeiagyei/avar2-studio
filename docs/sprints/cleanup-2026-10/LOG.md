@@ -1730,3 +1730,22 @@ Commands + results:
 - Live `~/avar2-agent/p2` (garbage `.glyphs` + valid metadata sibling): exit **2**,
   `error: Crispy.glyphs could not be read: Unexpected character after key at line 1:
   'a'`; no `out/`; no build worker left running.
+
+## Designer B7 — K2, K3, K4 (Kinetikern tab copy + size)
+
+K2: "Apply to all…" overwrites every style's looseness, so the control now says so — the button
+reads `Apply -0.60 to all…` (the slider's value) and the confirm names the tuned styles and the
+value they become; the guide says it replaces each style's looseness. K3: the dropdown's bare "●"
+became `· spaced -0.60`, Revert names its style, and the slider sync effect also keys on
+`entry?.looseness` (the payload arrives async). K4: the Font Size control moved into `.kk-main` and
+picking a style sets the size from its `opsz` (clamped to 9–144; no opsz → unchanged).
+
+All copy lives in `frontend/src/kinetikern-copy.js` so it is testable in node.
+
+Commands + results:
+- `node e2e/kinetikern-copy.spec.mjs` → all passed (labels for -0.60/0.00/+0.25; confirm text
+  singular/plural/plain; option and Revert text; `fontSizeForStyle` 72/144/clamped/null).
+- `pytest tests/ -q` → **635 passed**; `ruff check src tests` clean; frontend `eslint .` 0 errors;
+  `tsc --noEmit` clean; `npm run build` green.
+- `ui_probe.py`'s kinetikern scenario now asserts the K3 option/Revert text after an apply and that
+  `.kk-main .font-size-control` exists.
