@@ -35,7 +35,7 @@ function coordOf(instance, tag) {
 
 function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
   const { building } = useBuildStatus();
-  const { kinetikernFocus } = useStudioData();
+  const { kinetikernFocus, setKinetikern } = useStudioData();
   const { userAxes, controlAxes, transformAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];
@@ -147,8 +147,14 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, on
   const entry = applyName ? corrected.get(applyName) : undefined;
 
   const reloadStored = useCallback(() => {
-    api.getKinetikern().then(setStored).catch(() => {});
-  }, []);
+    api.getKinetikern().then((data) => {
+      setStored(data);
+      // Same payload the Instances rows badge from: without this the K badge
+      // only caught up on the next health poll, so an apply here left the row
+      // unbadged for a cycle (K1).
+      setKinetikern({ enabled: data.enabled !== false, instances: data.instances || [] });
+    }).catch(() => {});
+  }, [setKinetikern]);
   useEffect(() => { reloadStored(); }, [reloadStored]);
   useEffect(() => { if (!building) reloadStored(); }, [building, reloadStored]);
   // A row's K badge jumps here with its style selected (K1). Keyed on the

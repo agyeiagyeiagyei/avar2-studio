@@ -411,6 +411,18 @@ def kinetikern_toggle(s):
     return out
 
 
+def set_kinetikern_enabled(s, enabled):
+    """Open the Transforms menu and put the Kinetikern toggle in ``enabled``."""
+    s.page.locator("header button.btn-load-font:has-text('Transforms')").click()
+    s.page.wait_for_selector(".transforms-menu", timeout=10000)
+    box = s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern') "
+                         "input[type='checkbox']")
+    if box.is_checked() != bool(enabled):
+        box.click()
+    s.page.keyboard.press("Escape")
+    s.page.wait_for_timeout(400)
+
+
 def wait_new_build(s, before, timeout=180):
     """Wait for a server-side build (the browser may not POST it)."""
     t0 = time.time()
@@ -663,7 +675,9 @@ def scenario_kinetikern(s):
     row = s.page.locator(f"[data-instance-name='{row_name}']")
     row.wait_for(timeout=15000)
     badge = row.locator(".kinetikern-badge")
-    assert badge.count() == 1, f"no K badge on the spaced row ({row_name})"
+    # The badge follows the shadow rebuild (the tab pushes its payload, and the
+    # 2 s health poll re-reads it), so wait rather than snapshotting at once.
+    badge.first.wait_for(timeout=60000)
     badge_text = badge.inner_text()
     print("    K badge:", badge_text)
     assert badge_text.startswith("K "), badge_text
@@ -676,8 +690,7 @@ def scenario_kinetikern(s):
     # spacing (the build ignores it, so a badge would be a lie). The build
     # seam is covered by tests/test_kinetikern_enabled_route.py.
     before = health(s.url).get("last_build_time")
-    s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern') "
-                   "input[type='checkbox']").click()
+    set_kinetikern_enabled(s, False)
     wait_new_build(s, before, timeout=240)
     s.page.wait_for_timeout(1500)
     data = api_json(s.url, "/api/kinetikern")
@@ -685,6 +698,7 @@ def scenario_kinetikern(s):
     assert [e.get("name") for e in data.get("instances", [])] == [row_name], \
         "turning it off must keep the entries"
     row = s.page.locator(f"[data-instance-name='{row_name}']")
+    row.locator(".kinetikern-badge").first.wait_for(state="detached", timeout=60000)
     assert row.locator(".kinetikern-badge").count() == 0, \
         "the badge still claims spacing while Kinetikern is off"
     count_off = kinetikern_toggle(s)
@@ -695,14 +709,14 @@ def scenario_kinetikern(s):
 
     # And back on: the entry is restored, the row badges again.
     before = health(s.url).get("last_build_time")
-    s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern') "
-                   "input[type='checkbox']").click()
+    set_kinetikern_enabled(s, True)
     wait_new_build(s, before, timeout=240)
     s.page.wait_for_timeout(1500)
     data = api_json(s.url, "/api/kinetikern")
     assert data.get("enabled") is True
     assert [e.get("name") for e in data.get("instances", [])] == [row_name]
     row = s.page.locator(f"[data-instance-name='{row_name}']")
+    row.locator(".kinetikern-badge").first.wait_for(timeout=60000)
     assert row.locator(".kinetikern-badge").count() == 1, "badge did not return"
     s.tab("Kinetikern")
 

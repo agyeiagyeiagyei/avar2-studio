@@ -1749,3 +1749,22 @@ Commands + results:
   `tsc --noEmit` clean; `npm run build` green.
 - `ui_probe.py`'s kinetikern scenario now asserts the K3 option/Revert text after an apply and that
   `.kk-main .font-size-control` exists.
+
+## K1 (UI) — the probe's first run failed, and why
+
+Run `20261028-223121`: `probe exit=1 (PASS 15 / FAIL 1)`,
+`FAIL kinetikern: no K badge on the spaced row (Default 1 MaxOpsz)`. The
+apply and the K3/K4 assertions passed; the badge was simply not there yet —
+it renders from `useStudioData.kinetikern`, which only refreshed on the 2 s
+health poll, and the assert ran right after the build landed.
+
+Fixed the cause, not the symptom: `KinetikernTab.reloadStored` already
+fetches the payload after a build, so it now pushes that same payload into
+the shared state — an apply in the tab badges the row at once. The probe
+also waits for the badge to attach/detach (60 s) instead of snapshotting in
+the same tick.
+
+Commands + results:
+- `pytest tests/ -q` → **637 passed** (with CI0's new
+  `tests/test_fontc_lookup.py`); `ruff check src tests` clean.
+- `node e2e/kinetikern-copy.spec.mjs` → all passed; `npm run build` green.
