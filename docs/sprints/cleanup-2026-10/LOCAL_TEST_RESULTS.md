@@ -986,3 +986,14 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 | CI0 (acceptance) | PENDING | A fully green Test workflow on the checkpoint push (the stated acceptance). Local proxies above are green; the workflow verdict is what counts. |
 | K1 (parity) | PASS | `api.setKinetikernEnabled` shipped in K1's `api.js` without an entry in `e2e/api-parity.spec.mjs`'s `DESKTOP_ONLY`, which the frontend CI job caught (`FAIL setKinetikernEnabled — live-only and not in DESKTOP_ONLY`). Registered against the `kinetikern` capability, like its five siblings; `node e2e/api-parity.spec.mjs` → all passed. |
 | CI0a (real cause) | PASS | The launcher test's failure was not impatience: `test_probe_tells_free_other_and_studio_apart` took **35.05 s** on the macOS runner. `HTTPServer.server_bind` calls `socket.getfqdn` for `server_name`, a reverse DNS lookup that has no resolver on the runner and blocks for tens of seconds — the stub in `STUB_STUDIO` therefore reached `serve_forever` long after the launcher's 20 s deadline. Both the fixture and the stub now bind through a `_QuietServer` that skips the lookup (127.0.0.1 only, the name is never used). `pytest tests/test_glyphs_launcher.py -q` → 5 passed in **4.0 s** (was 8.6 s), and the wider `WAIT` from CI0a stays. |
+
+### Loop run 2026-10-28T16:08:11Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261028-225007/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261028-225007/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **0** — PASS 16 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261028-225007/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261028-225007/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
