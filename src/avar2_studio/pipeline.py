@@ -1291,8 +1291,16 @@ def build_variable_font(glyphs_path: Path, output_dir: Path, use_fontc: bool = T
 
     # Try fontc first if enabled
     if use_fontc:
-        # Use fontc from PATH (pip-installed)
+        # Use fontc from PATH (pip-installed), or — when the studio is started
+        # by absolute path without activating the venv (a Glyphs plugin, a
+        # launcher, CI running `.venv/bin/pytest`) — the copy installed next to
+        # the running interpreter. PATH alone silently fell through to
+        # fontmake there, which is not a dependency and crashed the build with
+        # FileNotFoundError (CI0).
         fontc_cmd = shutil.which("fontc")
+        if not fontc_cmd:
+            beside = Path(sys.executable).with_name("fontc")
+            fontc_cmd = str(beside) if beside.exists() else None
         if fontc_cmd:
             # Output filename derives from the .glyphs filename so the tool
             # works on any font, not just Crispy.

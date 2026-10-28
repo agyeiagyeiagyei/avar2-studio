@@ -24,7 +24,15 @@ import pytest
 LAUNCHER = (Path(__file__).resolve().parent.parent / "src" / "avar2_studio" / "glyphs"
             / "Avar2Studio.glyphsPlugin" / "Contents" / "Resources" / "studio_launcher.py")
 SPAN = 3
-WAIT = 20.0
+# What the launcher itself allows before it reports "no health" — the stub
+# interpreter answers immediately on an idle machine, so this only has to be
+# long enough for a cold start.
+READY_TIMEOUT = 20.0
+# The TEST's ceiling, deliberately several times the launcher's own: on a
+# shared CI runner the stub (a Python process plus a bind) can take a while to
+# come up, and waiting exactly as long as the launcher does turned a slow
+# runner into "no callback within 20.0s" (CI0).
+WAIT = 3 * READY_TIMEOUT
 
 
 def _is_free(port):
@@ -53,7 +61,7 @@ def launcher(monkeypatch):
     spec.loader.exec_module(mod)
     monkeypatch.setattr(mod, "FIRST_PORT", _free_port_span())
     monkeypatch.setattr(mod, "PORT_SPAN", SPAN)
-    monkeypatch.setattr(mod, "READY_TIMEOUT", WAIT)
+    monkeypatch.setattr(mod, "READY_TIMEOUT", READY_TIMEOUT)
     return mod
 
 

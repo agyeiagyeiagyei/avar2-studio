@@ -131,7 +131,10 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m venv .venv
-      - run: .venv/bin/pip install -e .
+      # fontmake is the oracle's reference build (compare_clamp.py). Without
+      # it the comparator reports a clean skip, so install it and let the
+      # anti-mangling bound actually run (CI0).
+      - run: .venv/bin/pip install -e . fontmake
 
       # The oracle fixtures are generated in-test (tests/common) from
       # examples/crispy-mini; nothing under /tmp is needed.

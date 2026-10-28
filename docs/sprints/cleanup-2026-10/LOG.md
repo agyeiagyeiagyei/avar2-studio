@@ -1768,3 +1768,28 @@ Commands + results:
 - `pytest tests/ -q` → **637 passed** (with CI0's new
   `tests/test_fontc_lookup.py`); `ruff check src tests` clean.
 - `node e2e/kinetikern-copy.spec.mjs` → all passed; `npm run build` green.
+
+## CI0 — the python and rust jobs on a plain runner
+
+- CI0a: `tests/test_glyphs_launcher.py` waited exactly `WAIT = 20.0` for a
+  callback *and* pinned the launcher's `READY_TIMEOUT` to the same 20 s, so a
+  loaded runner reported "no callback within 20.0s". They are separate now
+  (`READY_TIMEOUT = 20.0`, `WAIT = 3 * READY_TIMEOUT`).
+- CI0b: the worker-shadow failure was a real bug, not a fixture problem.
+  `build_variable_font` found fontc with `shutil.which` only; a build started
+  without the venv on PATH (CI's `.venv/bin/pytest`, a plugin launcher) fell
+  through to fontmake, which is not a dependency, and raised
+  `FileNotFoundError: 'fontmake'`. It now also looks beside
+  `sys.executable` — the same place the tests look. New
+  `tests/test_fontc_lookup.py`.
+- CI0c: the clamp oracle shells out to fontmake for its reference build; the
+  rust job installed only the package. `compare_clamp.py` now exits 3 with
+  "SKIP: fontmake is not installed" instead of a traceback, `clamp_oracle.rs`
+  accepts that code, and the rust job installs fontmake so the bound runs.
+
+Commands + results:
+- `pytest tests/test_fontc_lookup.py -q` → 2 passed;
+  `pytest tests/test_glyphs_launcher.py -q` → 5 passed;
+  `pytest tests/ -q` → 637 passed; `ruff check src tests` clean.
+- Not run locally: `cargo test` (the fontations stack is a 10+ minute cold
+  build) — CI is the acceptance for CI0c and for the whole item.

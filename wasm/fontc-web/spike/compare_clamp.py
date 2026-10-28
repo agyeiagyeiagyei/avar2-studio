@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from shutil import which
 
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
@@ -48,6 +49,13 @@ def max_diff(path_a, path_b, loc, glyphs):
 def main():
     source, before, after = sys.argv[1:4]
     failures = []
+    # fontmake is the reference build, and it is NOT a dependency of the
+    # studio (it is only used here, and only by the Rust oracle). Exit 3 — a
+    # clean "cannot judge" — instead of dying with a traceback, so a machine
+    # without it reports the skip rather than a crash (CI0).
+    if which("fontmake") is None:
+        print("SKIP: fontmake is not installed (pip install fontmake)")
+        return 3
     with tempfile.TemporaryDirectory() as td:
         fontmake_path = str(Path(td) / "fontmake.ttf")
         r = subprocess.run(
