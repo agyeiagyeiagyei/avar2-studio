@@ -1583,3 +1583,30 @@ Commands + results:
 - Note: the CLI's transform chain logged "native injector not found" and fell back to
   fontTools for SPAC; the studio's export did the same (outputs identical), so the
   comparison is like-for-like. Tracked for C7 where the transform runs from the config.
+
+## Phase C — C5: CI proof and the recipe for other repos
+
+(a) `.github/workflows/test.yml` gains `cli-build`: non-editable `pip install .` into
+`$RUNNER_TEMP/cli-venv`, an assertion that `avar2_studio.__file__` contains
+`site-packages` (not the checkout), then `avar2-studio build
+examples/crispy-mini/sources/CrispyMini.glyphs --out … --workdir …` run from
+`$RUNNER_TEMP`, then a `git status --porcelain --ignored` cleanliness check. The
+check excludes `__pycache__/` because `pip install .` leaves
+`__pycache__/hatch_build.cpython-311.pyc` at the repo root (observed in the local
+simulation); every other path there would be the build writing into the checkout.
+
+(b) README "Building in CI": `pip install avar2-studio` (fontc + gftools are regular
+dependencies with majors-only upper bounds), `avar2-studio doctor --strict`,
+`avar2-studio build … --config sources/MyFont-build.json --workdir … --out fonts/`,
+the exit codes, a paste-ready Actions snippet, and the
+`AVAR2_STUDIO_GFTOOLS_BUILDER=1` note.
+
+Commands + results:
+- YAML parsed with `yaml.safe_load` → jobs `['python', 'cli-build', 'frontend', 'rust']`.
+- Local simulation of the job on a fresh clone of `0a080d2` (`~/avar2-agent/c5`):
+  - `pip install .` → `avar2_studio` at `~/avar2-agent/c5/venv/lib/python3.11/site-packages/avar2_studio/__init__.py`;
+  - `avar2-studio build … --out out --workdir work` → exit 0; jobs
+    `build-…-1 finished: success=True in 2.83s`, `compress-…-2 … 0.64s`; artifact
+    `out/CrispyMini[SPAC,XOPQ,XTRA,YOPQ,opsz,wdth,wght].ttf` 83,716 B;
+  - cleanliness check → 0 lines.
+- The real workflow run is on the checkpoint push (it runs on `cleanup-2026-10`).

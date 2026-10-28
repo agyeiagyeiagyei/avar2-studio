@@ -73,8 +73,13 @@ jobs:
 
       - name: The checkout is untouched by the build
         run: |
-          git -C "$GITHUB_WORKSPACE" status --porcelain --ignored | tee /dev/stderr
-          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain --ignored)"
+          # `pip install .` leaves __pycache__/hatch_build.*.pyc behind (the
+          # build backend imports it); every other ignored or untracked path
+          # would be the build writing into the checkout.
+          git -C "$GITHUB_WORKSPACE" status --porcelain --ignored -- . \
+            ':(exclude)__pycache__' ':(exclude)**/__pycache__' | tee /dev/stderr
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain --ignored -- . \
+            ':(exclude)__pycache__' ':(exclude)**/__pycache__')"
 
   frontend:
     runs-on: ubuntu-latest
