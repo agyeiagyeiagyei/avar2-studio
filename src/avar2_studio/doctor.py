@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
+from . import state
+
 
 # ANSI colour helpers — only emit colour if stdout is a TTY so logs and
 # captured output stay clean.
@@ -205,7 +207,7 @@ def check_stale_processes() -> CheckResult:
         age = info.split(None, 1)[0] if info else "?"
         plist = ",".join(str(p) for p in sorted(ports))
         suspects.append(f"pid {lpid} (up {age}) on :{plist}")
-        if 8001 in ports:
+        if state.FONTRA_PORT in ports:
             fontra_squatter = True
 
     if not suspects:
@@ -216,8 +218,8 @@ def check_stale_processes() -> CheckResult:
     if fontra_squatter:
         return CheckResult(
             name="stale processes", ok=False,
-            detail=f"a process holds Fontra's port 8001 — {listing}",
-            fix="kill <pid>  # the embedded editor cannot launch while :8001 is taken",
+            detail=f"a process holds Fontra's port {state.FONTRA_PORT} — {listing}",
+            fix=f"kill <pid>  # the embedded editor cannot launch while :{state.FONTRA_PORT} is taken",
         )
     return CheckResult(
         name="stale processes", ok=True,

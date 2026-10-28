@@ -6,8 +6,28 @@ build worker, tests) goes through ``state.X``; never ``from .state import
 X`` — that binds a copy that goes stale on the next assignment.
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Optional
+
+
+def _fontra_port_from_env(default: int = 8001) -> int:
+    """Fontra's port: ``AVAR2_FONTRA_PORT`` if set, else 8001.
+
+    It used to be the hard-coded ``8001``, so the second studio to open the
+    editor lost it to the first (the fresh spawn died on bind while the port
+    probe reported success). Parallel studios — the designer's 5071, the
+    agent's 5072, the verifier's 5073 — each need their own Fontra. The
+    server's ``--fontra-port`` flag overrides this at startup.
+    """
+    raw = os.environ.get("AVAR2_FONTRA_PORT", "").strip()
+    if not raw:
+        return default
+    try:
+        port = int(raw)
+    except ValueError:
+        return default
+    return port if 0 < port < 65536 else default
 
 GLYPHS_PATH: Optional[Path] = None  # The ACTIVE source — what reads + builds operate on. When CONTROL AXES are declared, this points at the shadow .glyphs; otherwise it's the same as ORIGINAL_PATH. Name kept for git history; SOURCE_FORMAT tracks which.
 ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at. Sidecar paths and push-to-source target this. Studio NEVER writes to it directly for control-axis work (shadow staging only).
@@ -17,7 +37,7 @@ ORIGINAL_PATH: Optional[Path] = None  # The ORIGINAL source the user pointed at.
 # the studio UI. Started lazily on first "open in editor" request and
 # kept warm across opens. Killed on shutdown via atexit.
 FONTRA_PROCESS: Optional[object] = None
-FONTRA_PORT: int = 8001
+FONTRA_PORT: int = _fontra_port_from_env()
 # Per-session state for the embedded editor, set by open-editor and
 # read by the proxy's CSS builder + the injected shim (via
 # /api/fontra-shim-config). Studio sessions get the trimmed

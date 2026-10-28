@@ -899,3 +899,13 @@ file green (12 passed).
 
 Live acceptance (iv) still wants the verifier's `crispy-r12` copies, for the
 staging reasons recorded above.
+
+## Phase C — CI-grade `avar2-studio build` (items C1–C9)
+
+Agent root: `~/avar2-agent/` (staging under `~/avar2-agent/c9` for this
+item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
+5072 (its studio) — never 5070/5071 or Fontra 8001.
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| C9 | PASS | `--fontra-port` + `AVAR2_FONTRA_PORT`; two studios, each with its own Fontra. Unit: `tests/test_fontra_port.py` — 5 passed (env wins over the default; bad env falls back to 8001; the flag beats the env at startup; an out-of-range flag exits 2; `open-editor` answers with the configured port). Live: studios on **5072** (`--fontra-port 8002`) and **5074** (`--fontra-port 8004`) over two copies of `examples/crispy-mini`; `POST /api/control-axes/crbr/open-editor` → `port 8002, direct http://127.0.0.1:8002/editor.html?project=CrispyMini.glyphs` and `port 8004, …8004…`; both direct editors and both same-origin proxies answered **200 at the same time**; server logs show `Started Fontra on http://127.0.0.1:8002` and `:8004` with their own roots. Studios and Fontra children stopped afterwards; 5072/5074/8002/8004 all closed. |

@@ -1444,3 +1444,25 @@ the same staging — note text matched exactly; tooltip matched.
 Gates at this state: `ruff check src tests` clean; `pytest tests/ -q` → 564
 passed; `eslint .` 0 errors; `tsc --noEmit` clean; `npm run test:unit` green
 (10 chains); `npm run build` green.
+
+## Phase C — C9: `--fontra-port` and `AVAR2_FONTRA_PORT`
+
+`state.FONTRA_PORT` was the hard-coded 8001, so the second studio to open the
+editor lost it to the first (the fresh spawn died on bind while the port probe
+saw the squatter and reported success). It now comes from
+`state._fontra_port_from_env()` (`AVAR2_FONTRA_PORT`, invalid values fall back
+to 8001) and the server's `--fontra-port` overrides it at startup (out of range
+→ exit 2). `doctor`'s stale-process check reports/compares the configured port
+instead of the literal 8001.
+
+Commands + results:
+- `pytest tests/test_fontra_port.py -q` → 5 passed.
+- `ruff check src tests` → All checks passed; `pytest tests/ -q` → 569 passed.
+- Live: two studios (`--port 5072 --fontra-port 8002`, `--port 5074
+  --fontra-port 8004`) on copies of `examples/crispy-mini` under
+  `~/avar2-agent/c9/`; `open-editor` returned `port 8002` / `port 8004` with
+  matching direct URLs; `http://127.0.0.1:8002/editor.html` and `:8004` both
+  200 simultaneously; `/fontra/editor.html` proxies on both studios 200;
+  logs: `Started Fontra on http://127.0.0.1:8002 (root=…/src1/CrispyMini.glyphs)`
+  and `…:8004 (root=…/src2/CrispyMini.glyphs)`. Reservations respected: no
+  access to 5070/5071/8001 or `~/Documents/Crispy`.

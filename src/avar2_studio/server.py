@@ -898,6 +898,12 @@ def main():
         help="Port to run server on (default: 5001, avoiding macOS AirPlay on 5000)"
     )
     parser.add_argument(
+        "--fontra-port",
+        type=int,
+        default=None,
+        help="Port for the embedded Fontra editor (default: $AVAR2_FONTRA_PORT or 8001)"
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="127.0.0.1",
@@ -923,6 +929,14 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Fontra's port: the flag beats the env (which state already read).
+    # Parallel studios each need their own editor — see state._fontra_port_from_env.
+    if args.fontra_port is not None:
+        if not 0 < args.fontra_port < 65536:
+            log.error(f"Error: --fontra-port {args.fontra_port} is out of range")
+            sys.exit(2)
+        state.FONTRA_PORT = args.fontra_port
 
     # --csv / --build-dir are dead: the worker builds a staged snapshot
     # (sibling sidecars, job-dir output), so these overrides change nothing
