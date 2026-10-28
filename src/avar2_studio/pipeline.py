@@ -1702,7 +1702,13 @@ def _get_preview_dir() -> Optional[Path]:
     if not base:
         return None
 
-    workdir = base.parent / ".avar2-studio"
+    if state.WORKDIR_OVERRIDE is not None:
+        # CI (``avar2-studio build --workdir DIR``): the tool workdir — config,
+        # shadow, build output, relocation memo — lives under DIR so the
+        # checkout stays untouched. Authored sidecars stay beside the source.
+        workdir = Path(state.WORKDIR_OVERRIDE) / ".avar2-studio"
+    else:
+        workdir = base.parent / ".avar2-studio"
     workdir.mkdir(parents=True, exist_ok=True)
     state.PREVIEW_DIR = workdir
     return workdir
@@ -2248,9 +2254,13 @@ def _apply_source_path(path: Path) -> None:
     # studio feature needs it. See docs/ARCHITECTURE.md §3.
     state.GLYPHS_PATH = resolved
 
-    workdir = state.GLYPHS_PATH.parent / ".avar2-studio"
+    # The tool workdir: beside the source, or under --workdir (CI). Derived
+    # from ORIGINAL_PATH, so it follows the override like _get_preview_dir.
+    state.PREVIEW_DIR = None
+    workdir = _get_preview_dir()
     state.BUILD_DIR = workdir / "build"
     state.BUILD_DIR.mkdir(parents=True, exist_ok=True)
+
     # Reset every state global that's keyed to the previous source —
     # otherwise PREVIEW_DIR/PREVIEW_CSV_PATH/PREVIEW_CONFIG_PATH stay
     # pinned to the first load and every subsequent ``/api/avar2/*``
@@ -2259,7 +2269,6 @@ def _apply_source_path(path: Path) -> None:
     # the user swapped to Crispy.
     state.VARIABLE_FONT_PATH = None
     state.CSV_PATH = None
-    state.PREVIEW_DIR = None
     state.PREVIEW_CSV_PATH = None
     state.PREVIEW_CONFIG_PATH = None
     state.LAST_BUILD_TIME = None

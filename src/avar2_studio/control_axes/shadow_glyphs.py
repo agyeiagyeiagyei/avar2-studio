@@ -25,9 +25,14 @@ log = get_logger(__name__)
 
 
 def shadow_dir_for(original_path: Path) -> Path:
-    """Per-source shadow directory: sibling to the original under the
-    studio's existing ``.avar2-studio/`` workdir."""
-    return original_path.parent / ".avar2-studio" / "shadow"
+    """Per-source shadow directory: under the studio's ``.avar2-studio/``
+    workdir — beside the original, or under ``--workdir`` when the CLI moved
+    it off the checkout (C2)."""
+    from .. import state
+
+    base = (Path(state.WORKDIR_OVERRIDE) if state.WORKDIR_OVERRIDE is not None
+            else original_path.parent)
+    return base / ".avar2-studio" / "shadow"
 
 
 def shadow_path_for(original_path: Path) -> Path:

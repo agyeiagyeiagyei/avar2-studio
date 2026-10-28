@@ -529,7 +529,7 @@ class JobQueue:
             reap_build_dir(dst)
             # The regenerated gftools config is the current one — the
             # export row-lookup reads it (from snapshots).
-            cfg = Path(state.ORIGINAL_PATH).parent / ".avar2-studio" / "config.yaml"
+            cfg = Path(self.server._get_preview_dir()) / "config.yaml"
             job_cfg = job["dir"] / "src" / ".avar2-studio" / "config.yaml"
             if job_cfg.exists():
                 shutil.move(str(job_cfg), str(cfg))

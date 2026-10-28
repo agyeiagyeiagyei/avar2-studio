@@ -124,7 +124,8 @@ _REBUILD_TIMER = None
 OBSERVER = None  # Optional[watchdog.observers.Observer] — the source file watcher
 CSV_PATH: Optional[Path] = None  # Path to avar2-mappings.csv
 USE_FONTC: bool = True  # Use fontc by default, fallback to fontmake
-PREVIEW_DIR: Optional[Path] = None  # Per-project workdir (sibling .avar2-studio/)
+PREVIEW_DIR: Optional[Path] = None  # Per-project
+WORKDIR_OVERRIDE: Optional[Path] = None  # CLI --workdir: put .avar2-studio here, not beside the source (CI keeps its checkout untouched) workdir (sibling .avar2-studio/)
 # Relocation memo: the stable directory jobs write it to. A worker builds in a
 # throwaway job dir (only the font and the config are promoted back), so the
 # memo has to be told where to live or it dies with the job.

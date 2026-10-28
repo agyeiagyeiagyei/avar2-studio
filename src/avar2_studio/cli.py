@@ -106,6 +106,10 @@ def _build(argv) -> int:
     ap.add_argument("source", type=Path, help=".glyphs / .designspace source")
     ap.add_argument("--out", type=Path, required=True,
                     help="directory the built font is copied into (created)")
+    ap.add_argument("--workdir", type=Path, default=None,
+                    help="put the tool workdir (config, shadow, build output, "
+                         "relocation memo) under DIR instead of beside the source, "
+                         "so a CI checkout stays untouched")
     ap.add_argument("--csv", type=Path, default=None,
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
@@ -122,6 +126,9 @@ def _build(argv) -> int:
         print(f"error: {meta_problem}", file=sys.stderr)
         return 2
     from . import server, state
+    if args.workdir is not None:
+        # Before _apply_source_path: it resolves the workdir from this.
+        state.WORKDIR_OVERRIDE = args.workdir.resolve()
     try:
         server._apply_source_path(args.source)
     except Exception as exc:

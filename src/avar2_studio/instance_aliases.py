@@ -18,7 +18,11 @@ from typing import Dict
 
 
 def _path(original_path: Path) -> Path:
-    return Path(original_path).parent / ".avar2-studio" / "instance-renames.json"
+    from . import state
+
+    base = (Path(state.WORKDIR_OVERRIDE) if state.WORKDIR_OVERRIDE is not None
+            else Path(original_path).parent)
+    return base / ".avar2-studio" / "instance-renames.json"
 
 
 def load(original_path: Path) -> Dict[str, str]:

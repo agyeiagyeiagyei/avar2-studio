@@ -1504,3 +1504,30 @@ Commands + results:
   `git status --porcelain -- src` → 0 lines.
 - Post-build the checkout's own `.avar2-studio/` workdir is written beside the source
   (C2's `--workdir` removes that); the committed inputs are unchanged.
+
+## Phase C — C2: `--workdir DIR`
+
+The build wrote `.avar2-studio/` beside the source. `avar2-studio build --workdir DIR`
+now puts the whole tool workdir under DIR (default: beside the source, unchanged):
+`state.WORKDIR_OVERRIDE` is consulted by `pipeline._get_preview_dir()`, and the three
+places that resolved the workdir directly were routed through it —
+`control_axes.shadow_glyphs.shadow_dir_for`, `instance_aliases._path`, and the
+`config.yaml` promotion in `build_jobs` (the shadow and the renamed-instance map were
+the two files still landing in the checkout). `_apply_source_path` derives BUILD_DIR
+from `_get_preview_dir()` instead of the source's parent.
+
+Commands + results:
+- `pytest tests/test_build_workdir.py -q` → 4 passed (the test stages the committed
+  source + CSV, so a bootstrap write cannot mask a leak).
+- `ruff check src tests` → clean; `pytest tests/ -q` → **581 passed**. (First full run
+  failed `test_designspace_authoring_501` because the new test's
+  `_apply_source_path` left `SOURCE_FORMAT`/`BUILD_DIR` set for later tests — the
+  fixture now restores every global the call mutates.)
+- Live, `~/avar2-agent/c2/clean` (fresh `git clone` of the C1 checkout):
+  - without the flag: exit 0, `git status --porcelain --ignored` → `!! src/.avar2-studio/`.
+  - with `--workdir $R/work`: exit 0, `git status --porcelain --ignored` → **0 lines**;
+    the workdir is `$R/work/.avar2-studio/{config.yaml,build,jobs}`.
+  - font equality: A vs B differ in `head` only (`head.modified` 3876025681 vs
+    3876025604); all other tables sha256-identical. Two builds WITHOUT the flag also
+    differ (`c401d36b…` vs `bd36a347…`), so raw byte-identity is a property the build
+    does not have run-to-run; the flag changes nothing but the workdir.
