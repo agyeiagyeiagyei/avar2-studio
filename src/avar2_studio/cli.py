@@ -14,6 +14,7 @@ so the existing argparse contract continues to work.
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 _HELP = """\
@@ -110,6 +111,15 @@ def _build(argv) -> int:
                     help="put the tool workdir (config, shadow, build output, "
                          "relocation memo) under DIR instead of beside the source, "
                          "so a CI checkout stays untouched")
+    ap.add_argument("--hide-axes", default=None,
+                    help="comma-separated fvar tags to flag HIDDEN (font pickers "
+                         "stop surfacing them)")
+    ap.add_argument("--default", dest="default_location", default=None,
+                    help="resting style as tag=value[,tag=value] (e.g. "
+                         "wght=400,opsz=14); the export is re-origined there")
+    ap.add_argument("--format", dest="formats", action="append",
+                    choices=("ttf", "woff2"), default=None,
+                    help="output format, repeatable (default: ttf)")
     ap.add_argument("--csv", type=Path, default=None,
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
@@ -125,6 +135,16 @@ def _build(argv) -> int:
     if meta_problem:
         print(f"error: {meta_problem}", file=sys.stderr)
         return 2
+    try:
+        hidden_axes = _parse_hide_axes(args.hide_axes)
+        default_location = _parse_default_location(args.default_location)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    formats = []
+    for fmt in (args.formats or ["ttf"]):
+        if fmt not in formats:
+            formats.append(fmt)
     from . import server, state
     if args.workdir is not None:
         # Before _apply_source_path: it resolves the workdir from this.
@@ -146,10 +166,71 @@ def _build(argv) -> int:
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
-    dest = args.out / state.VARIABLE_FONT_PATH.name
-    shutil.copy2(state.VARIABLE_FONT_PATH, dest)
-    print(dest)
+    if not hidden_axes and not default_location and formats == ["ttf"]:
+        # Plain build: the served font IS the product.
+        dest = args.out / state.VARIABLE_FONT_PATH.name
+        shutil.copy2(state.VARIABLE_FONT_PATH, dest)
+        print(dest)
+        return 0
+
+    # Export options: same pipeline the studio's export dialog runs
+    # (pipeline._export_pipeline) on the font just built — no second pipeline.
+    from . import pipeline as _pipeline
+    scratch = Path(tempfile.mkdtemp(prefix="export-",
+                                    dir=str(_pipeline._get_preview_dir())))
+    written = []
+    try:
+        for fmt in formats:
+            try:
+                produced = _pipeline._export_pipeline(
+                    state.VARIABLE_FONT_PATH, hidden_axes, default_location,
+                    scratch / fmt, format=fmt)
+            except Exception as exc:
+                print(f"error: export failed ({fmt}): {exc}", file=sys.stderr)
+                return 1
+            dest = args.out / Path(produced).name
+            shutil.copy2(str(produced), str(dest))
+            written.append(dest)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    for dest in written:
+        print(dest)
     return 0
+
+
+def _parse_hide_axes(value):
+    """``--hide-axes XOPQ,XTRA`` → ["XOPQ", "XTRA"] (empty list when unset)."""
+    if not value:
+        return []
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def _parse_default_location(value):
+    """``--default wght=400,opsz=14`` → {"wght": 400.0, "opsz": 14.0}.
+
+    Raises ValueError so the caller can answer exit 2 (usage): a typo here
+    used to reach the exporter as an empty location and rebuild at the wrong
+    origin.
+    """
+    if not value:
+        return None
+    out = {}
+    for part in str(value).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        tag, sep, raw = part.partition("=")
+        if not sep or not tag.strip():
+            raise ValueError(f"--default expects tag=value, got {part!r}")
+        try:
+            out[tag.strip()] = float(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"--default value for {tag.strip()!r} is not a number: {raw!r}"
+            ) from exc
+    if not out:
+        raise ValueError("--default needs at least one tag=value")
+    return out
 
 
 def _failure_reasons(state_module) -> list:

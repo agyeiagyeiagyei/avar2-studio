@@ -1555,3 +1555,31 @@ Commands + results:
   the authored one): glyph 'g' has too many variation tuples…`.
 - Exit 2: C1's missing-metadata case (live) and the unloadable-source case (unit).
   Exit 0: C1's clean build (live).
+
+## Phase C — C4: the export options on the CLI
+
+`avar2-studio build` gains `--hide-axes TAGS`, `--default tag=value[,tag=value]` and
+repeatable `--format ttf|woff2`. With no flags it behaves exactly as before (the served
+font is the artifact); with any flag it calls `pipeline._export_pipeline` on the font it
+just built — the same function the studio's export dialog submits. A malformed
+`--default` is exit 2 (it used to be able to reach the exporter empty and rebuild at
+the wrong origin); an export that cannot fit the requested resting style exits 1 with
+the pipeline's readable message.
+
+Commands + results:
+- `pytest tests/test_cli_export_options.py -q` → 12 passed; `ruff check src tests`
+  clean; `pytest tests/ -q` → **600 passed**.
+- Live, `~/avar2-agent/c4/mini` (copy of `examples/crispy-mini/sources`):
+  CLI `build CrispyMini.glyphs --out cli-out --hide-axes XOPQ --default
+  wght=400,opsz=14 --format ttf --format woff2` → exit 0;
+  `CrispyMini[SPAC,XOPQ,XTRA,YOPQ,opsz,wdth,wght].ttf` 277,532 B and `.woff2`
+  79,560 B.
+  Studio on the same copy (5072), `POST /api/export-font {"hidden_axes":["XOPQ"],
+  "default_location":{"wght":400,"opsz":14},"format":"ttf"}` → download 277,532 B.
+  Table hashes: identical for every table except `head` (raw sha256 7c40ccdd… vs
+  ee243e07…; `head.modified` only). fvar hidden flags `{"XOPQ": true, others false}`;
+  fvar defaults `wght 400`, `opsz 14` (re-origined), parametric axes rebased. WOFF2
+  table set == TTF table set (18 tables).
+- Note: the CLI's transform chain logged "native injector not found" and fell back to
+  fontTools for SPAC; the studio's export did the same (outputs identical), so the
+  comparison is like-for-like. Tracked for C7 where the transform runs from the config.
