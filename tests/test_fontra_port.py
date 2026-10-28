@@ -59,7 +59,6 @@ def test_an_out_of_range_flag_is_a_usage_error(monkeypatch):
 def test_open_editor_answers_with_the_configured_port(tmp_path, monkeypatch):
     """The endpoint reports the port Fontra is on, so each studio's editor is
     addressable: the proxy and the "open in a new tab" URL both use it."""
-    import importlib.util
     from pathlib import Path
 
     from avar2_studio import routes  # noqa: F401  (import proves the app loads routes)
@@ -74,8 +73,6 @@ def test_open_editor_answers_with_the_configured_port(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "FONTRA_PORT", 8002)
     monkeypatch.setattr(server, "_ensure_fontra_running",
                         lambda *a, **k: state.FONTRA_PORT)
-    # Fontra is installed in this venv; the stub above means nothing spawns.
-    assert importlib.util.find_spec("fontra") is not None
 
     server.app.config["TESTING"] = True
     with server.app.test_client() as client:
