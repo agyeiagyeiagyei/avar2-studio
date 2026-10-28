@@ -35,3 +35,49 @@ files; no conversation history is required.
 > verifier only ever touches findings.md/STATUS.md) and push again.
 
 The verifier never edits this file's rules without a user instruction.
+
+## Phase C resume brief — CI-grade CLI (added 2026-10-28 on the user's instruction; supersedes the port/path rules above)
+
+> Resume the avar2-studio sprint as the executor, phase C. Work in the
+> worktree `~/Documents/avar2-studio-sprint` on branch `cleanup-2026-10`
+> (`git pull` first). Read, in this order: `docs/sprints/cleanup-2026-10/STATUS.md`,
+> then in `findings.md` the section "Approved next scope — a CI-grade
+> `avar2-studio build`" (items C1–C9, each with its acceptance evidence),
+> then `LOCAL_TEST_ROUTINE.md` (how a copy is staged, `ui_probe.py`).
+> No conversation history is needed.
+>
+> **Goal.** One command the Google Fonts team can run from a clean
+> checkout: `avar2-studio build Font.glyphs --config Font-build.json
+> --out fonts/` — the source, the mappings CSV and one committed config
+> produce the shipped font (transforms, hidden axes, resting style, named
+> instances + STAT, TTF and WOFF2). Design-authored data (secondary axes,
+> grade, Kinetikern, instance coordinates) stays studio-only: the CLI
+> reads it as the studio's build does and never offers a way to edit it.
+>
+> **Order.** C9 first (`--fontra-port` + `AVAR2_FONTRA_PORT`), then
+> C1 → C7, then C8 (your loop). One commit per item (`C<n>: …`) with its
+> test; evidence in `LOCAL_TEST_RESULTS.md`; commands + results in
+> `LOG.md` (append only). Set `STATE: checkpoint` in STATUS.md (ROUND+1,
+> HEAD) when C1–C9 are all in, push, and keep going on anything the
+> verifier then marks FAILED. The verifier's loop verifies every
+> checkpoint automatically and writes its review into findings.md; at
+> each of your pushes `git pull --rebase` first (the verifier only
+> touches findings.md/STATUS.md/EXECUTOR_RESUME.md).
+>
+> **Your loop (C8).** Build `~/avar2-agent/loop.sh` (outside `/tmp` —
+> macOS's periodic cleanup empties it) and keep it running: after each
+> of your pushes it restages a fresh Crispy copy per the routine, runs
+> `avar2-studio build` from the installed package on a git-clean
+> checkout of that copy (`git status --porcelain` empty before and
+> after), starts the studio on **port 5072 with `--fontra-port 8002`**
+> on the new bundle, runs the full `ui_probe.py` at idle, appends the
+> results to `LOCAL_TEST_RESULTS.md` and pushes. Its results section
+> names the root, the ports and the git-clean check.
+>
+> **Reserved — never touch, never probe:** `~/Documents/Crispy` (copy
+> from it, never write or watch it), port 5070 (the designer's live
+> studio), port 5071 and `~/avar2-studio-test` (the designer's Phase B
+> studio and its sync), and Fontra's port 8001. The designer is testing
+> there while you work; a run that touches any of these fails the
+> hand-off regardless of its test results. Your roots are `~/avar2-agent/`
+> and ports 5072/8002 only; the verifier uses 5073/8003.
