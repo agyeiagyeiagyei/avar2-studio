@@ -1667,3 +1667,22 @@ Commands + results:
 - `Crispy-build.json` = `{"control": {"axes": []}}` → **exit 2**,
   `error: Crispy-build.json: 'control' is studio-authored state — open the source in
   avar2-studio and edit it there. …`.
+
+## Phase C — checkpoint
+
+C1–C9 are all in. The agent's loop (`~/avar2-agent/loop.sh`, run after each push)
+staged a fresh Crispy copy per the routine, ran `avar2-studio build` from the
+INSTALLED package (`~/avar2-agent/venv`) on a git-clean checkout, started the studio on
+5072 (Fontra 8002) and ran the full `ui_probe.py` at idle, then appended its results and
+pushed. Final run at `2fcda7e`:
+
+- staged copy `~/avar2-agent/runs/20261028-181713/checkout/src`, git-clean **0 lines
+  before and after** the CLI build;
+- `avar2-studio build … --out … --workdir …` → **exit 0**, artifact
+  `out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`;
+- `ui_probe.py all` → **exit 0, PASS 16 / FAIL 0** (log and screenshots in the run dir);
+- reserved paths/ports untouched (`~/Documents/Crispy`, 5070, 5071, 8001,
+  `~/avar2-studio-test`).
+
+Gates at this checkpoint: `ruff check src tests` clean; `pytest tests/ -q` → 628 passed;
+frontend eslint 0 errors, typecheck clean, `test:unit` green, build green.

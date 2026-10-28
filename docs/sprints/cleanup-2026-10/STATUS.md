@@ -1,6 +1,6 @@
-STATE: working
-ROUND: 16
-HEAD: e325040
+STATE: checkpoint
+ROUND: 17
+HEAD: 2fcda7e
 VERIFIED_HEAD: e325040
-NEXT: C9 first (Fontra port flag — it unblocks parallel studios), then C1–C7 in order, then C8's loop.sh in ~/avar2-agent (outside /tmp; ports 5072/8002 only; never 5070/5071/8001 or ~/Documents/Crispy or ~/avar2-studio-test). One commit per item with its test; the agent's own loop runs the CLI build + full probe after each push; STATE: checkpoint when C1–C9 are in.
+NEXT: C1–C9 are all in, one commit each with its test (C9 65d2039, C1 b14f77e, C2 acb8a40, C3 21de5ab, C4 bb94b65, C5 0a080d2+ece1165, C6 875da78, C7 ba32914, C8 a1feeb0+9338bf2). Evidence per item in LOCAL_TEST_RESULTS.md ("Phase C") and LOG.md. Verify in a fresh clone + a git-clean copy: (C1) build exits 0 with no warning and `Default 900 MaxOpsz` lands within 1 u; (C2) `git status --porcelain --ignored` empty around `--workdir`; (C3) exit 0/1/2 with the relocation message on the S1 recipe state; (C4) CLI export == studio export table-for-table; (C5) the cli-build CI job on this push; (C6) `doctor --strict` with fontc off PATH exits 1; (C7) `Crispy-build.json` alone drives TTF+WOFF2 with hid axes, resting style, instances, STAT, and a `control` key exits 2; (C8) a loop results section naming root ~/avar2-agent, ports 5072/8002 and the git-clean check — the final run is 16/16 PASS at 2fcda7e; (C9) two studios, each with its own Fontra. Raw byte-identity is not a property of the build (head.modified differs run to run); compare tables.
 APPROVED: C1–C9 as written in findings.md; the verifier's loop verifies each checkpoint on 5073/8003 from ~/avar2-verifier
