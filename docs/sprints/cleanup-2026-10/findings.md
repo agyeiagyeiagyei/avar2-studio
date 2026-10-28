@@ -1473,8 +1473,75 @@ doctor with a named cause rather than mid-build. Evidence: test with
 fontc unavailable → exit 1 and the name; with everything present →
 exit 0.
 
+### C7 — one committed build config drives the whole export
+End goal (user, 2026-10-28): a full font export from the CLI from the
+committed source, the mappings CSV and ONE config file — no flags
+needed in CI. Add `<stem>-build.json` (CLI-owned, committed; written
+by hand or by `avar2-studio build --write-config` from the current
+sidecars) holding what C4 exposes as flags plus the two gftools steps
+that already exist as transforms: `transforms` (which of
+`round_corners`, `slant`, `spac`/`spac_widthaware` run, with their
+params — the committed `<stem>-transforms.json` is the default, the
+build config may enable/disable or override per run), `axes` (the
+declared defaults from C1 are the source of truth; here only
+`hide: [...]`), `default` (the resting style, C4), `instances` (named
+instances from the CSV rows → `fix_instances`/`gen_fvar_instances`,
+`stat: true` → `gen_stat`), `formats: ["ttf", "woff2"]`. Flags from C4
+override the file. **Boundary:** everything design-authored stays
+studio-only and read-only for the CLI — `<stem>-control.json`
+(secondary axes, brace layers, instance values), `<stem>-grade.json`,
+`<stem>-kinetikern.json`, instance coordinates in the CSV. The CLI
+consumes them exactly as the studio's build does and offers no flag or
+config key that edits them; a build config key that names one is a
+usage error (exit 2) with a message pointing at the studio. Evidence:
+`avar2-studio build Crispy.glyphs --config Crispy-build.json --out
+fonts/` on a git-clean copy produces TTF + WOFF2 with the configured
+transforms, hidden axes, resting style, named instances and STAT, and
+the TTF is sha256-identical to the studio's export with the same
+choices; a config naming `control` or `grade` exits 2.
+
+### C8 — the worker's own build → test → deploy loop, and the verifier's, without touching the designer's Phase B
+Contract (binding for the agent AND the verifier):
+- **Reserved for the designer:** `~/Documents/Crispy` (never read for
+  writing, never watched), port **5070** (live studio), port **5071**
+  and `~/avar2-studio-test` (Phase B sanitised studio + its sync), and
+  Fontra's port **8001 while Phase B runs** (B3 opens the editor from
+  5071). Neither agent touches these; probes never target them.
+- **Agent:** its own staging root OUTSIDE `/tmp` (macOS's periodic
+  cleanup emptied `/private/tmp/av2-routine` on 2026-10-26 and broke a
+  verifier clone the same way): `~/avar2-agent/` with a fresh Crispy
+  copy per run staged per the routine, studio on **5072**, Fontra on
+  **8002** (C9), CLI output under `~/avar2-agent/out/`. A
+  `~/avar2-agent/loop.sh` the agent writes and keeps running: after
+  each of its own pushes it (1) restages the copy, (2) runs
+  `avar2-studio build` from the installed package on a git-clean
+  checkout of the copy (the CLI test, C1–C7), (3) starts 5072 on the
+  new bundle and runs the full `ui_probe.py` at idle, (4) appends the
+  results to `LOCAL_TEST_RESULTS.md` and pushes. That push is the
+  "deploy" of this cycle: the sprint branch's own CI (`test.yml` runs on
+  `cleanup-2026-10`) is the deployed check; Pages and releases stay the
+  user's call. A11/open-editor runs against 8002 only.
+- **Verifier:** `~/avar2-verifier/` (also outside `/tmp`): a watcher on
+  `origin/cleanup-2026-10` that, on `STATE: checkpoint`, runs
+  `verify-checkpoint.sh` — fresh clone, gates by exit code, CLI build
+  on a git-clean copy, probe on **5073** with Fontra on **8003** — and
+  writes a report the verifier reviews into findings.md. Both loops
+  stage their own copies; neither writes to the other's root.
+- Evidence: each hand-off's results section names its root, ports and
+  the git-clean check (`git status --porcelain` empty before the CLI
+  build); a run that touched a reserved path or port is a FAIL of the
+  hand-off regardless of the test results.
+
+### C9 — `--fontra-port` (and `AVAR2_FONTRA_PORT`)
+`state.FONTRA_PORT` is hard-coded 8001, so two studios cannot both
+open the editor. Add the server flag + env (default 8001) so the
+agent's 5072, the verifier's 5073 and the designer's 5071 each own a
+Fontra. Evidence: two studios on different ports open the editor at
+the same time; `open-editor` returns each one's port.
+
 Out of scope: PyPI publishing (the user's, separately), a gftools
-recipe-provider plugin, any change to the studio's export dialog.
+recipe-provider plugin, any change to the studio's export dialog, any
+CLI path that writes a design sidecar.
 
 ## Standing instructions (apply to every round) — revised 2026-10-16
 

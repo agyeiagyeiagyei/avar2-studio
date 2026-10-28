@@ -2,5 +2,5 @@ STATE: working
 ROUND: 16
 HEAD: e325040
 VERIFIED_HEAD: e325040
-NEXT: C1–C6 in order (findings.md, "Approved next scope — a CI-grade avar2-studio build"): committed axis defaults; --workdir; every failure reason in the exit message; export options on the CLI; CI proof + README recipe; doctor --strict. One commit per item with its test, then STATE: checkpoint.
-APPROVED: C1–C6 as written; the verifier verifies in a fresh clone and on a git-clean checkout of a Crispy copy
+NEXT: C9 first (Fontra port flag — it unblocks parallel studios), then C1–C7 in order, then C8's loop.sh in ~/avar2-agent (outside /tmp; ports 5072/8002 only; never 5070/5071/8001 or ~/Documents/Crispy or ~/avar2-studio-test). One commit per item with its test; the agent's own loop runs the CLI build + full probe after each push; STATE: checkpoint when C1–C9 are in.
+APPROVED: C1–C9 as written in findings.md; the verifier's loop verifies each checkpoint on 5073/8003 from ~/avar2-verifier
