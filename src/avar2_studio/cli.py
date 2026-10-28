@@ -14,6 +14,7 @@ so the existing argparse contract continues to work.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 _HELP = """\
 Usage:
@@ -54,6 +55,40 @@ def main() -> None:
     server.main()
 
 
+def _axis_metadata_paths(source: Path):
+    """Both homes for the declared axis defaults (C1).
+
+    ``<stem>-axis-metadata.json`` beside the source is the canonical,
+    COMMITTED location. ``.avar2-studio/axis-metadata.json`` is the pre-C1
+    location: tool-managed and gitignored, so it only helps a checkout that
+    already ran the studio.
+    """
+    return (
+        source.parent / f"{source.stem}-axis-metadata.json",
+        source.parent / ".avar2-studio" / "axis-metadata.json",
+    )
+
+
+def _axis_metadata_problem(source: Path):
+    """None when the declared axis defaults ship with the source, else the
+    message to fail with.
+
+    Without this file the traditional axes' declared default (opsz 144 on
+    Crispy) is not in the build inputs at all, so each one falls back to its
+    column minimum and every named style lands off its mapped value (62 u
+    measured). In CI that is a silent wrong font, not a warning.
+    """
+    sibling, legacy = _axis_metadata_paths(source)
+    if sibling.exists() or legacy.exists():
+        return None
+    return (f"axis metadata not found: neither {sibling.name} nor "
+            f".avar2-studio/{legacy.name} exists beside {source.name}. It holds "
+            f"the declared axis defaults (opsz 144 etc.); without them named "
+            f"styles land off their mapped values. Open the font in "
+            f"avar2-studio once and commit {sibling.name} (or copy it from the "
+            f"studio's .avar2-studio/axis-metadata.json).")
+
+
 def _build(argv) -> int:
     """``avar2-studio build SOURCE --out DIR``: one headless build.
 
@@ -82,15 +117,10 @@ def _build(argv) -> int:
               "<stem>-avar.csv next to the source file.", file=sys.stderr)
         return 2
 
-    meta = args.source.resolve().parent / ".avar2-studio" / "axis-metadata.json"
-    if not meta.exists():
-        # The declared defaults of the traditional axes live there. Built
-        # without them, opsz (etc.) defaults to its CSV minimum and every
-        # named style lands off its mapped values — measured at 62 units
-        # on Crispy. CI checking out a clean tree is exactly this case.
-        print(f"warning: {meta} is missing — traditional axis defaults fall back "
-              f"to each CSV column's minimum, and named styles may land off "
-              f"their mapped values", file=sys.stderr)
+    meta_problem = _axis_metadata_problem(args.source)
+    if meta_problem:
+        print(f"error: {meta_problem}", file=sys.stderr)
+        return 2
     from . import server, state
     try:
         server._apply_source_path(args.source)

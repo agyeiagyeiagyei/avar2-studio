@@ -14,7 +14,7 @@ functions accept and what the writers emit, as of 2026-10-16.
 | `<stem>-grade.json` | yes | Grade toggle and G badges, config import | no | no | none |
 | `<stem>-transforms.json` | yes | Transforms menu, config import | yes | no | none |
 | `<stem>-kinetikern.json` | yes | Kinetikern tab | no | yes | none |
-| `.avar2-studio/axis-metadata.json` | no | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | no | none |
+| `<stem>-axis-metadata.json` | yes | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | no | none |
 | `.avar2-studio/instance-renames.json` | no | instance rename | no | no | none |
 | `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.update_config` in the worker, promoted back) | optional | no | — |
 
@@ -199,9 +199,15 @@ instance; zero pairs are dropped; `location` keys are uppercased. Without
 coordinates, so the correction follows the style if it moves. Owner:
 `kinetikern/sidecar.py`; written atomically.
 
-## `.avar2-studio/axis-metadata.json`
+## `.avar2-studio/axis-metadata.json` → `<stem>-axis-metadata.json`
 
-Display names and ranges of the axes the studio knows about, keyed by
+The declared axis metadata is **committed beside the source** as
+`<stem>-axis-metadata.json` (phase C item C1). It used to live in the
+tool-managed, gitignored `.avar2-studio/`, so a clean checkout built with
+each column's minimum as the default and every named style landed off its
+mapped value. `.avar2-studio/axis-metadata.json` is still read when the
+sibling is absent — and migrated to the sibling (then removed) on first
+access. Display names and ranges of the axes the studio knows about, keyed by
 **uppercase** tag:
 
 ```jsonc
@@ -219,14 +225,16 @@ Display names and ranges of the axes the studio knows about, keyed by
   what the gen-avar2 shim receives as `[min, default, max]`. Without a
   `default` the registered convention applies (`TRADITIONAL_AXIS_DEFAULTS`:
   wght 400, wdth 100, opsz 72, slnt/ital/grad/spac/cntr 0), clamped into
-  range. `avar2-studio build` warns when the file is missing (named styles
-  then land off their mapped values — measured at 62 units on Crispy).
+  range. `avar2-studio build` exits 2 when neither the sibling nor the
+  legacy `.avar2-studio/` file exists (named styles would land off their
+  mapped values — measured at 62 units on Crispy).
 - A placeholder extent (`-1000 / 1000`, or a degenerate `[0, 0]` as
   transform-injected axes report) is repaired on read from the enabled
   transform's params, the GRAD extent or the CSV column's spread
   (`_repair_placeholder_ranges`); hand-edited ranges are never clobbered.
 - Travels in the workspace zip (`.avar2-studio/axis-metadata.json` or a
-  `*-axis-metadata.json` beside the source) and, in the static demo, as an
+  `*-axis-metadata.json` beside the source; an import lands in the workdir
+  and migrates to the sibling on first read) and, in the static demo, as an
   optional `axis_metadata` section of the config bundle.
 
 ## `.avar2-studio/instance-renames.json`
@@ -271,7 +279,7 @@ section only.
 
 ```
 .avar2-studio/
-  axis-metadata.json, instance-renames.json, config.yaml
+  instance-renames.json, config.yaml
   shadow/<name>.glyphs                 the canonical shadow (control + grade braces)
   shadow/transformed/<name>.glyphs     the build copy after source-stage transforms
   shadow/<stem>.designspace            designspace shadow …
@@ -280,7 +288,7 @@ section only.
   build/<font>.woff2, <font>.woff2.json     the WOFF2 cache and its key {ttf_size, ttf_mtime, woff2_bytes, source_bytes}
   exports/<job-id>-<artifact>          finished exports, the last 5 (KEEP_EXPORTS)
   jobs/<job-id>/                       one per running job, removed when it finishes:
-    src/                                 the snapshot (source, sidecars, .avar2-studio/{axis-metadata,instance-renames,config}.json/yaml, shadow/<name>, UFOs)
+    src/                                 the snapshot (source, its -axis-metadata sibling and other sidecars, .avar2-studio/{instance-renames,config}.json/yaml, shadow/<name>, UFOs)
     spec.json, progress.jsonl, result.json, out/, build/
   backups/<file>.<YYYYMMDD-HHMMSS>     the last 20 copies of each rewritten sidecar
   archive/<stamp>-<source>             upload workspaces only: the previous source, last 5
@@ -341,7 +349,7 @@ demo reads the same format and additionally honours optional
 <stem>-grade.json                      # if any
 <stem>-kinetikern.json                 # desktop only; rides along as a plain file
 <stem>-cornerpins.json                 # static only
-.avar2-studio/axis-metadata.json       # if any (or <stem>-axis-metadata.json beside the source)
+<stem>-axis-metadata.json              # if any (the committed axis metadata)
 .avar2-studio/build/<stem>-VF.ttf      # the current build; required for a .designspace in the browser
 ```
 

@@ -1466,3 +1466,41 @@ Commands + results:
   logs: `Started Fontra on http://127.0.0.1:8002 (root=…/src1/CrispyMini.glyphs)`
   and `…:8004 (root=…/src2/CrispyMini.glyphs)`. Reservations respected: no
   access to 5070/5071/8001 or `~/Documents/Crispy`.
+
+## Phase C — C1: the declared axis defaults ship with the source
+
+The traditional axes' declared defaults lived in `.avar2-studio/axis-metadata.json`,
+which SIDECARS.md told designers not to commit — so a clean checkout built with each
+column's minimum as the default and named styles landed off their mapped values. The
+canonical home is now the committed sibling `<stem>-axis-metadata.json` beside the
+source (`pipeline._sibling_axis_metadata_path`); the old location is a read fallback
+that is migrated to the sibling (then removed) on first access, keeping the legacy file
+if the migration fails. `config_generator` takes an explicit `--axis-metadata` /
+`metadata_path` so the collision guard and the blank-cell fill read the same file; both
+callers (preview build, export) pass it. The job stager carries `-axis-metadata.json`
+among `SIDECAR_SUFFIXES`, so the worker sees the declared defaults. `doctor`'s metadata
+advice unchanged. SIDECARS.md: the row is now `<stem>-axis-metadata.json` / commit? yes;
+the `.avar2-studio/` listings no longer claim the file. The bundled example moves to
+`examples/crispy-mini/sources/CrispyMini-axis-metadata.json` (tracked), the legacy
+`.avar2-studio/` copy is removed and its `.gitignore` exception dropped. The CLI now
+exits 2 when neither home exists.
+
+Commands + results:
+- `pytest tests/test_axis_metadata_sibling.py -q` → 8 passed.
+- `ruff check src tests` → All checks passed; `pytest tests/ -q` → 577 passed.
+- Live, `~/avar2-agent/c1` (routine staging, metadata moved to the sibling, `git init`
+  + commit): `git status --porcelain` → 0 lines before the build;
+  `python -m avar2_studio build src/Crispy.glyphs --out out` → **exit 0**, 83 s,
+  stderr has no metadata warning; built font
+  `out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+  with fvar defaults wght 400 / wdth 100 / opsz 144 and `avar.majorVersion == 2`;
+  `pipeline._evaluate_with_font(font, {wght 900, wdth 100, opsz 144})` →
+  XTRA 725.89 (row 726.0), XOPQ 316.27 (316.3), YOPQ 235.20 (235.2) — all within 1 u.
+- Same source with neither metadata file → **exit 2**,
+  `error: axis metadata not found: neither Crispy-axis-metadata.json nor
+  .avar2-studio/axis-metadata.json exists beside Crispy.glyphs …`.
+- Studio on the same checkout (5072, fontra 8002): `origin_warning` null,
+  `last_build_status` ok, `/api/avar2/axes` → metadata OPSZ default **144**;
+  `git status --porcelain -- src` → 0 lines.
+- Post-build the checkout's own `.avar2-studio/` workdir is written beside the source
+  (C2's `--workdir` removes that); the committed inputs are unchanged.

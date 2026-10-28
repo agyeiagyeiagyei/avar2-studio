@@ -37,7 +37,7 @@ from .studio_log import get_logger
 #: original source), plus the small preview-dir files builds/exports read.
 
 log = get_logger(__name__)
-SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json")
+SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json", "-axis-metadata.json")
 PREVIEW_FILES = ("axis-metadata.json", "instance-renames.json", "config.yaml")
 LEGACY_CSV = "avar2-mappings.csv"
 

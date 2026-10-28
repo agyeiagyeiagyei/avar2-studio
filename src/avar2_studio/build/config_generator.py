@@ -485,16 +485,21 @@ def _pad_in_envelope(mappings: List[RowMapping], source_axes: List[Dict]) -> Lis
     return out
 
 
-def _declared_axis_defaults(config_path: Optional[Path]) -> Dict[str, Decimal]:
+def _declared_axis_defaults(config_path: Optional[Path],
+                            metadata_path: Optional[Path] = None) -> Dict[str, Decimal]:
     """Studio-declared defaults for non-parametric axes, keyed by fvar
     tag, from the sibling axis-metadata.json. Mirrors what the
     gen-avar2 shim applies to created axes, so the collision guard
     normalizes in: locations against the same defaults the compiled
-    font will actually use."""
+    font will actually use.
+
+    ``metadata_path`` is the committed ``<stem>-axis-metadata.json`` beside
+    the source (C1); without it the pre-C1 config sibling is tried.
+    """
     out: Dict[str, Decimal] = {}
     if not config_path:
         return out
-    meta_path = Path(config_path).parent / "axis-metadata.json"
+    meta_path = Path(metadata_path) if metadata_path else Path(config_path).parent / "axis-metadata.json"
     if not meta_path.exists():
         return out
     try:
@@ -1303,6 +1308,7 @@ def update_config(
     dry_run: bool = False,
     source_path: Optional[Path] = None,
     fill_in_defaults: bool = False,
+    metadata_path: Optional[Path] = None,
 ) -> None:
     """Generate STAT + avar2 sections from a CSV and merge them into config.yaml.
 
@@ -1326,6 +1332,8 @@ def update_config(
         argv += ["--source", str(source_path)]
     if fill_in_defaults:
         argv.append("--fill-in-defaults")
+    if metadata_path:
+        argv += ["--axis-metadata", str(metadata_path)]
 
     rc = main(argv)
     if rc != 0:
@@ -1348,6 +1356,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--save-opsz-csv", action="store_true", help="Save expanded opsz CSV to file (default: use temporary file, auto-deleted).")
     ap.add_argument("--source", type=Path, default=None,
                     help="Source file (.glyphs/.designspace). Its declared axis ranges pad the avar2 in: envelope so fontc doesn't clamp the built fvar axes to the CSV's instance envelope.")
+    ap.add_argument("--axis-metadata", type=Path, default=None,
+                    help="Axis metadata JSON (default: <config dir>/axis-metadata.json). "
+                         "The studio passes the committed <stem>-axis-metadata.json beside the source.")
     ap.add_argument("--fill-in-defaults", action="store_true",
                     help="Materialize blank in: cells at the declared axis defaults. "
                          "Blank normally means 'at default', which rebinds if a build "
@@ -1519,7 +1530,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             source_tags_u = {str(a.get("tag", "")).upper() for a in source_axes_list}
             declared = {
                 str(k).upper(): v
-                for k, v in _declared_axis_defaults(args.config).items()
+                for k, v in _declared_axis_defaults(args.config, args.axis_metadata).items()
             }
             trad_tags = {
                 str(t)
@@ -1548,7 +1559,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # fontTools ("Locations must be unique") deep inside gen-avar2
         # — catch it here, with instance names, before the build.
         mappings = _drop_colliding_in_locations(
-            mappings, source_axes_list, _declared_axis_defaults(args.config)
+            mappings, source_axes_list, _declared_axis_defaults(args.config, args.axis_metadata)
         )
 
         # Step 5: Generate STAT section

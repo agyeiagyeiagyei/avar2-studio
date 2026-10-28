@@ -40,9 +40,8 @@ examples/*/sources/*-avar.csv
 # axis metadata ship deliberately so the bundled example opens as a
 # complete three-axis avar2 demo (opsz/wght/wdth + width-aware SPAC).
 !examples/crispy-mini/sources/CrispyMini-avar.csv
-!examples/crispy-mini/sources/.avar2-studio/
-examples/crispy-mini/sources/.avar2-studio/*
-!examples/crispy-mini/sources/.avar2-studio/axis-metadata.json
+!examples/crispy-mini/sources/CrispyMini-transforms.json
+!examples/crispy-mini/sources/CrispyMini-axis-metadata.json
 
 # macOS
 .DS_Store

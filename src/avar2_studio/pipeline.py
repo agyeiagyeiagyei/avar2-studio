@@ -1157,7 +1157,7 @@ def _perform_avar2_build() -> Dict:
                 "details": str(e),
             })
         try:
-            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False, source_path=state.GLYPHS_PATH)
+            config_generator.update_config(csv_path=preview_csv, config_path=config_to_update, backup=False, source_path=state.GLYPHS_PATH, metadata_path=_get_avar2_metadata_path())
         except Exception as e:
             return _record_build_failure({"success": False, "error": "Failed to update config", "details": str(e)})
 
@@ -1636,6 +1636,7 @@ def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
             backup=False,
             source_path=state.GLYPHS_PATH,
             fill_in_defaults=True,
+            metadata_path=export_workdir / "axis-metadata.json",
         )
 
         build_env = _builder_env(default_overrides=requested)
@@ -1758,12 +1759,53 @@ def _get_avar2_font_dir() -> Optional[Path]:
     return font_dir
 
 
-def _get_avar2_metadata_path() -> Optional[Path]:
-    """Get path to axis-metadata.json (inside the .avar2-studio workdir)."""
-    workdir = _get_preview_dir()
-    if not workdir:
+def _sibling_axis_metadata_path() -> Optional[Path]:
+    """The COMMITTED axis-metadata home: ``<stem>-axis-metadata.json``
+    beside the source (findings.md, phase C item C1).
+
+    ``.avar2-studio/`` is tool-managed and gitignored, so a clean checkout
+    used to build with each column's minimum as the default — Crispy lost its
+    declared ``opsz`` default of 144 and every named style landed off its
+    mapped values (62 u measured).
+    """
+    base = state.ORIGINAL_PATH or state.GLYPHS_PATH
+    if not base:
         return None
-    return workdir / "axis-metadata.json"
+    return base.parent / f"{base.stem}-axis-metadata.json"
+
+
+def _legacy_axis_metadata_path() -> Optional[Path]:
+    """The pre-C1 location inside the tool-managed workdir."""
+    workdir = _get_preview_dir()
+    return workdir / "axis-metadata.json" if workdir else None
+
+
+def _get_avar2_metadata_path() -> Optional[Path]:
+    """Canonical axis-metadata path, migrating the pre-C1 location once.
+
+    The sibling ``<stem>-axis-metadata.json`` is the source of truth. If it is
+    absent but ``.avar2-studio/axis-metadata.json`` exists, the legacy file is
+    written to the sibling and removed, so the next commit carries the
+    declared defaults. A failed migration keeps reading the legacy file
+    rather than losing the designer's declarations.
+    """
+    sibling = _sibling_axis_metadata_path()
+    if sibling is None:
+        return None
+    if sibling.exists():
+        return sibling
+    legacy = _legacy_axis_metadata_path()
+    if legacy is None or not legacy.exists():
+        return sibling
+    try:
+        data = json.loads(legacy.read_text(encoding="utf-8"))
+        _sidecar_io.write_json(sibling, data)
+        legacy.unlink()
+        log.info(f"axis metadata migrated to {sibling.name} (commit this file)")
+    except Exception as exc:
+        log.warning(f"Could not migrate {legacy} to {sibling}: {exc}")
+        return legacy
+    return sibling
 
 
 # Extent written for an axis whose real range isn't known yet. Parametric
