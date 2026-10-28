@@ -479,10 +479,16 @@ class JobQueue:
         # The relocation memo outlives the job dir: it lives next to the built
         # fonts, which the supervisor promotes into.
         from .pipeline import RELOCATION_MEMO_DIRNAME
+        from .transforms import config as _tx_config
         spec = {"job_id": self._job_id(job), "kind": job["kind"],
                 "job_dir": str(job["dir"]),
                 "memo_dir": str(Path(self.server._get_avar2_font_dir())
                                 / RELOCATION_MEMO_DIRNAME),
+                # C7: a build config's transform override is a PROCESS global in
+                # the caller; the build runs in a worker subprocess, so it has to
+                # travel in the spec or the worker reads the committed sidecar
+                # and the config silently does nothing at the resting style (P3).
+                "transform_override": _tx_config.override(),
                 "original_path": str(src_dir / orig.name),
                 "use_fontc": bool(state.USE_FONTC),
                 "env": {k: os.environ.get(k) for k in ENV_KEYS},

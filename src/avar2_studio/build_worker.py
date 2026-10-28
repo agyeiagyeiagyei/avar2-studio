@@ -85,6 +85,12 @@ def _bind_server_globals(spec):
             os.environ.pop(var, None)
         else:
             os.environ[var] = str(val)
+    # C7/P3: the caller's transform override travels in the spec. Without this
+    # the worker reads the committed <stem>-transforms.json and a build config's
+    # transforms/instances silently do nothing (the committed file is never
+    # rewritten — the override is for this job only).
+    from .transforms import config as _tx_config
+    _tx_config.set_override(spec.get("transform_override"))
 
 
 def _run_build_job(pipeline, spec, progress):

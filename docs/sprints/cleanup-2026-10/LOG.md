@@ -1686,3 +1686,26 @@ pushed. Final run at `2fcda7e`:
 
 Gates at this checkpoint: `ruff check src tests` clean; `pytest tests/ -q` → 628 passed;
 frontend eslint 0 errors, typecheck clean, `test:unit` green, build green.
+
+## Phase C review — P3: the build config's transform override reaches the worker
+
+`transforms.config.set_override` is a process global; the build runs in a worker
+subprocess, so a config at the resting style (`default: null`) changed only the CLI's own
+shadow step — the worker read the committed `<stem>-transforms.json` and the font kept
+`slnt` and one instance (the verifier's finding). `build_jobs._stage` now carries
+`transform_override` in the job spec and `build_worker._bind_server_globals` installs it
+before the build. The committed sidecar is still never rewritten.
+
+Commands + results:
+- `pytest tests/test_build_config_worker.py -q` → 3 passed (spec carries the override;
+  the worker bootstrap applies it with the on-disk file unchanged; a real worker build
+  with `spac_widthaware` disabled by the config yields a font without SPAC).
+- `ruff check src tests` clean; `pytest tests/ -q` → **631 passed**.
+- Live, `~/avar2-agent/p3` (git-clean clone of the committed Crispy copy + committed
+  `Crispy-build.json`: `default: null`, transforms = `fix_instances` + `gen_stat`,
+  `instances.fix/stat` true; the sidecar enables round_corners, slant and
+  spac_widthaware): `python -m avar2_studio build clean/src/Crispy.glyphs --out out
+  --workdir work` → exit 0;
+  `Crispy[GRAD,LCWD,XOPQ,XTRA,YMOD,YOPQ].ttf` — axes `XTRA XOPQ YOPQ LCWD YMOD GRAD
+  opsz wdth wght` (no ROND / slnt / SPAC), 9 named instances, STAT present; checkout
+  `git status --porcelain --ignored` → 0 lines.
