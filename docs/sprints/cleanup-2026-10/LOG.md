@@ -1793,3 +1793,25 @@ Commands + results:
   `pytest tests/ -q` → 637 passed; `ruff check src tests` clean.
 - Not run locally: `cargo test` (the fontations stack is a 10+ minute cold
   build) — CI is the acceptance for CI0c and for the whole item.
+
+## The fourth CI run: two failures, both now understood
+
+`python (ubuntu)`, `rust (ubuntu)`, `rust (macos)` (started later) and
+`cli-build` were green; two jobs were red.
+
+- `frontend`: `FAIL setKinetikernEnabled — live-only and not in
+  DESKTOP_ONLY`. K1's `api.js` method needed an entry in
+  `e2e/api-parity.spec.mjs` (the spec enforces that every live-only method is
+  declared). Registered against the `kinetikern` capability.
+- `python (macos)`: the launcher test again, but now with the launcher's own
+  message — and the durations line named the cause:
+  `test_probe_tells_free_other_and_studio_apart` **35.05 s** for three local
+  servers. `HTTPServer.server_bind` calls `socket.getfqdn`, and that reverse
+  lookup has no resolver on the runner, so the stub reached `serve_forever`
+  after the launcher's deadline. The fixture and the stub now bind through a
+  `_QuietServer` that skips the lookup.
+
+Commands + results:
+- `pytest tests/test_glyphs_launcher.py -q` → 5 passed in 4.0 s (was 8.6 s).
+- `node e2e/api-parity.spec.mjs` → all passed.
+- Next: a fresh workflow run is the acceptance for CI0.

@@ -39,6 +39,7 @@ const DESKTOP_ONLY = {
   applyKinetikern: 'kinetikern',
   revertKinetikern: 'kinetikern',
   applyKinetikernAll: 'kinetikern',
+  setKinetikernEnabled: 'kinetikern',
 };
 
 // Browser-only methods (the Header/App call them only in static mode).

@@ -18,6 +18,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 
 import pytest
 
@@ -84,13 +85,29 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _QuietServer(HTTPServer):
+    """HTTPServer without ``socket.getfqdn``.
+
+    ``HTTPServer.server_bind`` does a reverse DNS lookup to fill
+    ``server_name``. On a CI runner that lookup has no resolver behind it and
+    blocks for tens of seconds — 35 s for three servers on macOS — which made
+    this module's tests look like dead servers (CI0a). The launcher talks to
+    127.0.0.1 only, so the name is never used.
+    """
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
+
+
 @pytest.fixture
 def serve():
     servers = []
 
     def _serve(port, payload=None):
         handler = type("Handler", (_Handler,), {"payload": payload})
-        srv = HTTPServer(("127.0.0.1", port), handler)
+        srv = _QuietServer(("127.0.0.1", port), handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         servers.append(srv)
         return srv
@@ -144,14 +161,23 @@ def _stub_interpreter(tmp_path, body):
 STUB_STUDIO = '''
 import json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import TCPServer
 source, port = sys.argv[1], int(sys.argv[sys.argv.index("--port") + 1])
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         body = json.dumps({"status": "ok", "original_path": source, "path": os.environ["PATH"]}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     def log_message(self, *a): pass
+class S(HTTPServer):
+    # No socket.getfqdn: on a CI runner the reverse lookup blocks for tens of
+    # seconds before the server listens, which read as "the studio never
+    # answered" (CI0a).
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
 print("stub studio on", port, flush=True)
-HTTPServer(("127.0.0.1", port), H).serve_forever()
+S(("127.0.0.1", port), H).serve_forever()
 '''
 
 
