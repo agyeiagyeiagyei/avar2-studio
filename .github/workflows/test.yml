@@ -42,6 +42,40 @@ jobs:
       - run: .venv/bin/ruff check src tests
       - run: .venv/bin/pytest -q --durations=10
 
+  cli-build:
+    # C5: the command the docs promise is the command CI checks. Builds the
+    # bundled example from the INSTALLED package (site-packages, run from a
+    # directory outside the checkout) and fails the job on a non-zero exit.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the package (not a dev checkout)
+        run: |
+          python -m venv "$RUNNER_TEMP/cli-venv"
+          "$RUNNER_TEMP/cli-venv/bin/pip" install .
+          "$RUNNER_TEMP/cli-venv/bin/python" -c \
+            "import avar2_studio, sys; p = avar2_studio.__file__; assert 'site-packages' in p, p; print(p)"
+
+      - name: avar2-studio build (installed package, bundled example)
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/cli-venv/bin/avar2-studio" build \
+            "$GITHUB_WORKSPACE/examples/crispy-mini/sources/CrispyMini.glyphs" \
+            --out "$RUNNER_TEMP/out" --workdir "$RUNNER_TEMP/work"
+          ls -l "$RUNNER_TEMP/out"
+
+      - name: The checkout is untouched by the build
+        run: |
+          git -C "$GITHUB_WORKSPACE" status --porcelain --ignored | tee /dev/stderr
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain --ignored)"
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

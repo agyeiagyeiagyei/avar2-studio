@@ -117,7 +117,8 @@ the source's stem, so it can be committed with it
 | `MyFont-transforms.json` | yes | which transforms are on, with their parameters | the Transforms menu |
 | `MyFont-grade.json` | yes | grade on/off, default %, intensity, headroom clamp, per-style anchors (`.glyphs` sources only) | the Grade toggle and the `G` badges |
 | `MyFont-kinetikern.json` | yes | per-style spacing corrections: the looseness each style was spaced at and how far each glyph's sides moved | the Kinetikern tab |
-| `.avar2-studio/` | no, gitignore it | `build/` (the preview font), `shadow/`, `exports/`, `jobs/`, `config.yaml`, `backups/` (the last 20 of each sidecar), `axis-metadata.json` (display names and ranges of the axes you declare), `instance-renames.json` | the studio |
+| `.avar2-studio/` | no, gitignore it | `build/` (the preview font), `shadow/`, `exports/`, `jobs/`, `config.yaml`, `backups/` (the last 20 of each sidecar), `instance-renames.json` | the studio |
+| `<stem>-axis-metadata.json` | yes | the declared axis defaults and display names — commit it, the build reads it (and `avar2-studio build` exits 2 without it) | the studio |
 
 Studio axis authoring never edits your source: once studio-authored
 brace layers exist, builds compile from a shadow copy in
@@ -309,6 +310,7 @@ Server: `avar2-studio [SOURCE] [options]`
 | `SOURCE` (or `--glyphs PATH`) | none | the `.glyphs` or `.designspace` to open; without it the studio starts with a Load Font picker |
 | `--port` | `5001` | port to serve on (5000 is taken by AirPlay on macOS) |
 | `--host` | `127.0.0.1` | interface to bind |
+| `--fontra-port` | `8001` (or `$AVAR2_FONTRA_PORT`) | port for the embedded Fontra editor; parallel studios each need their own |
 | `--no-fontc` | off | compile with fontmake instead of fontc |
 | `--debug` | off | Flask debug mode with auto-reload (can interrupt an in-flight build) |
 
@@ -323,6 +325,54 @@ and copies the font into `DIR`. Exit 0 prints the font's path; 1 means
 the build, the avar2 mapping, the grade or a source transform failed (a
 plain fallback font is not a pass); 2 means the source did not load.
 Crispy's CI is the reference use.
+
+| Build option | What it does |
+|---|---|
+| `--workdir DIR` | put the tool workdir (config, shadow, build output, relocation memo) under `DIR` instead of beside the source, so a CI checkout stays untouched |
+| `--hide-axes XOPQ,XTRA` | set the `fvar` HIDDEN flag so font pickers stop surfacing those axes |
+| `--default wght=400,opsz=14` | re-origin the export at that resting style (refused with a readable error when the relocation cannot fit) |
+| `--format ttf` / `--format woff2` | output format, repeatable; default `ttf` |
+
+The build reads the source, the committed `<stem>-avar.csv` and the
+committed `<stem>-axis-metadata.json` (declared axis defaults).
+Everything design-authored — `<stem>-control.json`, `<stem>-grade.json`,
+`<stem>-kinetikern.json`, the instance coordinates in the CSV — is read
+from those files; there is no flag that edits them, and editing them is
+the studio's job.
+
+### Building in CI
+
+```bash
+# fontc and gftools are regular dependencies of the package (pinned with
+# majors-only upper bounds in pyproject.toml), so this is the whole install.
+pip install avar2-studio
+avar2-studio doctor --strict        # fail early, with the missing piece named
+avar2-studio build sources/MyFont.glyphs --config sources/MyFont-build.json \
+    --workdir "$RUNNER_TEMP/avar2" --out fonts/
+```
+
+Exit codes: 0 ok, 1 the build itself failed (the printed `error:` lines
+say which stage — build, avar2 mapping, origin relocation, grade,
+source transform — and why), 2 usage or load error (bad flag, missing
+source, missing axis metadata). Every artifact path is printed on
+stdout, one per line.
+
+A font repo's workflow:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-python@v5
+  with: {python-version: "3.11"}
+- run: pip install avar2-studio
+- run: avar2-studio doctor --strict
+- run: >
+    avar2-studio build sources/MyFont.glyphs
+    --out fonts/ --workdir "$RUNNER_TEMP/avar2"
+```
+
+`AVAR2_STUDIO_GFTOOLS_BUILDER=1` exists as an internal safety valve for
+shelling out to `gftools builder`; the supported path builds in-process
+and needs no extra configuration.
 
 `avar2-studio doctor` checks Python (3.10 or newer), fontc,
 gftools-builder, glyphsLib, the frontend bundle, Fontra (optional), the
