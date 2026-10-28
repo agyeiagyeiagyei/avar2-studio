@@ -1390,6 +1390,92 @@ Flyout note reads "SPAC is saved in the studio, not the source file."
 rest of Part B, the fontra-embed push, the merge into `github-pages`,
 and the CI/Pages runs a push confirms.
 
+## Approved next scope — a CI-grade `avar2-studio build` (user decision 2026-10-28; verifier-written, the agent picks up from here)
+
+Why: the Google Fonts team needs one command they can run from any
+build (their CI, a gftools recipe, a Makefile) that produces the
+shipped avar2 font from a clean checkout, with no studio, no browser
+and no files they did not commit. `avar2-studio build SOURCE --out DIR`
+exists (`cli.py`) and runs the studio's pipeline; the verifier ran it
+on the bundled example from the sprint code: 3.5 s, exit 0, font
+printed. The items below make it fit for that use. Same rules as S0–S6:
+smallest change, one commit per item with its test, evidence in
+`LOCAL_TEST_RESULTS.md`, `STATE: checkpoint` when C1–C6 are in; the
+verifier verifies in a fresh clone and on a fresh checkout of a copy
+of Crispy (git-clean, committed files only). Nothing about the
+server's behaviour changes; every item is a CLI-only concern unless
+stated.
+
+### C1 — the declared axis defaults ship with the source
+Today the traditional axes' `min/default/max` (wght 400, wdth 100,
+opsz 144 on Crispy) live in `.avar2-studio/axis-metadata.json`, which
+SIDECARS.md tells designers not to commit. A clean checkout therefore
+builds with each column's minimum as the default: the CLI only warns,
+and named styles land off their mapped values (62 u measured on
+Crispy). Fix: make the committed sibling `<stem>-axis-metadata.json`
+(SIDECARS.md already names it as an alternative read location) the
+canonical home — the writer writes there, `.avar2-studio/` is read as
+a fallback and migrated to the sibling on first load, SIDECARS.md's
+row flips to "Commit? yes", the CLI warning becomes an error only when
+*neither* exists. Evidence: a git-clean checkout of a Crispy copy with
+only committed files → `avar2-studio build` exits 0 with no warning,
+and fontTools instancing of the built font at `Default 900 MaxOpsz`'s
+inputs lands on that row's out within 1 u (the probe the verifier
+uses). The studio on the same checkout shows the same defaults.
+
+### C2 — `--workdir DIR`
+The build writes `.avar2-studio/` (config, shadow, build output, memo)
+beside the source. CI wants the checkout untouched. Add
+`--workdir DIR` to `build` (default: beside the source, as today); the
+preview dir, build dir and memo all resolve under it. Evidence: build
+with `--workdir /tmp/x` → `git status --porcelain` in the checkout is
+empty afterwards; the font is byte-identical to a build without the
+flag.
+
+### C3 — every failure reason reaches the exit message
+`degraded` (relocation failed, S1(b)) exits 1 today as "build failed:
+unknown" because `LAST_BUILD_ERROR` is empty. Print
+`origin_relocation_error` for that case; print every `LAST_*` that is
+set, one per line, prefixed `error:`; exit codes: 0 ok, 1 build
+degraded/failed, 2 usage/load error. Evidence: the S1 recipe state
+(control axis + braces + ORIGIN nudge) run through the CLI → exit 1
+and the relocation message on stderr; the test pins the three codes.
+
+### C4 — the export options on the CLI
+The studio's export dialog (`routes/build.py` export job →
+`pipeline._export_pipeline`) can hide axes, re-origin at a resting
+style and emit WOFF2. CI needs the same font. Add to `build`:
+`--hide-axes XOPQ,XTRA,YOPQ`, `--default wght=400,opsz=14` (the
+"set default" relocation; refused with the existing readable message
+when it cannot fit), `--format ttf|woff2` (repeatable). Implement by
+calling `_export_pipeline` on the built font — no second pipeline.
+Evidence: for the same options the CLI output is byte-identical
+(sha256) to the studio's export download on the same copy; hidden
+flags set in `fvar`; WOFF2 decompresses to the same table set.
+
+### C5 — CI proof and the recipe for other repos
+(a) `test.yml` in this repo runs `avar2-studio build` on
+`examples/crispy-mini` from the installed package (not a dev checkout
+path) and fails the job on non-zero — the command the docs promise is
+the command CI checks. (b) README "Building in CI": the exact install
+line (package + `fontc` + `gftools` pins), the command, the exit
+codes, and a GitHub Actions snippet a font repo can paste; plus a
+gftools-builder note (the `AVAR2_STUDIO_GFTOOLS_BUILDER=1` safety
+valve stays internal — the documented path is the in-process one).
+Evidence: the workflow run on the checkpoint push is green and its
+log shows the build step.
+
+### C6 — `doctor` fails CI before the build does
+`avar2-studio doctor` reports; it does not exit non-zero. Add
+`--strict` (exit 1 when a headless-build prerequisite is missing:
+fontc, gftools, the engines where configured), so a CI job fails at
+doctor with a named cause rather than mid-build. Evidence: test with
+fontc unavailable → exit 1 and the name; with everything present →
+exit 0.
+
+Out of scope: PyPI publishing (the user's, separately), a gftools
+recipe-provider plugin, any change to the studio's export dialog.
+
 ## Standing instructions (apply to every round) — revised 2026-10-16
 
 **Protocol change (user instruction, 2026-10-16): checkpoints do not
