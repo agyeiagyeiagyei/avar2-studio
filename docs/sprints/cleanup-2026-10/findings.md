@@ -1584,3 +1584,231 @@ go entirely.
 5. **Keep the user's environment out of it.** Never touch
    `~/Documents/Crispy`; never start/stop port 5070; live probes on a
    copy at 5071 only.
+
+## Verifier review of the Phase C checkpoint `2fcda7e` (2026-10-28) — C1/C2/C4/C6/C8/C9 VERIFIED; C3 and C5 with follow-ups; C7 FAILS at the resting style
+
+Method: fresh clone of `2fcda7e` under `~/avar2-verifier` (`pip install
+-e .[dev]`, plus Fontra and fontra-glyphs from git — see the
+verifier-side note at the end), gates by exit code, CLI builds on a
+git-clean copy of the designer's sources (`~/Documents/Crispy/sources`,
+read-only; the copy committed with `Crispy-axis-metadata.json` copied
+from the legacy file), studio on 5073 with Fontra on 8003 running the
+16-scenario probe, then my own C3/C6/C7 commands. The report
+`~/avar2-verifier/reports/2fcda7e.md` is the first pass; the two FAILs
+in it were my environment and are re-run below.
+
+- **C9 — VERIFIED (one studio; two on the agent's evidence).**
+  `--fontra-port 8003`: `POST /api/control-axes/TST2/open-editor` →
+  `{port: 8003, editing_original: false}`, server log `Started Fontra on
+  http://127.0.0.1:8003`, direct `:8003/editor.html` and the proxy via
+  5073 both 200; `tests/test_fontra_port.py` 4 of 5 pass (the fifth is
+  P1). I ran one studio; two concurrent ones rest on the agent's
+  5072/5074 run and the unit test.
+- **C1 — VERIFIED.** Git-clean copy with the committed sibling: `build`
+  exit 0, no metadata warning; fvar defaults wght 400 / wdth 100 /
+  opsz 144, avar major 2; `pipeline._evaluate_with_font` at the CSV
+  inputs → `Default 900 MaxOpsz` XTRA 725.89 / XOPQ 316.27 / YOPQ 235.20
+  (csv 726.0 / 316.3 / 235.2), `Default 400 MaxOpsz` exact, `Default 1
+  MinOpsz` XTRA 630.91 (630.9). Without either metadata file: exit 2
+  with the readable message.
+- **C2 — VERIFIED.** `--workdir`: `git status --porcelain --ignored` 0
+  lines before and after; the workdir holds `build config.yaml jobs
+  shadow`.
+- **C3 — VERIFIED with one gap (P2).** Live: exit 0 (C1); exit 1 with
+  the relocation message when an export cannot fit (see C7); exit 2 for
+  missing metadata and for `--default wght=abc` (`error: --default
+  value for 'wght' is not a number: 'abc'`). The gap: a source that
+  exists but cannot be parsed (a one-line garbage `.glyphs`, metadata
+  present) exits **1** with `error: build failed: The source file
+  cannot be read: 'str' object has no attribute 'keys'` — the scope
+  said bad input → 2, and the message is a Python attribute error.
+- **C4 — VERIFIED (through the C7 runs).** `--hide-axes XTRA --format
+  ttf` on top of a config that hides XOPQ → the font hides XTRA only;
+  the TTF and WOFF2 from one config have identical table sets.
+- **C5 — the new `cli-build` job is green on the checkpoint push (run
+  40680788452); the python and rust jobs are red.** One python failure
+  is Phase C's (P1); the rest pre-date the phase (CI0 below). The README
+  documents the flags and the refusal.
+- **C6 — VERIFIED.** `doctor --strict` → 1 with fontc and
+  gftools-builder off PATH (both named, with fix lines), 0 with them on;
+  a missing Fontra is reported as optional and fails neither mode.
+- **C7 — FAILS at the resting style (P3).** `--write-config` emits the
+  sidecar state (5 transforms, `instances.fix/stat false`, `default
+  null`) and exits 0; a config carrying `control` → exit 2 with the
+  studio pointer; both as specified. But the config's `transforms` and
+  `instances` reach the build only through the export re-origin step:
+  - config at the resting style (`default: null`) with slant **off**
+    while the committed sidecar has it **on**, `instances.fix/stat
+    true` → exit 0; the CLI's own shadow step honours the override
+    (only `[transform] round_corners` runs, 7,597 layers, no twin
+    layers) — yet the built font still carries the `slnt` axis and one
+    named instance (`Default 400 MaxOpsz`), and the log has no
+    `spac_widthaware` / `fvar named instances regenerated` / `STAT table
+    rebuilt` lines;
+  - the same config with `default: {wght: 400, opsz: 144}` (the resting
+    location spelled out) → the export step runs in-process: SPAC
+    re-injected, instances regenerated (9), STAT rebuilt, `slnt` gone.
+  Cause: `cli.py` calls `transforms.config.set_override(...)`, a process
+  global (`transforms/config.py:40-47`, read by `entries()` at 76), but
+  the build runs in the worker subprocess (`build_jobs.py:358`) whose
+  spec carries only `ENV_KEYS` and the staged on-disk `-transforms.json`
+  (`SIDECAR_SUFFIXES`); the worker builds from the committed sidecar.
+  The agent's live C7 evidence had `default: {wght: 400, opsz: 14}`, so
+  it only exercised the export path — and on Crispy with the committed
+  transforms (rounding + slant on) that re-origin is refused (`g`: 2,599
+  tuples after relocation; the message says to export at the resting
+  style or disable slant/rounding), so for Crispy as committed the
+  config's transforms and instances currently never apply. Fix: carry
+  the override to the worker — stage the override entries as the job's
+  `-transforms.json` (the committed sidecar is still never rewritten),
+  or put them in the spec and `set_override` in `build_worker` before
+  the build; `instances.fix/stat` ride along as the two folded entries.
+  Test: a config at the resting style with one transform flipped
+  against the sidecar and `instances.fix true` → the built font (no
+  `default`) carries the flipped state and the regenerated instances;
+  pin it through the worker (`tests/test_build_jobs.py`), not through
+  `set_override` in the test process.
+  For the record, not a defect: `instances.fix` yields gftools' standard
+  ladder (Thin … Black at the default of the other axes), not the 30
+  studio rows — the agent's "9 named instances" are those.
+- **C8 — VERIFIED.** `~/avar2-agent/loop.sh` names the reserved set
+  (5070/5071/8001, `~/Documents/Crispy`, `~/avar2-studio-test`) and uses
+  5072/8002; the final run `runs/20261028-181713/probe.log` has 16 PASS
+  / 0 FAIL; the results sections carry root, ports and the git-clean
+  check.
+
+### Follow-ups for the agent (defects found in review — the standing loop)
+
+- **P1 — `tests/test_fontra_port.py:78` asserts
+  `importlib.util.find_spec("fontra") is not None`.** The launcher is
+  stubbed on the line above, so the assert only couples the test to the
+  venv: it fails on every plain `pip install -e .[dev]` (my clone: 1
+  failed / 627 passed) and in both CI python jobs on every Phase C push
+  since `65d2039` — the one CI regression of the phase. Drop the assert
+  and its comment (Fontra is a git-only optional extra, not a dev
+  dependency).
+- **P2 — an existing but unreadable source exits 2 with a readable
+  message** (`error: Crispy.glyphs could not be read: …`, no Python
+  attribute error), pinned in `tests/test_cli_failures.py` with a
+  garbage file beside a valid metadata sibling — the current
+  "unloadable source" case there is not this one.
+- **P3 — C7's override reaches the worker build** (above). P3 first: it
+  changes what C7 claims.
+
+### CI0 — recommended, NOT approved (user decision)
+
+CI on `cleanup-2026-10` has been red since at least `2f51aad`
+(2026-10-21), on every push: the python jobs fail
+`tests/test_glyphs_launcher.py::test_open_starts_the_studio_on_the_first_free_port_and_stop_ends_it`
+("no callback within 20.0s") and
+`tests/test_worker_shadow.py::test_a_shadow_drawing_survives_the_worker_build`
+(`[Errno 2] No such file or directory: 'fontmake' (avar2 build also
+failed: Preview config not found)`); the rust jobs fail
+`clamp_drops_stranded_sources` (`tests/clamp_oracle.rs:221`, fontmake
+missing). `frontend` and `cli-build` are green. If approved: make the
+python and rust jobs green on a plain runner (the worker-shadow fixture
+supplies its preview config or the test skips without fontc; the
+launcher test tolerates a slow runner; the clamp oracle installs
+fontmake or skips without it).
+
+### Verifier-side corrections
+
+The first pass of my loop reported `control-axis FAIL (503)` and `cli
+exit: 0` next to a metadata error. Both were mine: Fontra was absent
+from the fresh venv (it installs from git; `pip install fontra
+fontra-glyphs` finds no `fontra-glyphs` on PyPI), the staged copy lacked
+the C1 sibling, and the exit code was read through a pipe.
+`verify-checkpoint.sh` now installs Fontra from git, stages
+`Crispy-axis-metadata.json` from the legacy file, reads the CLI exit
+directly, checks `--ignored`, and prints pytest's FAILED lines. Every
+number above is from the re-runs.
+
+## Designer Part B finding — B7, the Kinetikern tab (2026-10-28; K1–K4 approved by the user, agent to pick up after the Phase C review)
+
+Found by the designer during B7 on the sanitised studio (port 5071,
+copy of the current `Crispy.glyphs`, SPAC transform on). B1–B6 pass.
+State on that copy: `Crispy-kinetikern.json` with `enabled: true` and
+one entry, `Default 400 MinOpsz` at looseness −0.60. The four notes,
+checked against the code at `8425478`:
+
+**K1 — Kinetikern has no presence outside its own tab: no row badge,
+no off-switch.** Rows in the Instances tab get Grade, Rounding and
+Slant badges (`InstanceRows.jsx:177-197` passes their props); nothing
+for Kinetikern, and the app loads the Kinetikern state only inside
+`KinetikernTab.jsx` (`api.getKinetikern`, line 141). The Transforms
+menu (`Header.tsx:367-464`) lists Grade and the post-build transforms;
+Kinetikern is absent. The sidecar already has the family-level
+`enabled` flag (`kinetikern/sidecar.py:49,54`; `entries()` returns
+nothing when it is off, line 95, so the build honours it; `set_enabled`
+at line 108) — but nothing calls it: `git grep set_enabled` hits only
+`sidecar.py`. Fix: (a) `PUT /api/kinetikern` with `{"enabled": bool}`
+→ `set_enabled` + one shadow rebuild, and a "Kinetikern" row in the
+Transforms menu (toggle, the count of spaced styles, copy along the
+lines of "Per-style spacing from the Kinetikern tab. Off builds
+without it and keeps the entries"); (b) a per-row badge on the
+Instances tab in the Grade badge's pattern: a spaced style shows
+"K −0.60" with Remove (the existing DELETE route) and a jump to the
+Kinetikern tab with that style selected; an unspaced style shows no
+badge (absence means not spaced — spacing is authored in the tab, so
+no "+ Kinetikern" affordance on the row). Load the state in
+`useStudioData` next to `grade` and refresh it after builds. Test:
+unit for the route; a probe scenario that applies on one style →
+that row carries the badge and the Transforms count reads 1; toggle
+off → `/api/kinetikern` reports `enabled false`, the rebuilt font's
+advance of a spaced glyph at that style is back to the unspaced
+value, the badge shows the off state; toggle on → the delta is back.
+
+**K2 — "Apply to all…" replaces every style's looseness with the
+slider's value, silently.** `routes/kinetikern.py:163-182` loops every
+style with parametric coordinates and calls `_kinetikern_apply_one`
+with the one `looseness` from the request; `sidecar.set_entry` (line
+126) drops the existing entry of the same name. The confirm
+(`KinetikernTab.jsx:218`, "Each gets its own correction") is true of
+the deltas and false of the looseness, and `docs/guides/kinetikern.md:40`
+says the same. User decision: keep "all means all" and make the
+overwrite visible, not skip the tuned styles. Fix: the button reads
+"Apply −0.60 to all…" (the slider's value); the confirm names the
+styles that already carry their own looseness and what they will
+become ("Default 400 MinOpsz (−0.60) … will be re-spaced at 0.00");
+with none spaced, the plain confirm; the guide line says it replaces
+each style's looseness. No route change. Test: a node spec with one
+style stored at −0.60 and the slider at 0 → the confirm text names
+that style and its value; after confirming, `/api/kinetikern` shows
+every style at 0.
+
+**K3 — spaced styles are marked by a bare "●", Revert does not say
+what it reverts, and the slider does not sync at load.**
+`KinetikernTab.jsx:399,401` prefix spaced names with `● `; the Revert
+button (line 436) is enabled when the selected style has an entry and
+the status line (456) says "applied at looseness"; the designer did
+not read any of that as "this style is spaced — select it and revert".
+Also, lines 145-147 sync the slider to the entry on `[selected]` only,
+but `entry` derives from `stored`, which arrives async (140-143): when
+the initially selected style is the spaced one, the slider stays at 0
+until the user re-selects. Fix: option text "Default 400 MinOpsz ·
+spaced −0.60"; the Revert button reads "Revert Default 400 MinOpsz"
+(its title says it is disabled during a build); the sync effect also
+depends on `entry?.looseness`. Test: a node spec mounting with the
+first style stored at −0.60 → the slider reads −0.60 on mount, the
+option text carries "spaced −0.60", the Revert button names the style.
+
+**K4 — size: the Font Size slider sits at the top of the left column
+and nothing ties a style to its intended size.** The control exists
+(`KinetikernTab.jsx:325-337`, shared with Preview and Instances, 9–144
+pt) and the panes use it (465-474), but the designer did not find it
+there; and unlike Preview, which starts at the opsz minimum
+(`PreviewTab.jsx:119-128`), picking a style in this tab never moves
+the size. User decision: both. Fix: (a) move the Font Size control
+into `.kk-main`, above the before/after panes next to the sample
+text (still the shared value); (b) `pickInstance` sets the size from
+the style's `opsz` coordinate (`coordOf(inst, 'opsz')`, clamped to
+the slider's range; no opsz axis → leave the size alone; Custom
+location leaves it alone); a manual slider move afterwards wins until
+the next pick. Test: a node spec: pick a style at opsz 72 → "Font
+Size: 72pt"; pick one at opsz 144 → 144pt; move the slider to 36 →
+stays 36 until the next pick; the control renders inside `.kk-main`.
+
+One commit per item with its test, after the Phase C review below is
+closed; the verifier then re-runs the designer's B7 sequence on a
+fresh copy (apply on one style → badge, Transforms toggle, dropdown
+text, Revert, size-on-pick).
