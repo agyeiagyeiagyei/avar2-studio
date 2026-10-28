@@ -776,12 +776,25 @@ def scenario_export(s):
     assert not rest, "console errors:\n" + "\n".join(rest[:10])
 
 
+def axis_metadata_files(src):
+    """The model's axis-metadata file(s) in a staged copy.
+
+    C1 made the COMMITTED sibling ``<stem>-axis-metadata.json`` canonical;
+    ``.avar2-studio/axis-metadata.json`` is the pre-C1 location and may still
+    exist on an older copy.
+    """
+    src = Path(src)
+    out = [p for p in (src / "Crispy-axis-metadata.json",
+                       src / ".avar2-studio" / "axis-metadata.json") if p.exists()]
+    return out
+
+
 def scenario_config_roundtrip(s):
     """A16 — export then import the same bundle: sidecars unchanged."""
     s.load()
     src = Path(s.sources)
     targets = sorted(src.glob("Crispy-*.json")) + sorted(src.glob("Crispy-avar.csv")) + \
-        sorted(src.glob(".avar2-studio/axis-metadata.json")) + \
+        axis_metadata_files(src) + \
         sorted(src.glob(".avar2-studio/instance-renames.json"))
     def snapshot(path):
         """The import's *meaningful* content: every layer pin and axis number.
@@ -886,8 +899,8 @@ def scenario_load_font(s):
     s.page.wait_for_selector(".load-font-menu", timeout=10000)
     files = s.page.locator("input[type=file]")
     files.first.set_input_files([str(src / "Crispy.glyphs"),
-                                 str(src / "Crispy-avar.csv"),
-                                 str(src / ".avar2-studio/axis-metadata.json")])
+                                 str(src / "Crispy-avar.csv")] +
+                                [str(p) for p in axis_metadata_files(src)])
     t0 = time.time()
     while time.time() - t0 < 180:
         h = health(s.url)
