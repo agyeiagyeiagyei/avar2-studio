@@ -68,6 +68,30 @@ def kinetikern_state():
     return jsonify(_kinetikern.sidecar.load(state.ORIGINAL_PATH))
 
 
+@bp.route('/api/kinetikern', methods=['PUT'])
+def kinetikern_set_enabled():
+    """Turn the family's Kinetikern spacing on or off — body
+    ``{"enabled": bool}``.
+
+    The sidecar's ``enabled`` flag is what the build honours (``entries()``
+    returns nothing while it is off), but nothing could reach it from the UI:
+    the only off-switch was hand-editing the sidecar (K1). Toggling rewrites
+    the sidecar and schedules ONE shadow rebuild, so the built font follows.
+    Entries are kept while off — turning it back on restores them.
+    """
+    if state.ORIGINAL_PATH is None:
+        return jsonify({"error": "No source loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        return jsonify({"error": "Body must include 'enabled' (true/false)"}), 400
+    before = bool(_kinetikern.sidecar.load(state.ORIGINAL_PATH).get("enabled", True))
+    after = bool(data["enabled"])
+    stored = _kinetikern.sidecar.set_enabled(state.ORIGINAL_PATH, after)
+    if after != before:
+        server.schedule_shadow_rebuild()
+    return jsonify(stored)
+
+
 def _kinetikern_apply_one(name: str, coords: Dict[str, float], looseness: float,
                           location: Optional[Dict[str, float]] = None) -> Dict:
     """Space ``name`` at ``looseness`` against the current build and store the

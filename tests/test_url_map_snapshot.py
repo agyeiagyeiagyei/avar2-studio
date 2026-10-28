@@ -57,6 +57,7 @@ _EXPECTED = [
     '/api/instances/<instance_name>/grade OPTIONS,PUT',
     '/api/instances/order OPTIONS,PUT',
     '/api/kinetikern GET,HEAD,OPTIONS',
+    '/api/kinetikern OPTIONS,PUT',
     '/api/kinetikern/all OPTIONS,PUT',
     '/api/kinetikern/instances/<instance_name> DELETE,OPTIONS',
     '/api/kinetikern/instances/<instance_name> OPTIONS,PUT',
