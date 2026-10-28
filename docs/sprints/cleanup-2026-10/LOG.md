@@ -1610,3 +1610,23 @@ Commands + results:
     `out/CrispyMini[SPAC,XOPQ,XTRA,YOPQ,opsz,wdth,wght].ttf` 83,716 B;
   - cleanliness check → 0 lines.
 - The real workflow run is on the checkpoint push (it runs on `cleanup-2026-10`).
+
+## Phase C — C6: `doctor --strict`
+
+`doctor` still reports and exits 1 on any failed check. `--strict` narrows that to the
+headless-build prerequisites: `CheckResult` gains `build_prereq` (fontc,
+gftools-builder, glyphsLib set it) and `configured_missing` (the SPAC injector and the
+Kinetikern engine set it when `$AVAR2_SPAC_INJECT` / `$AVAR2_KK2_DYLIB` names a path
+that is not there — a silent fallback to the slow fontTools path is exactly what CI
+should not ship). UI-only checks (frontend bundle, Fontra) are printed but do not fail
+strict mode. `doctor.main(argv)` takes its arguments; `cli.main` passes `argv[1:]`.
+
+Commands + results:
+- `pytest tests/test_doctor_strict.py -q` → 7 passed; `ruff check src tests` clean;
+  `pytest tests/ -q` → **607 passed**.
+- `python -m avar2_studio doctor --strict` → **exit 0**,
+  "All build prerequisites present. `avar2-studio build` can run on this machine."
+- `env PATH=/tmp/fakebin:/usr/bin:/bin python -m avar2_studio doctor --strict` →
+  **exit 1**: `✗ fontc not on PATH`, `✗ gftools-builder not on PATH`,
+  "2 build prerequisite(s) missing." with `brew install fontc` /
+  `pipx install gftools` fixes.

@@ -25,6 +25,7 @@ Usage:
 
 Subcommands:
   doctor                  Run environment checks (fontc, gftools, frontend bundle, …)
+                         --strict exits 1 when a headless-build prerequisite is missing
   build                   Build the font once, headless, and copy it to --out (for CI)
   install-glyphs-plugins  Link the bundled Glyphs 3 plugins into Glyphs (--uninstall removes them)
 
@@ -37,7 +38,7 @@ def main() -> None:
 
     if argv and argv[0] == "doctor":
         from . import doctor
-        doctor.main()
+        doctor.main(argv[1:])
         return
 
     if argv and argv[0] == "build":

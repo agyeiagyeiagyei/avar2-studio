@@ -44,6 +44,14 @@ class CheckResult:
     ok: bool
     detail: str
     fix: Optional[str] = None
+    # A headless-build prerequisite (fontc, gftools-builder, glyphsLib, or a
+    # native engine the environment points at). ``--strict`` fails on these
+    # and ignores UI-only checks — a CI box needs the build, not the bundle.
+    build_prereq: bool = False
+    # Set when the environment CONFIGURED a prerequisite that is missing
+    # (e.g. $AVAR2_SPAC_INJECT names a binary that is not there): that is a
+    # hard failure in strict mode even though the fallback still builds.
+    configured_missing: bool = False
 
 
 def _run_version(binary: str, *args: str) -> Optional[str]:
@@ -90,9 +98,11 @@ def check_fontc() -> CheckResult:
             ok=False,
             detail="not on PATH",
             fix="brew install fontc    # or: cargo install fontc",
+            build_prereq=True,
         )
     version = _run_version("fontc", "--version") or "version unknown"
-    return CheckResult(name="fontc", ok=True, detail=f"{version} at {path}")
+    return CheckResult(name="fontc", ok=True, detail=f"{version} at {path}",
+                       build_prereq=True)
 
 
 def check_gftools() -> CheckResult:
@@ -104,9 +114,11 @@ def check_gftools() -> CheckResult:
             ok=False,
             detail="not on PATH",
             fix="pipx install gftools    # or: pip install gftools",
+            build_prereq=True,
         )
     version = _run_version("gftools-builder", "--version") or "version unknown"
-    return CheckResult(name="gftools-builder", ok=True, detail=f"{version} at {path}")
+    return CheckResult(name="gftools-builder", ok=True, detail=f"{version} at {path}",
+                       build_prereq=True)
 
 
 def check_glyphslib() -> CheckResult:
@@ -118,6 +130,7 @@ def check_glyphslib() -> CheckResult:
             ok=False,
             detail="not importable",
             fix="pip install glyphsLib    # (should have come with avar2-studio's deps)",
+            build_prereq=True,
         )
     try:
         import glyphsLib
@@ -301,6 +314,10 @@ def check_spac_injector() -> CheckResult:
         name="spac-inject (optional)", ok=True,
         detail=detail,
         fix="cargo build --release --manifest-path wasm/fontc-web/Cargo.toml --bin spac-inject",
+        # Strict mode fails when the environment NAMED an injector and it is
+        # not there: the build would silently take the slow, overflow-prone
+        # fontTools path.
+        configured_missing=bool(env) and not found,
     )
 
 
@@ -323,6 +340,7 @@ def check_kinetikern_engine() -> CheckResult:
         name="kinetikern2 (optional)", ok=True,
         detail=detail,
         fix="cargo build --release --manifest-path native/kinetikern2/Cargo.toml",
+        configured_missing=bool(env) and not found,
     )
 
 
@@ -340,8 +358,16 @@ CHECKS: List[Callable[[], CheckResult]] = [
 ]
 
 
-def run() -> int:
-    """Run every check, print results, and return an exit code."""
+def run(strict: bool = False) -> int:
+    """Run every check, print results, and return an exit code.
+
+    Default: 1 when any check fails (the report everything is meant to read).
+    ``strict`` (``doctor --strict``): 1 only when a HEADLESS-BUILD
+    prerequisite is missing — fontc, gftools-builder, glyphsLib, or a native
+    engine the environment points at. The frontend bundle and Fontra are UI
+    concerns; a CI box that only runs ``avar2-studio build`` must not fail on
+    them (findings.md, phase C item C6).
+    """
     print("avar2-studio doctor — checking environment\n")
 
     name_w = max(len(c().name) for c in CHECKS) + 1
@@ -352,6 +378,20 @@ def run() -> int:
         results.append(result)
         mark = _green("✓") if result.ok else _red("✗")
         print(f"  {mark} {result.name:<{name_w}} {_dim(result.detail)}")
+
+    if strict:
+        failures = [r for r in results
+                    if r.configured_missing or (r.build_prereq and not r.ok)]
+        if failures:
+            print(f"\n{_red(f'{len(failures)} build prerequisite(s) missing.')} Fix-it commands:\n")
+            for r in failures:
+                print(f"  # {r.name}: {r.detail}")
+                if r.fix:
+                    print(f"  {r.fix}\n")
+            return 1
+        print(f"\n{_green('All build prerequisites present.')} "
+              "`avar2-studio build` can run on this machine.\n")
+        return 0
 
     failures = [r for r in results if not r.ok]
 
@@ -368,8 +408,17 @@ def run() -> int:
     return 1
 
 
-def main() -> None:
-    sys.exit(run())
+def main(argv=None) -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="avar2-studio doctor",
+                                 description="Check the environment avar2-studio needs.")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 1 when a headless-build prerequisite is missing "
+                         "(fontc, gftools-builder, glyphsLib, a configured engine); "
+                         "ignore UI-only checks")
+    args = ap.parse_args(argv)
+    sys.exit(run(strict=args.strict))
 
 
 if __name__ == "__main__":
