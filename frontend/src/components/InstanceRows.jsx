@@ -5,6 +5,7 @@ import { api } from '../api';
 import { registerPreviewFont } from '../fontLoad';
 import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useTransforms } from '../hooks/useTransforms';
+import { useStudioData } from '../hooks/useStudioData';
 
 function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, defaultOriginNames, originMasterByRow, axes }) {
   // Per-row badge state (grade / rounding / slant) + save handlers come
@@ -18,7 +19,13 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
     handleRemoveInstanceRounding: onRemoveInstanceRounding,
     handleSaveInstanceSlant: onSaveInstanceSlant,
     handleRemoveInstanceSlant: onRemoveInstanceSlant,
+    kinetikern,
+    handleRemoveInstanceKinetikern: onRemoveInstanceKinetikern,
   } = useTransforms();
+  const { setKinetikernFocus } = useStudioData();
+  // A row's K badge can ask the Kinetikern tab to open on its own style; App
+  // watches kinetikernFocus and switches the tab.
+  const openKinetikern = (name) => setKinetikernFocus({ name, at: Date.now() });
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
@@ -195,6 +202,11 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
             slantAxisMin={(axes || []).find(a => a.tag === 'slnt')?.min ?? null}
             onSaveInstanceSlant={onSaveInstanceSlant}
             onRemoveInstanceSlant={onRemoveInstanceSlant}
+            kinetikernEnabled={kinetikern?.enabled !== false}
+            kinetikernLooseness={(kinetikern?.instances || [])
+              .find(e => e.name === instance.name)?.looseness ?? null}
+            onRemoveInstanceKinetikern={onRemoveInstanceKinetikern}
+            onOpenKinetikern={openKinetikern}
             isDefaultOrigin={!!defaultOriginNames?.has(instance.name)}
             originMaster={originMasterByRow?.[instance.name] || null}
           />

@@ -393,6 +393,24 @@ def wait_header_ready(s, timeout=60000):
         "header button.btn-load-font:not([disabled])", timeout=timeout)
 
 
+def kinetikern_toggle(s):
+    """Open the Transforms menu and read the Kinetikern row: its checkbox
+    state, the count flag on the trigger, and the row's descriptive copy."""
+    trigger = s.page.locator("header button.btn-load-font:has-text('Transforms')")
+    trigger.click()
+    s.page.wait_for_selector(".transforms-menu", timeout=10000)
+    row = s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern')")
+    out = {
+        "checked": row.locator("input[type='checkbox']").is_checked(),
+        "desc": row.locator(".transform-desc").inner_text(),
+        "count": s.page.locator("header .count-flag").inner_text()
+        if s.page.locator("header .count-flag").count() else None,
+    }
+    s.page.keyboard.press("Escape")
+    s.page.wait_for_timeout(400)
+    return out
+
+
 def wait_new_build(s, before, timeout=180):
     """Wait for a server-side build (the browser may not POST it)."""
     t0 = time.time()
@@ -638,6 +656,56 @@ def scenario_kinetikern(s):
     assert row_name in revert_text, revert_text
     assert s.page.locator(".kk-main .font-size-control").count() == 1, \
         "the Font Size control must sit in .kk-main"
+
+    # --- K1: Kinetikern is visible outside its tab, and it can be switched
+    # off without losing the entries. ---
+    s.tab("Instances")
+    row = s.page.locator(f"[data-instance-name='{row_name}']")
+    row.wait_for(timeout=15000)
+    badge = row.locator(".kinetikern-badge")
+    assert badge.count() == 1, f"no K badge on the spaced row ({row_name})"
+    badge_text = badge.inner_text()
+    print("    K badge:", badge_text)
+    assert badge_text.startswith("K "), badge_text
+    count_on = kinetikern_toggle(s)
+    print("    transforms count + Kinetikern state:", count_on)
+    assert count_on["checked"], "the Transforms menu's Kinetikern toggle is off"
+    assert "1 style spaced" in count_on["desc"], count_on["desc"]
+
+    # Off: the API says so, the entries survive, and the row stops claiming
+    # spacing (the build ignores it, so a badge would be a lie). The build
+    # seam is covered by tests/test_kinetikern_enabled_route.py.
+    before = health(s.url).get("last_build_time")
+    s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern') "
+                   "input[type='checkbox']").click()
+    wait_new_build(s, before, timeout=240)
+    s.page.wait_for_timeout(1500)
+    data = api_json(s.url, "/api/kinetikern")
+    assert data.get("enabled") is False, data.get("enabled")
+    assert [e.get("name") for e in data.get("instances", [])] == [row_name], \
+        "turning it off must keep the entries"
+    row = s.page.locator(f"[data-instance-name='{row_name}']")
+    assert row.locator(".kinetikern-badge").count() == 0, \
+        "the badge still claims spacing while Kinetikern is off"
+    count_off = kinetikern_toggle(s)
+    print("    after off:", count_off)
+    assert not count_off["checked"], "toggle still reads on"
+    assert count_off["desc"].startswith("Off"), count_off["desc"]
+    s.shot("a13-kinetikern-off")
+
+    # And back on: the entry is restored, the row badges again.
+    before = health(s.url).get("last_build_time")
+    s.page.locator(".transforms-menu .transform-row:has-text('Kinetikern') "
+                   "input[type='checkbox']").click()
+    wait_new_build(s, before, timeout=240)
+    s.page.wait_for_timeout(1500)
+    data = api_json(s.url, "/api/kinetikern")
+    assert data.get("enabled") is True
+    assert [e.get("name") for e in data.get("instances", [])] == [row_name]
+    row = s.page.locator(f"[data-instance-name='{row_name}']")
+    assert row.locator(".kinetikern-badge").count() == 1, "badge did not return"
+    s.tab("Kinetikern")
+
     before = health(s.url).get("last_build_time")
     s.page.click(".kk-btn:has-text('Revert')")
     wait_new_build(s, before, timeout=240)

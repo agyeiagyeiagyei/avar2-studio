@@ -1,16 +1,19 @@
 /**
- * Unit tests for src/kinetikern-copy.js — the B7 findings K2 and K3.
+ * Unit tests for src/kinetikern-copy.js — the B7 findings K1, K2, K3, K4.
  *
- * K2: "Apply to all…" overwrites every style's looseness; the button carries
- * the value it writes and the confirm names the styles it will re-space.
- * K3: the dropdown marks a spaced style with words, and Revert names its style.
+ * K1: a spaced style is visible outside its tab — the row badge reads
+ * "K -0.60" and the Transforms menu reports the count and says what "off"
+ * does. K2: "Apply to all..." overwrites every style's looseness; the button
+ * carries the value it writes and the confirm names the styles it will
+ * re-space. K3: the dropdown marks a spaced style with words, and Revert names
+ * its style. K4: picking a style moves the Font Size to its opsz.
  *
  * Usage: node e2e/kinetikern-copy.spec.mjs
  */
 
 import {
-  applyAllConfirm, applyAllLabel, fmtLooseness, fontSizeForStyle, instanceOptionLabel,
-  revertLabel, spacedStyles,
+  applyAllConfirm, applyAllLabel, badgeLabel, fmtLooseness, fontSizeForStyle,
+  instanceOptionLabel, kinetikernMenuDesc, revertLabel, spacedStyles,
 } from '../src/kinetikern-copy.js';
 
 let failures = 0;
@@ -75,6 +78,21 @@ section('the slider format');
 check('fmtLooseness(-0.6)', fmtLooseness(-0.6) === '-0.60');
 check('fmtLooseness(0)', fmtLooseness(0) === '0.00');
 check('fmtLooseness(1)', fmtLooseness(1) === '+1.00');
+
+section('K1 — the row badge and the Transforms menu');
+check('badge reads K -0.60', badgeLabel(-0.6) === 'K -0.60', badgeLabel(-0.6));
+check('badge reads K 0.00 at zero', badgeLabel(0) === 'K 0.00');
+check('badge reads K +0.25 when loose', badgeLabel(0.25) === 'K +0.25');
+check('badge tolerates a missing value', badgeLabel(undefined) === 'K 0.00');
+const onOne = kinetikernMenuDesc(true, 1);
+check('menu says the count', onOne.includes('1 style spaced'), onOne);
+check('menu says off keeps the entries', onOne.includes('Off builds without it and keeps the entries.'), onOne);
+const onTwo = kinetikernMenuDesc(true, 2);
+check('menu pluralises', onTwo.includes('2 styles spaced'), onTwo);
+const off = kinetikernMenuDesc(false, 2);
+check('off menu says the build ignores it', off.startsWith('Off'), off);
+check('off menu says the entries are kept', off.includes('2 styles spaced'), off);
+check('off menu says how to restore', off.includes('turn it back on'), off);
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nkinetikern-copy: all passed');
 process.exit(failures ? 1 : 0);

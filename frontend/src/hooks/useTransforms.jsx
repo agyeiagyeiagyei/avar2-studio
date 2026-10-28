@@ -18,7 +18,8 @@ const _transformEntries = (list) =>
 
 export function TransformsProvider({ children }) {
   const { setBuilding } = useBuildStatus();
-  const { transforms, setTransforms, grade, setGrade, setError, loadData } = useStudioData();
+  const { transforms, setTransforms, grade, setGrade, setError, loadData,
+          kinetikern, setKinetikern } = useStudioData();
 
   // ---- Post-build transforms (e.g. SPAC) ----
   const transformCommitTimer = useRef(null);
@@ -279,6 +280,46 @@ export function TransformsProvider({ children }) {
     }
   };
 
+  // ---- Kinetikern (per-style spacing) ----
+  // Family switch. Off builds without the corrections but KEEPS them, so the
+  // optimistic update only flips `enabled`; the reload brings the real
+  // payload back (K1).
+  const handleToggleKinetikern = async (enabled) => {
+    const prev = kinetikern;
+    setKinetikern(k => ({ ...k, enabled: !!enabled }));
+    try {
+      setBuilding(true);
+      setError(null);
+      await api.setKinetikernEnabled(!!enabled);
+      await loadData();
+    } catch (err) {
+      setKinetikern(prev);
+      setError(err.message);
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  // A row's K badge Remove: the existing DELETE route drops one style's
+  // entry and the shadow rebuild follows.
+  const handleRemoveInstanceKinetikern = async (instanceName) => {
+    const prev = kinetikern;
+    setKinetikern(k => ({
+      ...k,
+      instances: (k.instances || []).filter(e => e.name !== instanceName),
+    }));
+    try {
+      setBuilding(true);
+      await api.revertKinetikern(instanceName);
+      await loadData();
+    } catch (err) {
+      setKinetikern(prev);
+      setError(err.message);
+    } finally {
+      setBuilding(false);
+    }
+  };
+
   const value = {
     // Header's Transforms menu and InstanceRows' grade badges read the
     // state from here (it lives in useStudioData); without these two the
@@ -286,6 +327,7 @@ export function TransformsProvider({ children }) {
     // the build.
     transforms,
     grade,
+    kinetikern,
     transformsDirty,
     rounding,
     slant,
@@ -299,6 +341,8 @@ export function TransformsProvider({ children }) {
     handleGradeClamp,
     handleSaveInstanceGrade,
     handleRemoveInstanceGrade,
+    handleToggleKinetikern,
+    handleRemoveInstanceKinetikern,
     handleSaveInstanceRounding,
     handleRemoveInstanceRounding,
     handleSaveInstanceSlant,

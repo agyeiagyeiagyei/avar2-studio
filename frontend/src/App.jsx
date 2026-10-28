@@ -29,6 +29,7 @@ function AppShell() {
     fontUrl, builtFontFilename, sampleText, setSampleText, testerState,
     setTesterState, fontSize, setFontSize, axes, instances, avar2Error,
     jumpLocation, glyphsFileHasUnsavedChanges, staticMode, loadData,
+    kinetikernFocus,
   } = useStudioData();
   const { fontraEditor, handleCloseFontraEditor } = useControlAxes();
   const {
@@ -38,6 +39,12 @@ function AppShell() {
   // Which top-level view is active: 'instances' (authoring) or
   // 'preview' (free-form driving of the built font).
   const [mainTab, setMainTab] = useState('instances');
+
+  // A row's Kinetikern badge asked to open the tab on its own style (K1):
+  // switch here, the tab itself selects the name from `kinetikernFocus`.
+  useEffect(() => {
+    if (kinetikernFocus) setMainTab('kinetikern');
+  }, [kinetikernFocus]);
 
   // Rebuild-on-demand: coordinate auto-saves no longer rebuild per
   // edit, so the built font can be stale when the designer opens the

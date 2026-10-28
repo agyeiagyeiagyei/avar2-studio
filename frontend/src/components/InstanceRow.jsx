@@ -4,6 +4,7 @@ import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
 import RoundingBadge from './RoundingBadge';
 import SlantBadge from './SlantBadge';
+import KinetikernBadge from './KinetikernBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
 // S1(d): the ORIGIN tooltip says whether this row's parametric location is a
@@ -28,6 +29,8 @@ function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingC
   onSaveInstanceRounding, onRemoveInstanceRounding,
   slantEnabled, slantPct, slantDefaultPct, slantAxisMin,
   onSaveInstanceSlant, onRemoveInstanceSlant,
+  kinetikernEnabled = false, kinetikernLooseness = null,
+  onRemoveInstanceKinetikern, onOpenKinetikern,
   isDefaultOrigin = false,
   originMaster = null,
 }) {
@@ -271,6 +274,15 @@ function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingC
               defaultPct={slantDefaultPct}
               onSave={onSaveInstanceSlant}
               onRemove={onRemoveInstanceSlant}
+            />
+          )}
+          {/* Absence means "not spaced" — there is no add affordance here. */}
+          {kinetikernEnabled && kinetikernLooseness != null && (
+            <KinetikernBadge
+              instanceName={instance.name}
+              looseness={kinetikernLooseness}
+              onOpen={onOpenKinetikern}
+              onRemove={onRemoveInstanceKinetikern}
             />
           )}
           {/* Coordinates moved below the sample text — see render-end. */}

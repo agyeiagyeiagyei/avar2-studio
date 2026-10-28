@@ -35,6 +35,13 @@ export function StudioDataProvider({ children }) {
   // { enabled, default_pct, instances: [{name, pct}], max_pct: {name: cap} }.
   const [grade, setGrade] = useState({ enabled: false, default_pct: 0.25, intensity: 1,
                                       clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] });
+  // Kinetikern's family switch + per-style looseness (its own sidecar).
+  // Loaded here rather than only inside KinetikernTab so the Instances rows
+  // can badge a spaced style and the Transforms menu can switch it off (K1).
+  const [kinetikern, setKinetikern] = useState({ enabled: true, instances: [] });
+  // {name, at} — a row asked to open Kinetikern on its own style. App switches
+  // the tab, the tab selects the name; `at` makes a repeat request re-fire.
+  const [kinetikernFocus, setKinetikernFocus] = useState(null);
   const [axes, setAxes] = useState([]);
   const [fontLoaded, setFontLoaded] = useState(false);
   // Static demo (GitHub Pages): the api object was swapped for the
@@ -238,13 +245,25 @@ export function StudioDataProvider({ children }) {
             setFontLoaded(true);
           }, 100);
           // Reload instances and axes in case they changed
-          const [instancesData, axesData] = await Promise.all([
+          const [instancesData, axesData, kinetikernData] = await Promise.all([
             api.getInstances(),
             api.getAxes(),
+            // Kinetikern's sidecar is rewritten by the tab and by the row
+            // badge; the shadow rebuild that follows must not leave the badge
+            // or the Transforms count reading the pre-rebuild state (K1).
+            api.capabilities.kinetikern
+              ? api.getKinetikern().catch(() => null)
+              : Promise.resolve(null),
           ]);
 
           setInstances(instancesData.instances);
           setAxes(axesData.axes || []);
+          if (kinetikernData) {
+            setKinetikern({
+              enabled: kinetikernData.enabled !== false,
+              instances: kinetikernData.instances || [],
+            });
+          }
 
           // Restore scroll position after a brief delay
           if (selectedInstanceName) {
@@ -346,12 +365,15 @@ export function StudioDataProvider({ children }) {
         }
       }
 
-      const [instancesData, axesData, mastersData, transformsData, gradeData] = await Promise.all([
+      const [instancesData, axesData, mastersData, transformsData, gradeData, kinetikernData] = await Promise.all([
         api.getInstances(),
         api.getAxes(),
         api.capabilities.masters ? api.getMasters().catch(() => ({ masters: [] })) : Promise.resolve({ masters: [] }),
         api.getTransforms().catch(() => ({ transforms: [] })),
         api.getGrade().catch(() => ({ enabled: false, default_pct: 0.25, intensity: 1, clamp_to_headroom: true, instances: [], max_pct: {}, diagnostics: [] })),
+        api.capabilities.kinetikern
+          ? api.getKinetikern().catch(() => ({ enabled: true, instances: [] }))
+          : Promise.resolve({ enabled: true, instances: [] }),
       ]);
 
       setInstances(instancesData.instances);
@@ -366,6 +388,10 @@ export function StudioDataProvider({ children }) {
         instances: gradeData.instances || [],
         max_pct: gradeData.max_pct || {},
         diagnostics: gradeData.diagnostics || [],
+      });
+      setKinetikern({
+        enabled: kinetikernData.enabled !== false,
+        instances: kinetikernData.instances || [],
       });
       setFontLoaded(health.font_built);
       setFamilyName(health.family_name || null);
@@ -694,6 +720,8 @@ export function StudioDataProvider({ children }) {
     axes, setAxes,
     transforms, setTransforms,
     grade, setGrade,
+    kinetikern, setKinetikern,
+    kinetikernFocus, setKinetikernFocus,
     fontLoaded, setFontLoaded,
     staticMode,
     fontUrl, setFontUrl,

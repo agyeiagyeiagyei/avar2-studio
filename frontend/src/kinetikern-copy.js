@@ -58,6 +58,29 @@ export function revertLabel(name) {
 }
 
 /**
+ * K1 — Kinetikern has to be visible outside its own tab, so an Instances row
+ * that is spaced carries a badge in the Grade badge's pattern. Absence means
+ * "not spaced": spacing is authored in the tab, so a row never offers to add
+ * one.
+ */
+export function badgeLabel(looseness) {
+  return `K ${fmtLooseness(looseness)}`;
+}
+
+/**
+ * K1 — the Transforms menu's Kinetikern row. The count is the number of
+ * spaced styles; the copy has to say what "off" does, because the switch
+ * looks like it deletes the work and does not (entries are kept).
+ */
+export function kinetikernMenuDesc(enabled, count = 0) {
+  const n = Number(count) || 0;
+  const styled = n === 1 ? '1 style spaced' : `${n} styles spaced`;
+  return enabled
+    ? `Per-style spacing from the Kinetikern tab. ${styled}. Off builds without it and keeps the entries.`
+    : `Off — the build uses the source's own spacing. ${styled}; turn it back on to restore them.`;
+}
+
+/**
  * K4 — the size a style was drawn for: its `opsz` coordinate, clamped to the
  * Font Size slider's range. `null` when the source has no opsz axis, so the
  * caller leaves the (shared) size alone.

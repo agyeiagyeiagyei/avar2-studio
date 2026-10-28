@@ -6,6 +6,7 @@ import './Header.css';
 import { api } from '../api';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
 import GradeDiagnostics from './GradeDiagnostics';
+import { kinetikernMenuDesc } from '../kinetikern-copy';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,7 +69,7 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
   // useStudioData.
   const { loading, buildFont: onBuildFont } = useStudioData();
   const {
-    transforms = [], transformsDirty = {}, grade,
+    transforms = [], transformsDirty = {}, grade, kinetikern,
     handleToggleTransform: onToggleTransform,
     handleTransformParam: onTransformParam,
     handleApplyTransform: onApplyTransform,
@@ -76,10 +77,15 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
     handleGradeDefault: onGradeDefault,
     handleGradeIntensity: onGradeIntensity,
     handleGradeClamp: onGradeClamp,
+    handleToggleKinetikern: onToggleKinetikern,
   } = useTransforms();
   // Same formula App drilled as `busy`: building (build signal) or the
   // first-load gate is up.
   const busy = building || loading;
+  // Styles Kinetikern actually has a correction for — the count the menu
+  // reports (K1). Entries survive the family switch, so this is entries,
+  // not "enabled and entries".
+  const spacedCount = (kinetikern?.instances || []).length;
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -122,7 +128,9 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [configOpen]);
 
-  const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0);
+  const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0)
+    + (kinetikern?.enabled !== false && spacedCount > 0 ? 1 : 0);
+    + (kinetikern?.enabled !== false && spacedCount > 0 ? 1 : 0);
 
   const handleLoadExample = async (id: string, name: string) => {
     setOpen(false);
@@ -352,7 +360,7 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
             onChange={handleFileChange}
           />
         </div>
-        {familyName && (transforms.length > 0 || grade) && (
+        {familyName && (transforms.length > 0 || grade || kinetikern) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -437,6 +445,28 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
                       </div>
                     )}
                     <GradeDiagnostics diagnostics={grade.diagnostics} scope="axis" />
+                  </div>
+                </>
+              )}
+              {kinetikern && (
+                <>
+                  <div className="load-font-section-label">Kinetikern</div>
+                  <div className="transform-row">
+                    <label
+                      className="transform-toggle"
+                      title="Per-style spacing from the Kinetikern tab. Off builds the font without it and keeps the entries, so turning it back on restores them."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={kinetikern.enabled !== false}
+                        disabled={busy || (staticMode && !isUploadDataset)}
+                        onChange={(e) => onToggleKinetikern && onToggleKinetikern(e.target.checked)}
+                      />
+                      <span className="transform-name">Kinetikern</span>
+                    </label>
+                    <div className="transform-desc">
+                      {kinetikernMenuDesc(kinetikern.enabled !== false, spacedCount)}
+                    </div>
                   </div>
                 </>
               )}

@@ -777,4 +777,19 @@ export const api = {
     }
     return parseJSON(response);
   },
+
+  // The family switch (K1). Off builds without Kinetikern but keeps the
+  // entries, so this is not a destructive "clear".
+  async setKinetikernEnabled(enabled) {
+    const response = await fetch(`${API_BASE}/kinetikern`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !!enabled }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern toggle failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
 };

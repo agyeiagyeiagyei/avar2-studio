@@ -4,6 +4,7 @@ import AxisControl from './AxisControl';
 import { api } from '../api';
 import { applyAllConfirm, applyAllLabel, fontSizeForStyle, instanceOptionLabel, revertLabel } from '../kinetikern-copy';
 import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
 
 // Kinetikern — per-instance spacing from Kinetikern2's engine (Mirko
 // Velimirovic, MIT). Pick an instance from the dropdown the way the plugin
@@ -34,6 +35,7 @@ function coordOf(instance, tag) {
 
 function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
   const { building } = useBuildStatus();
+  const { kinetikernFocus } = useStudioData();
   const { userAxes, controlAxes, transformAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];
@@ -149,6 +151,11 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, on
   }, []);
   useEffect(() => { reloadStored(); }, [reloadStored]);
   useEffect(() => { if (!building) reloadStored(); }, [building, reloadStored]);
+  // A row's K badge jumps here with its style selected (K1). Keyed on the
+  // request object, so asking for the same style twice re-selects it.
+  useEffect(() => {
+    if (kinetikernFocus?.name) setSelected(kinetikernFocus.name);
+  }, [kinetikernFocus]);
   useEffect(() => {
     if (entry) setLooseness(entry.looseness);
     // K3: `entry` comes from `stored`, which arrives async — keying this on the
