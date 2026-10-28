@@ -139,27 +139,10 @@ def _build(argv) -> int:
     # wait for the queue to drain before reading the outcome globals.
     server.JOBS.wait_for_idle()
 
-    if state.LAST_BUILD_STATUS != "ok" or not state.VARIABLE_FONT_PATH:
-        print(f"error: build failed: {state.LAST_BUILD_ERROR or 'unknown'}", file=sys.stderr)
-        return 1
-    if state.LAST_AVAR2_ERROR:
-        # The plain-VF fallback built, but the avar2 mapping did not. In CI
-        # that is a failure, not a warning — the mapped font IS the product.
-        print(f"error: avar2 build failed (plain fallback built instead): "
-              f"{state.LAST_AVAR2_ERROR}", file=sys.stderr)
-        return 1
-    if state.LAST_GRADE_ERROR:
-        # Grade is declared in the sidecar but its braces were not
-        # generated: the font built, without its GRAD axis. Passing that
-        # off as success is how a missing axis reaches a release.
-        print(f"error: grade generation failed (the font has no GRAD axis): "
-              f"{state.LAST_GRADE_ERROR}", file=sys.stderr)
-        return 1
-    if state.LAST_SOURCE_TRANSFORM_ERROR:
-        # An enabled source-stage transform (round_corners) did not run:
-        # the font built from the un-transformed source.
-        print(f"error: source transform failed (the font built without it): "
-              f"{state.LAST_SOURCE_TRANSFORM_ERROR}", file=sys.stderr)
+    failures = _failure_reasons(state)
+    if failures:
+        for line in failures:
+            print(f"error: {line}", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -167,6 +150,59 @@ def _build(argv) -> int:
     shutil.copy2(state.VARIABLE_FONT_PATH, dest)
     print(dest)
     return 0
+
+
+def _failure_reasons(state_module) -> list:
+    """Every reason this build must not ship, one entry per line.
+
+    A ``degraded`` build (origin relocation failed, S1(b)) used to exit 1 as
+    "build failed: unknown" because ``LAST_BUILD_ERROR`` is empty for it —
+    the relocation message lives in its own global. Nothing recorded may be
+    left out: in CI the exit status is the only thing anyone reads
+    (findings.md, phase C item C3).
+    """
+    reasons = []
+    status = state_module.LAST_BUILD_STATUS
+    if not state_module.VARIABLE_FONT_PATH:
+        reasons.append(
+            f"build failed: {state_module.LAST_BUILD_ERROR or status or 'unknown'}"
+        )
+    elif status not in (None, "ok", "degraded"):
+        reasons.append(
+            f"build status {status}: {state_module.LAST_BUILD_ERROR or 'no reason recorded'}"
+        )
+    if status == "degraded" and not state_module.LAST_ORIGIN_RELOCATION_ERROR:
+        # Degraded with nothing recorded: still not shippable, and still
+        # better than a silent 0.
+        reasons.append("build degraded: no reason recorded")
+    if state_module.LAST_AVAR2_ERROR:
+        # The plain-VF fallback built, but the avar2 mapping did not. In CI
+        # that is a failure, not a warning — the mapped font IS the product.
+        reasons.append(
+            f"avar2 build failed (plain fallback built instead): {state_module.LAST_AVAR2_ERROR}"
+        )
+    if state_module.LAST_ORIGIN_RELOCATION_ERROR:
+        # Degraded: the font built, but without the mapping the source
+        # authored. This is the case that used to read "unknown".
+        reasons.append(
+            f"origin relocation failed (degraded build — the avar2 mapping is not "
+            f"the authored one): {state_module.LAST_ORIGIN_RELOCATION_ERROR}"
+        )
+    if state_module.LAST_GRADE_ERROR:
+        # Grade is declared in the sidecar but its braces were not generated:
+        # the font built, without its GRAD axis. Passing that off as success
+        # is how a missing axis reaches a release.
+        reasons.append(
+            f"grade generation failed (the font has no GRAD axis): {state_module.LAST_GRADE_ERROR}"
+        )
+    if state_module.LAST_SOURCE_TRANSFORM_ERROR:
+        # An enabled source-stage transform (round_corners) did not run: the
+        # font built from the un-transformed source.
+        reasons.append(
+            f"source transform failed (the font built without it): "
+            f"{state_module.LAST_SOURCE_TRANSFORM_ERROR}"
+        )
+    return reasons
 
 
 if __name__ == "__main__":

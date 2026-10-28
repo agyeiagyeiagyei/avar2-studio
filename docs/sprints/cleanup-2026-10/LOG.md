@@ -1531,3 +1531,27 @@ Commands + results:
     3876025604); all other tables sha256-identical. Two builds WITHOUT the flag also
     differ (`c401d36b…` vs `bd36a347…`), so raw byte-identity is a property the build
     does not have run-to-run; the flag changes nothing but the workdir.
+
+## Phase C — C3: every failure reason reaches the exit message
+
+A degraded build (origin relocation failed, S1(b)) exited 1 as "build failed: unknown":
+`LAST_BUILD_ERROR` is empty for it and the relocation message lives in
+`LAST_ORIGIN_RELOCATION_ERROR`. `cli._failure_reasons(state)` now collects every
+recorded reason — build status/error, avar2, origin relocation, grade, source
+transform — one per line, printed by `_build` as `error: …`. A degraded status with
+nothing recorded still reports ("build degraded: no reason recorded") rather than
+exiting silently. Exit codes: 0 ok, 1 degraded/failed, 2 usage/load error.
+
+Commands + results:
+- `pytest tests/test_cli_failures.py -q` → 7 passed; `ruff check src tests` clean;
+  `pytest tests/ -q` → **588 passed**.
+- Live, `~/avar2-agent/c3` (routine staging + `s1_recipe.py --url
+  http://localhost:5072 --sources $R/sources`): after the recipe the studio reported
+  `last_build_status degraded` and `origin_relocation_error` = "glyph 'g' has too many
+  variation tuples for OpenType's per-glyph gvar limit after relocating the default
+  (1767 tuples; …)". Studio stopped, then
+  `python -m avar2_studio build $R/sources/Crispy.glyphs --out $R/out` → **exit 1**,
+  stderr `error: origin relocation failed (degraded build — the avar2 mapping is not
+  the authored one): glyph 'g' has too many variation tuples…`.
+- Exit 2: C1's missing-metadata case (live) and the unloadable-source case (unit).
+  Exit 0: C1's clean build (live).
