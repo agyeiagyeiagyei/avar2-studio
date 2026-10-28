@@ -121,6 +121,12 @@ def _build(argv) -> int:
     ap.add_argument("--format", dest="formats", action="append",
                     choices=("ttf", "woff2"), default=None,
                     help="output format, repeatable (default: ttf)")
+    ap.add_argument("--config", dest="build_config", type=Path, default=None,
+                    help="the committed build config (default: <stem>-build.json "
+                         "beside the source, when present)")
+    ap.add_argument("--write-config", action="store_true",
+                    help="write <stem>-build.json from the current sidecars and "
+                         "exit (no build)")
     ap.add_argument("--csv", type=Path, default=None,
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
@@ -136,17 +142,52 @@ def _build(argv) -> int:
     if meta_problem:
         print(f"error: {meta_problem}", file=sys.stderr)
         return 2
+
+    from . import build_config as _build_config
+    config_path = args.build_config or _build_config.path_for(args.source)
+    if args.write_config:
+        # From the current sidecars: the entries the studio already has, and
+        # the two gftools steps folded into `instances`. `default` and
+        # `axes.hide` are the designer's to fill in.
+        try:
+            written = _build_config.write(config_path,
+                                          _build_config.from_sidecars(args.source))
+        except OSError as exc:
+            print(f"error: could not write {config_path}: {exc}", file=sys.stderr)
+            return 2
+        print(written)
+        return 0
+    cfg = None
+    if config_path.exists():
+        try:
+            cfg = _build_config.load(config_path)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    elif args.build_config is not None:
+        print(f"error: build config not found: {config_path}", file=sys.stderr)
+        return 2
+
     try:
-        hidden_axes = _parse_hide_axes(args.hide_axes)
-        default_location = _parse_default_location(args.default_location)
+        # Flags override the config file (C4 vs C7).
+        hidden_axes = (_parse_hide_axes(args.hide_axes) if args.hide_axes
+                       else list((cfg or {}).get("axes", {}).get("hide", [])))
+        default_location = (_parse_default_location(args.default_location)
+                            if args.default_location
+                            else (cfg or {}).get("default"))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     formats = []
-    for fmt in (args.formats or ["ttf"]):
+    for fmt in (args.formats or (cfg or {}).get("formats") or ["ttf"]):
         if fmt not in formats:
             formats.append(fmt)
     from . import server, state
+    if cfg is not None:
+        # Design-authored state is read-only for the build; the config's
+        # transform entries replace the committed sidecar FOR THIS RUN only.
+        from .transforms import config as _tx_config
+        _tx_config.set_override(_build_config.transform_entries(cfg))
     if args.workdir is not None:
         # Before _apply_source_path: it resolves the workdir from this.
         state.WORKDIR_OVERRIDE = args.workdir.resolve()

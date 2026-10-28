@@ -40,15 +40,21 @@ def test_format_dedupes_and_keeps_order():
     assert formats == ["woff2", "ttf"]
 
 
-def _run_build(tmp_path, monkeypatch, argv):
+def _run_build(tmp_path, monkeypatch, argv, build_config=None):
     """Drive ``cli._build`` with a stubbed build and a stubbed exporter."""
+    import json as _json
+
     from avar2_studio import pipeline, server, state
+    from avar2_studio.transforms import config as _tx_config
 
     project = tmp_path / "checkout"
     project.mkdir()
     source = project / "CrispyMini.glyphs"
     source.write_bytes(b"<glyphs/>")
     (project / "CrispyMini-axis-metadata.json").write_text("{}", encoding="utf-8")
+    if build_config is not None:
+        (project / "CrispyMini-build.json").write_text(
+            _json.dumps(build_config), encoding="utf-8")
     built = tmp_path / "built.ttf"
     built.write_bytes(b"\0\1\0\0")
     monkeypatch.setattr(server, "_apply_source_path", lambda p: None)
@@ -69,6 +75,8 @@ def _run_build(tmp_path, monkeypatch, argv):
         return out
 
     monkeypatch.setattr(pipeline, "_export_pipeline", fake_export)
+    monkeypatch.setattr(_tx_config, "set_override",
+                        lambda entries: calls.append({"override": entries}))
     rc = cli._build([str(source), "--out", str(tmp_path / "out")] + argv)
     return rc, calls, tmp_path / "out"
 
@@ -78,6 +86,67 @@ def test_a_plain_build_copies_the_served_font(tmp_path, monkeypatch):
     assert rc == 0
     assert calls == [], "no export options → no export pipeline"
     assert (out / "built.ttf").exists()
+
+
+def test_the_committed_build_config_drives_the_export(tmp_path, monkeypatch):
+    """C7: no flags at all — <stem>-build.json supplies everything."""
+    cfg = {
+        "format": "avar2-studio-build", "format_version": 1,
+        "axes": {"hide": ["XOPQ", "XTRA"]},
+        "default": {"wght": 400, "opsz": 14},
+        "transforms": [{"type": "slant", "enabled": True, "params": {"angle": -11}}],
+        "instances": {"fix": True, "stat": True},
+        "formats": ["ttf", "woff2"],
+    }
+    rc, calls, out = _run_build(tmp_path, monkeypatch, [], build_config=cfg)
+
+    exports = [c for c in calls if "format" in c]
+    overrides = [c for c in calls if "override" in c]
+    assert rc == 0
+    assert [c["format"] for c in exports] == ["ttf", "woff2"]
+    assert exports[0]["hidden"] == ["XOPQ", "XTRA"]
+    assert exports[0]["default"] == {"wght": 400.0, "opsz": 14.0}
+    assert overrides and overrides[0]["override"] is not None
+    types = {e["type"]: e["enabled"] for e in overrides[0]["override"]}
+    assert types == {"slant": True, "fix_instances": True, "gen_stat": True}
+    assert (out / "CrispyMini.woff2").exists()
+
+
+def test_flags_override_the_build_config(tmp_path, monkeypatch):
+    cfg = {"axes": {"hide": ["XOPQ"]}, "default": {"opsz": 144},
+           "formats": ["woff2"]}
+    rc, calls, _ = _run_build(tmp_path, monkeypatch,
+                              ["--hide-axes", "YOPQ", "--default", "wght=900",
+                               "--format", "ttf"], build_config=cfg)
+    exports = [c for c in calls if "format" in c]
+    assert rc == 0
+    assert [c["format"] for c in exports] == ["ttf"]
+    assert exports[0]["hidden"] == ["YOPQ"]
+    assert exports[0]["default"] == {"wght": 900.0}
+
+
+def test_a_config_naming_design_state_exits_2(tmp_path, monkeypatch, capsys):
+    rc, calls, _ = _run_build(tmp_path, monkeypatch, [],
+                              build_config={"grade": {"pct": 0.25}})
+    assert rc == 2
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "studio-authored" in err and "avar2-studio" in err
+
+
+def test_a_missing_explicit_config_exits_2(tmp_path, monkeypatch, capsys):
+    rc, _, _ = _run_build(tmp_path, monkeypatch, ["--config", "nope.json"])
+    assert rc == 2
+    assert "build config not found" in capsys.readouterr().err
+
+
+def test_write_config_emits_the_file_and_skips_the_build(tmp_path, monkeypatch, capsys):
+    rc, calls, _ = _run_build(tmp_path, monkeypatch, ["--write-config"])
+    assert rc == 0
+    assert calls == [], "--write-config does not build"
+    written = tmp_path / "checkout" / "CrispyMini-build.json"
+    assert written.exists()
+    assert str(written) in capsys.readouterr().out
 
 
 def test_the_export_options_reach_the_pipeline(tmp_path, monkeypatch, capsys):

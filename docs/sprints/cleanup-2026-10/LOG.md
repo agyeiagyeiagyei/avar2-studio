@@ -1630,3 +1630,40 @@ Commands + results:
   **exit 1**: `✗ fontc not on PATH`, `✗ gftools-builder not on PATH`,
   "2 build prerequisite(s) missing." with `brew install fontc` /
   `pipx install gftools` fixes.
+
+## Phase C — C7: one committed build config drives the whole export
+
+`src/avar2_studio/build_config.py` reads/validates `<stem>-build.json`
+(`format`/`format_version`, `axes.hide`, `default`, `transforms`, `instances.fix|stat`,
+`formats`). `avar2-studio build` uses it automatically when it sits beside the source
+(so CI needs no flags), `--config` points elsewhere, `--write-config` emits it from the
+current sidecars and exits. C4 flags override the file. `instances.fix/stat` fold into
+the existing `fix_instances` / `gen_stat` transforms, so there is one mechanism.
+Transforms come from the committed `<stem>-transforms.json` unless the config carries
+`transforms`, which replaces them for that run via `transforms.config.set_override` —
+the sidecar is never rewritten. Any config key naming design-authored state
+(`control`, `grade`, `kinetikern`, `coordinates`, …) is exit 2 with a message pointing
+at the studio.
+
+Commands + results:
+- `pytest tests/test_build_config.py -q` → 16 passed; `tests/test_cli_export_options.py`
+  → 17 passed (5 of them the config wiring); `ruff check src tests` clean;
+  `pytest tests/ -q` → **628 passed**.
+- Live, `~/avar2-agent/c7` (git-clean clone of the committed Crispy copy with
+  `Crispy-build.json` committed; `git status --porcelain --ignored` = 0 lines before
+  and after): `python -m avar2_studio build src/Crispy.glyphs --out out --workdir
+  work` → exit 0. stderr shows the configured transforms ran
+  (`width-aware SPAC injected (-20…40, bias 1, scale 1.25)`, `fvar named instances
+  regenerated`, `STAT table rebuilt`). Artifacts:
+  `out/Crispy[GRAD,LCWD,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,wdth,wght].ttf` + `.woff2`.
+  Font inspection: `XOPQ` hidden; defaults `wght 400`, `opsz 14`, `wdth 100`;
+  9 named instances; `STAT` present; WOFF2 tables == TTF tables.
+- Studio export on the same copy with the same choices
+  (`POST /api/export-font {"hidden_axes":["XOPQ"],"default_location":{"wght":400,
+  "opsz":14},"format":"ttf"}`; the copy's transforms sidecar was set to the config's
+  run: spac_widthaware -20…40 + fix_instances + gen_stat): table-for-table identical
+  except `head` (raw sha256 3e562b66… vs 5d379cc5…; hidden flags and defaults equal,
+  9 instances both).
+- `Crispy-build.json` = `{"control": {"axes": []}}` → **exit 2**,
+  `error: Crispy-build.json: 'control' is studio-authored state — open the source in
+  avar2-studio and edit it there. …`.

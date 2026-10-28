@@ -25,11 +25,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .. import sidecar_io
 
 _SCHEMA_VERSION = 1
+
+# Per-RUN override used by `avar2-studio build --config` (C7): the committed
+# <stem>-transforms.json stays the default and is never rewritten for a build;
+# a build config that carries a ``transforms`` list replaces it for that run.
+_OVERRIDE: Optional[List[Dict]] = None
+
+
+def set_override(entries_list: Optional[List[Dict]]) -> None:
+    """Replace the transforms entries for this process (None clears it)."""
+    global _OVERRIDE
+    _OVERRIDE = None if entries_list is None else [dict(e) for e in entries_list]
+
+
+def override() -> Optional[List[Dict]]:
+    return _OVERRIDE
 
 
 def _empty() -> Dict:
@@ -58,8 +73,9 @@ def load(source_path: Path) -> Dict:
 
 def entries(source_path: Path) -> List[Dict]:
     """The raw ordered list of ``{type, enabled, params}`` as stored."""
+    source = _OVERRIDE if _OVERRIDE is not None else load(source_path).get("transforms", [])
     out = []
-    for e in load(source_path).get("transforms", []):
+    for e in source:
         if not isinstance(e, dict) or not e.get("type"):
             continue
         out.append({
