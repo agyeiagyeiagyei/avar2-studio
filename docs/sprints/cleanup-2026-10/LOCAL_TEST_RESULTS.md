@@ -339,8 +339,27 @@ byte-stable. A12 size comparisons should carry a tolerance.
 
 ## Part B — designer
 
-**NOT RUN.** B1–B10 need Glyphs 3, the Fontra UI, design apps and a real judgement of the
-shapes/spacing; B11–B12 need a push and the live 5070 studio. Nothing was started there.
+Run by the designer on the sanitised copy at `~/avar2-studio-test` (studio on 5071), reported
+in chat and recorded here by the verifier. B1–B7 on 2026-10-28 (code bce032f in memory,
+workers from the live worktree); B8–B10 on 2026-10-29 (5071 restarted on the current worktree,
+`aa6b87f`). Earlier FAILs from this routine (F1 promote drops a pending draft, F2 SPAC never
+reaches the source, F3 the sync dot compares the SPAC key case) were fixed and verified at
+`e325040` before B1 was re-run.
+
+| ID | Result | Notes |
+|---|---|---|
+| B1 | PASS | — |
+| B2 | PASS | — |
+| B3 | PASS | — |
+| B4 | PASS | — |
+| B5 | PASS | — |
+| B6 | PASS | — |
+| B7 | PASS, with four notes | No label for a spaced instance and no way to switch Kinetikern off like grade or slant; "Apply to all" unclear against per-style looseness; the dropdown should mark spaced styles and allow select + revert; a font-size control for previewing at intended sizes. Became K1–K4 (user decisions: K2 overwrite-with-warning, K4 both), fixed and verified at `4d96107` (findings.md). |
+| B8 | PASS | — |
+| B9 | PASS | — |
+| B10 | PASS | The hub opened the studio on the current font (port 5001). First attempt collided with the still-running 5071 on the same folder: the new server's C1 migration removed the legacy `.avar2-studio/axis-metadata.json` the pre-C1 5071 server still staged, so 5071's builds fell to the compiled corner (findings.md, "Observation (2026-10-29 …)"). Re-run with 5071 stopped: pass. Rule: one studio per source folder. |
+| B11 | not yet | Needs the pushes (Pages, fontra-embed `shared-studio-shim`, release wheels) — user's call. |
+| B12 | not yet | The real studio on 5070, after B11. |
 
 ## Findings behind the FAILs (root cause + smallest repro)
 
