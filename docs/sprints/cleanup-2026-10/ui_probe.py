@@ -779,6 +779,11 @@ def scenario_degraded_banner(s):
     sibling = src.parent / f"{src.stem}-axis-metadata.json"
     assert sibling.exists(), f"the staged copy must carry {sibling.name}"
     backup = sibling.read_bytes()
+    # The copy may already be in the corner state (a sources folder that lost
+    # its declared defaults). Then the banner asserts below still apply, but
+    # the restore step cannot prove it clears — say so instead of pretending.
+    started_healthy = health(s.url).get("degraded") is None
+    print("    started healthy:", started_healthy)
 
     def rebuild():
         before = health(s.url).get("last_build_time")
@@ -807,10 +812,14 @@ def scenario_degraded_banner(s):
     finally:
         sibling.write_bytes(backup)
         rebuild()
-        data = health(s.url)
-        assert data.get("degraded") is None, data.get("degraded")
-        s.page.locator(".build-degraded-banner").wait_for(state="detached",
-                                                         timeout=60000)
+        if started_healthy:
+            data = health(s.url)
+            assert data.get("degraded") is None, data.get("degraded")
+            s.page.locator(".build-degraded-banner").wait_for(state="detached",
+                                                             timeout=60000)
+        else:
+            print("    (the copy started degraded; the clear-on-restore check is"
+                  " not applicable)")
 
 
 def scenario_export(s):
