@@ -790,7 +790,9 @@ def scenario_degraded_banner(s):
         req = urllib.request.Request(f"{s.url}/api/build", method="POST",
                                      data=b"{}",
                                      headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=30).read()
+        # 120 s: the handler accepts the job and the POST can sit behind the
+        # queue's own bookkeeping; 30 s timed out mid-scenario (O1).
+        urllib.request.urlopen(req, timeout=120).read()
         wait_new_build(s, before, timeout=300)
 
     try:
@@ -1089,7 +1091,6 @@ SCENARIOS = {
     # sees the plain fallback instead of the mapped font. A12 documents the
     # resting style, so it must run on one.
     "export": scenario_export,
-    "degraded-banner": scenario_degraded_banner,
     "flyout-source": scenario_flyout_source,
     "lifecycle": scenario_lifecycle,
     "multi-broadcast": scenario_multi_broadcast,
@@ -1099,6 +1100,9 @@ SCENARIOS = {
     "tester": scenario_tester,
     "config-roundtrip": scenario_config_roundtrip,
     "load-font": scenario_load_font,
+    # Last: it removes the committed metadata to show the banner, then restores
+    # it — the rebuild that follows must not colour any other scenario.
+    "degraded-banner": scenario_degraded_banner,
 }
 
 
