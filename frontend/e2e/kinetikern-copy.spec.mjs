@@ -12,7 +12,7 @@
  */
 
 import {
-  applyAllConfirm, applyAllLabel, badgeLabel, fmtLooseness, fontSizeForStyle,
+  applyAllConfirm, applyAllLabel, badgeHint, badgeLabel, fmtLooseness, fontSizeForStyle,
   instanceOptionLabel, kinetikernMenuDesc, revertLabel, spacedStyles,
 } from '../src/kinetikern-copy.js';
 
@@ -93,6 +93,17 @@ const off = kinetikernMenuDesc(false, 2);
 check('off menu says the build ignores it', off.startsWith('Off'), off);
 check('off menu says the entries are kept', off.includes('2 styles spaced'), off);
 check('off menu says how to restore', off.includes('turn it back on'), off);
+
+section('K1b — the popover hint names the tab, never a file');
+const hint = badgeHint(-0.6);
+check('hint carries the value', hint.includes('-0.60'), hint);
+check('hint points at the Kinetikern tab', hint.includes('Kinetikern tab'), hint);
+check('hint says the row does not own it', hint.includes('not in this row'), hint);
+for (const word of ['sidecar', 'JSON', 'CSV', '.json', '.csv']) {
+  check(`hint never says "${word}"`, !hint.toLowerCase().includes(word.toLowerCase()), hint);
+}
+check('menu copy never says "sidecar"',
+      !onOne.toLowerCase().includes('sidecar') && !off.toLowerCase().includes('sidecar'));
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nkinetikern-copy: all passed');
 process.exit(failures ? 1 : 0);

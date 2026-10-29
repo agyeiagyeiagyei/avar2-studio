@@ -68,6 +68,16 @@ export function badgeLabel(looseness) {
 }
 
 /**
+ * The badge popover's one line (K1b). It says where the spacing lives in the
+ * UI, never in files: the studio's copy refers to "the studio" and "the
+ * source file", not to sidecars or their formats.
+ */
+export function badgeHint(looseness) {
+  return `Spaced by Kinetikern at ${fmtLooseness(looseness)}. ` +
+    'The deltas live in the Kinetikern tab, not in this row.';
+}
+
+/**
  * K1 — the Transforms menu's Kinetikern row. The count is the number of
  * spaced styles; the copy has to say what "off" does, because the switch
  * looks like it deletes the work and does not (entries are kept).

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './KinetikernBadge.css';
-import { badgeLabel } from '../kinetikern-copy';
+import { badgeHint, badgeLabel } from '../kinetikern-copy';
 
 /**
  * Per-row Kinetikern marker, in the Grade badge's pattern (B7 K1).
@@ -44,8 +44,7 @@ function KinetikernBadge({ instanceName, looseness, onOpen, onRemove }) {
       {open && (
         <div className="kinetikern-popover" onClick={(e) => e.stopPropagation()}>
           <div className="kinetikern-popover-hint">
-            Spaced by Kinetikern at {lo.toFixed(2)} — deltas live in the
-            Kinetikern sidecar, not in this row.
+            {badgeHint(lo)}
           </div>
           <div className="kinetikern-popover-actions">
             <button

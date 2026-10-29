@@ -65,6 +65,19 @@ def _build(tmp_path, monkeypatch, mappings, sub="a", report=None):
                                       relocation_report=report)
 
 
+def _differing_tables(first, second):
+    """Table tags whose bytes differ between two saved fonts."""
+    a, b = TTFont(str(first)), TTFont(str(second))
+    try:
+        tags = set(a.reader.keys()) | set(b.reader.keys())
+        return {tag for tag in tags
+                if tag not in a.reader or tag not in b.reader
+                or a.getTableData(tag) != b.getTableData(tag)}
+    finally:
+        a.close()
+        b.close()
+
+
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")
 def test_default_row_relocates_and_table_is_exact(tmp_path, monkeypatch):
     # Build-time relocation is EXPORT-ONLY by default now (gvar ~7x cost
@@ -307,7 +320,6 @@ def test_a_failed_relocation_is_memoised(tmp_path, monkeypatch):
 
     first_report = {}
     first = _build(tmp_path, monkeypatch, MAPPINGS, sub="a", report=first_report)
-    first_bytes = first.read_bytes()
     assert first_report.get("memo") == "miss", first_report
     assert "too many variation tuples" in (first_report.get("error") or "")
 
@@ -317,7 +329,18 @@ def test_a_failed_relocation_is_memoised(tmp_path, monkeypatch):
     assert second_report.get("error") == first_report["error"], (
         "the cached verdict must be the same error, not a paraphrase")
     assert len(fits) == 1, "the failed fit must not run twice for the same key"
-    assert second.read_bytes() == first_bytes
+    # Content, not bytes: `head.modified` is a timestamp, so two builds that
+    # straddle a second boundary differ in `head` only — which is exactly what
+    # made this intermittent on the macOS runner (it never failed locally,
+    # where both builds land inside one second; CI0d). The digest excludes
+    # `head`, and the differing-table assert proves that is the only thing that
+    # moved rather than hiding a real difference behind a tolerant comparison.
+    assert (pipeline._font_content_digest(second)
+            == pipeline._font_content_digest(first)), (
+        "the cached failure must leave the font content unchanged")
+    assert _differing_tables(first, second) <= {"head"}, (
+        _differing_tables(first, second),
+        "only head.modified may differ between two builds of one source")
 
 
 @pytest.mark.skipif(not FONTC.exists(), reason="fontc not in venv")

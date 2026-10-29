@@ -1840,3 +1840,18 @@ Verification at this state:
 Not verified locally, stated plainly: `cargo test` (the fontations stack is a
 10+ minute cold build) — CI ran it, and both rust legs are green, including
 `clamp_drops_stranded_sources` with fontmake installed.
+
+## K1b — the badge popover named a file
+
+The verifier's copy note: the popover read "deltas live in the Kinetikern
+sidecar, not in this row", and the studio's UI copy never names sidecars or
+their formats. The string is now `badgeHint(looseness)` in
+`frontend/src/kinetikern-copy.js` — "Spaced by Kinetikern at -0.60. The deltas
+live in the Kinetikern tab, not in this row." — and the node spec pins it and
+asserts it never says sidecar/JSON/CSV.
+
+Commands + results:
+- `node e2e/kinetikern-copy.spec.mjs` → all passed (9 new cases).
+- `eslint` on the two touched files → 0 problems; `tsc --noEmit` clean;
+  `npm run test:unit` → 0 failing cases; `npm run build` green.
+- `grep -rn sidecar frontend/src` → every remaining hit is a comment, not copy.
