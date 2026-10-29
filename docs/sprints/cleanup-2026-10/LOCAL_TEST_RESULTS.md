@@ -1069,3 +1069,17 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   Failing scenarios:
   - FAIL degraded-banner: timed out
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### Loop run 2026-10-29T10:56:16Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261029-173630/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261029-173630/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 16 / FAIL 1 (log: `/Users/agyei/avar2-agent/runs/20261029-173630/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-173630/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+
+  Failing scenarios:
+  - FAIL degraded-banner: timed out
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
