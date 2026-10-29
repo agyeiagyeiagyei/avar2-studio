@@ -998,3 +998,14 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
 | K1b | PASS | The badge popover said "deltas live in the Kinetikern **sidecar**, not in this row" — UI copy never names sidecar/JSON/CSV files (the standing rule). The string moved out of `KinetikernBadge.jsx` into `kinetikern-copy.js` as `badgeHint(looseness)`: "Spaced by Kinetikern at -0.60. The deltas live in the Kinetikern tab, not in this row." `e2e/kinetikern-copy.spec.mjs` pins it (carries the value, names the tab, says the row does not own the spacing) and asserts it contains none of `sidecar`, `JSON`, `CSV`, `.json`, `.csv` — plus the same check on the Transforms menu copy. Grepped the rest of `frontend/src`: every other `sidecar` hit is a code comment or docstring, so this was the only user-visible one. |
+
+### Loop run 2026-10-29T08:12:21Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261029-145640/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261029-145640/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **0** — PASS 16 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261029-145640/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-145640/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
