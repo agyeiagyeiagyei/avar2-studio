@@ -1010,3 +1010,14 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
 | CI0d | PASS (local) | `test_a_failed_relocation_is_memoised` compared the two saved fonts' raw bytes, so two builds straddling a second boundary differ in `head.modified` and the test is intermittent on a slow runner (red on the macOS legs of runs 40723781794 and 40716800627, never locally). It now asserts `pipeline._font_content_digest(second) == pipeline._font_content_digest(first)` — the helper excludes `head` for exactly this reason — and, to prove the hypothesis rather than hide it, that the set of tables whose bytes differ is a subset of `{'head'}` (the failure message lists the differing tables). The new `_differing_tables()` helper was checked directly: identical copies → `set()`, a bumped `head.modified` → `{'head'}`, a changed `name` table → `{'head', 'name'}`. `pytest tests/test_avar2_default_relocation.py -q` → 12 passed; `pytest tests/ -q` → 637 passed; `ruff check src tests` clean. |
+
+### Loop run 2026-10-29T08:33:19Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261029-151746/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261029-151746/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **0** — PASS 16 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261029-151746/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-151746/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
