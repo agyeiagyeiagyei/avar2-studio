@@ -1951,3 +1951,18 @@ Two code facts surfaced by the fact-check are not documentation and go to the ag
 - **A2** — `src/avar2_studio/kinetikern/__init__.py:38` and `src/avar2_studio/transforms/builtin_spac_widthaware.py:69` cite `docs/decisions/0015` for the wheel-carried `bin/` binaries; no such record exists. Write decision 0015 (the platform wheels carry `spac-inject` and `libkinetikern2` under `avar2_studio/bin/`, built by `release.yml`'s platform matrix; lookup order env → wheel → repo build), dated from the commit that introduced the lookup, and add it to the decisions index.
 
 E1 acceptance gains (6): the README's export paragraph, the CLI reference and SIDECARS (zip contents) carry the new format in the same commit, in whatever shape the documentation decisions below settle on; until then, the minimal line in each.
+
+## D1 approved (user decision 2026-10-29): apply the documentation audit
+
+`DOCS_AUDIT.md` is the spec: section 2 (the shape and the per-document targets), section 3 (the must-fix list), Appendix D (the tables of contents) and Appendices A–C (every stale row and every duplicate, with code evidence). Queue D1 after A2 and before the checkpoint; one commit per document (README; docs/README.md; CLI.md; the five guides, one each; SIDECARS; DEVELOPMENT; ARCHITECTURE; decisions; examples (one commit for the three); the archive/delete moves), each commit message naming the appendix rows it resolves.
+
+Rules for the rewrite:
+- Facts come from the code, never from the old text; a row marked WRONG or OUTDATED is fixed or removed, never softened. UNVERIFIABLE rows are removed unless the agent measures them (then the number and the date go in).
+- The reader set (README, docs/README.md, the five guides, the three example READMEs) names tabs, menus and buttons as the UI spells them; no routes, module names, symbols, test names or sprint-ticket ids. Where a mechanism matters, one sentence and a link to the Architecture section.
+- The README install section says the studio installs from git until 0.1.0 is on PyPI, with the `pipx install git+…` line first; the CI examples use the git URL too. When 0.1.0 is published, that is a one-line change.
+- Every duplicate in Appendix C is written once, in the document Appendix C's first column points at, and linked from the others.
+- The appendices (CLI.md, ARCHITECTURE, DEVELOPMENT, SIDECARS, decisions, the plugin README's development notes) keep their developer register; ARCHITECTURE and SIDECARS drop the "as of 2026-10-16" dating and the sprint-ticket annotations and get a "checked against the code at <sha>" line instead. DEVELOPMENT loses the two personal session rules.
+- `docs/HANDOVER.md` moves to `docs/archive/`; `docs/authoring-instances.md` is deleted (every link already points at the guide); `docs/README.md` links `CODEBASE_AUDIT.md`, `sprints/` and `archive/` under one *Internal* line.
+- E1's documentation lines (README export paragraph, CLI.md, SIDECARS zip contents) are written into the new shape, not the old.
+
+Acceptance (verifier, at the checkpoint): the two fact-check briefs are re-run against the new documents and return no WRONG, OUTDATED or MISSING rows for anything landed by then; every relative link and anchor in the reader set and the appendices resolves (a link-check script or `markdown-link-check` run, output in LOG.md); line counts within the section-2 targets (README ≤ ~150, each guide ≤ ~100, docs/README.md one screen); a grep of the reader set for `/api/`, `_[a-z]+\(`, `.py`, `T[0-9]\.` and `tests/` returns nothing; the decisions index lists fourteen (fifteen with A2), 0007's header matches its update; the Pages site after B11a serves the new README.

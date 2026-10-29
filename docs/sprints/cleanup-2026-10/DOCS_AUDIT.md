@@ -86,6 +86,8 @@ Plain-language summary; line-level evidence in Appendices A and B.
 3. **Who applies it.** The agent, as sprint item D1 after E1 and before the Pages merge (B11a), so the site ships the updated docs — or me. *Recommendation: the agent, one commit per document, with the fact tables below as its checklist; I verify each claim again at the checkpoint.*
 4. **Internal records.** Keep `CODEBASE_AUDIT.md` and the sprint folder linked from the docs map under *Internal*, or unlink them. *Recommendation: keep, one line.*
 
+**Decisions taken (user, 2026-10-29): all four recommendations approved** — the reader-set / appendix split; the README says "from git until 0.1.0 is on PyPI"; the agent applies it as sprint item D1 (findings.md), after E1 and before the Pages merge, with the verifier re-checking every row below at the checkpoint; the internal records stay linked under *Internal*.
+
 Two code notes surfaced by the audit, not documentation: `frontend/src/components/Header.tsx` carries a duplicated no-op expression line after the `enabledCount` assignment (from K1), and two modules cite a decision 0015 that was never written (the wheel-carried `bin/` binaries). Both go to the agent as one-line items regardless of the decisions above.
 
 ---
