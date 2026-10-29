@@ -1898,3 +1898,20 @@ Designer-side recovery (not done by the verifier — 5071, 5001 and `~/avar2-stu
 - **CI0 acceptance — MET.** Test workflow run **40843477514** on `bdd63a1`, the checkpoint push commit itself: success. Runs 40842980952 (`aa6b87f`) and 40841117105 (`83908a2`) also green. Read from `gh run list`, not from the agent's note.
 
 Verdict: the approved queue (P1–P3, K1–K4, K1b, CI0a–d) is fully VERIFIED at `aa6b87f`. Nothing is queued for the agent. Open for the user: the two observations above (silent corner build; migration unlinking the legacy file), the Thin–Black ladder (Google Fonts meeting), the fontra-embed `shared-studio-shim` push, the `cleanup-2026-10` → `github-pages` merge, and the 5071 restart.
+
+## O1 and O2 approved (user decision 2026-10-29: "proceed with the rest")
+
+Both come from the "Observation (2026-10-29 …)" section above; evidence and repro builds are there (`~/avar2-verifier/diag/`). One commit each with its test; the agent's loop after each push; `STATE: checkpoint` when both are in and the Test workflow run on that push commit is green.
+
+**O1 — a build with no declared axis defaults must say so, not report `ok`.**
+- Today: with `<stem>-axis-metadata.json` absent or `{}`, `_declared_axis_ranges` is empty, no CSV row is a default row, the relocation target is `{}`, the font rests at the compiled corner (user axes default to the first master: Crispy wght 1 / wdth 5 / opsz 14) and health says `last_build_status: ok`, `degraded: None`, `last_origin_warning: None`. The designer saw "deformed instances" with no message.
+- Required (studio path): reuse S1(b)'s machinery — when relocation is on and the target is empty because no declared user-axis defaults exist while the CSV has mapped rows (or a `default-origin` exists), mark the build **degraded** with a reason that names the file (`<stem>-axis-metadata.json` missing or empty — the font rests at the compiled corner), surface it in health and the existing banner, and log it at warning level. Do not refuse in the studio (the preview must keep working); do not change the CLI's behaviour, which already exits 2 for missing metadata (C1) — add a test for that exit if none pins it.
+- Also: `_load_axis_metadata` creating an empty `{}` file silently is part of the same silence — log it at warning level with the path.
+- Test: a worker build of crispy-mini with the sibling removed → health `degraded` truthy, reason names the file, `last_build_status` still `ok`; with the sibling present → `degraded` None. Probe: the banner text visible in the UI for that state (one scenario or an assert in an existing one).
+
+**O2 — the C1 migration must not unlink the legacy file.**
+- Today: `_get_avar2_metadata_path()` writes the sibling and `legacy.unlink()`s `.avar2-studio/axis-metadata.json`. Any older process on the same folder (this sprint: the pre-C1 5071 server, whose `_stage` copies `PREVIEW_FILES` including the legacy name) then stages no metadata and builds at the corner.
+- Required: copy, don't move. Write the sibling, keep the legacy file, log "migrated to <sibling>; legacy copy kept for older studio versions (safe to delete)". The sibling stays canonical (it is read first), so a stale legacy file is never consulted by current code.
+- Test: after a first load with legacy only, both files exist with equal content and the sibling is what `_get_avar2_metadata_path()` returns; a second load does not rewrite either.
+
+Not for the agent: B11 (pushes) and B12 (5070 on the real Crispy) are the designer's; the Thin–Black ladder goes to the Google Fonts meeting.
