@@ -1109,3 +1109,18 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
 | O2 | PASS | The C1 migration copies `sources/.avar2-studio/axis-metadata.json` to the sibling instead of `unlink()`ing it, and says so in the log ("the legacy .avar2-studio/ copy is kept for older studio versions (safe to delete)"). The sibling stays canonical — it is read first, so a stale legacy file is never consulted by this code. `tests/test_axis_metadata_sibling.py::test_a_legacy_file_is_copied_not_moved` asserts both files exist with equal content after a first load with legacy only, that the sibling is what `_get_avar2_metadata_path()` returns, and that a second access rewrites neither (mtimes unchanged). `pytest tests/ -q` → 641 passed; ruff clean. |
+
+### Loop run 2026-10-29T11:57:39Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261029-184235/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261029-184235/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 15 / FAIL 2 (log: `/Users/agyei/avar2-agent/runs/20261029-184235/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-184235/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+
+  Failing scenarios:
+  - FAIL kinetikern: Apply is disabled
+  - FAIL degraded-banner: a corner build must be marked degraded
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
