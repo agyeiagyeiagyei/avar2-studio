@@ -1819,7 +1819,7 @@ Commands + results:
 ## Checkpoint ROUND 18
 
 All of the approved queue is in at `4d96107` (one commit each, K2–K4 sharing
-one because they are one file's copy and layout): P3 `14a0d73`, P1 `6689b6`,
+one because they are one file's copy and layout): P3 `14a0d73`, P1 `668b9b6`,
 P2 `393e093`, K1 route `619da0f`, K2–K4 `056a551`, K1 UI `0ee5c90` (+
 `944fd13` for the badge timing the probe found), CI0 `0169274` (+
 `2237df9` for the parity entry and the reverse DNS).
@@ -1855,3 +1855,26 @@ Commands + results:
 - `eslint` on the two touched files → 0 problems; `tsc --noEmit` clean;
   `npm run test:unit` → 0 failing cases; `npm run build` green.
 - `grep -rn sidecar frontend/src` → every remaining hit is a comment, not copy.
+
+## CI0d — the flaky byte assert, and a bookkeeping slip
+
+`test_a_failed_relocation_is_memoised` compared `second.read_bytes()` with the
+first build's. `head.modified` is a timestamp, so two builds that straddle a
+second boundary differ there and nowhere else — which is why it failed on the
+macOS runner and never locally. It now compares
+`pipeline._font_content_digest` (which excludes `head`) **and** asserts the
+differing-table set is a subset of `{"head"}`, so the hypothesis is proven per
+run instead of being assumed; the message lists the tables that differed.
+
+`_differing_tables()` was exercised directly: identical copies → `set()`,
+bumped `head.modified` → `{'head'}`, changed `name` table → `{'head', 'name'}`.
+
+Bookkeeping, stated plainly: the assert itself landed in `117f99a` (K1b) — it
+was staged with K1b's `git add -A`, so that commit carries K1b's copy change
+*and* this test. The CI0d commit holds the evidence. Also fixed the review's
+Minor note: the ROUND 18 paragraph above cited P1 as `6689b6`; it is
+`668b9b6`.
+
+Commands + results:
+- `pytest tests/test_avar2_default_relocation.py -q` → 12 passed.
+- `pytest tests/ -q` → **637 passed**; `ruff check src tests` clean.
