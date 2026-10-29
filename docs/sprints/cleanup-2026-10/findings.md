@@ -1915,3 +1915,13 @@ Both come from the "Observation (2026-10-29 …)" section above; evidence and re
 - Test: after a first load with legacy only, both files exist with equal content and the sibling is what `_get_avar2_metadata_path()` returns; a second load does not rewrite either.
 
 Not for the agent: B11 (pushes) and B12 (5070 on the real Crispy) are the designer's; the Thin–Black ladder goes to the Google Fonts meeting.
+
+## B11 pushes approved for the agent (user decision 2026-10-29: "the agent can do the pushes too")
+
+Sequenced **after** the O1/O2 checkpoint is verified (the deployed site must carry verified code): STATUS will say `APPROVED: B11a–c` at that point; do not start them before. No force-push, no history rewrite, no bare `git stash`, no PyPI publish.
+
+- **B11a — Pages.** Merge `cleanup-2026-10` into `github-pages` with a regular merge commit (no squash, no rebase), push `github-pages`, then read the Pages workflow run for that push and confirm it is green and the site serves the new bundle (cite the run id and the served asset hash). Conflicts: tool code from the sprint branch; `github-pages`-only site content kept.
+- **B11b — fontra-embed.** Push `~/Documents/fontra-embed` branch `shared-studio-shim` (HEAD `3de37a6`, on top of `f063a02`) to `origin` (`agyeiagyeiagyei/fontra-embed`), as a branch — opening a PR against its default branch is fine; merging it is the user's call. If fontra-embed has its own deploy workflow, read its run.
+- **B11c — release wheels, dry run only.** Run `release.yml` via `workflow_dispatch` (artifacts to the run page; `publish_to: testpypi` allowed as the dry run), download the wheels, install one into a clean venv on this machine and run `avar2-studio doctor --strict`: both accelerators (spac-inject, kinetikern2) must be found. **Do not push a version tag** — a tag push publishes to PyPI and cannot be repeated for the same version; that step stays with the user.
+
+Acceptance for each: the run id and its conclusion read from `gh`, plus the doctor output for B11c, in LOG.md; `STATE: checkpoint` after B11c.
