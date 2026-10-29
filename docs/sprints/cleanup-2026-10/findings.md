@@ -1889,3 +1889,12 @@ Two things worth a decision (user's call):
 2. **Migration unlinks a file another process may still read.** One-time mixed-version hazard in this sprint (old server + new worker on one folder); in the field it only bites if two studio versions share a folder. Keeping the legacy file (copy, not move) until the sibling is committed would be the conservative form.
 
 Designer-side recovery (not done by the verifier — 5071, 5001 and `~/avar2-studio-test` are the designer's): close the 5001 studio; restart 5071 with the same command and environment it was started with (the current worktree code then reads the sibling that now exists), or restore `.avar2-studio/axis-metadata.json` from `Crispy-axis-metadata.json` if 5071 must keep running as is — but a new-code process on that folder will migrate it again.
+
+## Verifier review of the ROUND 19 checkpoint `aa6b87f` / push `bdd63a1` (2026-10-29) — K1b and CI0d VERIFIED; CI0 acceptance met on the push commit itself
+
+- Automated pass (`~/avar2-verifier/reports/aa6b87f.md`, 15:38–15:55): pytest 635 passed / 2 skipped, ruff clean, eslint 0, typecheck ok, unit ok, build ok; CLI build on a git-clean copy exit 0, clean after; probe **16/16** on 5073 with Fontra on 8003 (the verifier venv now installs Fontra from the git URLs, so `control-axis` passes in the unattended run).
+- **K1b — VERIFIED.** `117f99a`: the popover hint is `badgeHint()` in `frontend/src/kinetikern-copy.js` ("Spaced by Kinetikern at −0.60. The deltas live in the Kinetikern tab, not in this row."), pinned in the node spec; the probe's kinetikern scenario passed on this code.
+- **CI0d — VERIFIED.** `83908a2`: the memo test compares `pipeline._font_content_digest` and asserts `_differing_tables(first, second) <= {"head"}`, with the failing message listing the tables — the hypothesis is proven by the assert rather than hidden.
+- **CI0 acceptance — MET.** Test workflow run **40843477514** on `bdd63a1`, the checkpoint push commit itself: success. Runs 40842980952 (`aa6b87f`) and 40841117105 (`83908a2`) also green. Read from `gh run list`, not from the agent's note.
+
+Verdict: the approved queue (P1–P3, K1–K4, K1b, CI0a–d) is fully VERIFIED at `aa6b87f`. Nothing is queued for the agent. Open for the user: the two observations above (silent corner build; migration unlinking the legacy file), the Thin–Black ladder (Google Fonts meeting), the fontra-embed `shared-studio-shim` push, the `cleanup-2026-10` → `github-pages` merge, and the 5071 restart.
