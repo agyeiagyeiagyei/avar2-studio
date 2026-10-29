@@ -1135,3 +1135,14 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `ui_probe.py all`: exit **0** — PASS 17 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261029-185821/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-185821/shots`)
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### E1 — sources export (2026-10-29, root `~/Documents/avar2-studio-sprint`, venv)
+
+- `pytest tests/test_sources_export.py -q` → **5 passed** (zip contents, README, UI copy parity, usage error, fontmake round trip)
+- `pytest tests/test_cli_export_options.py -q` → **21 passed**; `pytest tests/test_export_sources_route.py -q` → **3 passed**
+- `pytest tests/ -q` → **653 passed**; `ruff check src tests` clean
+- frontend: `eslint` clean on the touched files, `npm run test:unit` pass, `npm run build` green, `build/` rsynced to `src/avar2_studio/static/`
+- round trip basis: fontc-plain vs fontmake-sources at every CSV row's parametric output → **worst 0.0 u**; the studio's avar2 TTF is not comparable (fontmake ignores designspace 5 `<mappings>`; measured 8–4835 u) — see LOG.md, E1
+- probe `export-sources` (studio 5074 / Fontra 8004, `HOME=/tmp/e1probe`, crispy-mini) → **PASS** (warning read from the DOM before download; zip 626 entries, 1 designspace, 8 UFOs, README)
+- the probe found two seams the unit tests missed; both fixed and pinned: a 500 from `entries()` missing its source path, and a 404 because `export_artifact` ignored `.zip`
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`

@@ -147,8 +147,13 @@ def export_font():
     hidden = body.get("hidden_axes") or []
     default_location = body.get("default_location") or None
     fmt = body.get("format") or "ttf"
-    if fmt not in ("ttf", "woff2"):
-        return jsonify({"error": "format must be ttf or woff2"}), 400
+    if fmt not in ("ttf", "woff2", "sources"):
+        return jsonify({"error": "format must be ttf, woff2 or sources"}), 400
+    if fmt == "sources" and default_location:
+        # A designspace default must be a master location; the sources rest at
+        # the compiled origin (E1). Bad input, not a build failure.
+        return jsonify({"error": "sources rest at the compiled origin; the "
+                                 "default location applies to ttf/woff2 only"}), 400
 
     if default_location:
         tt = TTFont(str(state.VARIABLE_FONT_PATH), lazy=True)
@@ -164,8 +169,18 @@ def export_font():
         if not requested:
             return jsonify({"error": "default_location has no known axis values"}), 400
 
+    composed = []
+    if fmt == "sources":
+        # Name the composed source-stage transforms in the README; the list is
+        # the enabled entries the build itself reads.
+        from ..transforms import config as _tx_config
+        base = state.ORIGINAL_PATH or state.GLYPHS_PATH
+        composed = [e.get("type") for e in _tx_config.entries(base)
+                    if e.get("enabled")]
     job_id = server.JOBS.submit_export(hidden_axes=hidden, default_location=default_location,
-                                format=fmt)
+                                format=fmt,
+                                family_name=server.get_font_family_name(state.GLYPHS_PATH),
+                                composed_transforms=composed)
     if job_id is None:
         return jsonify({"error": "No source loaded"}), 400
     return jsonify({"job_id": job_id, "status": "queued"}), 202

@@ -187,6 +187,22 @@ def test_a_woff2_export_carries_the_format(queue):
     assert artifact.read_bytes() == b"faux-export-woff2"
 
 
+def test_a_sources_export_is_downloadable_as_a_zip(queue):
+    """E1: the zip rides the same job and the same download route.
+
+    The first live run 404'd here: ``export_artifact`` only accepted .ttf and
+    .woff2, so a finished sources job had no artifact to serve.
+    """
+    queue.request_build()
+    assert queue.wait_for_idle(timeout=30)
+    job_id = queue.submit_export(hidden_axes=[], default_location=None,
+                                 format="sources", family_name="Mini")
+    assert _wait_for(queue, lambda: queue.export_artifact(job_id), 30)
+    artifact = queue.export_artifact(job_id)
+    assert artifact.name.endswith(".zip")
+    assert artifact.read_bytes() == b"faux-export-sources"
+
+
 def test_a_successful_build_queues_woff2_compression(queue, monkeypatch):
     runs = os.path.join(tempfile_dir(), "runs.log")
     monkeypatch.setenv("STUB_WORKER_RUNS", runs)

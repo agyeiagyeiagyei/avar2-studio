@@ -29,7 +29,9 @@ if spec["kind"] == "build":
                   last_build_error=None, last_build_time=time.time())
 elif spec["kind"] == "export":
     fmt = spec.get("format", "ttf")
-    art = out / ("Mini-export.woff2" if fmt == "woff2" else "Mini-export.ttf")
+    name = {"woff2": "Mini-export.woff2", "sources": "Mini-sources.zip"}.get(
+        fmt, "Mini-export.ttf")
+    art = out / name
     art.write_bytes(b"faux-export-" + fmt.encode())
     result.update(artifact=str(art), artifact_name=art.name)
 elif spec["kind"] == "compress":

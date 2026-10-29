@@ -1566,6 +1566,30 @@ def _save_woff2(font_path, out_path):
     return Path(out_path)
 
 
+def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
+                      family_name=None, composed=()):
+    """Write the sources zip (E1). Runs in the build worker for an export job
+    whose format is ``sources``.
+
+    The sources come from the ACTIVE source (the staged shadow when control
+    axes exist), not from the built font: that is where the composed braces
+    live. The CSV and the declared axis defaults are read the same way the
+    studio build reads them, so the designspace mapping matches the built
+    font's table.
+    """
+    from . import sources_export
+
+    out = Path(export_dir) / f"{(family_name or 'font').replace(' ', '')}-sources.zip"
+    return sources_export.build_sources_zip(
+        Path(source_path), out,
+        csv_path=_get_preview_csv_path(),
+        metadata=_load_axis_metadata(),
+        family_name=family_name,
+        hidden_axes=hidden_axes,
+        composed=composed,
+    )
+
+
 def _export_pipeline(font_path, hidden_axes, default_location, export_dir,
                      format="ttf"):
     """The export build, caller-agnostic: re-origin at ``default_location``

@@ -111,13 +111,24 @@ def _run_export_job(pipeline, spec, progress):
     out_dir = Path(spec["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     progress.phase("export")
-    artifact = pipeline._export_pipeline(
-        current,
-        hidden_axes=spec.get("hidden_axes") or [],
-        default_location=spec.get("default_location"),
-        export_dir=out_dir,
-        format=spec.get("format", "ttf"),
-    )
+    fmt = spec.get("format", "ttf")
+    if fmt == "sources":
+        # E1: the sources come from the ACTIVE source, not from the built font.
+        artifact = pipeline._sources_pipeline(
+            state.GLYPHS_PATH,
+            out_dir,
+            hidden_axes=spec.get("hidden_axes") or [],
+            family_name=spec.get("family_name"),
+            composed=spec.get("composed_transforms") or [],
+        )
+    else:
+        artifact = pipeline._export_pipeline(
+            current,
+            hidden_axes=spec.get("hidden_axes") or [],
+            default_location=spec.get("default_location"),
+            export_dir=out_dir,
+            format=fmt,
+        )
     return {"success": True, "artifact": str(artifact),
             "artifact_name": Path(artifact).name}
 

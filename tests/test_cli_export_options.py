@@ -200,3 +200,92 @@ def test_an_export_failure_exits_1(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "error: export failed (ttf)" in err
     assert "Cannot relocate the default" in err
+
+
+# --- E1: the sources format on the CLI -------------------------------------
+# ``--format sources`` writes <stem>-sources.zip from the ACTIVE SOURCE — no
+# build, no export pipeline — and says on stderr, once, that spacing is not in
+# it. It is a usage error to ask for sources AND a re-origin.
+
+MINIMAL_GLYPHS = """{
+.formatVersion = 3;
+familyName = "CrispyMini";
+fontMaster = ({ id = "m01"; name = Regular; });
+glyphs = ();
+unitsPerEm = 1000;
+}
+"""
+
+
+def _sources_env(monkeypatch, tmp_path):
+    """Stub the writer; return the list of calls it receives.
+
+    ``state.GLYPHS_PATH`` must point at a file glyphsLib can parse: the CLI
+    parses the source before building (P2), even though this test never builds.
+    """
+    from avar2_studio import sources_export, state
+
+    real = tmp_path / "real-source" / "CrispyMini.glyphs"
+    real.parent.mkdir(parents=True, exist_ok=True)
+    real.write_text(MINIMAL_GLYPHS, encoding="utf-8")
+    monkeypatch.setattr(state, "GLYPHS_PATH", real)
+    calls = []
+
+    def fake_zip(source_path, out_zip, **kwargs):
+        calls.append({"source": source_path, "out": out_zip, **kwargs})
+        out_zip.parent.mkdir(parents=True, exist_ok=True)
+        out_zip.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+        return out_zip
+
+    monkeypatch.setattr(sources_export, "build_sources_zip", fake_zip)
+    return calls
+
+
+def test_sources_writes_the_zip_and_warns_once(tmp_path, monkeypatch, capsys):
+    from avar2_studio import sources_export
+
+    calls = _sources_env(monkeypatch, tmp_path)
+    rc, _, out = _run_build(tmp_path, monkeypatch, ["--format", "sources"])
+
+    assert rc == 0
+    assert (out / "CrispyMini-sources.zip").exists()
+    assert len(calls) == 1
+    err = capsys.readouterr().err
+    assert err.count(sources_export.SPACING_WARNING) == 1
+
+
+def test_sources_repeats_with_a_font_format(tmp_path, monkeypatch):
+    calls = _sources_env(monkeypatch, tmp_path)
+    rc, exported, out = _run_build(tmp_path, monkeypatch,
+                                   ["--format", "sources", "--format", "ttf"])
+
+    assert rc == 0
+    assert len(calls) == 1, "sources is written once, not per format"
+    assert (out / "CrispyMini-sources.zip").exists()
+    assert (out / "CrispyMini.ttf").exists() or exported
+
+
+def test_sources_with_a_default_location_is_a_usage_error(tmp_path, monkeypatch, capsys):
+    calls = _sources_env(monkeypatch, tmp_path)
+    rc, _, out = _run_build(tmp_path, monkeypatch,
+                            ["--format", "sources", "--default", "wght=400"])
+
+    assert rc == 2
+    assert calls == [], "nothing is written when the flags contradict"
+    assert not (out / "CrispyMini-sources.zip").exists()
+    assert "sources rest at the compiled origin" in capsys.readouterr().err
+
+
+def test_a_sources_error_is_a_usage_error(tmp_path, monkeypatch, capsys):
+    from avar2_studio import sources_export
+
+    _sources_env(monkeypatch, tmp_path)
+
+    def boom(*a, **k):
+        raise sources_export.SourcesError("no avar2 CSV beside CrispyMini.glyphs")
+
+    monkeypatch.setattr(sources_export, "build_sources_zip", boom)
+    rc, _, _ = _run_build(tmp_path, monkeypatch, ["--format", "sources"])
+
+    assert rc == 2
+    assert "no avar2 CSV" in capsys.readouterr().err

@@ -226,7 +226,9 @@ sizes are shown before you download — WOFF2 is compressed in the
 background after every build), mark axes as hidden in the exported
 font, or **set a default** — pick an axis combination and the export
 interpolates a master there and makes it the font's origin (the
-source file is never touched).
+source file is never touched). **UFO + designspace (zip)** instead
+downloads the masters as UFOs plus a designspace 5 file with the
+mappings, for fontmake/gftools; spacing is not in it.
 
 ![Export dialog: mark axes hidden, set the default location](docs/images/export-modal.png)
 
@@ -332,6 +334,7 @@ Crispy's CI is the reference use.
 | `--hide-axes XOPQ,XTRA` | set the `fvar` HIDDEN flag so font pickers stop surfacing those axes |
 | `--default wght=400,opsz=14` | re-origin the export at that resting style (refused with a readable error when the relocation cannot fit) |
 | `--format ttf` / `--format woff2` | output format, repeatable; default `ttf` |
+| `--format sources` | write `<stem>-sources.zip` (masters as UFOs + designspace 5 with the mappings) instead of a font; spacing is not in it |
 
 The build reads the source, the committed `<stem>-avar.csv` and the
 committed `<stem>-axis-metadata.json` (declared axis defaults).

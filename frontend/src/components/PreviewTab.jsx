@@ -6,6 +6,9 @@ import { registerPreviewFont } from '../fontLoad';
 import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useStudioData } from '../hooks/useStudioData';
 import { previewRenderCoords, variationSettings } from '../preview-coords';
+import {
+  SOURCES_COPY, SOURCES_DEFAULT_REASON, SPACING_WARNING, buttonLabel, exportFormats,
+} from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
 // (12pt = 1rem at the default 16px root — same convention as Sidebar).
@@ -573,41 +576,46 @@ function PreviewTab({
                 {familyName || vfFamilyId || 'Aa'}
               </div>
               <div className="preview-export-options">
-                {api.capabilities.woff2 && (
-                  <div className="preview-export-row">
-                    <span
-                      className="preview-export-label"
-                      title="WOFF2 is the same font, Brotli-compressed for the web — lossless (it decompresses back to identical tables). TTF is what you install locally."
-                    >
-                      Format
-                    </span>
-                    <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
-                      {['ttf', 'woff2'].map((fmt) => {
-                        const size = exportSizes
-                          ? (fmt === 'ttf' ? exportSizes.ttf_bytes : exportSizes.woff2_bytes)
-                          : null;
-                        const exact = fmt === 'ttf' || (exportSizes && exportSizes.woff2_exact);
-                        return (
-                          <button
-                            key={fmt}
-                            type="button"
-                            role="radio"
-                            aria-checked={exportFormat === fmt}
-                            className={`preview-export-chip preview-export-chip--format${exportFormat === fmt ? ' on' : ''}`}
-                            onClick={() => setExportFormat(fmt)}
-                          >
-                            {fmt.toUpperCase()}
-                            {size != null && (
-                              <span className="preview-export-size">
-                                {' '}· {formatBytes(size)}{exact ? '' : ' (est.)'}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div className="preview-export-row">
+                  <span
+                    className="preview-export-label"
+                    title="WOFF2 is the same font, Brotli-compressed for the web — lossless (it decompresses back to identical tables). TTF is what you install locally."
+                  >
+                    Format
+                  </span>
+                  <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
+                    {exportFormats({ woff2: api.capabilities.woff2 }).map(({ id, label }) => {
+                      const size = exportSizes
+                        ? (id === 'ttf' ? exportSizes.ttf_bytes
+                          : id === 'woff2' ? exportSizes.woff2_bytes : null)
+                        : null;
+                      const exact = id === 'ttf' || (exportSizes && exportSizes.woff2_exact);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="radio"
+                          aria-checked={exportFormat === id}
+                          className={`preview-export-chip preview-export-chip--format${exportFormat === id ? ' on' : ''}`}
+                          onClick={() => setExportFormat(id)}
+                          title={id === 'sources' ? SOURCES_COPY : undefined}
+                        >
+                          {label}
+                          {size != null && (
+                            <span className="preview-export-size">
+                              {' '}· {formatBytes(size)}{exact ? '' : ' (est.)'}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {exportFormat === 'sources' && (
+                      <p className="preview-export-note preview-export-note--spacing">
+                        {SOURCES_COPY} {SPACING_WARNING}
+                      </p>
+                    )}
                   </div>
-                )}
+                </div>
                 <div className="preview-export-row">
                   <span
                     className="preview-export-label"
@@ -638,7 +646,9 @@ function PreviewTab({
                   >
                     <input
                       type="checkbox"
-                      checked={exportUseDefault}
+                      checked={exportFormat !== 'sources' && exportUseDefault}
+                      disabled={exportFormat === 'sources'}
+                      title={exportFormat === 'sources' ? SOURCES_DEFAULT_REASON : undefined}
                       onChange={(e) => setExportUseDefault(e.target.checked)}
                     />
                     <span>
@@ -665,11 +675,13 @@ function PreviewTab({
                   className="btn btn-secondary"
                   onClick={handleDownload}
                   disabled={exporting}
-                  title={exportUseDefault
-                    ? "Rebuilds the font at the chosen location — takes a few seconds"
-                    : "Download the built variable font"}
+                  title={exportFormat === 'sources'
+                    ? SOURCES_COPY
+                    : exportUseDefault
+                      ? "Rebuilds the font at the chosen location — takes a few seconds"
+                      : "Download the built variable font"}
                 >
-                  {exporting ? 'Preparing…' : 'Download'}
+                  {exporting ? 'Preparing…' : buttonLabel(exportFormat)}
                 </button>
               </div>
             </div>

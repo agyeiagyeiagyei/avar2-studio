@@ -147,6 +147,16 @@ def _write_designspace(doc: DesignSpaceDocument, path: Path, *, hidden_axes: Ite
     """
     doc.formatVersion = "5.0"
     doc.write(str(path))
+    # glyphsLib hands back one UFO `Font` per master (the sparse brace sources
+    # are extra LAYERS of that UFO, referenced by ``layer`` in the XML), so the
+    # UFOs are written here: doc.write() only writes the designspace.
+    for source in doc.sources:
+        if source.font is None or not source.filename:
+            continue
+        target = path.parent / source.filename
+        if target.exists():
+            continue
+        source.font.save(str(target))
 
     tree = ET.parse(path)
     root = tree.getroot()
@@ -157,9 +167,9 @@ def _write_designspace(doc: DesignSpaceDocument, path: Path, *, hidden_axes: Ite
         for axis_el in axes_el.findall("axis"):
             if axis_el.get("tag") in hidden:
                 axis_el.set("hidden", "1")
-        # Schema order: axes, mappings, sources, instances, lib.
-        axes_index = list(root).index(axes_el)
-        root.insert(axes_index + 1, mappings)
+        # designspace 5 puts <mappings> INSIDE <axes> (fontTools reads
+        # `.axes/mappings` and writes it there too), after the axis elements.
+        axes_el.append(mappings)
     tree.write(path, encoding="UTF-8", xml_declaration=True)
 
 

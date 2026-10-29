@@ -119,8 +119,10 @@ def _build(argv) -> int:
                     help="resting style as tag=value[,tag=value] (e.g. "
                          "wght=400,opsz=14); the export is re-origined there")
     ap.add_argument("--format", dest="formats", action="append",
-                    choices=("ttf", "woff2"), default=None,
-                    help="output format, repeatable (default: ttf)")
+                    choices=("ttf", "woff2", "sources"), default=None,
+                    help="output format, repeatable (default: ttf); 'sources' "
+                         "writes <family>-sources.zip (masters as UFOs + a "
+                         "designspace with the mappings)")
     ap.add_argument("--config", dest="build_config", type=Path, default=None,
                     help="the committed build config (default: <stem>-build.json "
                          "beside the source, when present)")
@@ -182,6 +184,12 @@ def _build(argv) -> int:
     for fmt in (args.formats or (cfg or {}).get("formats") or ["ttf"]):
         if fmt not in formats:
             formats.append(fmt)
+    if "sources" in formats and default_location:
+        # A designspace default must be a master location; the sources rest at
+        # the compiled origin (E1). Bad input, not a build failure.
+        print("error: sources rest at the compiled origin; --default applies "
+              "to ttf/woff2 only", file=sys.stderr)
+        return 2
     from . import server, state
     if cfg is not None:
         # Design-authored state is read-only for the build; the config's
@@ -224,7 +232,22 @@ def _build(argv) -> int:
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
-    if not hidden_axes and not default_location and formats == ["ttf"]:
+    written: list = []
+    # `sources` needs no built font and no export pipeline: it is written from
+    # the active source (E1). The spacing warning goes to stderr once, because
+    # the zip cannot carry that fact in its fonts.
+    if "sources" in formats:
+        zip_path = _write_sources(args, state, server, hidden_axes)
+        if zip_path is None:
+            return 2
+        print(f"note: {sources_warning()}", file=sys.stderr)
+        written.append(zip_path)
+        formats = [f for f in formats if f != "sources"]
+    if not formats:
+        for dest in written:
+            print(dest)
+        return 0
+    if not hidden_axes and not default_location and formats == ["ttf"] and not written:
         # Plain build: the served font IS the product.
         dest = args.out / state.VARIABLE_FONT_PATH.name
         shutil.copy2(state.VARIABLE_FONT_PATH, dest)
@@ -236,7 +259,6 @@ def _build(argv) -> int:
     from . import pipeline as _pipeline
     scratch = Path(tempfile.mkdtemp(prefix="export-",
                                     dir=str(_pipeline._get_preview_dir())))
-    written = []
     try:
         for fmt in formats:
             try:
@@ -254,6 +276,30 @@ def _build(argv) -> int:
     for dest in written:
         print(dest)
     return 0
+
+
+def sources_warning() -> str:
+    """The one-line warning the CLI prints on stderr when writing sources."""
+    from .sources_export import SPACING_WARNING
+    return SPACING_WARNING
+
+
+def _write_sources(args, state, server, hidden_axes):
+    """E1: write ``<stem>-sources.zip`` into ``--out``; None on a usage error."""
+    from . import pipeline as _pipeline
+    from . import sources_export
+    out = args.out / f"{args.source.stem}-sources.zip"
+    try:
+        return sources_export.build_sources_zip(
+            state.GLYPHS_PATH, out,
+            csv_path=_pipeline._get_preview_csv_path(),
+            metadata=_pipeline._load_axis_metadata(),
+            family_name=server.get_font_family_name(state.GLYPHS_PATH),
+            hidden_axes=hidden_axes,
+        )
+    except sources_export.SourcesError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
 
 
 def _parse_hide_axes(value):

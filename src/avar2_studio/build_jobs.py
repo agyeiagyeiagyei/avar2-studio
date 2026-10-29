@@ -109,11 +109,16 @@ class JobQueue:
             self._wake.set()
         return True
 
-    def submit_export(self, hidden_axes, default_location, format="ttf"):
+    def submit_export(self, hidden_axes, default_location, format="ttf", *,
+                      family_name=None, composed_transforms=()):
         if state.ORIGINAL_PATH is None:
             return None
         job = {"kind": "export", "hidden_axes": list(hidden_axes),
-               "default_location": default_location, "format": format}
+               "default_location": default_location, "format": format,
+               # E1: the sources zip is named after the family and its README
+               # names the transforms composed into the masters.
+               "family_name": family_name,
+               "composed_transforms": list(composed_transforms)}
         with self._lock:
             self._pending_exports.append(job)
             self._wake.set()
@@ -272,7 +277,8 @@ class JobQueue:
     def export_artifact(self, job_id):
         exports = self._exports_dir()
         for p in sorted(exports.glob(f"{job_id}-*")):
-            if p.suffix in (".ttf", ".woff2"):
+            # .zip is the sources export (E1): same job, same download route.
+            if p.suffix in (".ttf", ".woff2", ".zip"):
                 return p
         return None
 
@@ -514,7 +520,9 @@ class JobQueue:
                          "glyphs_path": str(staged_active),
                          "hidden_axes": job["hidden_axes"],
                          "default_location": job["default_location"],
-                         "format": job.get("format", "ttf")})
+                         "format": job.get("format", "ttf"),
+                         "family_name": job.get("family_name"),
+                         "composed_transforms": job.get("composed_transforms") or []})
         elif job["kind"] == "compress":
             spec["font_path"] = job["font_path"]
         job["spec"] = spec

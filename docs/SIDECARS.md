@@ -362,3 +362,9 @@ other project file (feature files, notes, `-grade.json`,
 `-kinetikern.json`) verbatim next to the source; the static writer emits
 the sidecars from live state (the CSV is the source of truth) plus the
 current font bytes.
+
+The sources export (`--format sources`, or **UFO + designspace (zip)**) is the
+other way round: it carries no sidecar at all — the mappings are written into
+the designspace 5 `<mappings>` block and the declared defaults become the axis
+defaults, so what the downstream build needs is in the designspace, not in a
+file beside it.

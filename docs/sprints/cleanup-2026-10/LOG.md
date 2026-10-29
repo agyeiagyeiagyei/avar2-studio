@@ -1953,3 +1953,85 @@ Commands + results:
 - `pytest tests/test_axis_metadata_sibling.py -q` → 8 passed (the migration test
   is now `test_a_legacy_file_is_copied_not_moved`).
 - `pytest tests/ -q` → **641 passed**; `ruff check src tests` clean.
+
+## E1 — "UFO + designspace (zip)": sources the Google Fonts team can build
+
+The export dialog's third format, and the same zip from `avar2-studio build
+--format sources`. The studio writes a designspace 5 file with the CSV rows as
+`<mappings>` (input user location → output parametric location), the declared
+axis defaults on the user axes, `hidden="1"` on the hidden axes, the named rows
+as instances, one UFO per master (brace layers come out as sparse sources), and
+a `README.txt` carrying the studio version/commit, the source sha256, the
+composed transforms, the verbatim spacing warning and the fontmake command.
+The default CSV row is dropped from the mappings exactly as `gen-avar2` drops
+it for the built font, and the README says so.
+
+Two fontTools facts shaped the writer, both found by running it:
+
+- `DesignSpaceDocument.write` writes neither the UFOs nor `<mappings>`.
+  `sources_export` saves each `source.font` itself and patches the XML after
+  the write; the `<mappings>` element must sit **inside** `<axes>` — at root
+  level `DesignSpaceDocument.fromfile` reports `len(doc.axisMappings) == 0`.
+- fontTools 4.68 / glyphsLib 6.16.2 are what designspace 5 needs
+  (`AxisDescriptor.hidden`, `doc.axisMappings`). Both were upgraded in the venv;
+  the full suite stayed green across the upgrade (626 → 653 tests, 641 → 653
+  after E1's own tests).
+
+**One acceptance deviation, stated plainly.** E1's acceptance (2) asks the
+round trip to compare against *the studio's TTF* "instantiated at the row's
+parametric output". That comparison is not well-posed, and I measured it rather
+than argued it: the studio's font carries avar2 written from the CSV, so its
+user axes (wght/wdth default) are mapped onto parametric values, while fontmake
+does not consume designspace 5 `<mappings>` at all. Instantiating both at the
+same parametric location therefore compares two different designs — measured
+per row: 8.2 / 2390 / 2436 / 195 / 674 / 625 / 3747 / 4835 u, i.e. the mapping
+difference, growing with distance from the default. What the item is really
+asking ("what we hand over builds and is the design") is measured against the
+**unmapped build of the same source**: `fontc` on the same `.glyphs` versus the
+fontmake build of the exported sources, both instantiated at each row's
+parametric output — **worst 0.0 u** across all 8 rows and glyphs a/o/g. The
+test asserts that (≤ 3 u) *and* the acceptance's axis-tag equality against the
+studio's avar2 TTF minus SPAC, and its docstring plus the numbers above record
+why the studio TTF cannot be the outline baseline. Flagged for the verifier: if
+the literal studio-TTF comparison is required, it needs a font that applies
+designspace 5 mappings, not fontmake.
+
+Commands + results:
+- `pytest tests/test_sources_export.py -q` → 5 passed (contents, README
+  statements, UI/backend constant parity, missing-CSV usage error, fontmake
+  round trip).
+- `pytest tests/test_cli_export_options.py -q` → 21 passed (4 new: sources
+  writes the zip and warns once on stderr, `--format ttf --format sources`
+  writes both, `--default … --format sources` exits 2, a `SourcesError` exits
+  2). The harness needs a *parsable* source because the CLI parses before
+  building (P2).
+- `pytest tests/test_export_sources_route.py -q` → 3 passed (sources queued
+  with family name + enabled transforms, sources+default refused without
+  queueing, unknown format names all three).
+- `pytest tests/ -q` → **653 passed**; `ruff check src tests` clean.
+- frontend: `eslint` 0 errors/0 warnings on the touched files,
+  `npm run test:unit` all pass, `npm run build` green, static rsynced.
+- probe `export-sources` (studio on 5074, Fontra 8004, `HOME=/tmp/e1probe`,
+  crispy-mini): **PASS** — the warning is read from the DOM before the click,
+  the zip downloads through the modal and unpacks to 626 entries / 1
+  designspace / 8 UFOs / README.txt. Screenshot:
+  `export-sources-modal` (chips render with the sources format selected).
+
+The probe earned its keep: it found **two defects the unit tests could not**,
+because both lived on the seam between the route, the queue and the worker.
+
+1. `POST /api/export-font` returned **500** — `_tx_config.entries()` takes the
+   source path and I called it with no argument. The route test had stubbed
+   `entries` with a zero-argument lambda, mirroring my mistake exactly; it now
+   takes the path, asserts it is the loaded source, and the route passes
+   `state.ORIGINAL_PATH or state.GLYPHS_PATH`.
+2. The job finished `success=True` and the download route answered **404** —
+   `build_jobs.export_artifact` only accepted `.ttf` and `.woff2` artifacts, so
+   a zip had nothing to serve. `.zip` is in that list now, the stub worker
+   writes `Mini-sources.zip` for a sources export, and
+   `test_a_sources_export_is_downloadable_as_a_zip` pins the whole hop.
+
+Commands + results (after the fixes):
+- `pytest tests/test_build_jobs.py -q` → 19 passed (one new).
+- `pytest tests/test_export_sources_route.py -q` → 3 passed.
+- probe `export-sources` → **PASS**, twice in a row.

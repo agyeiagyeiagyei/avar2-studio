@@ -967,6 +967,54 @@ def axis_metadata_files(src):
     return out
 
 
+def scenario_export_sources(s):
+    """E1 — the third format: warning visible, zip downloads and is sources."""
+    import zipfile
+
+    s.load()
+    s.tab("Preview")
+    wait_ui_idle(s)
+    out = Path(s.shots).parent / "exports"
+    out.mkdir(parents=True, exist_ok=True)
+
+    s.page.click("button:has-text('Download font…')")
+    s.page.wait_for_selector(".preview-export-modal", timeout=10000)
+    s.page.click(".preview-export-chip--format:has-text('UFO + designspace')")
+    # The warning must be readable BEFORE the download, in body text.
+    note = s.page.locator(".preview-export-note--spacing")
+    note.wait_for(timeout=5000)
+    text = note.inner_text()
+    print("    warning:", " ".join(text.split())[:110])
+    assert "Spacing is not included" in text, text
+    assert "Kinetikern" in text, text
+    s.shot("export-sources-modal")
+    # No size estimate for this format, and the button names it.
+    modal = s.page.locator(".preview-export-modal").inner_text()
+    assert "est." not in modal.split("UFO + designspace")[1], modal
+    button = s.page.locator(".preview-export-actions .btn-secondary")
+    assert "sources" in button.inner_text().lower(), button.inner_text()
+    # "Open at this style" is disabled, with the reason on the control.
+    box = s.page.locator(".preview-export-default input")
+    if box.count():
+        assert box.first.is_disabled(), "set-default must be disabled for sources"
+
+    with s.page.expect_download(timeout=180000) as dl:
+        button.click()
+    target = out / "sources.zip"
+    dl.value.save_as(str(target))
+    with zipfile.ZipFile(target) as zf:
+        names = zf.namelist()
+    ds = [n for n in names if n.endswith(".designspace")]
+    ufos = [n for n in names if n.endswith("metainfo.plist")]
+    print(f"    zip: {len(names)} entries, {len(ds)} designspace, {len(ufos)} UFOs")
+    assert ds, names[:5]
+    assert "README.txt" in names
+    assert len(ufos) >= 2, "one UFO per master"
+    # Closing the modal leaves the app usable.
+    s.page.keyboard.press("Escape")
+    s.page.wait_for_timeout(500)
+
+
 def scenario_config_roundtrip(s):
     """A16 — export then import the same bundle: sidecars unchanged."""
     s.load()
@@ -1106,6 +1154,7 @@ SCENARIOS = {
     # sees the plain fallback instead of the mapped font. A12 documents the
     # resting style, so it must run on one.
     "export": scenario_export,
+    "export-sources": scenario_export_sources,
     "flyout-source": scenario_flyout_source,
     "lifecycle": scenario_lifecycle,
     "multi-broadcast": scenario_multi_broadcast,
