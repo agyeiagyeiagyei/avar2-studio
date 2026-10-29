@@ -646,7 +646,14 @@ def scenario_kinetikern(s):
     s.page.mouse.down()
     s.page.mouse.move(box["x"] + box["width"] * 0.7, box["y"] + box["height"] / 2, steps=6)
     s.page.mouse.up()
-    s.page.wait_for_timeout(4000)
+    # Apply is enabled once a proposal has arrived; the engine sits behind the
+    # built font and the fontTools instancer, so wait for it rather than
+    # assuming 4 s is enough on a loaded machine (a fixed sleep made this flaky
+    # after the fontTools 4.68 upgrade).
+    s.page.locator(".kk-btn.primary").wait_for(state="attached", timeout=15000)
+    deadline = time.time() + 120
+    while time.time() < deadline and not s.page.locator(".kk-btn.primary").is_enabled():
+        s.page.wait_for_timeout(500)
     assert s.page.locator(".kk-btn.primary").is_enabled(), "Apply is disabled"
     before = health(s.url).get("last_build_time")
     s.page.click(".kk-btn.primary")
@@ -777,8 +784,13 @@ def scenario_degraded_banner(s):
     h = health(s.url)
     src = Path(h["original_path"])
     sibling = src.parent / f"{src.stem}-axis-metadata.json"
+    legacy = src.parent / ".avar2-studio" / "axis-metadata.json"
     assert sibling.exists(), f"the staged copy must carry {sibling.name}"
     backup = sibling.read_bytes()
+    # O2 keeps the legacy copy on purpose, and the job stages it from the
+    # preview dir — so deleting only the sibling no longer removes the
+    # declarations. Both homes go, and both come back.
+    legacy_backup = legacy.read_bytes() if legacy.exists() else None
     # The copy may already be in the corner state (a sources folder that lost
     # its declared defaults). Then the banner asserts below still apply, but
     # the restore step cannot prove it clears — say so instead of pretending.
@@ -797,6 +809,7 @@ def scenario_degraded_banner(s):
 
     try:
         sibling.unlink()
+        legacy.unlink(missing_ok=True)
         rebuild()
         data = health(s.url)
         assert data.get("last_build_status") == "ok", data.get("last_build_status")
@@ -818,6 +831,8 @@ def scenario_degraded_banner(s):
         # reason to clear. Reported, not asserted — the item's assertion is the
         # banner above; a stuck reason would be a finding, not a flaky red.
         sibling.write_bytes(backup)
+        if legacy_backup is not None:
+            legacy.write_bytes(legacy_backup)
         deadline = time.time() + 120
         while time.time() < deadline and health(s.url).get("building"):
             time.sleep(1)
