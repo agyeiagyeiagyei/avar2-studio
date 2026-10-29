@@ -1041,3 +1041,17 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
 | O1 | PASS (probe pending on the loop) | A build with no declared user-axis defaults now says so instead of reporting a plain `ok`. The condition is checked where the relocation target is computed: relocating is on, the config has mapped rows, and `_declared_axis_ranges()` is empty ⇒ nothing can be a default row, so the font rests at the compiled corner. `state.LAST_BUILD_DEGRADED` carries a reason that names `<stem>-axis-metadata.json` and the corner, logged at warning level, bridged through `build_worker._apply_result` **and** `build_jobs._apply_build_state` (the second whitelist was missing it — the first test run caught the field being dropped at the worker boundary), and surfaced as `health.degraded` + the amber banner (`buildDegraded` in `useStudioData`, `.build-degraded-banner` in `StatusBanners`). `last_build_status` stays `ok` and `origin_relocation_error` is untouched — S1(b)'s banner is about a FAILED relocation, this is about there being nothing to relocate from. `_load_axis_metadata` creating the empty `{}` now warns with the path (the other half of the silence). CLI unchanged: `tests/test_cli_failures.py` already pins exit 2 when neither metadata home exists. Tests: `tests/test_build_degraded.py` → 3 passed (real worker, sibling removed → reason set + status ok; sibling present → no reason; the empty file is created loudly). `pytest tests/ -q` → 640 passed; ruff clean; eslint 0 errors; tsc clean; `npm run test:unit` all pass; build green. Probe scenario `degraded-banner` added. |
+
+### Loop run 2026-10-29T10:07:46Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261029-170131/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **2**
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 15 / FAIL 2 (log: `/Users/agyei/avar2-agent/runs/20261029-170131/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-170131/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+
+  Failing scenarios:
+  - FAIL first-load: ORIGIN badge missing on Default 400 MaxOpsz
+  - FAIL degraded-banner: a corner build must be marked degraded
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
