@@ -765,6 +765,54 @@ def scenario_tester(s):
     s.shot("a14-tester")
 
 
+def scenario_degraded_banner(s):
+    """O1 — a build with no declared axis defaults says so in the banner.
+
+    Removes the committed sibling from the SERVED copy, rebuilds, and reads the
+    banner: the build must stay `ok` (the preview keeps working) while
+    `health.degraded` and the amber banner name the file. The sibling is
+    restored and the font rebuilt in a finally, so later scenarios see the
+    healthy state again."""
+    s.load()
+    h = health(s.url)
+    src = Path(h["original_path"])
+    sibling = src.parent / f"{src.stem}-axis-metadata.json"
+    assert sibling.exists(), f"the staged copy must carry {sibling.name}"
+    backup = sibling.read_bytes()
+
+    def rebuild():
+        before = health(s.url).get("last_build_time")
+        req = urllib.request.Request(f"{s.url}/api/build", method="POST",
+                                     data=b"{}",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=30).read()
+        wait_new_build(s, before, timeout=300)
+
+    try:
+        sibling.unlink()
+        rebuild()
+        data = health(s.url)
+        assert data.get("last_build_status") == "ok", data.get("last_build_status")
+        reason = data.get("degraded")
+        print("    degraded:", reason)
+        assert reason, "a corner build must be marked degraded"
+        assert sibling.name in reason, reason
+        banner = s.page.locator(".build-degraded-banner")
+        banner.wait_for(timeout=60000)
+        text = banner.inner_text()
+        print("    banner:", text)
+        assert "compiled corner" in text, text
+        assert sibling.name in text, text
+        s.shot("o1-degraded-banner")
+    finally:
+        sibling.write_bytes(backup)
+        rebuild()
+        data = health(s.url)
+        assert data.get("degraded") is None, data.get("degraded")
+        s.page.locator(".build-degraded-banner").wait_for(state="detached",
+                                                         timeout=60000)
+
+
 def scenario_export(s):
     """A12 — TTF at default, WOFF2, TTF at a non-default location."""
     s.load()
@@ -1020,6 +1068,7 @@ SCENARIOS = {
     # sees the plain fallback instead of the mapped font. A12 documents the
     # resting style, so it must run on one.
     "export": scenario_export,
+    "degraded-banner": scenario_degraded_banner,
     "flyout-source": scenario_flyout_source,
     "lifecycle": scenario_lifecycle,
     "multi-broadcast": scenario_multi_broadcast,

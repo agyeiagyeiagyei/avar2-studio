@@ -12,7 +12,7 @@ import { useStudioData } from '../hooks/useStudioData';
 export default function StatusBanners() {
   const { building, lastBuildStatus, lastBuildError } = useBuildStatus();
   const {
-    error, setError, sessionLockLost, originWarning,
+    error, setError, sessionLockLost, originWarning, buildDegraded,
     sourceTransformError, avar2Error, originRelocationError, buildFont,
   } = useStudioData();
 
@@ -59,6 +59,14 @@ export default function StatusBanners() {
       {lastBuildStatus !== 'failed' && originWarning && !originRelocationError && (
         <div className="error-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
           {originWarning}
+        </div>
+      )}
+      {lastBuildStatus !== 'failed' && buildDegraded && (
+        // The build succeeded but has nothing to rest on: no declared user-axis
+        // defaults. Amber, not red — the preview works, it is just not at any
+        // authored style (O1).
+        <div className="build-degraded-banner" style={{ background: '#fff4e0', color: '#8a4b00', borderColor: '#f1c277' }}>
+          This font rests at the compiled corner. {buildDegraded}
         </div>
       )}
       {lastBuildStatus !== 'failed' && sourceTransformError && (

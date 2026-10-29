@@ -464,6 +464,7 @@ def _run_build():
     # Cleared on every build: a stale relocation error would keep the studio
     # reporting "degraded" after the ORIGIN row was put back.
     state.LAST_ORIGIN_RELOCATION_ERROR = None
+    state.LAST_BUILD_DEGRADED = None
     state.LAST_ORIGIN_RELOCATION_MEMO = None
     state.LAST_ORIGIN_AUTHORED_AVAR = None
     with _gc_paused():
@@ -869,6 +870,9 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     avar2_cfg_early = (config.get("avar2") or {}).get(name)
     compile_source = source
     default_rows = []
+    # Hoisted: step 3.5 below needs it after the block to tell "nothing to
+    # relocate FROM" from "relocation is off" (O1).
+    declared_for_defaults: Dict[str, list] = {}
     if avar2_cfg_early:
         declared_for_defaults = _declared_axis_ranges(default_overrides)
 
@@ -957,6 +961,20 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     target = relocate_target if relocate_target is not None else (
         (default_rows[0].get("out") or {}) if (avar2_cfg_early and default_rows) else {})
     relocation_error = None
+    if relocate_at_build and avar2_cfg_early and not target and not declared_for_defaults:
+        # There is nothing to relocate FROM: the source declares no user-axis
+        # defaults, so no CSV row can be the default row and the font rests at
+        # the compiled corner (the first master's parametric values). That used
+        # to report a plain "ok" and the designer saw "deformed instances" with
+        # no message at all (O1). Not a failure: the preview must keep working
+        # and the build gate must stay open.
+        _sibling = _sibling_axis_metadata_path()
+        _meta_name = _sibling.name if _sibling else "<stem>-axis-metadata.json"
+        state.LAST_BUILD_DEGRADED = (
+            f"{_meta_name} is missing or empty — the font rests at the compiled "
+            "corner (the first master's settings), not at any authored style. "
+            "Declare the axis defaults in that file beside the source.")
+        log.warning(f"  relocation: {state.LAST_BUILD_DEGRADED}")
     if relocate_at_build and target:
         from fontTools.varLib import instancer as _instancer
         font = _TTFont(str(out))
@@ -1951,10 +1969,15 @@ def _load_axis_metadata() -> Dict[str, Dict[str, any]]:
     if not metadata_path:
         return {}
 
-    # Create file with empty dict if it doesn't exist
+    # Create file with empty dict if it doesn't exist. Logged at warning
+    # level: an empty file declares no user-axis defaults, so every build
+    # rests at the compiled corner until the designer fills it in (O1).
     if not metadata_path.exists():
         try:
             _sidecar_io.write_json(metadata_path, {})
+            log.warning(f"Created an empty axis-metadata file at {metadata_path} "
+                        "— no axis defaults are declared yet, so the font rests "
+                        "at the compiled corner until they are")
         except Exception as e:
             log.error(f"Error creating axis metadata file: {e}")
             return {}

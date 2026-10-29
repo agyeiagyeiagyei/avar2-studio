@@ -65,6 +65,11 @@ export function StudioDataProvider({ children }) {
   // onto the ORIGIN row (health.origin_relocation_error); the preview keeps
   // every axis, it just does not rest at the ORIGIN row's style.
   const [originRelocationError, setOriginRelocationError] = useState(null);
+  // Non-null ⇒ the font built and is served, but it rests at the compiled
+  // corner because the source declares no user-axis defaults
+  // (`<stem>-axis-metadata.json` missing or empty). LAST_BUILD_STATUS stays
+  // "ok" — this is the reason, shown as a banner (O1).
+  const [buildDegraded, setBuildDegraded] = useState(null);
   // Non-null ⇒ a source-stage transform (round corners / slant) failed
   // and the font was built WITHOUT it — surfaced as a banner so an
   // enabled-but-inert transform never passes silently.
@@ -209,6 +214,7 @@ export function StudioDataProvider({ children }) {
         setOriginRelocationError(health.origin_relocation_error || null);
         setSourceTransformError(health.source_transform_error || null);
         setOriginWarning(health.origin_warning || null);
+        setBuildDegraded(health.degraded || null);
         setSessionLockLost(!!health.session_lock_lost);
         setGlyphsFileHasUnsavedChanges(glyphsStatus.has_unsaved_changes || false);
 
@@ -405,6 +411,7 @@ export function StudioDataProvider({ children }) {
       setOriginRelocationError(health.origin_relocation_error || null);
       setSourceTransformError(health.source_transform_error || null);
       setOriginWarning(health.origin_warning || null);
+      setBuildDegraded(health.degraded || null);
 
       // Restore persisted sample text (static mode with upload only)
       if (isStaticMode() && isUploadDataset()) {
@@ -731,6 +738,7 @@ export function StudioDataProvider({ children }) {
     originRelocationError,
     sourceTransformError,
     originWarning,
+    buildDegraded,
     sampleText, setSampleText,
     testerState, setTesterState,
     fontSize, setFontSize,

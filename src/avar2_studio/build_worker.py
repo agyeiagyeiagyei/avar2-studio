@@ -57,7 +57,7 @@ def _apply_result(result):
     """Snapshot the shared build-state globals into the result."""
     for name in ("LAST_BUILD_STATUS", "LAST_BUILD_ERROR", "LAST_AVAR2_ERROR",
                  "LAST_ORIGIN_RELOCATION_ERROR", "LAST_ORIGIN_RELOCATION_MEMO",
-                 "LAST_ORIGIN_AUTHORED_AVAR",
+                 "LAST_ORIGIN_AUTHORED_AVAR", "LAST_BUILD_DEGRADED",
                  "LAST_GRADE_ERROR", "LAST_SOURCE_TRANSFORM_ERROR",
                  "LAST_TRANSFORM_ERROR", "LAST_ORIGIN_WARNING", "LAST_BUILD_TIME"):
         result[name.lower()] = getattr(state, name, None)

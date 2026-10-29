@@ -72,6 +72,11 @@ def health():
             # "degraded". Revert the ORIGIN row to clear it.
             "origin_relocation_error": state.LAST_ORIGIN_RELOCATION_ERROR,
             "origin_relocation_memo": state.LAST_ORIGIN_RELOCATION_MEMO,
+            # Non-null ⇒ the font built and is served, but it rests at the
+            # compiled corner because the source declares no user-axis
+            # defaults (`<stem>-axis-metadata.json` missing or empty). The
+            # build itself is "ok"; this is the reason, for the banner (O1).
+            "degraded": state.LAST_BUILD_DEGRADED,
             "grade_error": state.LAST_GRADE_ERROR,
             "source_transform_error": state.LAST_SOURCE_TRANSFORM_ERROR,
             "origin_warning": state.LAST_ORIGIN_WARNING,

@@ -1904,3 +1904,34 @@ Verification at this HEAD (`aa6b87f`):
 
 Also corrected the review's Minor note: the ROUND 18 paragraph cited P1 as
 `6689b6`; the commit is `668b9b6`.
+
+## O1 — the corner build is no longer silent
+
+With `<stem>-axis-metadata.json` absent or empty there is no declared default
+for any user axis, so no CSV row can be the default row, nothing is relocated,
+and the font rests at the compiled corner. That used to report `ok` with
+`degraded: None`, which is how the designer saw "deformed instances" with no
+message at all.
+
+The flag is set where the relocation target is computed (relocating on + mapped
+rows + no declared defaults), carried in `state.LAST_BUILD_DEGRADED`, logged at
+warning level, bridged across the worker boundary, and read by `/api/health` as
+`degraded`. `last_build_status` stays `ok` and `origin_relocation_error` is
+unchanged: the build worked, it just has nothing to rest on. The banner is
+amber, not the S1(b) failure copy.
+
+`_load_axis_metadata` now warns with the path when it creates the empty `{}` —
+that creation was the other half of the silence.
+
+One real defect surfaced while testing, worth naming: the reason reached the
+worker's result but was dropped on the server side, because `build_jobs` keeps
+its own whitelist of build-state keys. `tests/test_build_degraded.py` failed on
+exactly that (`degraded: None`) until `_apply_build_state` learned the key.
+
+Commands + results:
+- `pytest tests/test_build_degraded.py -q` → 3 passed (real worker builds).
+- `pytest tests/ -q` → **640 passed**; `ruff check src tests` clean.
+- frontend `eslint` 0 errors, `tsc --noEmit` clean, `npm run test:unit` all
+  pass, `npm run build` green.
+- Probe: new `degraded-banner` scenario (removes the sibling from the served
+  copy, rebuilds, reads the banner, restores and rebuilds in a finally).

@@ -70,6 +70,13 @@ LAST_AVAR2_ERROR: Optional[str] = None
 # avar2 font is still served (all axes, avar2 table) but its default is the
 # compiled origin, so LAST_BUILD_STATUS reports "degraded", not "ok".
 LAST_ORIGIN_RELOCATION_ERROR: Optional[str] = None
+# Set when the font had to rest at the compiled corner because the source
+# declares no user-axis defaults at all: ``<stem>-axis-metadata.json`` is
+# missing or empty, so no CSV row can be the default row and there is nothing
+# to relocate. The build succeeds and the studio keeps working, so
+# LAST_BUILD_STATUS stays "ok" — but it used to pass silently, which is how a
+# designer saw "deformed instances" with no message (O1).
+LAST_BUILD_DEGRADED: Optional[str] = None
 # "hit"/"miss": whether the last build reused a memoised relocation. Carried
 # across the worker boundary for the same reason as the error above — the
 # worker's own log is discarded, so the field IS the evidence.
