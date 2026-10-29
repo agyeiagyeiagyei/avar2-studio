@@ -1,4 +1,8 @@
-# Handover
+# Handover redirect table (archived 2026-10-29)
+
+**Archived.** This is the 2026-10-16 split's redirect table, kept because
+the questions it maps are still the ones a new reader asks. Its targets are
+live; its *where it went* column is history.
 
 The handover document was split on 2026-10-16 so that live knowledge is
 not mixed with history. Where things went:
