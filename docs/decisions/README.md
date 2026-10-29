@@ -23,6 +23,7 @@ gets a new record that supersedes the old one rather than an edit.
 | [0012](0012-foundry-tags-uppercase-registered-lowercase.md) | Authored tag case preserved: foundry tags uppercase, registered lowercase | Accepted | 2026-10-16 |
 | [0013](0013-designspace-authoring-501.md) | Secondary-axis authoring is .glyphs-only; designspace sources get a clean 501 | Accepted | 2026-10-16 |
 | [0014](0014-wasm-blob-built-in-ci-history-kept.md) | The wasm binary is a CI build output; repository history is kept intact | Accepted | 2026-10-19 |
+| [0015](0015-native-accelerators-ship-in-platform-wheels.md) | `spac-inject` and `libkinetikern2` ship inside the platform wheels; env → wheel → repo build | Accepted | 2026-10-18 |
 
 ## Not yet recorded
 
