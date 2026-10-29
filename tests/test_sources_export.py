@@ -33,6 +33,8 @@ REPO = Path(__file__).resolve().parents[1]
 MINI = REPO / "examples" / "crispy-mini" / "sources"
 FONTC = Path(sys.executable).with_name("fontc")
 FONTMAKE = shutil.which("fontmake")
+# The CSV row whose output IS the compiled origin (decision 0001).
+DEFAULT_ROW = "Narrow Thin 144"
 needs_fontc = pytest.mark.skipif(
     not FONTC.exists(), reason="fontc not next to the test interpreter")
 
@@ -134,24 +136,22 @@ def test_a_missing_csv_is_a_usage_error(project, tmp_path):
 @pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
 def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_path,
                                                                monkeypatch):
-    """The point of the item: what we hand over must build and agree.
+    """The point of the item: what we hand over must build into the same font.
 
-    Two comparisons, and a limit stated plainly:
+    Three things, because the first version of this test was green over a
+    broken export (verifier, E1a): the fontmake build must CARRY the mappings
+    (``avar`` version 2 with one entry per non-default row) and log no errors;
+    the outlines and advances must match the studio's TTF at every non-default
+    row's USER location (both fonts apply avar2 there, so this compares the
+    same coordinate system); and the default row is compared separately
+    against the unmapped build of the same masters.
 
-    * the axis tags must match the studio's avar2 TTF (minus SPAC);
-    * the outlines must match at every CSV row's parametric output.
-
-    The outline comparison is against the UNMAPPED build of the same source
-    (fontc on the same .glyphs), not the studio's shipped TTF: that TTF carries
-    an avar2 mapping written from the CSV, while the sources carry the same
-    information as a designspace 5 ``<mappings>`` block, which fontmake and
-    fontTools' instancer do not consume. Instantiating the mapped font "at a
-    parametric location" therefore drives two different coordinate systems, and
-    the difference measured is the mapping, not the sources (4826–4835 u on the
-    rows that move wght/wdth). Against the unmapped build of the same masters
-    the sources are exact: 0 u at every row, which is what "the sources are the
-    design" means. The mapped font is reproducible from these sources only by a
-    tool that applies the mappings.
+    The default row is the resting dip of decision 0001: the studio's font is
+    relocated to that row's output (XOPQ 6 / YOPQ 6) while the sources rest at
+    the compiled origin (2 / 2) with the row dropped from the mappings — 8–9 u
+    on outlines, 8 u on advances. That is what the zip's README states, and it
+    is asserted here as the *unmapped* agreement it actually is, not blamed on
+    a tolerance.
     """
     zip_path = _zip(project, tmp_path)
     work = tmp_path / "rt"
@@ -166,8 +166,22 @@ def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_pa
     assert res.returncode == 0, (res.stdout or res.stderr)[-1500:]
     built = next((tmp_path / "fm").glob("*.ttf"))
 
-    # (a) axis tags vs the studio's avar2 build of the same source.
-    monkeypatch.setenv("AVAR2_RELOCATE_BUILD_DEFAULT", "0")
+    rows = config_generator.read_csv_mappings(project["csv"])
+    default_row = next(r for r in rows if r.instance_name == DEFAULT_ROW)
+
+    # (a) the exported mappings survive the build.
+    errors = [ln for ln in (res.stderr or "").splitlines() if "ERROR" in ln]
+    assert errors == [], errors[:3]
+    avar = TTFont(str(built))["avar"].table
+    assert avar.Version == 0x00020000, "fontmake must build avar 2.0"
+    # avar2 keeps one variation region per mapping (the VarData items are the
+    # per-output-axis deltas, not the mappings).
+    regions = avar.VarStore.VarRegionList.RegionCount
+    assert regions == len(rows) - 1, (
+        f"{regions} mappings, {len(rows) - 1} non-default rows")
+
+    # (b) the studio's own build of the same source, at its normal setting.
+    monkeypatch.delenv("AVAR2_RELOCATE_BUILD_DEFAULT", raising=False)
     cfg = pipeline._initialize_preview_config_from_glyphs()
     assert cfg and cfg.exists()
     config_generator.update_config(csv_path=project["csv"], config_path=cfg,
@@ -180,17 +194,67 @@ def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_pa
     studio_tags = {a.axisTag for a in TTFont(str(studio))["fvar"].axes} - {"SPAC"}
     assert built_tags == studio_tags, (built_tags, studio_tags)
 
-    # (b) outlines at every row's parametric output, against the same masters.
+    # (c) every non-default row, at its user location, both fonts mapped.
+    worst_outline, worst_advance = 0.0, 0.0
+    for row in rows:
+        if row.instance_name == DEFAULT_ROW:
+            continue
+        loc = {t: float(v) for t, v in row.in_axes.items()}
+        d, adv = _glyph_set_distance(studio, built, loc, ["a", "g", "o"])
+        worst_outline, worst_advance = max(worst_outline, d), max(worst_advance, adv)
+    assert worst_outline <= 3.0, f"outlines diverge by {worst_outline:.2f} u"
+    assert worst_advance <= 1.0, f"advances diverge by {worst_advance:.2f} u"
+
+    # (d) the default row, against the unmapped build of the same masters.
     plain = tmp_path / "plain.ttf"
     subprocess.run([str(FONTC), "-o", str(plain), str(project["source"]),
                     "--flatten-components", "--decompose-transformed-components"],
                    check=True, capture_output=True)
-    rows = config_generator.read_csv_mappings(project["csv"])
+    # The default row is deliberately NOT in the mappings (gen-avar2 drops it
+    # for the built font, and the README says so). Its user location therefore
+    # lands NEAR — not exactly on — the compiled origin: the avar2 built from
+    # the 7 mapped rows interpolates across it. Measured 8.1 u against the
+    # masters instanced at the row's parametric output, which is the resting
+    # dip of decision 0001 seen from the sources' side. Asserted as a bound with
+    # the number in it, not as a tolerance that hides the difference.
+    user_loc = {t: float(v) for t, v in default_row.in_axes.items()}
+    out_loc = {t: float(v) for t, v in default_row.out_axes.items()}
+    fm_set = TTFont(str(built)).getGlyphSet(location=user_loc)
+    plain_set = TTFont(str(plain)).getGlyphSet(location=out_loc)
     worst = 0.0
-    for row in rows:
-        loc = {t: float(v) for t, v in row.out_axes.items()}
-        worst = max(worst, _outline_distance(built, plain, loc, ["a", "g", "o"]))
-    assert worst <= 3.0, f"outlines diverge by {worst:.2f} u"
+    for name in ("a", "g", "o"):
+        pa, pb = _points(fm_set, name), _points(plain_set, name)
+        assert len(pa) == len(pb), f"{name}: different point counts"
+        for pt, qt in zip(pa, pb):
+            worst = max(worst, ((pt[0] - qt[0]) ** 2 + (pt[1] - qt[1]) ** 2) ** 0.5)
+    assert worst <= 10.0, (f"the default row rests {worst:.2f} u from the "
+                          "masters (was 8.1 u; a jump means the mappings moved)")
+
+
+def _glyph_set_distance(a, b, loc, glyphs):
+    """(worst point distance, worst advance difference) at one USER location.
+
+    ``getGlyphSet(location=…)`` normalises through ``avar``/avar2, so both
+    fonts are interpolated in the coordinate system the mappings define — the
+    comparison the acceptance asks for.
+    """
+    fa, fb = TTFont(str(a)), TTFont(str(b))
+    ga, gb = fa.getGlyphSet(location=loc), fb.getGlyphSet(location=loc)
+    worst, advances = 0.0, 0.0
+    for name in glyphs:
+        pa, pb = _points(ga, name), _points(gb, name)
+        assert len(pa) == len(pb), f"{name}: different point counts"
+        for p, q in zip(pa, pb):
+            worst = max(worst, ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5)
+        advances = max(advances, abs(ga[name].width - gb[name].width))
+    return worst, advances
+
+
+def _points(glyph_set, name):
+    from fontTools.pens.recordingPen import RecordingPen
+    pen = RecordingPen()
+    glyph_set[name].draw(pen)
+    return [pt for _op, pts in pen.value for pt in pts]
 
 
 def _outline_distance(a, b, loc, glyphs):

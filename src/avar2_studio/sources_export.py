@@ -123,13 +123,25 @@ def _mapping_xml(doc: DesignSpaceDocument, rows, declared, axis_names: Dict[str,
         mapping = ET.SubElement(mappings, "mapping")
         src = ET.SubElement(mapping, "input")
         for tag, value in sorted(row.in_axes.items()):
-            ET.SubElement(src, "dimension", name=axis_names.get(tag, tag),
+            ET.SubElement(src, "dimension", name=_axis_name(tag, axis_names),
                           xvalue=_fmt(value))
         dst = ET.SubElement(mapping, "output")
         for tag, value in sorted(row.out_axes.items()):
-            ET.SubElement(dst, "dimension", name=axis_names.get(tag, tag),
+            ET.SubElement(dst, "dimension", name=_axis_name(tag, axis_names),
                           xvalue=_fmt(value))
     return mappings
+
+
+def _axis_name(tag: str, axis_names: Dict[str, str]) -> str:
+    """A dimension's ``name`` is the designspace axis NAME, never its tag.
+
+    designspace 5 resolves mapping dimensions by ``axis.name`` (that is what
+    ``designspaceLib`` hands fontmake); a tag there makes fontmake log "some
+    output axes are not in the variable-font" and drop the mapping, which is
+    how E1 first shipped a zip that built a font with no ``avar`` at all.
+    The CSV rows carry uppercase tags, so the lookup is case-insensitive.
+    """
+    return axis_names.get(str(tag).lower(), tag)
 
 
 def _fmt(value) -> str:

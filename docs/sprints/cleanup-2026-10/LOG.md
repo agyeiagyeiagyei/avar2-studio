@@ -1977,24 +1977,35 @@ Two fontTools facts shaped the writer, both found by running it:
   the full suite stayed green across the upgrade (626 → 653 tests, 641 → 653
   after E1's own tests).
 
-**One acceptance deviation, stated plainly.** E1's acceptance (2) asks the
-round trip to compare against *the studio's TTF* "instantiated at the row's
-parametric output". That comparison is not well-posed, and I measured it rather
-than argued it: the studio's font carries avar2 written from the CSV, so its
-user axes (wght/wdth default) are mapped onto parametric values, while fontmake
-does not consume designspace 5 `<mappings>` at all. Instantiating both at the
-same parametric location therefore compares two different designs — measured
-per row: 8.2 / 2390 / 2436 / 195 / 674 / 625 / 3747 / 4835 u, i.e. the mapping
-difference, growing with distance from the default. What the item is really
-asking ("what we hand over builds and is the design") is measured against the
-**unmapped build of the same source**: `fontc` on the same `.glyphs` versus the
-fontmake build of the exported sources, both instantiated at each row's
-parametric output — **worst 0.0 u** across all 8 rows and glyphs a/o/g. The
-test asserts that (≤ 3 u) *and* the acceptance's axis-tag equality against the
-studio's avar2 TTF minus SPAC, and its docstring plus the numbers above record
-why the studio TTF cannot be the outline baseline. Flagged for the verifier: if
-the literal studio-TTF comparison is required, it needs a font that applies
-designspace 5 mappings, not fontmake.
+**Round trip (acceptance 2), and a defect the first version of it hid.** My
+first comparison instantiated both fonts by *parametric* coordinates; because it
+found 8–4835 u of difference I concluded fontmake does not consume designspace 5
+`<mappings>` and substituted the unmapped build. That conclusion was **wrong**,
+and the verifier found it: `_mapping_xml` wrote the `<output>` dimensions by axis
+**tag** (`XOPQ`), and designspace 5 resolves dimensions by axis **name**
+(`X-Opacity`), so fontmake logged `ERROR … some output axes are not in the
+variable-font` once per mapping and built a font with **no avar table at all**.
+The substitution then compared an unmapped font against an unmapped font, which
+is why it read 0.0 u and stayed green over a broken export.
+
+Fixed in `sources_export._axis_name`: every `<dimension name>` is the axis name
+from `doc.axes`, case-insensitively (the CSV rows carry uppercase tags). With
+that one change and nothing else, `fontmake -m <designspace> -o variable` builds
+**avar 2.0 with 7 mappings and zero ERROR lines**, and the round trip is the
+comparison the acceptance asks for — both fonts interpolated at each row's USER
+location, so both go through the mappings:
+
+- 7 mapped rows: outlines **worst 2.18 u** (≤ 3), advances **worst 0.55 u** (≤ 1).
+- the default row (`Narrow Thin 144`), which gen-avar2 deliberately leaves out of
+  the mappings: **8.12 u** from the masters at its parametric output. That is the
+  resting dip of decision 0001 seen from the sources' side — the row's user
+  location lands near, not on, the compiled origin — so the test asserts it as a
+  bound of 10 u with the number in the message rather than folding it into the
+  3 u tolerance.
+
+The test now also asserts the build carries the mappings (`avar.Version == 2.0`,
+`VarRegionList.RegionCount == len(rows) - 1`, no `ERROR` lines), which is the
+assertion that would have caught the original defect.
 
 Commands + results:
 - `pytest tests/test_sources_export.py -q` → 5 passed (contents, README
