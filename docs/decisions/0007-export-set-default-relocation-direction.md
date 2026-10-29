@@ -1,7 +1,7 @@
 # 0007 — Export "set default": the inserted-master method is rejected; lossless relocation to a parameterised default is the direction
 
-- **Status:** Accepted direction, **not built** (sprint item T3.8). The code still runs the inserted-master staging.
-- **Date:** 2026-07-21 inserted-origin-master export (`edd4b5a`); 2026-10-04 measurements; 2026-10-16 direction recorded (audit §2)
+- **Status:** Accepted and **built** (2026-10-19, see the status update at the end). The inserted-master staging is gone; the export compiles the resolved source with a lossless relocation.
+- **Date:** 2026-07-21 inserted-origin-master export (`edd4b5a`); 2026-10-04 measurements; 2026-10-16 direction recorded (audit §2); 2026-10-19 built
 - **Area:** `server._export_pipeline`, `server._build_export_source`, `server._build_in_process`
 
 ## Context

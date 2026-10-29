@@ -15,7 +15,7 @@ gets a new record that supersedes the old one rather than an edit.
 | [0004](0004-kinetikern-font-stage-phantom-tuples.md) | Kinetikern corrections as font-stage phantom-point tuples, before SPAC | Accepted | 2026-10-15 |
 | [0005](0005-rond-axis-per-style-percent-rendered-fill.md) | Rounding is a ROND axis with per-style %; corners classified by the rendered fill | Accepted | 2026-10-02 / 2026-10-11 |
 | [0006](0006-slant-name-exemption-italic-doubling.md) | "Italic"/"Slanted" styles are exempt from the slant stamp; gftools-style doubling | Accepted | 2026-10-10 |
-| [0007](0007-export-set-default-relocation-direction.md) | Export "set default": inserted-master method rejected; lossless relocation to a parameterised default is the direction | Accepted direction, not built (T3.8) | 2026-10-16 |
+| [0007](0007-export-set-default-relocation-direction.md) | Export "set default": inserted-master method rejected; lossless relocation to a parameterised default is the direction | Accepted; built 2026-10-19 | 2026-10-16 / 2026-10-19 |
 | [0008](0008-per-instance-control-values-in-sidecar.md) | Per-instance control-axis values in the control sidecar, never CSV columns | Accepted | 2026-10-11 |
 | [0009](0009-drop-out-of-range-sources.md) | Out-of-range sources are dropped (Glyphs.app / fontmake semantics) | Accepted; static-only action | 2026-08-03 |
 | [0010](0010-fontra-embed-gpl-subproject.md) | The browser editor is fontra-embed, a separate GPL sub-project over postMessage | Accepted | 2026-09-30 |
