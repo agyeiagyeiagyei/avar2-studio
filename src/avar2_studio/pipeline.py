@@ -873,6 +873,7 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     # Hoisted: step 3.5 below needs it after the block to tell "nothing to
     # relocate FROM" from "relocation is off" (O1).
     declared_for_defaults: Dict[str, list] = {}
+    maps_declared_axis = False
     if avar2_cfg_early:
         declared_for_defaults = _declared_axis_ranges(default_overrides)
 
@@ -961,19 +962,25 @@ def _build_in_process(config_path: Path, workdir: Path, fontc_path: str,
     target = relocate_target if relocate_target is not None else (
         (default_rows[0].get("out") or {}) if (avar2_cfg_early and default_rows) else {})
     relocation_error = None
-    if relocate_at_build and avar2_cfg_early and not target and not declared_for_defaults:
-        # There is nothing to relocate FROM: the source declares no user-axis
-        # defaults, so no CSV row can be the default row and the font rests at
-        # the compiled corner (the first master's parametric values). That used
-        # to report a plain "ok" and the designer saw "deformed instances" with
-        # no message at all (O1). Not a failure: the preview must keep working
-        # and the build gate must stay open.
+    if (relocate_at_build and avar2_cfg_early and not target
+            and not maps_declared_axis):
+        # Nothing anchors the resting state: no mapping row maps an axis whose
+        # default is declared, so the font rests at the compiled corner (the
+        # first master's values). That used to report a plain "ok" and the
+        # designer saw "deformed instances" with no message (O1). Not a
+        # failure: the preview must keep working and the gate must stay open.
+        #
+        # `maps_declared_axis` and not "declared_axis_ranges() is empty" is the
+        # right test: the metadata auto-declares the studio's OWN created axes
+        # (LCWD/YMOD/TST2/GRAD placeholders) on any source with control axes,
+        # so an empty range map never happens on Crispy — while none of those
+        # axes appears in the mapping's in:, which is exactly the corner case.
         _sibling = _sibling_axis_metadata_path()
         _meta_name = _sibling.name if _sibling else "<stem>-axis-metadata.json"
         state.LAST_BUILD_DEGRADED = (
-            f"{_meta_name} is missing or empty — the font rests at the compiled "
-            "corner (the first master's settings), not at any authored style. "
-            "Declare the axis defaults in that file beside the source.")
+            f"{_meta_name} declares no defaults for the mapped axes — the font "
+            "rests at the compiled corner (the first master's settings), not at "
+            "any authored style. Declare them in that file beside the source.")
         log.warning(f"  relocation: {state.LAST_BUILD_DEGRADED}")
     if relocate_at_build and target:
         from fontTools.varLib import instancer as _instancer

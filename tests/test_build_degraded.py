@@ -27,6 +27,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -143,6 +144,42 @@ def test_an_empty_metadata_file_is_created_loudly(mini, monkeypatch, caplog):
     assert any(r.levelno == logging.WARNING and str(sibling) in str(r.message)
                for r in caplog.records), (
         "an empty axis-metadata file must be reported at warning level")
+
+
+@needs_fontc
+def test_a_declared_axis_the_mapping_never_uses_still_counts_as_missing(mini, monkeypatch):
+    """The trap this condition fell into first.
+
+    ``_load_axis_metadata`` auto-declares the studio's OWN created axes —
+    LCWD/YMOD/TST2/GRAD with placeholder extents — on any source with control
+    axes, so "declared ranges is empty" is false on Crispy even when nothing
+    anchors the resting state. What matters is whether a mapping row maps an
+    axis whose default is declared; here the only declared axis (``lcwd``) is
+    not in the CSV, so the build is still at the corner and must say so.
+
+    In-process on purpose: the point is the condition inside
+    ``_build_in_process``, and a worker subprocess cannot see a monkeypatch."""
+    source, with_metadata = mini
+    with_metadata(False)
+    # The metadata/CSV/config getters all derive from these three globals.
+    monkeypatch.setattr(state, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", source)
+    monkeypatch.setattr(state, "PREVIEW_DIR", source.parent / ".avar2-studio")
+    state._DECLARED_RANGES_CACHE = {}
+    cfg = pipeline._initialize_preview_config_from_glyphs()
+    assert cfg and cfg.exists(), "the preview config must be created first"
+    from avar2_studio.build import config_generator
+    config_generator.update_config(csv_path=pipeline._get_preview_csv_path(),
+                                   config_path=cfg, backup=False,
+                                   source_path=source,
+                                   metadata_path=pipeline._get_avar2_metadata_path())
+    work = source.parent / "work"
+    work.mkdir(exist_ok=True)
+    with mock.patch.object(pipeline, "_declared_axis_ranges",
+                           lambda *a, **k: {"lcwd": [-1000.0, -1000.0, 1000.0]}):
+        pipeline._build_in_process(cfg, work, str(FONTC))
+    assert state.LAST_BUILD_DEGRADED, (
+        "a declared axis the mapping never uses must not hide the corner build")
 
 
 @needs_fontc
