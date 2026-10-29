@@ -35,6 +35,15 @@ export default [
       // components predate this config and must stay untouched.
       'no-unused-vars': 'warn',
       'react/no-unescaped-entities': 'warn',
+      // A dangling `+ (cond ? 1 : 0);` line survived a refactor in Header.tsx
+      // (A1): eslint:recommended does not include that rule, and tsc accepts a
+      // stray expression statement. Short-circuit and ternary expressions stay
+      // legal, because `cond && doThing()` is idiomatic React.
+      'no-unused-expressions': ['error', {
+        allowShortCircuit: true,
+        allowTernary: true,
+        allowTaggedTemplates: true,
+      }],
     },
   },
   {

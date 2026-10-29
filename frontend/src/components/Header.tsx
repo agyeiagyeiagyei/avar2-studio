@@ -130,7 +130,6 @@ function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
 
   const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0)
     + (kinetikern?.enabled !== false && spacedCount > 0 ? 1 : 0);
-    + (kinetikern?.enabled !== false && spacedCount > 0 ? 1 : 0);
 
   const handleLoadExample = async (id: string, name: string) => {
     setOpen(false);
