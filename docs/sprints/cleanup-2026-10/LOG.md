@@ -1878,3 +1878,29 @@ Minor note: the ROUND 18 paragraph above cited P1 as `6689b6`; it is
 Commands + results:
 - `pytest tests/test_avar2_default_relocation.py -q` → 12 passed.
 - `pytest tests/ -q` → **637 passed**; `ruff check src tests` clean.
+
+## Checkpoint ROUND 19
+
+Two follow-ups from the ROUND 18 review, one commit each, then the acceptance
+the review set: a green Test workflow on the checkpoint push commit itself.
+
+- K1b `117f99a` — the badge popover said "deltas live in the Kinetikern
+  sidecar"; the line is now `badgeHint()` in `kinetikern-copy.js` and talks
+  about the tab. The node spec pins it and rejects sidecar/JSON/CSV wording.
+- CI0d `83908a2` — `test_a_failed_relocation_is_memoised` compares
+  `pipeline._font_content_digest` and asserts the differing-table set is a
+  subset of `{"head"}`, so a second-boundary straddle cannot fail it while a
+  real content change still does. The assert landed in `117f99a` (staged with
+  K1b); the commit carries the evidence and says so.
+
+Verification at this HEAD (`aa6b87f`):
+- Test workflow run **40842980952**: cli-build, frontend, python (ubuntu,
+  macos), rust (ubuntu, macos) — **all success** (2m51s).
+- Loop run `20261029-151746`: staged copy git-clean before and after the
+  build, installed-package build exit 0, `ui_probe.py all` **PASS 16 / FAIL 0**.
+- `pytest tests/ -q` → 637 passed; `ruff check src tests` clean; frontend
+  `eslint` 0 errors, `tsc --noEmit` clean, `npm run test:unit` all pass,
+  `npm run build` green.
+
+Also corrected the review's Minor note: the ROUND 18 paragraph cited P1 as
+`6689b6`; the commit is `668b9b6`.
