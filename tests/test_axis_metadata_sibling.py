@@ -52,20 +52,28 @@ def test_the_writer_writes_the_sibling(project):
     assert not (project.parent / ".avar2-studio" / "axis-metadata.json").exists()
 
 
-def test_a_legacy_file_is_migrated_once(project):
+def test_a_legacy_file_is_copied_not_moved(project):
+    """O2: the migration must not unlink what another process may still read.
+
+    It used to. Then a second studio on the same folder — an older version, or
+    one started before the migration — staged the legacy name from the preview
+    dir, found no metadata beside the staged source, and built at the compiled
+    corner (the designer's "deformed instances").
+    """
     legacy = project.parent / ".avar2-studio" / "axis-metadata.json"
     legacy.write_text(json.dumps(META), encoding="utf-8")
 
     path = pipeline._get_avar2_metadata_path()
 
     sibling = project.parent / "Crispy-axis-metadata.json"
-    assert path == sibling
+    assert path == sibling, "the sibling is canonical"
     assert json.loads(sibling.read_text()) == META, "content carried over verbatim"
-    assert not legacy.exists(), "migrated, not duplicated"
-    # Second access is a plain hit — no re-migration, no rewrite.
-    before = sibling.stat().st_mtime_ns
+    assert legacy.exists(), "the legacy copy is kept for older studio versions"
+    assert json.loads(legacy.read_text()) == META, "and it still says the same thing"
+    # Second access is a plain hit — no re-migration, no rewrite of either file.
+    before = (sibling.stat().st_mtime_ns, legacy.stat().st_mtime_ns)
     assert pipeline._get_avar2_metadata_path() == sibling
-    assert sibling.stat().st_mtime_ns == before
+    assert (sibling.stat().st_mtime_ns, legacy.stat().st_mtime_ns) == before
 
 
 def test_an_existing_sibling_wins_over_the_legacy_file(project):

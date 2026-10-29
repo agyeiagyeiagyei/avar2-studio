@@ -1824,9 +1824,17 @@ def _get_avar2_metadata_path() -> Optional[Path]:
 
     The sibling ``<stem>-axis-metadata.json`` is the source of truth. If it is
     absent but ``.avar2-studio/axis-metadata.json`` exists, the legacy file is
-    written to the sibling and removed, so the next commit carries the
-    declared defaults. A failed migration keeps reading the legacy file
-    rather than losing the designer's declarations.
+    COPIED to the sibling, so the next commit carries the declared defaults.
+
+    The legacy copy is deliberately kept. It used to be unlinked, which bit in
+    two ways: a second studio on the same folder (an older version, or one
+    started before the migration) stages the legacy name from the preview dir
+    and builds at the compiled corner, and a hand-edited old file vanishes
+    silently. The sibling is read first, so a stale legacy file is never
+    consulted by this code (O2).
+
+    A failed migration keeps reading the legacy file rather than losing the
+    designer's declarations.
     """
     sibling = _sibling_axis_metadata_path()
     if sibling is None:
@@ -1839,8 +1847,9 @@ def _get_avar2_metadata_path() -> Optional[Path]:
     try:
         data = json.loads(legacy.read_text(encoding="utf-8"))
         _sidecar_io.write_json(sibling, data)
-        legacy.unlink()
-        log.info(f"axis metadata migrated to {sibling.name} (commit this file)")
+        log.info(f"axis metadata migrated to {sibling.name} (commit this file); "
+                 "the legacy .avar2-studio/ copy is kept for older studio "
+                 "versions (safe to delete)")
     except Exception as exc:
         log.warning(f"Could not migrate {legacy} to {sibling}: {exc}")
         return legacy

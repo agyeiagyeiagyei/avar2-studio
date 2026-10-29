@@ -1935,3 +1935,21 @@ Commands + results:
   pass, `npm run build` green.
 - Probe: new `degraded-banner` scenario (removes the sibling from the served
   copy, rebuilds, reads the banner, restores and rebuilds in a finally).
+
+## O2 — the migration copies, it does not move
+
+`_get_avar2_metadata_path()` wrote the sibling and `unlink()`ed
+`.avar2-studio/axis-metadata.json`. A second studio on the same folder — an
+older version, or one started before the migration — stages the legacy name
+from the preview dir; after the unlink it found no metadata and built at the
+compiled corner. That is a mixed-version hazard inside this sprint and a silent
+data loss for anyone who hand-edited the old file.
+
+It now copies and keeps the legacy file, logging "the legacy .avar2-studio/
+copy is kept for older studio versions (safe to delete)". The sibling is read
+first, so nothing here consults a stale legacy file.
+
+Commands + results:
+- `pytest tests/test_axis_metadata_sibling.py -q` → 8 passed (the migration test
+  is now `test_a_legacy_file_is_copied_not_moved`).
+- `pytest tests/ -q` → **641 passed**; `ruff check src tests` clean.
