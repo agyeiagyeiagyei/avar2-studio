@@ -23,7 +23,9 @@ through `_apply_source_path` (sidecar bootstrap, `_resolve_active_source`,
 `JOBS.cancel_all()`, first build), schedules the watchdog `Observer`
 (the active source's directory; the original's directory when it differs;
 the shadow directory when source transforms make `transformed/` the
-active source; recursive only for `.designspace`), and runs `app.run`.
+active source; recursive only for `.designspace`), re-points it on every load
+(`WATCHER.reschedule` from the load routes, so a source opened after launch is
+watched too), and runs `app.run`.
 Request threads serve the API. Layer edits return in milliseconds and
 `schedule_shadow_rebuild` coalesces them into one regen + build after a
 0.4 s debounce (`_REBUILD_DEBOUNCE_SECONDS`); `BACKGROUND_WORK` folds
@@ -36,15 +38,18 @@ points the path globals at the job snapshot
 (`_bind_server_globals`), runs the very same pipeline functions, writes
 `progress.jsonl` (phases plus a stderr tee) and an atomically renamed
 `result.json`, and never writes shared state. The supervisor promotes.
-Only the env names in `build_jobs.ENV_KEYS` are forwarded. Decision 0003.
+The spec carries the `ENV_KEYS` environment (relocation switch, gftools builder,
+`AVAR2_SPAC_INJECT`), the `transform_override` from a committed build config and
+a `memo_dir` for the relocation memo. Decision 0003.
 
 **Fontra subprocess** — spawned on demand by `open-editor`
 (`_ensure_fontra_running`): `python -m avar2_studio._fontra_launch
---http-port 8001 filesystem <root>`, which applies `_fontra_patch` (keeps
-studio brace layers editable in fontra-glyphs) before Fontra starts.
-Restarted when the root changes or the served shadow's mtime moved;
-stopped on source swap. `FONTRA_PORT` is a single global (8001): two
-studios on one machine fight over it. The studio reverse-proxies it
+--http-port <AVAR2_FONTRA_PORT or 8001> filesystem <root>`, which applies
+`_fontra_patch` (keeps studio brace layers editable in fontra-glyphs) before
+Fontra starts. Restarted when the root changes or the served shadow's mtime
+moved; stopped on source swap. The port is `--fontra-port` /
+`AVAR2_FONTRA_PORT`, default 8001: one studio instance owns it, so a second
+instance on the same machine needs its own. The studio reverse-proxies it
 same-origin (§7).
 
 **Glyphs plugin launcher** — `glyphs/Avar2Studio.glyphsPlugin/…/studio_launcher.py`
@@ -79,9 +84,9 @@ decision 0010).
 | Module | Role |
 |---|---|
 | `__init__.py`, `__main__.py` | package; `python -m avar2_studio` → `cli.main` |
-| `cli.py` | dispatch: `doctor`, `build SOURCE --out DIR`, `install-glyphs-plugins`, otherwise `server.main()` |
+| `cli.py` | dispatch: `doctor`, `build SOURCE --out DIR` (`--workdir`, `--hide-axes`, `--default`, `--format ttf|woff2|sources`, `--config`, `--write-config`), `install-glyphs-plugins`, otherwise `server.main()`; `build` runs the same pipeline as the app and refuses without axis metadata |
 | `server.py` | the Flask app: construction, the build gate (`before_request`), route registration (`routes.register`), the source-file read/CRUD helpers routes share, the debounced-build triggers, `main()` (argparse + wiring: watcher via `watch.WATCHER`, periodic fallback, `app.run`). Pipeline functions are imported back from `pipeline.py`, so `server.X` call sites stay valid |
-| `state.py` | the 37 mutable runtime-state globals as plain module attributes; everyone reads/writes `state.X` (never `from state import X` — that binds a copy) |
+| `state.py` | the 34 mutable runtime-state globals as plain module attributes; everyone reads/writes `state.X` (never `from state import X` — that binds a copy) |
 | `watch.py` | the source-file watcher: `GlyphsFileHandler` (classification, debounce, suppression watermarks, settle/dedup, mid-build and idle branches) + `SourceWatcher` (`start`/`stop`/`reschedule` — `/api/load-source` re-points it); call-ins go through late-bound `server.X` |
 | `routes/` | one Flask blueprint per route group (`ui`, `source`, `health`, `build`, `text_width`, `coverage`, `config`, `transforms_grade`, `kinetikern`, `avar2`, `instances`, `control_axes`, `load`, `fontra` incl. the proxy + websocket); handlers read `state.X` and call pipeline/server helpers late-bound; `tests/test_url_map_snapshot.py` pins the route table |
 | `pipeline.py` | Flask-free build/export pipeline: source-path model (`_apply_source_path`, `_resolve_active_source`), build (`_run_build`, `_perform_avar2_build`, `_build_in_process`, `build_variable_font`), transform chain (`_apply_transform_chain`, `_strip_injected_axes`, `_stamp_control_instance_values`), export (`_export_pipeline`, `_save_woff2`), the preview-path getters and axis metadata (`_load_axis_metadata`, `_save_axis_metadata`, `_derive_traditional_range`, `_repair_placeholder_ranges`), `_builder_env`/`_declared_axis_ranges`, watcher suppression (`_suppress_watcher`) |
@@ -89,6 +94,11 @@ decision 0010).
 | `build_worker.py` | worker entry: `build` / `export` / `compress` handlers, progress + result files |
 | `build/config_generator.py` | CSV → `config.yaml` `stat` and `avar2` sections (`update_config`); the in/out column split and row dedupe |
 | `build/_shims/gftools-gen-avar2` | patched gen-avar2 for the external `gftools builder` path (fvar dedupe + declared ranges via `AVAR2_STUDIO_AXIS_RANGES`); the in-process build applies the same patch directly |
+| `build_config.py` | the committed `<stem>-build.json`: keys, validation, design-only refusals, `path_for` |
+| `sidecar_io.py` | `atomic_writer` / `write_json` / `write_text` and the process-wide `LOCK` every sidecar writer takes |
+| `sources_export.py` | the UFO + designspace 5 zip (`--format sources`) |
+| `studio_log.py` | the log handler the server and worker share |
+| `examples.py` | the bundled example projects and their staging into `~/.avar2-studio/workspace/` |
 | `source_font.py` | format dispatch (`.glyphs` via glyphsLib, `.designspace` via designspaceLib); `load_source_cached` (keyed on path, mtime, size — `.glyphs` only); `save_font_atomically`; axes, masters, instances and instance CRUD on the source |
 | `csv_io.py` | CSV readers, the parametric/user column split, source→CSV sync (`update_csv_from_glyphs`), `backup_sidecar`, `normalize_in_axis_name` |
 | `control_axes/` | package re-exporting the old flat module's namespace: `schema.py` (`-control.json` I/O and normalisation; layer delta / reseed), `naming.py`, `outlines.py`, `shadow_glyphs.py` / `shadow_designspace.py` (shadow regeneration, seeds, virtual masters, seed signatures, `capture_outlines` / `_extract_brace_outlines`) |
@@ -112,7 +122,7 @@ decision 0010).
 | `api.js` | the live provider (one method per route; export polling) |
 | `static-api.js` | the static provider: examples, uploads, the in-browser rebuild pipeline (`rebuildUploadFont`), sessions, bundle import, editor sessions |
 | `session.js` | IndexedDB persistence of the uploaded workspace |
-| `zip-workspace.js` | project zip read/write (mirrors `server._load_project_zip`) |
+| `zip-workspace.js` | project zip read/write (mirrors `routes/load.py::_load_project_zip`) |
 | `mappings-csv.js` | the CSV model (instances + mappings) for uploads |
 | `fvar.js`, `gvar.js`, `coverage.js` | minimal TTF readers; the structural coverage audit |
 | `avar2-eval.js`, `avar2-lint.js` | avar v2 VarStore evaluator (the Preview tab's reflection); the mappings lint |
@@ -121,7 +131,7 @@ decision 0010).
 | `fontc-compile.js`, `fontc-worker.js`, `wasm/fontc-web/` | the wasm worker and the committed `wasm-pack` output |
 | `fontLoad.js`, `mac-glyph-names.js`, `utils/`, `lib/` | preview face registration from bytes; helpers |
 | `components/` | `Header.tsx`, `Sidebar.jsx`, `InstanceRows` / `InstanceRow` / `InstanceFlyout`, `AxisControl`, `ControlAxes` + `LayersEditor` + `AddControlAxisModal` + `AddBraceLocationModal` + `EditAxisModal`, `AddAxisModal`, `DeleteInstanceModal`, `DuplicateModal`, `GradeBadge` / `GradeDiagnostics`, `RoundingBadge`, `SlantBadge`, `PreviewTab`, `TesterTab`, `KinetikernTab`, `FontraEditorModal`, `ImportConfigModal.tsx`, `DemoLanding`, `ui/` (Radix dialog and dropdown) |
-| `e2e/` | Playwright and node specs — see DEVELOPMENT |
+| `e2e/` (`frontend/e2e/`) | Playwright and node specs — see DEVELOPMENT |
 
 ### Rust — `wasm/fontc-web/` (cdylib + rlib)
 
@@ -205,9 +215,9 @@ ORIGINAL_PATH          the designer's file. Never written by studio
   suppression (`_suppress_watcher`: a time window **and** an mtime
   watermark, so a late-processed self-event is still dropped).
 - **The worker's snapshot** (`JobQueue._stage`): the original, its sidecars
-  (`SIDECAR_SUFFIXES`), the legacy `avar2-mappings.csv`, the small
-  preview-dir files (`axis-metadata.json`, `instance-renames.json`,
-  `config.yaml`) into `src/.avar2-studio/`, the control shadow for
+  (`SIDECAR_SUFFIXES`, which includes `<stem>-axis-metadata.json`), the legacy
+  `avar2-mappings.csv`, the small preview-dir files (`axis-metadata.json`,
+  `instance-renames.json`, `config.yaml`) into `src/.avar2-studio/`, the control shadow for
   `.glyphs` sources (so uncaptured Fontra drawings survive), the UFOs for
   a designspace. Not `transformed/` — the worker re-derives it from the
   staged shadow in its own `_resolve_active_source`. Exports also stage
@@ -217,7 +227,9 @@ ORIGINAL_PATH          the designer's file. Never written by studio
   built font into `.avar2-studio/build/`; the job's regenerated
   `config.yaml` over the canonical one; export artifacts into
   `.avar2-studio/exports/<job-id>-<name>` (`KEEP_EXPORTS = 5`); the WOFF2
-  cache beside the font. Job directories are removed after `_finish`.
+  cache beside the font. Older builds are reaped by `reap_build_dir`
+  (`KEEP_BUILDS = 2`) and the result files by `KEEP_RESULTS = 50`; job
+  directories are removed after `_finish`.
 - **Workspaces outside the project:** bundled examples are staged once to
   `~/.avar2-studio/workspace/<id>/` (edits persist, the repo fixture stays
   clean); uploads go to `~/.avar2-studio/workspace/uploads/<slug>/`, one
@@ -278,7 +290,10 @@ keyed, read-only) and, if the loader raises, records
 either builder runs. Without that, the degraded build published a
 truncated font as `ok`, the gate stayed open while every mutating route
 500'd on the same parse error, and the fallback replaced the last-good
-artifact. `avar2-studio build` treats any `LAST_*` as a failing exit.
+artifact. `avar2-studio build` fails the exit on every `LAST_*` that means the
+shipped font is wrong (`build`, `avar2`, origin relocation, grade, source
+transform); `LAST_ORIGIN_WARNING` and `LAST_TRANSFORM_ERROR` do not, because the
+last good font still ships — the UI shows them, the exit status does not.
 
 ### Export (worker, `_export_pipeline`)
 
@@ -361,8 +376,10 @@ without `static/`).
 `glyphs_path`, `original_path`, `source_format`, `font_built`,
 `family_name`, `vf_family_id`, `built_font_filename`, `last_build_time`,
 `last_build_status`, `last_build_error`, `transform_error`, `avar2_error`,
-`grade_error`, `source_transform_error`, `origin_warning`, `build_stale`,
-`building`, `build_job`); `GET /api/glyphs-file-status` (osascript probe
+`grade_error`, `source_transform_error`, `origin_warning`, `degraded`,
+`origin_relocation_error`, `origin_relocation_memo`, `sidecar_errors`,
+`build_stale`, `building`, `build_job`); `GET /api/glyphs-file-status` (osascript
+probe
 of unsaved changes); `GET /api/examples`; `POST /api/load-source` (JSON
 `{example}` or multipart: one `.glyphs` + sibling files, or one project
 `.zip`; filenames sanitised).
@@ -438,7 +455,7 @@ drawings across a replace); `POST /api/control-axes/<tag>/reseed`
 | Persistence | files next to the source | IndexedDB session + workspace zip |
 
 Provider method drift, measured on `api.js` vs `static-api.js`'s
-`staticOverrides` (sprint T2.7 adds `api.capabilities` and a parity test):
+`staticOverrides` (`tests/e2e/api-parity.spec.mjs` pins the parity):
 
 - **live only:** `getBuildStatus`, `cancelBuild`, `getKinetikern`,
   `proposeKinetikern`, `applyKinetikern`, `revertKinetikern`,
@@ -510,10 +527,11 @@ layers read-only, structural ops rejected. Decision 0010.
   config import), `_RESOLVE_LOCK` (RLock; serializes
   `_resolve_active_source`), `control_axes._INSTANCE_VALUES_LOCK`,
   `_MAPPED_FONT_LOCK` (the mapped-location font cache),
-  `_REBUILD_TIMER_LOCK`. Atomic writes: the control and kinetikern
-  sidecars, every shadow save (`save_font_atomically`), `result.json`,
-  promotion. Not yet atomic or locked: the CSV (twelve write sites, three
-  threads), grade and transforms sidecars — sprint T2.1.
+  `_REBUILD_TIMER_LOCK`. Every sidecar write and every shadow save
+  (`save_font_atomically`) is atomic (`sidecar_io.atomic_writer` /
+  `write_json`) and runs under `sidecar_io.LOCK`, as do `result.json` and
+  promotion. Exactly one thing is not: `config.yaml`, which is written by the
+  worker into the job directory and promoted by rename.
 - The watcher (`GlyphsFileHandler.on_modified`) classifies each event
   (`_classify_watched_path`: `source`, `original`, `shadow`, `glif`),
   debounces 0.5 s per path, drops self-writes by window **and** mtime
@@ -521,8 +539,7 @@ layers read-only, structural ops rejected. Decision 0010.
   processes one event per final mtime, then: mid-build → capture drawings
   (shadow saves), re-resolve, `request_build(source_refresh=…)`; idle →
   resolve (original) or capture + CSV sync (shadow/source), then
-  `trigger_build`. Known gaps: the observer is scheduled once in `main()`
-  and not re-pointed by `/api/load-source` (T3.10); sidecar files are not
-  watched (T2.11); the designspace recursive watch covers `jobs/` (T2.12).
+  `trigger_build`. Known gaps: sidecar files are not watched, and the
+  designspace recursive watch also covers `jobs/` (builds write there).
 - `trigger_build()` only ever submits to `JOBS`; `_run_build` must never
   run in the server process.
