@@ -1168,3 +1168,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `ui_probe.py all`: exit **0** — PASS 18 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261029-200749/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261029-200749/shots`)
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### D1 — documentation audit applied (2026-10-30, root `~/Documents/avar2-studio-sprint`)
+
+- `pytest tests/ -q` → **654 passed**; `ruff check src tests` clean
+- link + anchor check across 16 reader/appendix documents → **0 broken paths, 0 broken anchors**
+- line counts: README 165 (was 435), CLI.md new, guides 129/97/158/315/120, examples 39/44/39, SIDECARS 378, DEVELOPMENT 255, ARCHITECTURE 545
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`

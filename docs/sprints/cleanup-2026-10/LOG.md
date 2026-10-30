@@ -2046,3 +2046,34 @@ Commands + results (after the fixes):
 - `pytest tests/test_build_jobs.py -q` → 19 passed (one new).
 - `pytest tests/test_export_sources_route.py -q` → 3 passed.
 - probe `export-sources` → **PASS**, twice in a row.
+
+## D1 — the documentation audit applied, one commit per document
+
+`DOCS_AUDIT.md`'s shape is now the repo's: a short reader set for designers and
+an appendix set for developers, with the sprint and audit records kept under
+*Internal*. Thirteen commits, one per document:
+
+| Document | What changed |
+|---|---|
+| `docs/CLI.md` (**new**) | the headless build reference: six flags incl. `--format sources`, `--csv` refused, the committed build config's keys and design-only refusals, three exit codes, `doctor --strict`, the CI recipe |
+| `README.md` | 435 → 165 lines: no PyPI promise, one file table, six features as paragraphs, CLI/CI/env moved to the appendices, Kinetikern caught up with K1–K4 |
+| `docs/README.md` | *For designers* / *Appendices* / *Internal*; `HANDOVER.md` archived, the `authoring-instances.md` stub deleted |
+| `docs/decisions/` | 0007 says built (2026-10-19); index lists fifteen |
+| `guides/authoring-instances.md` | 222 → 129: the shipped fixtures (no instances in the `.glyphs`, eight CSV rows, the real `Narrow Heavy 144` walkthrough), Roboto Delta Mini's nine axes and nineteen sources |
+| `guides/kinetikern.md` | 105 → 97: the K1–K4 UI, the wheel-carried engine, `Custom location`, the family switch, `PUT /api/kinetikern` |
+| `guides/transforms.md` | oracle paths under `wasm/fontc-web/tests/`, the wheel injector + `ENV_KEYS`, the `<stem>-build.json` transform override |
+| `guides/secondary-parametric-axes.md` | 373 → 315: the removed "pin layers" button, decision 0013's 501, the slider's third home |
+| `guides/grade.md` | 135 → 120: `+ Grade` for ungraded rows, the mechanics on one page |
+| `examples/*/README.md` | rewritten from the files: 63 glyphs / 8 masters / 8 CSV rows / transforms / declared defaults; nine axes / 19 sources / no CSV |
+| `docs/SIDECARS.md` | every sidecar is atomic, locked and backed up (or the table says why not); the control sidecar preserves unknown keys; `reap_build_dir`; no sprint ids |
+| `docs/DEVELOPMENT.md` | the test workflow exists (four jobs, six check names), the wasm binary is built not committed, wheels carry the accelerators, 654 tests, `AVAR2_FONTRA_PORT` |
+| `docs/ARCHITECTURE.md` | the twenty Appendix-B rows: watcher re-pointing, spec contents, Fontra port, CLI flags, 34 globals, five missing module rows, retention, health keys, which `LAST_*` are fatal |
+
+Commands + results:
+- `pytest tests/ -q` → **654 passed**; `ruff check src tests` clean.
+- Link and anchor check over the 16 reader-set and appendix documents (relative
+  path resolution plus heading anchors): **0 broken paths, 0 broken anchors**.
+- Line targets: README 165 (target ~150), guides 129/97/158/315/120 (target
+  ~100 each), examples 39/44/39, CLI 118. The two guides over target carry the
+  walkthroughs the guide exists for and the transform recipes the audit told us
+  to keep; the numbers are stated rather than excused.
