@@ -111,13 +111,10 @@ the bottom of the range.
 
 ### Fixing an extrapolation warning
 
-Two ways, both in the glyph's tray:
-
-- **Pin layers to axis extremes** — moves your outermost layer(s) out to
-  the axis min / max. The outline carries over; only the location
-  changes (the delta API carries a drawing across the move).
-- **+ Add layer for `<glyph>`** at the extreme — keeps your existing
-  layer as an intermediate and adds a new anchor at the extreme.
+**+ Add layer for `<glyph>`** at the axis extreme, from the glyph's tray: your
+existing layer stays as an intermediate and the new one anchors the end of the
+range. (To move an existing layer instead, edit its location — the delta API
+carries the drawing across the move.)
 
 ### One location across every applicable glyph
 
@@ -198,21 +195,14 @@ Rules:
 
 ### Corrections in the static (GitHub Pages) app
 
-The static app builds control-axis geometry itself:
-
-- **Plain brace layer** — a drawn outline is spliced into the source
-  before compiling (`compile_with_overlays`); a layer without a drawing
-  keeps a demo approximation: engaging the axis morphs the glyph toward
-  its own shape at the layer's parametric location, pinning only the
-  secondary axis.
-- **Correction layer** — the same model as the full app: the delta is
-  measured from the layer's own location to its target.
-
-Corrections are also **pinned automatically** there: where the full app
-needs a hand-authored anchor layer, the static build emits a companion
-tuple at the unpinned axis's extreme carrying the negated delta, so an
-anchor layer carried in from a bundle is simply a plain layer that
-contributes nothing at its own location.
+The static app builds control-axis geometry itself: a drawn brace layer is spliced
+into the source before compiling, a layer without a drawing keeps a demo
+approximation (engaging the axis morphs the glyph toward its own shape at that
+location), and a correction layer uses the same delta model as the full app.
+Corrections are also pinned automatically there — where the desktop app needs a
+hand-authored anchor layer, the static build emits a companion tuple at the
+unpinned axis's extreme carrying the negated delta. Details in
+[ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Per-style values
 
@@ -224,99 +214,51 @@ instance at build time.
 
 ## Previewing a secondary axis
 
-Every declared secondary axis gets a slider in two places: the
-**Instances tab sidebar**, under its own group beneath the core
-parametric sliders (every row re-renders at that value — only applicable
-glyphs change), and the **Preview tab**. The slider value is **preview
+Every declared secondary axis gets a slider in three places: the
+**Instances tab sidebar**, under its own group beneath the core parametric
+sliders (every row re-renders at that value — only applicable glyphs change);
+the **Preview tab**; and the **Kinetikern tab**, which spaces the style at that
+axis value. The slider value is **preview
 state, not instance data**: it is stripped from instance saves and never
 lands in the CSV or the source. The eye icon on the axis row disables it
 in preview for a quick with/without comparison (session-local).
 
 ## The shadow source file
 
-For studio-declared secondary-axis authoring the studio operates on a
-**shadow source file** — never the original.
+For studio-declared secondary-axis authoring the studio works on a **shadow
+source file**, never the original:
 
 ```
 <source-dir>/
-  Crispy.glyphs                       ← original. Never written for secondary-axis work.
-  Crispy-avar.csv                     ← AVAR2 MAPPINGS.
-  Crispy-control.json                 ← declared axes, layer locations, drawings, per-style values.
+  Crispy.glyphs                       ← original; never written for secondary-axis work
+  Crispy-control.json                 ← axes, layer locations, drawings, per-style values
   .avar2-studio/
-    shadow/Crispy.glyphs              ← derived: original + sidecar axes + brace layers (+ grade braces).
-    shadow/transformed/Crispy.glyphs  ← derived: the shadow after slant / round corners.
-    build/                            ← the preview font.
+    shadow/Crispy.glyphs              ← derived: original + sidecar axes + brace layers
+    shadow/transformed/Crispy.glyphs  ← derived: after slant / round corners
+    build/                            ← the preview font
 ```
 
-### How `regenerate_shadow` works
-
-On each secondary-axis action (and once at load), `regenerate_shadow`:
-
-1. Re-copies the original to the shadow path (the shadow is fully
-   derived; it is never updated incrementally).
-2. Appends any sidecar-declared axes missing from the shadow's axis list,
-   pads every master's and existing brace layer's coordinate vector, and
-   adds a **Virtual Master** per axis extreme so an axis spanned by no
-   master still has a real range (glyphsLib would otherwise derive a
-   zero-width range and fontra-glyphs would drop the axis, collapsing the
-   braces onto one location).
-3. Seeds a brace layer for each sidecar entry. The outline comes from, in
-   priority order: the **stored `outline`** in the sidecar (a captured
-   drawing); the **preserved prior-shadow outline** when its geometry no
-   longer matches the seed signature it was stamped with (a hand edit);
-   otherwise a fresh **interpolation of the glyph at the layer's
-   parametric location** (a correction uses its target), falling back to
-   a copy of the default master only when the masters are not
-   point-compatible for that glyph. Untouched seeds therefore **follow
-   master edits**.
-4. Applies studio-side instance renames, writes the file atomically, and
-   stamps every freshly seeded layer with its seed signature from the
-   saved file.
-
-The shadow is created lazily and used by the build only once an axis has
-layers (or an instance is graded, or a source transform is on). The
-studio also watches the **original**: editing it in Glyphs regenerates
-the shadow from it and rebuilds, so master, instance and glyph edits
-propagate without a reload.
-
-### Where drawings live
-
-A drawn outline lives in the shadow **and** in the sidecar. It is
-captured from the shadow into `-control.json` on every Fontra save (the
-watcher), on every configuration export, and it is carried along when a
-layer's coordinates are edited through the modal. A sidecar with outlines
-is therefore a complete backup: wiping `.avar2-studio/` and regenerating
-reproduces the drawings. Correction layers are never captured (they are
-recomputed) and untouched seeds are skipped (so the sidecar only ever
-holds real drawing).
-
-### Re-seeding
-
-A captured drawing is restored in preference to re-seeding — which also
-freezes it against later edits to the masters it was drawn over. The
-layer list shows **source changed** on a drawing whose masters moved
-since capture (`source_sig`). **Re-seed** (`POST
-/api/control-axes/<tag>/reseed`, body `{layers?, force}`) drops the stored
-drawing so the next regeneration pulls the current source through; it
-reports `reseeded`, `blocked` (layers holding a drawing — refused with 409
-unless `force`), `computed` (correction layers, nothing to re-seed),
-`clean` (no drawing, already up to date) and `missing`. There is no undo
-once the sidecar is written.
+Every action regenerates it from the original plus the sidecar: the original's
+glyphs are read, the sidecar's layer locations become brace layers (a correction
+layer's outline is recomputed, a drawn one is re-attached), grade braces are
+added, and the result is what gets compiled. Drawings live in the sidecar, never
+in the shadow, so the sidecar alone is a complete backup; **Re-seed** drops a
+layer's drawing and re-derives it from the current source, reporting `reseeded`,
+`blocked` (a layer still holds a drawing — 409 unless `force`), `computed`,
+`clean` or `missing`. There is no undo once the sidecar is written. The sequence
+in full is in [ARCHITECTURE.md](../ARCHITECTURE.md) (`regenerate_shadow`).
 
 ## Source-format scope
 
 - **`.glyphs`** — brace layers live inside each glyph; the shadow is a
   single `.glyphs` copy. Everything above applies.
-- **`.designspace`** — no brace layers; the equivalent is a **pooled
-  sparse UFO per unique brace location** (`<stem>-studio-<slug>.ufo`
-  beside the shadow document, attached as an extra `<source>`). Pools
-  that still match a sidecar location are kept across regenerations
-  (drawn outlines included); only missing glyphs are re-seeded and stale
-  pools deleted. Declaring axes and adding layers works, but this path
-  lacks correction targets, captured outlines, seed signatures and
-  instance renames, writes non-atomically, and a configuration bundle
-  with control axes cannot be imported onto a `.designspace` target.
-  Sprint item T2.15 decides parity or an explicit "not supported".
+- **`.designspace`** — read-only for secondary axes. No brace layers exist, so
+  the equivalent would be a pooled sparse UFO per brace location, and that path
+  lacks correction targets, captured drawings, seed signatures and instance
+  renames and writes non-atomically. **Authoring answers 501** with that
+  explanation ([decision 0013](../decisions/0013-designspace-authoring-501.md));
+  everything already declared still builds, and a configuration bundle carrying
+  control axes cannot be imported onto a `.designspace` target.
 
 ## Editing in Fontra
 
