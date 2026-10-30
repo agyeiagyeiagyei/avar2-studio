@@ -1,11 +1,10 @@
 # Grade — how it works
 
-Darken or lighten a style **without changing its advance widths**, so
-text never reflows. Turn **Grade** on in the Transforms menu, then click a
-style's **`G`** badge to set its percentage; grades interpolate between
-the styles you set, so you grade a few anchors, not every style. This
-document covers the mechanics; the file format is in
-[SIDECARS.md](../SIDECARS.md#stem-gradejson).
+Darken or lighten a style **without changing its advance widths**, so text never
+reflows. Turn **Grade** on in the Transforms menu, then click a style's **`G`**
+badge to set its percentage — an ungraded row offers **`+ Grade`** instead.
+Grades interpolate between the styles you set, so you grade a few anchors, not
+every style. The file format is in [SIDECARS.md](../SIDECARS.md#stem-gradejson).
 
 ## What a grade is
 
@@ -79,35 +78,22 @@ the preview until you drag the slider to an extreme.
 
 ## Source-level generation
 
-Grade is a source transform, not a VF → VF post-build step. For every
-graded instance `grade_shadow.apply_grades` injects onto the **shadow**
-`.glyphs` (never the original), composed after the control-axis shadow:
+Grade is a source transform, not a VF → VF post-build step. For every graded
+instance `grade_shadow.apply_grades` injects braces onto the **shadow** `.glyphs`
+(never the original), composed after the control-axis shadow: a per-glyph
+interpolator over the parametric masters plus any parametric curve braces
+interpolates the glyph at the instance's light and dark grade coordinates,
+**equalisation** sets each brace's advance to the interpolated base advance while
+shifting the outline symmetrically (which is what holds the advance across GRAD),
+and a Virtual Master pair gives the axis a real range. Masters off the parametric
+plane (an italic sharing its upright's coordinates) are excluded, or the model
+fails with "Locations must be unique".
 
-1. A per-glyph interpolator over the parametric masters **plus any
-   parametric curve braces** (so round glyphs get fontmake-accurate
-   geometry). Masters off the parametric plane — an italic master at
-   `ital 1`, which shares its upright's parametric coordinates — are
-   excluded, or the model fails with "Locations must be unique"; grading
-   the plane grades the family, because the italics are sheared from the
-   uprights width for width.
-2. The glyph's outline interpolated at the instance's **light** and
-   **dark** grade coordinates (the instance's *true* avar2-mapped
-   parametric location, taken from the source instance or the CSV row).
-3. **Equalisation**: each brace's advance is set to the glyph's base
-   advance at the instance (the interpolated width, rounded), shifting the
-   outline symmetrically — this is what holds the advance across GRAD with
-   zero phantom-point delta.
-4. The two braces at `(instance parametric coords × GRAD ∓10)` and a
-   **Virtual Master pair** at the same location × GRAD extremes, so the
-   GRAD axis has a real range.
-
-Regeneration is idempotent: the grade pass starts from the freshly
-regenerated control shadow (or a fresh copy of the original when no
-control axis exists), so re-runs never stack braces. `.glyphs` sources
-only; `.designspace` grade is future work. A grade declared but not
-generated sets `LAST_GRADE_ERROR` (`grade_error` in `/api/health`) and
-`avar2-studio build` exits 1, because a font missing its GRAD axis must
-not pass as a release.
+Regeneration is idempotent — the pass starts from the freshly regenerated control
+shadow, so re-runs never stack braces. `.glyphs` sources only; `.designspace`
+grade is future work. A grade declared but not generated sets `LAST_GRADE_ERROR`
+(`grade_error` in `/api/health`) and `avar2-studio build` exits 1, because a font
+missing its GRAD axis must not pass as a release.
 
 ## Why the shipped font stays compact
 
@@ -118,18 +104,17 @@ not grade, is what makes the *preview* font large — decision 0001.)
 
 ## The static port
 
-The browser demo injects the same braces as gvar tuples at GRAD ∓10 with
-`apply_grade` in the wasm crate, verified against fontTools' instancer as
-oracle; the cap model is ported in `grade-model.js` and oracle-tested
-against the Python to 1e-9. One deliberate difference: the static GRAD
-tuple is global along the axis (server braces are scoped to the
-instance's parametric location), so multiple grades sum there — the
-designer prefers the global behaviour for preview.
+The browser demo injects the same braces as gvar tuples at GRAD ∓10 (`apply_grade`
+in the wasm crate, verified against fontTools' instancer as oracle); the cap model
+is ported in `grade-model.js` and oracle-tested against the Python to 1e-9. One
+deliberate difference: the static GRAD tuple is global along the axis (server
+braces are scoped to the instance's parametric location), so multiple grades sum
+there — the designer prefers the global behaviour for preview.
 
 ## Routes and storage
 
 `GET|PUT /api/transforms/grade` (`enabled`, `default_pct`, `intensity`,
-`clamp_to_headroom`), `PUT|DELETE /api/instances/<name>/grade`
-(`{pct}`, omitted = the default). Everything persists in
-`MyFont-grade.json`; per-instance grades survive the toggle being off,
-and the configuration bundle carries the whole declaration.
+`clamp_to_headroom`) and `PUT|DELETE /api/instances/<name>/grade` (`{pct}`,
+omitted = the default). Everything persists in `MyFont-grade.json`; per-instance
+grades survive the toggle being off, and the configuration bundle carries the
+whole declaration.
