@@ -6,11 +6,14 @@ the designer hands over. This module writes the other half: the masters as
 UFOs, a designspace 5 file carrying the avar2 mappings, the declared axis
 defaults, the named instances and the hidden axes, plus a README.
 
-Two things are deliberately NOT in the sources, and the README says so:
+What is in the sources (E2): the ``SPAC`` axis as metrics-only twin sources and
+the Kinetikern corrections as metrics-only sparse sources, rendered from the same
+sidecars the binary-stage injectors read, so a fontmake build of the zip is
+spaced. The studio's own preview and TTF keep the injectors (decision 0004's
+budget stands); the sidecars stay the authored truth, with two renderers.
 
-* **spacing** — the SPAC axis and Kinetikern are applied to the built font, so
-  a font built from these sources has the source's own spacing;
-* **the relocated default** — the studio's TTF moves the parametric defaults
+What is deliberately NOT in the sources, and the README says so: **the relocated
+default** — the studio's TTF moves the parametric defaults
   onto the ORIGIN row at build time (docs/decisions/0001). A designspace
   default must be a master location, so the sources rest at the compiled
   origin and the default row is not in ``<mappings>`` (exactly as gen-avar2
@@ -111,6 +114,154 @@ def _is_default_row(row, declared: Dict[str, Tuple[float, float, float]]) -> boo
         if abs(float(value) - float(trip[1])) > 1e-6:
             return False
     return True
+
+
+SPAC_TAG = "SPAC"
+SPAC_NAME = "Spacing"
+
+
+def _spacing_transform(source_path: Path) -> Optional[dict]:
+    """The enabled SPAC transform entry, or None when spacing is off."""
+    from .transforms import config as _tx_config
+
+    for entry in _tx_config.entries(Path(source_path)):
+        if entry.get("type") in ("spac_widthaware", "spac") and entry.get("enabled"):
+            return entry
+    return None
+
+
+#: The compiler draws a `.notdef` box this wide (0.4 × upm) when the source's
+#: `.notdef` has no outline. The injector's mean ink width includes it — measured
+#: on a compiled Crispy Mini: bounds (100, -300, 900, 1600) at upm 2000 — so the
+#: renderer must too, or every width-aware factor comes out ~11 % high.
+NOTDEF_INK_RATIO = 0.4
+
+
+def _ink_widths(font) -> Dict[str, float]:
+    """``{glyph: ink width}`` for one ufoLib2 font, components included.
+
+    Mirrors ``builtin_spac_widthaware._ink_width`` over the font a compiler
+    would emit: glyphs whose ink is zero are skipped, and an empty ``.notdef``
+    counts as the box the compiler substitutes for it.
+    """
+    layer = font.layers.defaultLayer
+    upm = float(getattr(font.info, "unitsPerEm", 1000) or 1000)
+    out = {}
+    for name in font.keys():
+        bounds = font[name].getBounds(layer)
+        width = (bounds.xMax - bounds.xMin) if bounds is not None else 0.0
+        if name == ".notdef" and width <= 0:
+            width = NOTDEF_INK_RATIO * upm
+        if width > 0:
+            out[name] = float(width)
+    # glyphsLib does not write `.notdef` when the source has no outline for it,
+    # but every compiler emits the box — so the basis adds it here.
+    out.setdefault(".notdef", NOTDEF_INK_RATIO * upm)
+    return out
+
+
+def _shift_metrics(glyph, dx: int) -> None:
+    """Move the drawing right by ``dx`` (the LSB grows), origin unchanged."""
+    for contour in glyph:
+        for point in contour:
+            point.x += dx
+    for component in glyph.components:
+        a, b, c, d, ox, oy = component.transformation
+        component.transformation = (a, b, c, d, ox + dx, oy)
+
+
+def _use_my_metrics(glyph) -> bool:
+    """True when the compiler takes this composite's metrics from a component.
+
+    ufoLib2 exposes no per-component lib in this version, and the flag is
+    glyph-level in both conventions glyphsLib writes, so it is read there.
+    """
+    lib = glyph.lib or {}
+    return bool(lib.get("public.useMyMetrics") or lib.get("com.glyphs.useMyMetrics"))
+
+
+def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[str]:
+    """Add ``SPAC`` as metrics-only twin sources (E2).
+
+    Per master and per end of the range, a twin source with the same outlines and
+    every inked glyph's sidebearings moved by the enabled transform's per-glyph
+    amount, so the axis changes metrics and nothing else. The binary-stage
+    injector moves phantom points; this is the same arithmetic at source level —
+    a simple glyph takes ``+d`` per side (advance ``+2d``), a composite only its
+    left side (advance ``+d``), and a ``USE_MY_METRICS`` composite is left alone
+    because it inherits its base's delta.
+
+    The transform is linear in SPAC, so one twin per end defines the axis: at the
+    maximum always, and at the minimum when the range is not symmetric.
+    """
+    entry = _spacing_transform(source_path)
+    if entry is None:
+        return None
+    params = entry.get("params") or {}
+    lo = float(params.get("min", -20))
+    hi = float(params.get("max", 40))
+    kind = entry["type"]
+    bias = float(params.get("bias", 1.0))
+    scale = float(params.get("scale", 1.0))
+    if hi == 0 and lo == 0:
+        return None
+
+    # The injector normalises against the built font's own average ink width at
+    # its default location, so the renderer measures the default source.
+    default_source = next(
+        (s for s in doc.sources if not s.layerName), doc.sources[0])
+    inks = _ink_widths(default_source.font)
+    mean_ink = (sum(inks.values()) / len(inks)) if inks else 0.0
+
+    import copy as _copy
+
+    from fontTools.designspaceLib import AxisDescriptor, SourceDescriptor
+
+    axis = AxisDescriptor()
+    axis.tag = SPAC_TAG
+    axis.name = SPAC_NAME
+    axis.minimum = lo
+    axis.default = 0.0
+    axis.maximum = hi
+    doc.addAxis(axis)
+
+    ends = [hi] + ([lo] if abs(lo + hi) > 1e-9 else [])
+    twins = []
+    # Only the masters get twins: a sparse brace source is an extra layer of its
+    # master's UFO and rides along in the deep copy.
+    for source in [s for s in doc.sources if not s.layerName]:
+        for value in ends:
+            twin_font = _copy.deepcopy(source.font)
+            for name, ink in inks.items():
+                if name not in twin_font:
+                    # `.notdef` is in the ink basis but glyphsLib did not write
+                    # it; the compiler will synthesise the same box.
+                    continue
+                glyph = twin_font[name]
+                amount = (value if kind == "spac"
+                          else value * ((ink / mean_ink) ** bias) * scale)
+                dx = round(amount)
+                if not dx or dx == 0:
+                    continue
+                composite = bool(glyph.components)
+                if composite and _use_my_metrics(glyph):
+                    continue
+                _shift_metrics(glyph, dx)
+                glyph.width += dx if composite else 2 * dx
+            twin = SourceDescriptor()
+            twin.font = twin_font
+            twin.familyName = source.familyName
+            twin.styleName = f"{source.styleName or source.name} SPAC{value:g}"
+            twin.name = twin.styleName
+            slug = "".join(ch if ch.isalnum() else "-" for ch in twin.styleName)
+            twin.filename = f"{slug}.ufo"
+            twin.location = dict(source.location, **{SPAC_NAME: value})
+            twins.append(twin)
+    for twin in twins:
+        doc.addSource(twin)
+    log.info("sources_export: SPAC as %d metrics-only twin sources (%s, %g..%g)",
+             len(twins), kind, lo, hi)
+    return SPAC_TAG
 
 
 def _mapping_xml(doc: DesignSpaceDocument, rows, declared, axis_names: Dict[str, str],
@@ -244,6 +395,9 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
                 for tag, e in user_axes}
 
     doc = glyphsLib.to_designspace(font)
+    # E2: spacing rides the sources as a metrics-only SPAC axis rendered from
+    # the transforms sidecar, so a fontmake build of the zip is spaced.
+    spac_tag = _add_spacing_axis(doc, source_path)
     # Created user axes: declared min/default/max, appended after the
     # parametric ones glyphsLib emitted from the masters.
     existing = {a.tag for a in doc.axes}
@@ -260,13 +414,22 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     for a in doc.axes:                       # parametric tags are upper-case
         axis_names.setdefault(a.tag.upper().lower(), a.name)
 
-    # Instances = the named rows, at their user-axis locations.
+    # Instances = the named rows, at their user-axis locations. A row with a
+    # SPAC coordinate pins it, exactly as the studio's font does.
+    spac_by_style = {}
+    if spac_tag:
+        from .csv_io import read_csv_spac_overrides
+
+        spac_by_style = read_csv_spac_overrides(Path(csv_path))
     doc.instances = []
     for row in rows:
         location = {axis_names.get(t, t): float(v)
                     for t, v in row.in_axes.items()}
         if not location:
             continue
+        if spac_tag and row.instance_name in spac_by_style:
+            location[axis_names.get(spac_tag.lower(), SPAC_NAME)] = float(
+                spac_by_style[row.instance_name])
         inst = InstanceDescriptor()
         inst.styleName = row.instance_name
         inst.familyName = family

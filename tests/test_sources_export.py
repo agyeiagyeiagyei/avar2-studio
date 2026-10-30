@@ -48,6 +48,9 @@ def project(tmp_path, monkeypatch):
     shutil.copy2(MINI / "CrispyMini-avar.csv", csv)
     meta_path = tmp_path / "CrispyMini-axis-metadata.json"
     shutil.copy2(MINI / "CrispyMini-axis-metadata.json", meta_path)
+    # The transforms sidecar is what renders the SPAC axis into the sources.
+    shutil.copy2(MINI / "CrispyMini-transforms.json",
+                 tmp_path / "CrispyMini-transforms.json")
     (tmp_path / ".avar2-studio").mkdir()
     monkeypatch.setattr(state, "ORIGINAL_PATH", src)
     monkeypatch.setattr(state, "GLYPHS_PATH", src)
@@ -79,8 +82,10 @@ def test_the_zip_carries_the_masters_the_designspace_and_a_readme(project, tmp_p
         readme = zf.read("README.txt").decode()
 
     assert [n for n in names if n.endswith(".designspace")], names[:5]
-    assert len([n for n in names if n.endswith("metainfo.plist")]) == 8, (
-        "one UFO per master (CrispyMini has 8)")
+    ufos = [n for n in names if n.endswith("metainfo.plist")]
+    masters = [n for n in ufos if " SPAC" not in n and "-SPAC" not in n]
+    assert len(masters) == 8, f"one UFO per master (CrispyMini has 8): {masters}"
+    assert len(ufos) == 24, "8 masters + 16 SPAC twins (E2)"
     assert "README.txt" in names
     assert readme.strip(), "the zip explains itself"
 
@@ -190,7 +195,7 @@ def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_pa
     workdir = tmp_path / "work"
     workdir.mkdir()
     studio = pipeline._build_in_process(cfg, workdir, str(FONTC))
-    built_tags = {a.axisTag for a in TTFont(str(built))["fvar"].axes}
+    built_tags = {a.axisTag for a in TTFont(str(built))["fvar"].axes} - {"SPAC"}
     studio_tags = {a.axisTag for a in TTFont(str(studio))["fvar"].axes} - {"SPAC"}
     assert built_tags == studio_tags, (built_tags, studio_tags)
 
@@ -277,3 +282,106 @@ def _outline_distance(a, b, loc, glyphs):
         for pa, pb in zip(ca, cb):
             worst = max(worst, ((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2) ** 0.5)
     return worst
+
+
+@needs_fontc
+@pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
+def test_the_sources_carry_the_spacing_axis(project, tmp_path):
+    """E2: the source-level SPAC renderer is the injector's arithmetic.
+
+    Two builds of the same project: one with the SPAC twins in the sources, one
+    with spacing switched off in the sidecar. The second is then spaced by the
+    **injector** itself (`WidthAwareSpacTransform.apply`), and the two per-glyph
+    ADVANCE CHANGES from ``SPAC = 0`` to ``SPAC = max`` must agree within 1 u at
+    every non-default mapping row — the source renderer and the binary one
+    producing the same spacing is the whole claim.
+
+    Comparing against the studio's built TTF would also drag in the build-time
+    default relocation (decision 0001), so the comparison is between the two
+    renderers instead, on the same masters.
+    """
+    zip_path = _zip(project, tmp_path)
+    work = tmp_path / "rt"
+    work.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(work)
+    ds_path = next(work.glob("*.designspace"))
+    doc = DesignSpaceDocument.fromfile(str(ds_path))
+    spac = next((a for a in doc.axes if a.tag == "SPAC"), None)
+    assert spac is not None, [a.tag for a in doc.axes]
+    assert (spac.minimum, spac.default, spac.maximum) == (-20.0, 0.0, 40.0)
+    twins = [s for s in doc.sources if s.location.get(spac.name) not in (None, 0)]
+    assert len(twins) == 2 * 8, f"{len(twins)} twin sources for 8 masters"
+
+    res = subprocess.run([FONTMAKE, "-m", str(ds_path), "-o", "variable",
+                          "--output-dir", str(tmp_path / "fm")],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, (res.stdout or res.stderr)[-1500:]
+    errors = [ln for ln in (res.stderr or "").splitlines() if "ERROR" in ln]
+    assert errors == [], errors[:3]
+    with_spac = next((tmp_path / "fm").glob("*.ttf"))
+    assert TTFont(str(with_spac))["avar"].table.Version == 0x00020000, \
+        "E1a's assert stays: the mappings must still build"
+
+    # The same project with spacing off, then spaced by the injector.
+    quiet = tmp_path / "quiet"
+    quiet.mkdir()
+    for name in ("CrispyMini.glyphs", "CrispyMini-avar.csv",
+                 "CrispyMini-axis-metadata.json"):
+        shutil.copy2(project["source"].parent / name, quiet / name)
+    quiet_zip = _zip({"source": quiet / "CrispyMini.glyphs",
+                      "csv": quiet / "CrispyMini-avar.csv",
+                      "metadata": project["metadata"]}, quiet)
+    quiet_work = quiet / "rt"
+    quiet_work.mkdir()
+    with zipfile.ZipFile(quiet_zip) as zf:
+        zf.extractall(quiet_work)
+    quiet_ds = next(quiet_work.glob("*.designspace"))
+    assert not [a for a in DesignSpaceDocument.fromfile(str(quiet_ds)).axes
+                if a.tag == "SPAC"], "no SPAC axis without the transform"
+    resealed = subprocess.run([FONTMAKE, "-m", str(quiet_ds), "-o", "variable",
+                               "--output-dir", str(quiet / "fm")],
+                              capture_output=True, text=True)
+    assert resealed.returncode == 0, (resealed.stderr or "")[-1500:]
+    plain = next((quiet / "fm").glob("*.ttf"))
+
+    from avar2_studio.transforms.base import BuildContext
+    from avar2_studio.transforms.builtin_spac_widthaware import (
+        WidthAwareSpacTransform,
+    )
+
+    target = quiet / "injected.ttf"
+    shutil.copy2(plain, target)
+    ctx = BuildContext(build_dir=quiet, source_path=project["source"],
+                       glyphs_path=project["source"], family="CrispyMini")
+    params = {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}
+    # apply() returns the font it wrote — it may not be the file passed in.
+    injected = WidthAwareSpacTransform().apply(target, params, ctx)
+
+    rows = config_generator.read_csv_mappings(project["csv"])
+    glyphs = ["a", "o", "g", "w", "i"]
+    worst = 0.0
+    for row in rows:
+        if row.instance_name == DEFAULT_ROW:
+            continue
+        user = {t: float(v) for t, v in row.in_axes.items()}
+        for name in glyphs:
+            base = _one_metric(with_spac, name, "advance", {**user, "SPAC": 0.0})
+            top = _one_metric(with_spac, name, "advance", {**user, "SPAC": 40.0})
+            ref_base = _one_metric(injected, name, "advance", {**user, "SPAC": 0.0})
+            ref_top = _one_metric(injected, name, "advance", {**user, "SPAC": 40.0})
+            worst = max(worst, abs((top - base) - (ref_top - ref_base)))
+    assert worst <= 1.0, f"the SPAC shape differs by {worst:.2f} u"
+
+
+def _one_metric(font_path, name, key, location):
+    """One metric of one glyph at a location ('advance' or 'lsb')."""
+    from fontTools.pens.boundsPen import BoundsPen
+
+    font = TTFont(str(font_path))
+    glyph_set = font.getGlyphSet(location=location)
+    if key == "advance":
+        return glyph_set[name].width
+    pen = BoundsPen(glyph_set)
+    glyph_set[name].draw(pen)
+    return pen.bounds[0] if pen.bounds else 0
