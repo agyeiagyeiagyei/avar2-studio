@@ -1,50 +1,39 @@
 # Example source files
 
-Small, self-contained parametric-font fixtures designed to be opened
-directly with avar2-studio:
+Two small, self-contained parametric fixtures, each opening directly in the
+studio:
 
 ```bash
 avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
 avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
 ```
 
-The two fixtures pair to show the **two main parametric-axis layouts**
-real-world variable fonts use, with avar2-studio working on top of
-both:
+They pair to show the **two parametric-axis layouts** avar2-studio works on top
+of:
 
 | | [crispy-mini](./crispy-mini/) | [roboto-delta-mini](./roboto-delta-mini/) |
 |---|---|---|
-| Source format | `.glyphs` | `.designspace` + UFOs |
-| Parametric axes | `XOPQ`, `YOPQ`, `XTRA` (unified) | `XOUC`, `YOUC`, `XTUC` (uppercase-scoped) |
-| Author intent | "One stroke axis describes the whole font" | "Caps and lowercase need independent optical tuning" |
-| Slider effect | Every glyph responds | Only uppercase responds |
-| Pre-defined instances | 1 (`Default` at first master) | 1 (`Default` at first master) |
-| Glyph count | 64 (A–Z, a–z, 0–9, space + auto `.notdef`) | 64 (same) |
+| Source format | `.glyphs` | `.designspace` + 19 UFOs |
+| Parametric axes | `XTRA`, `XOPQ`, `YOPQ` (unified) | nine, case-scoped: `XOUC`/`YOUC`/`XTUC`, `XOLC`/`YOLC`/`XTLC`, `XOFI`/`YOFI`/`XTFI` |
+| Masters / sources | 8 (the corners of the three-axis box) | 19 (a base plus one source per axis extreme) |
+| Glyphs | 63 (`A–Z`, `a–z`, `0–9`, `space`, `.notdef`) | 63 (same subset) |
+| Named rows | 8 in `CrispyMini-avar.csv`, with declared axis defaults, a `wght`/`wdth`/`opsz` mapping and a width-aware SPAC transform | none — the designspace declares one `Default` instance and no `wght` |
+| Shows | "one stroke vocabulary describes the whole font" | "each script case needs its own optical tuning" |
 
-**Crispy's even-tone design** lets one set of axes (`XOPQ` / `YOPQ` /
-`XTRA`) describe the whole font — uppercase and lowercase share the
-same stroke contrast and counter proportions, so a single thick-stroke
-slider does the right thing everywhere.
+**Crispy Mini** derives from [Crispy](https://github.com/agyeiagyeiagyei/Crispy):
+uppercase, lowercase and figures share one stroke contrast and counter
+proportion, so a single thick-stroke slider does the right thing everywhere.
+Eight masters at the corners of the box, eight authored rows in the CSV.
 
-**Roboto Delta's broader brief** — readable at 8 pt through display
-sizes — needs case-specific tuning. Caps and lowercase reach optimal
-contrast at different stroke values, so the source ships nine
-case-scoped parametric axes (three for caps: `XOUC` / `YOUC` / `XTUC`;
-three for lowercase: `XOLC` / `YOLC` / `XTLC`; three for figures:
-`XOFI` / `YOFI` / `XTFI`). This mini fixture ships only the uppercase
-trio; that's why lowercase letters appear in the preview but don't move
-when you scrub the sliders.
+**Roboto Delta Mini** derives from Roboto Delta: readable from 8 pt to display
+sizes, caps and lowercase reach their best contrast at different stroke values,
+so it ships three trios instead of one. Moving `XOUC` thickens caps without
+touching lowercase.
 
-avar2-studio handles both layouts identically: each fixture has an
-empty traditional `wght` axis the studio's CSV brings to life, the
-output VF gets an avar2 table mapping `wght` to a coherent parametric
-location, and the same UI affordances (create studio-only instance,
-add to source, edit coords) apply.
+avar2-studio treats both identically — core axes on Crispy Mini, control axes on
+Roboto Delta Mini, mappings authored in the same CSV shape once you give a row
+user-axis coordinates.
 
-The parametric → stylistic workflow — covering both fixtures, with
-animations of each — lives in
+The parametric → stylistic workflow, with an animation of each, is in
 [../docs/guides/authoring-instances.md](../docs/guides/authoring-instances.md).
-
-The fixture READMEs below stay focused on what each example *is*:
-axes table, glyph coverage, and how the subset was assembled from
-upstream.
+Each fixture's own README covers what it *is*: axes, coverage, provenance.
