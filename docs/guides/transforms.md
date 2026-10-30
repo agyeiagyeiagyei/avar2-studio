@@ -57,16 +57,21 @@ transform when it pins instance coordinates; blank = 0).
   left-phantom-only treatment, and `USE_MY_METRICS` composites inherit
   their base's delta and are skipped. The transform prefers the native
   Rust injector `spac-inject` (the same engine the browser demo runs,
-  parity-tested by `tests/spac_oracle.rs`; 300 s timeout) because it
-  splices tuples with write-fonts' compact encoding; the fontTools
+  parity-tested by `wasm/fontc-web/tests/spac_oracle.rs`; 300 s timeout)
+  because it splices tuples with write-fonts' compact encoding; the fontTools
   fallback re-encodes the whole gvar table and can overflow its 64 KB
   per-glyph header ceiling on twin-heavy fonts, which is why the log says
   which path ran. Per-style SPAC values never cross as CSV: Python
   parses the CSV via csv_io (the one mappings reader) and hands the
   values to the injector in the transforms JSON
   (`params.instance_spac`), so style names containing commas survive on
-  the native path too — parity-pinned by `tests/spac_csv_parity.rs` +
-  the Python `tests/test_spac_csv_parity.py`.
+  the native path too — parity-pinned by
+  `wasm/fontc-web/tests/spac_csv_parity.rs` + the Python
+  `tests/test_spac_csv_parity.py`. The injector is found via
+  `$AVAR2_SPAC_INJECT`, the wheel-carried `avar2_studio/bin/spac-inject`
+  ([decision 0015](../decisions/0015-native-accelerators-ship-in-platform-wheels.md))
+  or the repo build; `ENV_KEYS` forwards the override into the build worker
+  and `avar2-studio doctor` reports which one it found.
 
 ### gftools fixers
 
@@ -142,5 +147,12 @@ logged and skipped, never crashes the studio.
 
 `MyFont-transforms.json` — the ordered list of `{type, enabled, params}`;
 schema in [SIDECARS.md](../SIDECARS.md#stem-transformsjson). The
-`transforms` section of a configuration bundle carries the same list and
-is replaced wholesale on import.
+`transforms` section of a configuration bundle carries the same list and is
+replaced wholesale on import.
+
+A committed `<stem>-build.json` can carry a `transforms` list too, and it
+**replaces** the sidecar for headless builds only (the sidecar is untouched):
+`instances.fix` / `instances.stat` fold into `fix_instances` / `gen_stat`, the
+override travels to the worker as `transform_override`, `--write-config` emits
+the list from the current state, and keys for design-authored state are refused
+with exit 2. See [CLI.md](../CLI.md#the-committed-build-config).
