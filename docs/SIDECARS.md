@@ -4,27 +4,36 @@ Everything the studio authors lives next to the source, named after the
 source's stem, so it can be committed with it; tool-managed state lives
 under `.avar2-studio/` beside the source and should be gitignored. Every
 path is resolved against `ORIGINAL_PATH` — the designer's file — never
-against the shadow. The schemas below are what the `_normalise` / `load`
-functions accept and what the writers emit, as of 2026-10-16.
+against the shadow. The schemas below are what the `_normalise` / `load` functions accept and what
+the writers emit, as of 2026-10-30.
 
-| File | Commit? | Writer(s) | Backup before rewrite | Atomic write | Lock |
+Every writer here goes through `sidecar_io`: `atomic_writer` for text and
+`write_json` for JSON (temporary file + replace, so a crash leaves the old file
+whole), and the whole load → mutate → save sequence under the one process-wide
+`sidecar_io.LOCK` (an `RLock`, so nesting is safe). The studio is the only
+writer; external edits are picked up on read.
+
+| File | Commit? | Writer(s) | Backup | Atomic | Locked |
 |---|---|---|---|---|---|
-| `<stem>-avar.csv` | yes | Instances tab (`update_instance` …), the source→CSV sync, config import, mapping routes | yes (`csv_io.backup_sidecar`) | no (sprint T2.1) | none (T2.1) |
-| `<stem>-control.json` | yes | secondary-axes panel, the outline editor via capture, config import | yes | yes | `SIDECAR_LOCK` for layer mutations; `_INSTANCE_VALUES_LOCK` for instance values; `add_axis` / `update_axis` / `remove_axis` / `reseed` unlocked (T2.1) |
-| `<stem>-grade.json` | yes | Grade toggle and G badges, config import | no | no | none |
-| `<stem>-transforms.json` | yes | Transforms menu, config import | yes | no | none |
-| `<stem>-kinetikern.json` | yes | Kinetikern tab | no | yes | none |
-| `<stem>-axis-metadata.json` | yes | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | no | none |
-| `.avar2-studio/instance-renames.json` | no | instance rename | no | no | none |
-| `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.update_config` in the worker, promoted back) | optional | no | — |
+| `<stem>-avar.csv` | yes | Instances tab (`update_instance` …), the source→CSV sync, config import, mapping routes | yes (`csv_io.backup_sidecar`) | yes | yes |
+| `<stem>-control.json` | yes | secondary-axes panel, the outline editor via capture, config import | yes | yes | yes |
+| `<stem>-grade.json` | yes | Grade toggle and G badges, config import | no | yes | yes |
+| `<stem>-transforms.json` | yes | Transforms menu, config import | yes | yes | yes |
+| `<stem>-kinetikern.json` | yes | Kinetikern tab, the family switch | no | yes | yes |
+| `<stem>-axis-metadata.json` | yes | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | yes | yes |
+| `.avar2-studio/instance-renames.json` | no | instance rename | no | yes | yes |
+| `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.update_config` in the worker, promoted back) | optional | yes | yes |
 
-Backups go to `.avar2-studio/backups/<filename>.<YYYYMMDD-HHMMSS>`, the
-last **20 per filename**; a slider session can evict the last pre-edit
-copy in seconds, so a backup is a convenience, not an archive. Every
-loader returns an empty schema-shaped document for a missing **or
-unreadable** file and the next writer overwrites it (surfacing corrupt
-files is sprint T2.10); `version` is read and re-emitted, never checked;
-unknown keys are dropped at every level.
+Backups go to `.avar2-studio/backups/<filename>.<YYYYMMDD-HHMMSS>`, the last **20
+per filename**; a slider session can evict the last pre-edit copy in seconds, so a
+backup is a convenience, not an archive. Every loader returns an empty
+schema-shaped document for a missing **or unreadable** file and the next writer
+overwrites it — corrupt files are not surfaced as errors yet. `version` is
+re-emitted where the schema defines one (grade, transforms and Kinetikern always
+write their current schema version); **unknown keys are carried through** by the control sidecar
+(`_KNOWN_TOP_KEYS` and friends exist precisely so a newer studio's file is not
+stripped by an older one) and dropped elsewhere. A control sidecar that does not
+parse is refused rather than overwritten (`SidecarCorruptError`).
 
 ## `<stem>-avar.csv`
 
@@ -284,7 +293,8 @@ section only.
   shadow/transformed/<name>.glyphs     the build copy after source-stage transforms
   shadow/<stem>.designspace            designspace shadow …
   shadow/<stem>-studio-<slug>.ufo        … with one pooled sparse UFO per unique brace location
-  build/<Family>[tags].ttf             promoted builds (newest wins; the directory accumulates — T2.14)
+  build/<Family>[tags].ttf             promoted builds (newest wins; the last two are kept,
+                                       older ones reaped by reap_build_dir)
   build/<font>.woff2, <font>.woff2.json     the WOFF2 cache and its key {ttf_size, ttf_mtime, woff2_bytes, source_bytes}
   exports/<job-id>-<artifact>          finished exports, the last 5 (KEEP_EXPORTS)
   jobs/<job-id>/                       one per running job, removed when it finishes:
@@ -339,7 +349,7 @@ demo reads the same format and additionally honours optional
 ## The workspace zip
 
 **Config ▾ → Download workspace (.zip)…** / **Load Font ▾ → Upload …**
-(`server._load_project_zip`, `frontend/src/zip-workspace.js`):
+(`routes/load.py::_load_project_zip`, `frontend/src/zip-workspace.js`):
 
 ```
 <stem>.glyphs                          # or: <stem>.designspace + *.ufo/ directories
