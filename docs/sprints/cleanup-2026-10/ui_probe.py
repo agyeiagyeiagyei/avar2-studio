@@ -984,9 +984,11 @@ def scenario_export_sources(s):
     note = s.page.locator(".preview-export-note--spacing")
     note.wait_for(timeout=5000)
     text = note.inner_text()
-    print("    warning:", " ".join(text.split())[:110])
-    assert "Spacing is not included" in text, text
-    assert "Kinetikern" in text, text
+    print("    note:", " ".join(text.split())[:110])
+    # E2: spacing now rides the sources, so the note is about where the font
+    # rests, not about missing spacing.
+    assert "rest at the compiled origin" in text, text
+    assert "ORIGIN row" in text, text
     s.shot("export-sources-modal")
     # No size estimate for this format, and the button names it.
     modal = s.page.locator(".preview-export-modal").inner_text()
