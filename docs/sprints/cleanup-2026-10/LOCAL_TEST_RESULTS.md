@@ -1195,3 +1195,17 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `pytest tests/ -q` → **656 passed**; `ruff check src tests` clean; frontend eslint/unit/build green
 - E2 report (real Crispy, rounding + slant + SPAC on): resting style 1476 `g` tuples / 95,232 B upper-bound header / 74.6 s; `wght=400,opsz=14` 1404 / 95,376 B / 119.1 s — see LOG.md, E2c
 - reserved paths/ports untouched: `~/Documents/Crispy` (copied), 5070, 5071, 8001, `~/avar2-studio-test`
+
+### Loop run 2026-10-31T08:14:51Z — root `~/avar2-agent`, ports 5072/8002
+
+- staged copy: `/Users/agyei/avar2-agent/runs/20261031-145648/checkout/src` (git-clean checkout, committed files only)
+- git-clean check: **0** line(s) before the CLI build, **0** after
+- `avar2-studio build` (installed package `/Users/agyei/avar2-agent/venv`): exit **0**
+  - artifact: `/Users/agyei/avar2-agent/runs/20261031-145648/out/Crispy[GRAD,LCWD,ROND,SPAC,XOPQ,XTRA,YMOD,YOPQ,opsz,slnt,wdth,wght].ttf`
+- studio on 5072 (Fontra 8002), state at probe time: idle
+- `ui_probe.py all`: exit **1** — PASS 17 / FAIL 1 (log: `/Users/agyei/avar2-agent/runs/20261031-145648/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261031-145648/shots`)
+  (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
+
+  Failing scenarios:
+  - FAIL export-sources: Sources for fontmake and gftools: the masters as UFOs and a designspace 5 file with the avar2 mappings, the declared axis defaults and the named instances. The sources rest at the compiled origin; the studio's font relocates its default to the ORIGIN row, so the default row differs there.
+- reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
