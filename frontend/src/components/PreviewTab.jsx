@@ -7,7 +7,7 @@ import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useStudioData } from '../hooks/useStudioData';
 import { previewRenderCoords, variationSettings } from '../preview-coords';
 import {
-  SOURCES_COPY, SOURCES_DEFAULT_REASON, SPACING_WARNING, buttonLabel, exportFormats,
+  SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, buttonLabel, exportFormats,
 } from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -611,7 +611,7 @@ function PreviewTab({
                     })}
                     {exportFormat === 'sources' && (
                       <p className="preview-export-note preview-export-note--spacing">
-                        {SOURCES_COPY} {SPACING_WARNING}
+                        {SOURCES_COPY} {RESTING_NOTE}
                       </p>
                     )}
                   </div>

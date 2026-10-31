@@ -279,9 +279,14 @@ def _build(argv) -> int:
 
 
 def sources_warning() -> str:
-    """The one-line warning the CLI prints on stderr when writing sources."""
-    from .sources_export import SPACING_WARNING
-    return SPACING_WARNING
+    """The one-line note the CLI prints on stderr when writing sources.
+
+    Since E2 the sources carry the spacing (a ``SPAC`` axis as metrics-only
+    twins plus the Kinetikern braces), so what is left to say is where the font
+    rests: the compiled origin, not the studio's relocated default.
+    """
+    from .sources_export import RESTING_NOTE
+    return RESTING_NOTE
 
 
 def _write_sources(args, state, server, hidden_axes):
@@ -290,12 +295,15 @@ def _write_sources(args, state, server, hidden_axes):
     from . import sources_export
     out = args.out / f"{args.source.stem}-sources.zip"
     try:
+        from .kinetikern import sidecar as _kk_sidecar
+
         return sources_export.build_sources_zip(
             state.GLYPHS_PATH, out,
             csv_path=_pipeline._get_preview_csv_path(),
             metadata=_pipeline._load_axis_metadata(),
             family_name=server.get_font_family_name(state.GLYPHS_PATH),
             hidden_axes=hidden_axes,
+            kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or state.GLYPHS_PATH),
         )
     except sources_export.SourcesError as exc:
         print(f"error: {exc}", file=sys.stderr)

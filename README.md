@@ -107,7 +107,7 @@ Correction layers are re-derived on every build; the rest you draw in the
 **Download font…** as **TTF** or **WOFF2**, flag axes hidden, or **set a default**
 so the export rests at a picked style — the source is never touched. **UFO +
 designspace (zip)** hands fontmake users the masters plus a designspace 5 with the
-mappings; spacing is not in it, and the dialog says so.
+mappings and the spacing.
 
 ![Export dialog: mark axes hidden, set the default location](docs/images/export-modal.png)
 

@@ -10,7 +10,7 @@
 
 // Verbatim, and pinned against the backend constant by the Python tests (one
 // line on purpose: the test greps for the sentence, so keep it unbroken).
-export const SPACING_WARNING = 'Spacing is not included. The SPAC axis and Kinetikern corrections are applied to the built font, not to the sources; a font built from these sources has the source\'s own spacing.';
+export const RESTING_NOTE = 'The sources rest at the compiled origin; the studio\'s font relocates its default to the ORIGIN row, so the default row differs there.';
 
 export const SOURCES_COPY =
   'Sources for fontmake and gftools: the masters as UFOs and a designspace 5 ' +
@@ -32,7 +32,7 @@ export function exportFormats({ woff2 = true } = {}) {
       button: 'Download sources',
       estimate: false,
       copy: SOURCES_COPY,
-      warning: SPACING_WARNING,
+      warning: RESTING_NOTE,
       defaultDisabledReason: SOURCES_DEFAULT_REASON,
     },
   ];

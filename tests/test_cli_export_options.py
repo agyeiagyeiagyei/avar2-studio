@@ -251,7 +251,7 @@ def test_sources_writes_the_zip_and_warns_once(tmp_path, monkeypatch, capsys):
     assert (out / "CrispyMini-sources.zip").exists()
     assert len(calls) == 1
     err = capsys.readouterr().err
-    assert err.count(sources_export.SPACING_WARNING) == 1
+    assert err.count(sources_export.RESTING_NOTE) == 1
 
 
 def test_sources_repeats_with_a_font_format(tmp_path, monkeypatch):

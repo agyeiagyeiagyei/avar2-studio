@@ -22,10 +22,12 @@ default** — the studio's TTF moves the parametric defaults
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import os
 import shutil
 import subprocess
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -33,18 +35,19 @@ from xml.etree import ElementTree as ET
 
 import glyphsLib
 from fontTools.designspaceLib import DesignSpaceDocument, InstanceDescriptor
+from glyphsLib.classes import GSLayer
 
 from .build import config_generator
 from .studio_log import get_logger
 
 log = get_logger(__name__)
 
-#: Verbatim, from findings.md ("E1 approved"). The UI shows the same text; a
-#: test pins both against this constant.
-SPACING_WARNING = (
-    "Spacing is not included. The SPAC axis and Kinetikern corrections are "
-    "applied to the built font, not to the sources; a font built from these "
-    "sources has the source's own spacing.")
+#: The always-visible note in the export dialog (E2). Spacing now rides the
+#: sources, so what is left to warn about is the resting origin. The UI shows
+#: the same text; a test pins both against this constant.
+RESTING_NOTE = (
+    "The sources rest at the compiled origin; the studio's font relocates "
+    "its default to the ORIGIN row, so the default row differs there.")
 
 
 class SourcesError(RuntimeError):
@@ -264,6 +267,127 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[s
     return SPAC_TAG
 
 
+def _add_kinetikern_braces(font, kinetikern: Dict, rows) -> int:
+    """Write the Kinetikern corrections as metrics-only brace layers (E2).
+
+    For every entry in the sidecar (while the family switch is on) and every
+    glyph it moved, a brace at the style's PARAMETRIC location carrying the
+    interpolated outline with the LSB and advance moved exactly as
+    ``kinetikern/inject.py`` moves the phantom points: the left side by
+    ``left``, the advance by ``left + right``. Composites keep their own
+    metrics — the bake leaves them rigid too.
+
+    Returns the number of layers written; 0 when the switch is off or nothing
+    is corrected, which is what "with Kinetikern off, no braces are written"
+    means.
+    """
+    if not kinetikern or not kinetikern.get("enabled"):
+        return 0
+    entries = [e for e in (kinetikern.get("instances") or []) if e.get("deltas")]
+    masters = list(font.masters)
+    if not entries or not masters:
+        return 0
+
+    from fontTools.varLib.models import VariationModel, normalizeLocation
+
+    axes_tags = [str(getattr(a, "axisTag", "")).upper() for a in font.axes]
+    index_of = {tag: i for i, tag in enumerate(axes_tags)}
+    base = masters[0]
+    base_loc = [float(v) for v in (base.axes or [])]
+    if not base_loc:
+        return 0
+
+    def _norm(loc_values):
+        axis_ranges = {}
+        for i, _tag in enumerate(axes_tags):
+            values = [float(m.axes[i]) for m in masters if i < len(m.axes)]
+            axis_ranges[str(i)] = (min(values), base_loc[i], max(values))
+        return normalizeLocation(
+            {str(i): v for i, v in enumerate(loc_values)}, axis_ranges)
+
+    try:
+        model = VariationModel([_norm([float(v) for v in m.axes])
+                                for m in masters])
+    except Exception as exc:            # incompatible master set: no braces
+        log.warning("sources_export: Kinetikern braces skipped (%s)", exc)
+        return 0
+
+    by_name = {r.instance_name: r for r in rows}
+    written = 0
+    seen = set()                        # (glyph, brace name) written once
+    for entry in entries:
+        row = by_name.get(entry["name"])
+        location = dict(entry.get("location") or {})
+        if row is not None:
+            for tag, value in row.out_axes.items():
+                location.setdefault(str(tag).upper(), float(value))
+        values = list(base_loc)
+        for tag, value in location.items():
+            if tag in index_of:
+                values[index_of[tag]] = float(value)
+        # Glyphs 3 stores a brace layer's location in ``attributes.coordinates``
+        # (the name is a human label), and that is what glyphsLib turns into a
+        # sparse source — a `{x, y, z}` name alone produces an inert layer.
+        brace_name = f"Kinetikern {entry['name']}"
+        for glyph_name, (left, right) in sorted(entry["deltas"].items()):
+            glyph = font.glyphs[glyph_name] if glyph_name in font.glyphs else None
+            if glyph is None or (glyph_name, brace_name) in seen:
+                continue
+            master_layers = []
+            for master in masters:
+                layer = next((ly for ly in glyph.layers
+                              if ly.layerId == master.id), None)
+                if layer is None:
+                    break
+                master_layers.append(layer)
+            if len(master_layers) != len(masters):
+                continue
+            ref = master_layers[0]
+            ref_paths = list(ref.paths or [])
+            compatible = all(len(list(ly.paths or [])) == len(ref_paths)
+                             and all(len(rp.nodes) == len(mp.nodes)
+                                     for rp, mp in zip(ref_paths, ly.paths))
+                             for ly in master_layers)
+            if not compatible:
+                continue
+            new_paths = copy.deepcopy(ref_paths, {id(ref): None})
+            for pi, path in enumerate(new_paths):
+                for ni in range(len(path.nodes)):
+                    xs = [float(ly.paths[pi].nodes[ni].position.x)
+                          for ly in master_layers]
+                    ys = [float(ly.paths[pi].nodes[ni].position.y)
+                          for ly in master_layers]
+                    path.nodes[ni].position = (
+                        model.interpolateFromMasters(_norm(values), xs) + left,
+                        model.interpolateFromMasters(_norm(values), ys),
+                    )
+            widths = [float(ly.width) for ly in master_layers]
+            layer = GSLayer()
+            layer.name = brace_name
+            layer.attributes = {"coordinates": list(values)}
+            layer.associatedMasterId = base.id
+            layer.layerId = str(uuid.uuid4()).upper()
+            layer.paths = new_paths
+            layer.width = model.interpolateFromMasters(_norm(values), widths) \
+                + left + right
+            glyph.layers.append(layer)
+            seen.add((glyph_name, brace_name))
+            written += 1
+    if written:
+        log.info("sources_export: %d Kinetikern brace layers", written)
+    return written
+
+
+def _spacing_summary(kinetikern: Optional[Dict], spac_tag: Optional[str]):
+    """What the README lists under "Composed into the masters" for spacing."""
+    out = []
+    if spac_tag:
+        out.append(f"the {SPAC_TAG} axis as metrics-only twin sources")
+    if kinetikern and kinetikern.get("enabled") and kinetikern.get("instances"):
+        out.append("Kinetikern corrections as metrics-only brace layers")
+    return out
+
+
 def _mapping_xml(doc: DesignSpaceDocument, rows, declared, axis_names: Dict[str, str],
                  default_row_name: Optional[str]) -> ET.Element:
     """The designspace 5 ``<mappings>``: one entry per NON-default CSV row."""
@@ -337,9 +461,11 @@ def _write_designspace(doc: DesignSpaceDocument, path: Path, *, hidden_axes: Ite
 
 
 def _readme(family: str, source: Path, *, composed: Sequence[str],
-            default_row_name: Optional[str], designspace_name: str) -> str:
+            default_row_name: Optional[str], designspace_name: str,
+            spacing: Sequence[str] = ()) -> str:
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    composed_text = ", ".join(composed) if composed else "nothing"
+    parts = list(composed) + list(spacing)
+    composed_text = ", ".join(parts) if parts else "nothing"
     default_text = (
         f"The default row ({default_row_name}) is not in the designspace "
         "<mappings>: its input sits at the axis defaults, which map to "
@@ -358,7 +484,7 @@ def _readme(family: str, source: Path, *, composed: Sequence[str],
         f"sha256: {digest}\n\n"
         f"Composed into the masters: {composed_text}\n\n"
         f"{default_text}\n\n"
-        f"{SPACING_WARNING}\n\n"
+        f"{RESTING_NOTE}\n\n"
         f"Build:\n"
         f"    fontmake -m {designspace_name} -o variable\n"
         f"    # or, through the studio's own toolchain:\n"
@@ -371,7 +497,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
                       metadata: Optional[Dict[str, Dict]] = None,
                       family_name: Optional[str] = None,
                       hidden_axes: Iterable[str] = (),
-                      composed: Sequence[str] = ()) -> Path:
+                      composed: Sequence[str] = (),
+                      kinetikern: Optional[Dict] = None) -> Path:
     """Write ``<family>-sources.zip`` next to nothing else: masters, a
     designspace 5 and a README. Returns the zip path.
 
@@ -393,6 +520,14 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     user_axes = declared_user_axes(metadata or {})
     declared = {tag: (float(e["min"]), _default_of(e, tag), float(e["max"]))
                 for tag, e in user_axes}
+
+    # E2: the Kinetikern corrections ride the sources as metrics-only braces.
+    # The cached font is shared with the build path, so a fresh parse is used
+    # here: the export must never leave studio state mutated behind it (a second
+    # export with Kinetikern off would otherwise still carry the braces).
+    if kinetikern and kinetikern.get("enabled") and kinetikern.get("instances"):
+        font = glyphsLib.load(str(source_path))
+    _add_kinetikern_braces(font, kinetikern or {}, rows)
 
     doc = glyphsLib.to_designspace(font)
     # E2: spacing rides the sources as a metrics-only SPAC axis rendered from
@@ -457,7 +592,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
         (tmp / "README.txt").write_text(
             _readme(family, source_path, composed=composed,
                     default_row_name=default_rows[0] if default_rows else None,
-                    designspace_name=ds_name), encoding="utf-8")
+                    designspace_name=ds_name,
+                    spacing=_spacing_summary(kinetikern, spac_tag)), encoding="utf-8")
         with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(tmp.rglob("*")):
                 if path.is_file():

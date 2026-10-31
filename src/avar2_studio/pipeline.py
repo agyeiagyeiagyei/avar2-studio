@@ -1578,6 +1578,7 @@ def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
     font's table.
     """
     from . import sources_export
+    from .kinetikern import sidecar as _kk_sidecar
 
     out = Path(export_dir) / f"{(family_name or 'font').replace(' ', '')}-sources.zip"
     return sources_export.build_sources_zip(
@@ -1585,6 +1586,9 @@ def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
         csv_path=_get_preview_csv_path(),
         metadata=_load_axis_metadata(),
         family_name=family_name,
+        # E2: the corrections ride the sources as brace layers, read from the
+        # same sidecar the binary-stage bake reads.
+        kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or Path(source_path)),
         hidden_axes=hidden_axes,
         composed=composed,
     )

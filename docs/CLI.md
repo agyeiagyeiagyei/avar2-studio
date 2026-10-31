@@ -33,8 +33,11 @@ artifact path on stdout, one per line.
 `--format sources` writes from the active source, so it needs neither a built
 font nor the export pipeline. It refuses `--default` (`sources rest at the
 compiled origin; --default applies to ttf/woff2 only`) because a designspace
-default must be a master location. The spacing warning — SPAC and Kinetikern
-are applied to the built font, not to the sources — is printed once on stderr.
+default must be a master location. A one-line note on stderr says where the font
+rests: the compiled origin, not the studio's relocated default. Spacing rides the
+sources — a `SPAC` axis as metrics-only twin masters and the Kinetikern
+corrections as metrics-only brace layers, rendered from the same sidecars the
+built font uses.
 
 ## The committed build config
 

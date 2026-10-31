@@ -111,7 +111,7 @@ def test_the_readme_states_what_the_sources_do_not_carry(project, tmp_path):
     with zipfile.ZipFile(zip_path) as zf:
         readme = zf.read("README.txt").decode()
 
-    assert sources_export.SPACING_WARNING in readme, (
+    assert sources_export.RESTING_NOTE in readme, (
         "the spacing warning ships verbatim in the README")
     assert "not in the designspace <mappings>" in readme, (
         "the dropped default row must be explained")
@@ -128,7 +128,7 @@ def test_the_ui_warning_matches_the_constant():
     ui = (REPO / "frontend" / "src" / "export-formats.js").read_text()
     # A JS single-quoted literal escapes the apostrophe it contains; compare on
     # the unescaped text so the constant can stay greppable.
-    assert sources_export.SPACING_WARNING in ui.replace("\\'", "'")
+    assert sources_export.RESTING_NOTE in ui.replace("\\'", "'")
 
 
 def test_a_missing_csv_is_a_usage_error(project, tmp_path):
@@ -385,3 +385,67 @@ def _one_metric(font_path, name, key, location):
     pen = BoundsPen(glyph_set)
     glyph_set[name].draw(pen)
     return pen.bounds[0] if pen.bounds else 0
+
+
+@needs_fontc
+@pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
+def test_kinetikern_corrections_ride_the_sources(project, tmp_path):
+    """E2 acceptance 3: the corrections are in the build, and off means off.
+
+    A spaced style's brace carries the interpolated outline with the injector's
+    arithmetic: LSB by ``left``, advance by ``left + right``. The check is a
+    difference between two fontmake builds at that style — one with the
+    Kinetikern entry, one without — so the interpolated outline cancels out and
+    only the correction is being measured.
+    """
+    style = "Narrow Heavy 144"
+    deltas = {"a": [-12, 7], "o": [5, -9]}
+    spaced = {"version": 1, "enabled": True,
+              "instances": [{"name": style, "looseness": -0.6, "deltas": deltas}]}
+
+    def build(kinetikern, tag):
+        out = tmp_path / tag / "CrispyMini-sources.zip"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        zip_path = sources_export.build_sources_zip(
+            project["source"], out, csv_path=project["csv"],
+            metadata=project["metadata"], family_name="CrispyMini",
+            kinetikern=kinetikern)
+        work = tmp_path / tag / "rt"
+        work.mkdir()
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(work)
+        ds = next(work.glob("*.designspace"))
+        res = subprocess.run([FONTMAKE, "-m", str(ds), "-o", "variable",
+                              "--output-dir", str(tmp_path / tag / "fm")],
+                             capture_output=True, text=True)
+        assert res.returncode == 0, (res.stdout or res.stderr)[-1500:]
+        errors = [ln for ln in (res.stderr or "").splitlines() if "ERROR" in ln]
+        assert errors == [], errors[:3]
+        doc = DesignSpaceDocument.fromfile(str(ds))
+        return next((tmp_path / tag / "fm").glob("*.ttf")), doc
+
+    plain, plain_doc = build(None, "off")
+    corrected, corrected_doc = build(spaced, "on")
+
+    extra = len(corrected_doc.sources) - len(plain_doc.sources)
+    assert extra >= 1, "a Kinetikern style adds at least one sparse source"
+
+    row = next(r for r in config_generator.read_csv_mappings(project["csv"])
+               if r.instance_name == style)
+    user = {t: float(v) for t, v in row.in_axes.items()}
+    for glyph, (left, right) in deltas.items():
+        base = _one_metric(plain, glyph, "advance", {**user, "SPAC": 0.0})
+        moved = _one_metric(corrected, glyph, "advance", {**user, "SPAC": 0.0})
+        assert abs((moved - base) - (left + right)) <= 1.0, (
+            f"{glyph}: the sources carry {moved - base:.1f} u, the correction "
+            f"is {left + right} u")
+        base_lsb = _one_metric(plain, glyph, "lsb", {**user, "SPAC": 0.0})
+        moved_lsb = _one_metric(corrected, glyph, "lsb", {**user, "SPAC": 0.0})
+        assert abs((moved_lsb - base_lsb) - left) <= 1.0, (
+            f"{glyph}: LSB moved {moved_lsb - base_lsb:.1f} u, expected {left}")
+
+    # The family switch off writes no braces at all.
+    quiet = {"version": 1, "enabled": False, "instances": spaced["instances"]}
+    _, quiet_doc = build(quiet, "disabled")
+    assert len(quiet_doc.sources) == len(plain_doc.sources), \
+        "with Kinetikern off, no braces are written"
