@@ -2077,3 +2077,36 @@ Commands + results:
   ~100 each), examples 39/44/39, CLI 118. The two guides over target carry the
   walkthroughs the guide exists for and the transform recipes the audit told us
   to keep; the numbers are stated rather than excused.
+
+## E2c — the measurement report: what source-level spacing would cost Crispy
+
+E2's acceptance (6), measurement only, no pipeline change. Built the **real
+Crispy** source (a copy of `~/Documents/Crispy/sources`; the designer's checkout
+is untouched) with the twins and braces in the preview shadow, rounding, slant
+and the width-aware SPAC transform all on, and measured `g` in the built font:
+
+| Configuration | Exit | Wall clock | `g` gvar tuples | `g` header block (upper bound) |
+|---|---|---|---|---|
+| relocation at the **resting style** (default) | 0 | **74.6 s** (build 47.6 s + WOFF2 15.3 s) | **1476** | **95,232 B** |
+| relocation at **`wght=400,opsz=14`** | 0 | **119.1 s** | **1404** | **95,376 B** |
+
+Reading the numbers:
+
+- The header figure is an **upper bound**: it counts every tuple's peak as
+  private, while fontTools shares peaks at save time. That is why both builds fit
+  `gvar`'s 65,535-byte per-glyph offset at all — `pipeline._fit_gvar_headers`
+  prunes only when the real block overflows, and neither run needed it (both
+  exited 0 with no pruning recorded).
+- `g` carries **1,476** tuples at the resting style and **1,404** at
+  `wght=400,opsz=14`: relocation removes tuples, it does not add them. The
+  headroom is thin either way — a linear source-level SPAC axis adds one tuple
+  per glyph per SPAC end on top of this.
+- The relocated build is **60 % slower** (119.1 s vs 74.6 s) for a font with
+  *fewer* tuples, so the cost is the relocation/instancing pass, not the tuple
+  count.
+
+Conclusion for the decision this report exists for: the binary-stage budget
+(decision 0004) is not obviously replacable by a source-level pipeline on
+Crispy — `g` is already at 1,476 tuples and ~95 KB of upper-bound header space
+before any source-level SPAC axis exists. **No switch is proposed here**; that
+needs a user decision, as E2 states.

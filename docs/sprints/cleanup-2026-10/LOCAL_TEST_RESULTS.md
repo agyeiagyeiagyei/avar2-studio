@@ -1186,3 +1186,12 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `ui_probe.py all`: exit **0** — PASS 18 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261030-101548/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261030-101548/shots`)
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### E2 — spacing in the exported sources (2026-10-30/31, root `~/Documents/avar2-studio-sprint`)
+
+- `pytest tests/test_sources_export.py -q` → **7 passed** (zip contents, README, UI copy parity, usage error, fontmake round trip, SPAC twins vs the injector, Kinetikern braces on/off)
+- SPAC: fontmake build of the export vs the injector's own output at every non-default row → advance change **worst 0.0 u**
+- Kinetikern: build-with vs build-without, instantiated at the spaced style → LSB moves by `left`, advance by `left + right`, both within 1 u; source count unchanged with the switch off
+- `pytest tests/ -q` → **656 passed**; `ruff check src tests` clean; frontend eslint/unit/build green
+- E2 report (real Crispy, rounding + slant + SPAC on): resting style 1476 `g` tuples / 95,232 B upper-bound header / 74.6 s; `wght=400,opsz=14` 1404 / 95,376 B / 119.1 s — see LOG.md, E2c
+- reserved paths/ports untouched: `~/Documents/Crispy` (copied), 5070, 5071, 8001, `~/avar2-studio-test`
