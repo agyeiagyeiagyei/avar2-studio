@@ -1589,6 +1589,7 @@ def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
         # E2: the corrections ride the sources as brace layers, read from the
         # same sidecar the binary-stage bake reads.
         kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or Path(source_path)),
+        original_path=state.ORIGINAL_PATH,
         hidden_axes=hidden_axes,
         composed=composed,
     )

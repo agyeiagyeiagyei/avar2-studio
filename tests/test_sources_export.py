@@ -449,3 +449,35 @@ def test_kinetikern_corrections_ride_the_sources(project, tmp_path):
     _, quiet_doc = build(quiet, "disabled")
     assert len(quiet_doc.sources) == len(plain_doc.sources), \
         "with Kinetikern off, no braces are written"
+
+
+def test_the_sidecars_are_read_from_the_original_source(project, tmp_path):
+    """E2e: the transforms sidecar resolves against the ORIGINAL, not the staging.
+
+    The worker stages the active source as `.avar2-studio/active-<name>.glyphs`,
+    so a sidecar lookup from that path finds nothing — which is how the real
+    Crispy export lost its SPAC axis entirely (verifier, ROUND 22). The sidecar
+    is beside the designer's file, and `original_path` is what says so.
+    """
+    staged_dir = project["source"].parent / ".avar2-studio"
+    staged_dir.mkdir(exist_ok=True)
+    active = staged_dir / f"active-{project['source'].name}"
+    shutil.copy2(project["source"], active)
+
+    def axes(**kwargs):
+        out = tmp_path / f"_{len(list(tmp_path.glob('*.zip')))}.zip"
+        sources_export.build_sources_zip(
+            active, out, csv_path=project["csv"], metadata=project["metadata"],
+            family_name="CrispyMini", **kwargs)
+        work = out.with_suffix("")
+        work.mkdir()
+        with zipfile.ZipFile(out) as zf:
+            zf.extractall(work)
+        doc = DesignSpaceDocument.fromfile(str(next(work.glob("*.designspace"))))
+        return {a.tag for a in doc.axes}
+
+    assert "SPAC" in axes(original_path=project["source"]), (
+        "the sidecar beside the original must reach the export")
+    assert "SPAC" not in axes(), (
+        "without original_path the staged copy has no sidecar — the defect this "
+        "parameter exists to avoid")

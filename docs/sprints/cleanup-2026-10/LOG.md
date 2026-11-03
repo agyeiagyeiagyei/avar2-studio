@@ -2110,3 +2110,38 @@ Conclusion for the decision this report exists for: the binary-stage budget
 Crispy — `g` is already at 1,476 tuples and ~95 KB of upper-bound header space
 before any source-level SPAC axis exists. **No switch is proposed here**; that
 needs a user decision, as E2 states.
+
+## ROUND 23 — E2e: the sidecars resolve against the ORIGINAL source
+
+The verifier's blocking finding: on the real Crispy, both the dialog's and the
+CLI's sources zip had **no `SPAC` axis and no twins**. Reproduced before fixing,
+with the studio's own staging shape — the original `CrispyMini.glyphs` and its
+sidecars in `src/`, the active source copied to
+`src/.avar2-studio/active-CrispyMini.glyphs`, exactly what `JobQueue._stage`
+writes:
+
+- `build_sources_zip(active, …)` → axes `XTRA, XOPQ, YOPQ, wght, opsz, wdth`,
+  **no SPAC**.
+- `build_sources_zip(active, …, original_path=src/CrispyMini.glyphs)` → axes
+  include **SPAC**.
+
+Cause: `_spacing_transform()` read `<stem>-transforms.json` beside the path it
+was given, and the exporter is given the ACTIVE source. The staged name has no
+sidecar, so the transform list came back empty and the export silently dropped
+the spacing — the same failure mode as E1's mapping dimensions: a lookup that
+quietly returns nothing instead of an error.
+
+Fix: `build_sources_zip(..., original_path=…)`, and both callers
+(`pipeline._sources_pipeline` in the worker, `cli._write_sources`) pass
+`state.ORIGINAL_PATH`; the exporter resolves the transforms sidecar against it.
+The Kinetikern sidecar was already loaded by the callers from
+`ORIGINAL_PATH` — this makes the two consistent.
+
+Evidence:
+- `pytest tests/test_sources_export.py -q` → **8 passed**, including the new
+  staging test: SPAC present **with** `original_path`, absent without it (the
+  defect, pinned so it cannot come back).
+- `pytest tests/ -q` → **657 passed**; `ruff check src tests` clean.
+- The probe's `export-sources` scenario now reads the designspace inside the
+  downloaded zip and asserts a `SPAC` axis and unique axis names — so the Crispy
+  run (where this broke) fails loudly rather than passing on names alone.

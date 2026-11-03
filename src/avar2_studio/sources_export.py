@@ -498,14 +498,23 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
                       family_name: Optional[str] = None,
                       hidden_axes: Iterable[str] = (),
                       composed: Sequence[str] = (),
-                      kinetikern: Optional[Dict] = None) -> Path:
+                      kinetikern: Optional[Dict] = None,
+                      original_path: Optional[Path] = None) -> Path:
     """Write ``<family>-sources.zip`` next to nothing else: masters, a
     designspace 5 and a README. Returns the zip path.
 
     ``source_path`` must be the ACTIVE source (the staged shadow when control
     axes exist), so the masters carry the braces the studio composed.
+    ``original_path`` is the designer's file: the sidecars that are not already
+    passed in (the transforms list, which decides whether a SPAC axis exists)
+    live beside IT, never beside the staged copy — the worker stages the active
+    source as ``.avar2-studio/active-<name>.glyphs``, so a lookup from
+    ``source_path`` finds nothing and the export silently loses the spacing.
     """
     source_path = Path(source_path)
+    # Sidecars resolve against the designer's file (ORIGINAL_PATH), never the
+    # staged active copy. See the docstring.
+    sidecar_base = Path(original_path) if original_path else source_path
     if csv_path is None or not Path(csv_path).exists():
         raise SourcesError("the mappings are not authored yet, so there is "
                            "nothing to map in the designspace")
@@ -532,7 +541,7 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     doc = glyphsLib.to_designspace(font)
     # E2: spacing rides the sources as a metrics-only SPAC axis rendered from
     # the transforms sidecar, so a fontmake build of the zip is spaced.
-    spac_tag = _add_spacing_axis(doc, source_path)
+    spac_tag = _add_spacing_axis(doc, sidecar_base)
     # Created user axes: declared min/default/max, appended after the
     # parametric ones glyphsLib emitted from the masters.
     existing = {a.tag for a in doc.axes}

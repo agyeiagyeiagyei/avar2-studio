@@ -1012,6 +1012,21 @@ def scenario_export_sources(s):
     assert ds, names[:5]
     assert "README.txt" in names
     assert len(ufos) >= 2, "one UFO per master"
+    # E2e: the studio stages the active source (`.avar2-studio/active-<name>`),
+    # so the transforms sidecar must be resolved against the ORIGINAL source or
+    # the export silently loses its spacing. On this font (Crispy) the SPAC axis
+    # and its twins have to be in the zip.
+    import xml.etree.ElementTree as ET
+
+    with zipfile.ZipFile(target) as zf:
+        root = ET.fromstring(zf.read(ds[0]))
+    axes_in_ds = [(a.get("tag"), a.get("name"))
+                  for a in root.findall(".//axes/axis")]
+    tags = [t for t, _name in axes_in_ds]
+    print(f"    designspace axes: {tags}")
+    assert "SPAC" in tags, f"no SPAC axis in the exported designspace: {tags}"
+    assert len({name for _t, name in axes_in_ds}) == len(axes_in_ds), (
+        "axis names must be unique: " + repr(axes_in_ds))
     # Closing the modal leaves the app usable.
     s.page.keyboard.press("Escape")
     s.page.wait_for_timeout(500)

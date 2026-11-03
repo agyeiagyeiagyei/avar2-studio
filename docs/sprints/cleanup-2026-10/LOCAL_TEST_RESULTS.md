@@ -1220,3 +1220,11 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `ui_probe.py all`: exit **0** — PASS 18 / FAIL 0 (log: `/Users/agyei/avar2-agent/runs/20261102-112047/probe.log`, shots: `/Users/agyei/avar2-agent/runs/20261102-112047/shots`)
   (the probe's studio runs from the checkout so the bundled examples exist; the CLI build above came from the installed package)
 - reserved paths/ports untouched: `~/Documents/Crispy`, 5070, 5071, 8001, `~/avar2-studio-test`
+
+### ROUND 23 E2e — sidecars resolve against the ORIGINAL (2026-11-03)
+
+- reproduced with the worker's staging shape (`.avar2-studio/active-<stem>.glyphs`): no SPAC axis before the fix, SPAC present after
+- `pytest tests/test_sources_export.py -q` → **8 passed** (new staging test pins both halves)
+- `pytest tests/ -q` → **657 passed**; `ruff check src tests` clean
+- probe `export-sources` now asserts a `SPAC` axis and unique axis names inside the downloaded designspace
+- reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071, 8001, `~/avar2-studio-test`

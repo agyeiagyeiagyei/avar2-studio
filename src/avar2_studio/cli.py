@@ -304,6 +304,7 @@ def _write_sources(args, state, server, hidden_axes):
             family_name=server.get_font_family_name(state.GLYPHS_PATH),
             hidden_axes=hidden_axes,
             kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or state.GLYPHS_PATH),
+            original_path=state.ORIGINAL_PATH,
         )
     except sources_export.SourcesError as exc:
         print(f"error: {exc}", file=sys.stderr)
