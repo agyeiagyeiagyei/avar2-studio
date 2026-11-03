@@ -2030,3 +2030,31 @@ Acceptance: (1) the designspace carries a `SPAC` axis with the twin sources and 
 **B11c amendment — the proof I specified proves nothing.** `doctor --strict` exits 0 with no accelerator installed at all. B11c's acceptance becomes: the release dry run's platform wheel, installed into a clean venv, contains `avar2_studio/bin/spac-inject` and `avar2_studio/bin/libkinetikern2.{dylib,so}`, and `avar2-studio doctor` (no `AVAR2_*` overrides set) lists both as found at the wheel path; `doctor --strict` exit 0 on that venv is reported but is not the proof. B11a–c stay gated until the ROUND 23 checkpoint is verified.
 
 **Order for the agent (ROUND 23):** E2e → E1b → E1c (one commit each with its tests; then the agent's own fontmake build of the real-Crispy zip, exit 0, in LOG.md) → E2f → D1a (one commit per document, naming the factcheck rows it resolves) → D1b → D1c → K5 → `STATE: checkpoint` with the Test run on the push commit green in all six checks. My gate then re-runs: the CLI and dialog zips of the real Crispy (SPAC axis with twins, `findDefault()` not None, identical content), a fontmake build of that zip, the register grep, the line counts, and a spot re-check of the factcheck rows.
+
+## Verifier early check of E2e at `cb24a2f` (2026-11-03) — E2e holds on the real Crispy (CLI path); new defect E2h: a symmetric SPAC range exports no negative side
+
+Run: `avar2-studio build Crispy.glyphs --format sources` with the `cb24a2f` code on a git-clean scratch copy of `~/Documents/Crispy/sources` (exit 0, copy clean after). Test workflow run 41621073996 on `cb24a2f`: six jobs green.
+
+**E2e — holds on the CLI path.** The zip now carries `SPAC` "Spacing" −100..100 (the sidecar's range) with **36** metrics-only twin sources, one per master; the writer logs `SPAC as 36 metrics-only twin sources (spac_widthaware, -100..100)` and the README lists "the SPAC axis as metrics-only twin sources". The dialog path is checked at the gate (it needs the studio). Two things this run shows that the next items must cover:
+- the lowercase `spac` placeholder (−40/0/40, name "Spacing") now collides with the real `SPAC` by name as well — four duplicate pairs (grad, lcwd, ymod, spac), so every `<dimension name="Spacing">` in the designspace is ambiguous. E1b's case-insensitive rule removes it; E1b's test must include the `spac`/`SPAC` pair.
+- the CLI README's sha256 is the hash of `.avar2-studio/shadow/transformed/Crispy.glyphs`, not of the designer's `Crispy.glyphs` (different hashes) — E1c as written.
+
+**E2h (blocking, new) — with a symmetric range the exported font has no negative spacing.** `_add_spacing_axis` writes `ends = [hi] + ([lo] if abs(lo + hi) > 1e-9 else [])`; its docstring says "The transform is linear in SPAC, so one twin per end defines the axis: at the maximum always, and at the minimum when the range is not symmetric." That is wrong: varLib does not extrapolate across the default. A master only at +1 gets the support `(0, 1, 1)`, so every negative SPAC value interpolates to SPAC 0 (`VariationModel([{}, {"SPAC": 1.0}])` → 500, 500, 500, 510, 520 at −1, −0.5, 0, 0.5, 1). The injector writes two regions, `(−1, −1, 0)` with `lo` and `(0, 1, 1)` with `hi`, so the studio's TTF tightens and the fontmake build does not. Crispy's range is −100..100 — exactly this case.
+
+Repro on crispy-mini (the `cb24a2f` writer, fontmake 3.12.2; advance change vs SPAC 0 at the default location; injector = `WidthAwareSpacTransform` on the quiet build):
+
+| range | glyph | sources @lo | injector @lo | sources @hi | injector @hi |
+|---|---|---|---|---|---|
+| −40..40 | a | **0.0** | −88.0 | 88.0 | 88.0 |
+| −40..40 | o | **0.0** | −90.0 | 90.0 | 90.0 |
+| −40..40 | w | **0.0** | −94.0 | 94.0 | 94.0 |
+| −20..40 | a | −44.0 | −44.0 | 88.0 | 88.0 |
+| −20..40 | w | −47.0 | −47.0 | 94.0 | 94.0 |
+
+The ROUND 22 renderer checks passed only because crispy-mini's sidecar is asymmetric (−20..40), so both twins were written.
+
+Fix: always write a twin at each non-zero end (`lo` and `hi`), whatever the symmetry; fix the docstring. Acceptance: a test with a SYMMETRIC range (e.g. −40..40) that builds the exported sources with fontmake and asserts the advance change at SPAC `lo` equals the injector's within 0 u for the E2 glyph set (and `hi` still does); the real-Crispy zip carries **72** SPAC twins (36 masters × 2). Watch the source count: the zip goes from 132 to 168 sources — say in LOG.md whether fontmake's build time on the real Crispy zip (E1b's manual build) stays workable.
+
+**E2h memory budget.** The verifier's CLI `--format sources` run on the real Crispy (full font build, then the writer deep-copying 36 masters in memory for the twins) took about **6 GB** of RAM and slowed the designer's 16 GB machine (user report, 2026-11-03). E2h doubles the twins, and the dialog export runs the same writer inside the studio process. Measure peak RSS of the real-Crispy export before and after E2h (`/usr/bin/time -l`, "maximum resident set size") and put both numbers in LOG.md; if E2h raises it materially, build and write each twin to disk one at a time instead of holding all the deep copies at once.
+
+**Order (ROUND 23, amended):** E1b → E2h → E1c → E2f → E2g → D1a → D1b → D1c → K5 → checkpoint.
