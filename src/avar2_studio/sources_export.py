@@ -77,20 +77,45 @@ def _version() -> str:
         return "unknown"
 
 
+#: Axes the studio COMPOSES at build time (grade braces, the Kinetikern/spacing
+#: machinery, rounding, slanting, the secondary parametric axes). Their metadata
+#: entries exist so the studio can show a slider; they are placeholders, never
+#: designspace axes of their own. Shipping them as axes gave Crispy a designspace
+#: with duplicate names, `grad`/`spac` axes no master reaches, a default of −1000
+#: on `lcwd`/`ymod` and no findable default source — fontmake exited 1.
+STUDIO_BUILD_AXES = frozenset(
+    {"grad", "spac", "rond", "slnt", "lcwd", "ymod"})
+
+
 def declared_user_axes(metadata: Dict[str, Dict]) -> List[Tuple[str, Dict]]:
     """``[(tag, entry)]`` for the user axes the metadata declares.
 
     Parametric axes are the masters' own business (glyphsLib emits them with
     their master ranges); these are the CREATED axes — wght/wdth/opsz and any
     other the designer declared — whose default the mapping is written against.
+
+    Two kinds of entry are skipped, and both matter: the studio's build-time
+    placeholders (``STUDIO_BUILD_AXES``) and anything without a declared
+    ``default``. A placeholder has no default because nothing is authored at
+    it, and ``_default_of`` would silently fall back to ``min`` — −1000 for a
+    secondary axis — which is what made fontmake fail on Crispy.
     """
     out = []
+    seen = set()
     for _col, entry in (metadata or {}).items():
         tag = (entry.get("registered_tag") or "").strip()
         if not tag or entry.get("is_parametric"):
             continue
         if entry.get("min") is None or entry.get("max") is None:
             continue
+        if tag.lower() in STUDIO_BUILD_AXES:
+            continue
+        if entry.get("default") is None:
+            continue
+        key = tag.lower()
+        if key in seen:                      # one axis per tag, case-insensitive
+            continue
+        seen.add(key)
         out.append((tag, entry))
     return out
 
@@ -388,6 +413,34 @@ def _spacing_summary(kinetikern: Optional[Dict], spac_tag: Optional[str]):
     return out
 
 
+def _validate_designspace(doc: DesignSpaceDocument) -> None:
+    """Refuse a designspace fontmake cannot use, with the reason named.
+
+    Three things went wrong on the real Crispy and none of them raised: duplicate
+    axis names, an axis no source sits at (so no default source exists), and a
+    default that fell back to an axis minimum. A zip that builds is the whole
+    point of the export, so these are errors here rather than surprises in
+    fontmake's log.
+    """
+    tags = [a.tag for a in doc.axes]
+    names = [a.name for a in doc.axes]
+    for label, values in (("tags", tags), ("names", names)):
+        lowered = [str(v).lower() for v in values]
+        dupes = {v for v in lowered if lowered.count(v) > 1}
+        if dupes:
+            raise SourcesError(
+                f"the designspace would carry duplicate axis {label}: "
+                f"{', '.join(sorted(dupes))} (axes: {values})")
+    if doc.findDefault() is None:
+        missing = [f"{a.tag}={a.default}" for a in doc.axes
+                   if not any(s.location.get(a.name) == a.default
+                              for s in doc.sources)]
+        raise SourcesError(
+            "no source sits at the axes' defaults, so the designspace has no "
+            f"default source (axes whose default nothing reaches: "
+            f"{', '.join(missing) or 'unknown'}) — fontmake cannot build it")
+
+
 def _mapping_xml(doc: DesignSpaceDocument, rows, declared, axis_names: Dict[str, str],
                  default_row_name: Optional[str]) -> ET.Element:
     """The designspace 5 ``<mappings>``: one entry per NON-default CSV row."""
@@ -544,9 +597,9 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     spac_tag = _add_spacing_axis(doc, sidecar_base)
     # Created user axes: declared min/default/max, appended after the
     # parametric ones glyphsLib emitted from the masters.
-    existing = {a.tag for a in doc.axes}
+    existing = {a.tag.lower() for a in doc.axes}
     for tag, entry in user_axes:
-        if tag in existing:
+        if tag.lower() in existing:
             continue
         from fontTools.designspaceLib import AxisDescriptor
         axis = AxisDescriptor()
@@ -585,6 +638,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
         raise SourcesError(
             "more than one mapping row sits at the axis defaults — the studio "
             "builds this fine only because it dedupes first; fix the mappings")
+    _validate_designspace(doc)
+
     mappings = _mapping_xml(doc, rows, declared, axis_names,
                             default_rows[0] if default_rows else None)
 

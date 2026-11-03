@@ -2145,3 +2145,45 @@ Evidence:
 - The probe's `export-sources` scenario now reads the designspace inside the
   downloaded zip and asserts a `SPAC` axis and unique axis names — so the Crispy
   run (where this broke) fails loudly rather than passing on names alone.
+
+## ROUND 23 — E1b: the metadata's placeholders are not axes, and real Crispy builds
+
+The verifier's second blocking finding: the axis metadata's lowercase placeholders
+became extra user axes. Crispy's metadata declares, besides `wght`/`wdth`/`opsz`,
+the studio's build-time axes — `grad`, `lcwd`, `ymod`, `spac` — all with
+`default: none`. `declared_user_axes` passed them through, `_default_of` fell back
+to the axis **minimum**, and the designspace shipped with duplicate names, axes no
+master reaches, `lcwd`/`ymod` defaulting to **−1000** and **no findable default
+source** — fontmake exited 1.
+
+Fix, in `sources_export`:
+
+- `STUDIO_BUILD_AXES = {grad, spac, rond, slnt, lcwd, ymod}` are skipped — the
+  studio composes those axes at build time, so shipping them as designspace axes
+  is wrong by construction;
+- any declared axis **without a `default`** is skipped too: a placeholder has no
+  default precisely because nothing is authored at it, and the `min` fallback was
+  the −1000;
+- the created-axis dedupe is case-insensitive, so a metadata `spac` cannot collide
+  with E2's `SPAC` twin axis;
+- **`_validate_designspace`** refuses to write a zip whose designspace has
+  duplicate tags or names, or no default source — naming the offending axes.
+  A buildable zip is the point of the export, so these fail here, not inside
+  fontmake.
+
+Evidence — the real Crispy, through the CLI (`--format sources` on a copy at
+`~/e1b-check/sources`, archival folders removed; the designer's checkout
+untouched):
+
+- the zip's designspace: **132 sources, 29 instances, 12 axes**, tags and names
+  unique, `default source: "Crispy 47-1-1"`, one `SPAC` (−100…0…100) from the
+  twins, and `LCWD`/`YMOD`/`GRAD`/`ROND`/`slnt` present with masters behind them;
+- `fontmake -m Crispy.designspace -o variable` → **exit 0, 0 ERROR lines**,
+  `Crispy-VF.ttf` 627 KB, 499 glyphs, fvar `XTRA XOPQ YOPQ LCWD YMOD GRAD slnt
+  ROND SPAC wght wdth opsz`, **avar version 2.0** — the mappings build as well as
+  the spacing axis.
+
+Tests: `pytest tests/test_sources_export.py -q` → **9 passed**, including a case
+that injects `GRAD`/`LCWD`/`YMOD`/`SPAC` and a default-less `XTRA2` and asserts
+none of them become axes, exactly one `SPAC`, unique tags and names, and a findable
+default source. `pytest tests/ -q` → **658 passed**; `ruff check src tests` clean.

@@ -1228,3 +1228,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `pytest tests/ -q` → **657 passed**; `ruff check src tests` clean
 - probe `export-sources` now asserts a `SPAC` axis and unique axis names inside the downloaded designspace
 - reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071, 8001, `~/avar2-studio-test`
+
+### ROUND 23 E1b — placeholders are not axes; the real Crispy builds (2026-11-03)
+
+- real Crispy via `avar2-studio build --format sources` (copy at `~/e1b-check/sources`): designspace 132 sources / 29 instances / 12 axes, unique tags and names, default source `Crispy 47-1-1`, one `SPAC` axis
+- `fontmake -m Crispy.designspace -o variable` → **exit 0, 0 ERROR lines**, `Crispy-VF.ttf` 627 KB / 499 glyphs / **avar 2.0**
+- `pytest tests/test_sources_export.py -q` → **9 passed**; `pytest tests/ -q` → **658 passed**; `ruff check src tests` clean
+- reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071, 8001, `~/avar2-studio-test`

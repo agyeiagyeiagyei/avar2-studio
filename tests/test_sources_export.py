@@ -481,3 +481,44 @@ def test_the_sidecars_are_read_from_the_original_source(project, tmp_path):
     assert "SPAC" not in axes(), (
         "without original_path the staged copy has no sidecar — the defect this "
         "parameter exists to avoid")
+
+
+def test_the_studio_placeholders_never_become_axes(project, tmp_path):
+    """E1b: the metadata's build-time placeholders are not designspace axes.
+
+    Crispy's metadata carries `grad`, `lcwd`, `ymod` and `spac` entries with no
+    default, because the studio composes those axes at build time. Shipped as
+    axes they produced duplicate names, a default of −1000 on `lcwd`/`ymod` and
+    no findable default source — fontmake exited 1 (verifier, ROUND 22).
+    """
+    metadata = dict(project["metadata"])
+    metadata.update({
+        "GRAD": {"registered_tag": "grad", "display_name": "Grade",
+                 "min": -10.0, "max": 10.0, "is_parametric": False},
+        "LCWD": {"registered_tag": "lcwd", "display_name": "Lowercase width",
+                 "min": -1000, "max": 1000, "is_parametric": False},
+        "YMOD": {"registered_tag": "ymod", "display_name": "Horizontal correction",
+                 "min": -1000, "max": 1000, "is_parametric": False},
+        "SPAC": {"registered_tag": "spac", "display_name": "Spacing",
+                 "min": -20.0, "max": 40.0, "is_parametric": False},
+        # a real axis without a declared default is a placeholder too
+        "XTRA2": {"registered_tag": "xtra2", "display_name": "Half width",
+                  "min": 0.0, "max": 10.0, "is_parametric": False},
+    })
+    out = tmp_path / "placeholders.zip"
+    sources_export.build_sources_zip(
+        project["source"], out, csv_path=project["csv"], metadata=metadata,
+        family_name="CrispyMini", original_path=project["source"])
+    work = tmp_path / "rt-placeholders"
+    work.mkdir()
+    with zipfile.ZipFile(out) as zf:
+        zf.extractall(work)
+    doc = DesignSpaceDocument.fromfile(str(next(work.glob("*.designspace"))))
+    tags = [a.tag for a in doc.axes]
+    assert not [t for t in tags if t.lower() in
+                {"grad", "lcwd", "ymod", "xtra2"}], tags
+    assert tags.count("SPAC") == 1, f"one SPAC axis, from the twins: {tags}"
+    assert len({t.lower() for t in tags}) == len(tags), f"unique tags: {tags}"
+    assert len({a.name for a in doc.axes}) == len(doc.axes), \
+        [a.name for a in doc.axes]
+    assert doc.findDefault() is not None, "a default source must exist"
