@@ -2398,3 +2398,18 @@ compares the file list, the README and the designspace byte for byte (they were
 already equal — the test is the guarantee). The route test now pins that
 `composed_transforms` is NOT in the job spec. `pytest tests/ -q` → **666
 passed**; ruff clean.
+
+### E2f — the default row rests EXACTLY on the compiled origin (ROUND 23)
+
+The E1a test's part (d) compared the fontmake build at the default row's USER
+location against the unmapped build instanced at the row's **parametric output**
+and reported an 8.1 u "resting dip", which the comment explained away as
+decision 0001's relocation seen from the sources' side. That is not what the
+sources claim: the default row is the one row **not** in the `<mappings>`, its
+user location IS the axes' default, and the designspace's default source sits
+at the compiled origin — so the build must land on the origin to the unit.
+
+The comparison is now against the unmapped build at **its default**, and the
+assert is `worst <= 1e-6`. Measured: **0.0 u**. A leak of any mapping into the
+default location (E1d's defect) or a moved default source fails the test; the
+comment now says that instead of rationalising 8 u.

@@ -1292,3 +1292,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - both paths name the zip `CrispyMini-sources.zip`; file list, README and
   designspace compare byte for byte
 - `pytest tests/ -q` → **666 passed**; ruff clean
+
+### ROUND 23 E2f — default row on the compiled origin, exactly (2026-11-04)
+
+- E1a part (d) now compares against the unmapped build at ITS default:
+  **0.0 u** (assert ≤ 1e-6); the old 8.1 u "dip" was the comparison's own
+  error, not the export's
+- `pytest tests/ -q` → **666 passed**; ruff clean

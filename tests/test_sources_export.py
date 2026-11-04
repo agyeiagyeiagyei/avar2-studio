@@ -150,14 +150,13 @@ def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_pa
     the outlines and advances must match the studio's TTF at every non-default
     row's USER location (both fonts apply avar2 there, so this compares the
     same coordinate system); and the default row is compared separately
-    against the unmapped build of the same masters.
+    against the unmapped build at ITS default, where it must rest exactly.
 
-    The default row is the resting dip of decision 0001: the studio's font is
-    relocated to that row's output (XOPQ 6 / YOPQ 6) while the sources rest at
-    the compiled origin (2 / 2) with the row dropped from the mappings — 8–9 u
-    on outlines, 8 u on advances. That is what the zip's README states, and it
-    is asserted here as the *unmapped* agreement it actually is, not blamed on
-    a tolerance.
+    The default row is the one row NOT in the mappings: its user location IS
+    the axes' default, and the designspace's default source sits at the
+    compiled origin, so a fontmake build must land on that origin to the unit.
+    (The studio's TTF, by contrast, relocates its default there at build time —
+    decision 0001; the zip's README states the difference.)
     """
     zip_path = _zip(project, tmp_path)
     work = tmp_path / "rt"
@@ -211,30 +210,29 @@ def test_fontmake_builds_the_sources_and_matches_the_studio_font(project, tmp_pa
     assert worst_outline <= 3.0, f"outlines diverge by {worst_outline:.2f} u"
     assert worst_advance <= 1.0, f"advances diverge by {worst_advance:.2f} u"
 
-    # (d) the default row, against the unmapped build of the same masters.
+    # (d) the default row, against the unmapped build at ITS default.
     plain = tmp_path / "plain.ttf"
     subprocess.run([str(FONTC), "-o", str(plain), str(project["source"]),
                     "--flatten-components", "--decompose-transformed-components"],
                    check=True, capture_output=True)
     # The default row is deliberately NOT in the mappings (gen-avar2 drops it
-    # for the built font, and the README says so). Its user location therefore
-    # lands NEAR — not exactly on — the compiled origin: the avar2 built from
-    # the 7 mapped rows interpolates across it. Measured 8.1 u against the
-    # masters instanced at the row's parametric output, which is the resting
-    # dip of decision 0001 seen from the sources' side. Asserted as a bound with
-    # the number in it, not as a tolerance that hides the difference.
+    # for the built font, and the README says so). Its user location IS the
+    # axes' default, and the designspace's default source is the compiled
+    # origin — so the exported sources must rest EXACTLY there. Anything but
+    # 0.00 u means a mapping leaked into the default location (E1d's defect) or
+    # the default source moved.
     user_loc = {t: float(v) for t, v in default_row.in_axes.items()}
-    out_loc = {t: float(v) for t, v in default_row.out_axes.items()}
     fm_set = TTFont(str(built)).getGlyphSet(location=user_loc)
-    plain_set = TTFont(str(plain)).getGlyphSet(location=out_loc)
+    plain_set = TTFont(str(plain)).getGlyphSet()
     worst = 0.0
     for name in ("a", "g", "o"):
         pa, pb = _points(fm_set, name), _points(plain_set, name)
         assert len(pa) == len(pb), f"{name}: different point counts"
         for pt, qt in zip(pa, pb):
             worst = max(worst, ((pt[0] - qt[0]) ** 2 + (pt[1] - qt[1]) ** 2) ** 0.5)
-    assert worst <= 10.0, (f"the default row rests {worst:.2f} u from the "
-                          "masters (was 8.1 u; a jump means the mappings moved)")
+    assert worst <= 1e-6, (
+        f"the default row must rest EXACTLY on the compiled origin; it is "
+        f"{worst:.4f} u away")
 
 
 def _glyph_set_distance(a, b, loc, glyphs):
