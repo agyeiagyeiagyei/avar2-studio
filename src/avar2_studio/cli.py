@@ -61,14 +61,19 @@ def _axis_metadata_paths(source: Path):
     """Both homes for the declared axis defaults (C1).
 
     ``<stem>-axis-metadata.json`` beside the source is the canonical,
-    COMMITTED location. ``.avar2-studio/axis-metadata.json`` is the pre-C1
-    location: tool-managed and gitignored, so it only helps a checkout that
-    already ran the studio.
+    COMMITTED location. The legacy ``.avar2-studio/axis-metadata.json`` lives in
+    the tool workdir — which ``--workdir`` moves (O1b): the pre-check used to
+    look only beside the source, so a CI run with ``--workdir`` passed it, wrote
+    an empty file into the workdir and exited 0 at the compiled corner.
     """
-    return (
-        source.parent / f"{source.stem}-axis-metadata.json",
-        source.parent / ".avar2-studio" / "axis-metadata.json",
-    )
+    from . import state
+
+    if state.WORKDIR_OVERRIDE is not None:
+        legacy = (Path(state.WORKDIR_OVERRIDE) / ".avar2-studio"
+                  / "axis-metadata.json")
+    else:
+        legacy = source.parent / ".avar2-studio" / "axis-metadata.json"
+    return (source.parent / f"{source.stem}-axis-metadata.json", legacy)
 
 
 def _axis_metadata_problem(source: Path):
@@ -133,6 +138,13 @@ def _build(argv) -> int:
                     help="avar2 mappings CSV (default: <stem>-avar.csv beside the source)")
     args = ap.parse_args(argv)
 
+    if args.workdir is not None:
+        # Before the metadata pre-check and _apply_source_path: both resolve
+        # the tool workdir from this (O1b — the checks must look where the
+        # build will actually write).
+        from . import state as _state_early
+        _state_early.WORKDIR_OVERRIDE = args.workdir.resolve()
+
     if args.csv is not None:
         # Dead override: _apply_source_path resets CSV_PATH and the build
         # always reads the sibling <stem>-avar.csv. Say so, don't pretend.
@@ -196,9 +208,6 @@ def _build(argv) -> int:
         # transform entries replace the committed sidecar FOR THIS RUN only.
         from .transforms import config as _tx_config
         _tx_config.set_override(_build_config.transform_entries(cfg))
-    if args.workdir is not None:
-        # Before _apply_source_path: it resolves the workdir from this.
-        state.WORKDIR_OVERRIDE = args.workdir.resolve()
     try:
         server._apply_source_path(args.source)
     except Exception as exc:
@@ -387,6 +396,14 @@ def _failure_reasons(state_module) -> list:
         reasons.append(
             f"origin relocation failed (degraded build — the avar2 mapping is not "
             f"the authored one): {state_module.LAST_ORIGIN_RELOCATION_ERROR}"
+        )
+    if state_module.LAST_BUILD_DEGRADED:
+        # O1b: the metadata declares no defaults for the mapped axes, so the
+        # font rests at the compiled corner. The studio shows it; in CI the
+        # exit status is the only thing anyone reads.
+        reasons.append(
+            f"build degraded (the font rests at the compiled corner): "
+            f"{state_module.LAST_BUILD_DEGRADED}"
         )
     if state_module.LAST_GRADE_ERROR:
         # Grade is declared in the sidecar but its braces were not generated:

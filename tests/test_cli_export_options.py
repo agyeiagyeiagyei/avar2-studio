@@ -40,7 +40,8 @@ def test_format_dedupes_and_keeps_order():
     assert formats == ["woff2", "ttf"]
 
 
-def _run_build(tmp_path, monkeypatch, argv, build_config=None, build_error=None):
+def _run_build(tmp_path, monkeypatch, argv, build_config=None, build_error=None,
+               with_metadata=True):
     """Drive ``cli._build`` with a stubbed build and a stubbed exporter."""
     import json as _json
 
@@ -48,10 +49,14 @@ def _run_build(tmp_path, monkeypatch, argv, build_config=None, build_error=None)
     from avar2_studio.transforms import config as _tx_config
 
     project = tmp_path / "checkout"
-    project.mkdir()
+    project.mkdir(exist_ok=True)
     source = project / "CrispyMini.glyphs"
     source.write_bytes(b"<glyphs/>")
-    (project / "CrispyMini-axis-metadata.json").write_text("{}", encoding="utf-8")
+    meta = project / "CrispyMini-axis-metadata.json"
+    if with_metadata:
+        meta.write_text("{}", encoding="utf-8")
+    elif meta.exists():
+        meta.unlink()
     if build_config is not None:
         (project / "CrispyMini-build.json").write_text(
             _json.dumps(build_config), encoding="utf-8")
@@ -68,6 +73,9 @@ def _run_build(tmp_path, monkeypatch, argv, build_config=None, build_error=None)
         # E2g: the sources export is not independent of the build.
         monkeypatch.setattr(state, "LAST_BUILD_STATUS", "error")
         monkeypatch.setattr(state, "LAST_BUILD_ERROR", build_error)
+    # _build assigns WORKDIR_OVERRIDE directly; scope it to this test so a
+    # --workdir run cannot leak the override into the rest of the suite.
+    monkeypatch.setattr(state, "WORKDIR_OVERRIDE", None)
     monkeypatch.setattr(pipeline, "_get_preview_dir", lambda: tmp_path)
     calls = []
 
@@ -308,3 +316,48 @@ def test_a_sources_error_is_a_usage_error(tmp_path, monkeypatch, capsys):
 
     assert rc == 2
     assert "no avar2 CSV" in capsys.readouterr().err
+
+
+def test_a_degraded_build_exits_1(tmp_path, monkeypatch, capsys):
+    """O1b: the font rests at the compiled corner — CI must see exit 1.
+
+    ``LAST_BUILD_DEGRADED`` is set when the axis metadata declares no defaults
+    for the mapped axes; the studio's health panel shows it, but the CLI's
+    ``_failure_reasons`` never read it, so a corner build shipped as success.
+    """
+    from avar2_studio import state
+
+    rc, calls, out = _run_build(tmp_path, monkeypatch, [])
+    assert rc == 0, "the stub build is healthy by default"
+
+    monkeypatch.setattr(
+        state, "LAST_BUILD_DEGRADED",
+        "Crispy-axis-metadata.json declares no defaults for the mapped axes")
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", tmp_path / "built.ttf")
+
+    rc, calls, out = _run_build(tmp_path, monkeypatch, [])
+    assert rc == 1, "a degraded build is not shippable"
+    err = capsys.readouterr().err
+    assert "degraded" in err and "compiled corner" in err, err
+
+
+def test_the_legacy_metadata_is_found_in_the_workdir(tmp_path, monkeypatch, capsys):
+    """O1b: ``--workdir`` moves the legacy metadata with the rest of the state.
+
+    The pre-check looked beside the source only, so a CI run with --workdir
+    passed it, wrote an empty file into the workdir and exited 0 at the corner.
+    """
+    workdir = tmp_path / "tool"
+    (workdir / ".avar2-studio").mkdir(parents=True)
+    (workdir / ".avar2-studio" / "axis-metadata.json").write_text(
+        '{"XTRA": {"default": 0}}', encoding="utf-8")
+
+    rc, _calls, _out = _run_build(
+        tmp_path, monkeypatch, ["--workdir", str(workdir)],
+        build_config=None)
+    assert rc == 0, "the workdir's legacy metadata satisfies the pre-check"
+
+    (workdir / ".avar2-studio" / "axis-metadata.json").unlink()
+    rc, _calls, _out = _run_build(
+        tmp_path, monkeypatch, ["--workdir", str(workdir)], with_metadata=False)
+    assert rc == 2, "the workdir is empty and the sibling is gone: usage error"

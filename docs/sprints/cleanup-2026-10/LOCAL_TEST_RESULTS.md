@@ -1327,3 +1327,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   Kinetikern tab is disabled." (both route sites and `EngineError`); no
   `native/…README.md`
 - `pytest tests/ -q` → **668 passed**; ruff clean
+
+### ROUND 25 O1b — degraded builds exit 1; --workdir metadata path (2026-11-05)
+
+- `LAST_BUILD_DEGRADED` is a `_failure_reasons` entry: exit 1, message on stderr
+- the CLI resolves the legacy axis-metadata path like the pipeline does
+  (WORKDIR/.avar2-studio/), assigned before the pre-check
+- `pytest tests/ -q` → **672 passed**; ruff clean

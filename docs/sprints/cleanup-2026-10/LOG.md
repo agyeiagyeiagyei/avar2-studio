@@ -2571,3 +2571,25 @@ flattens one it is handed directly (the unit-test path).
 Test: `test_a_mixed_glyph_flattens_and_tracks_like_a_simple_one` builds `Q` as
 contour + component, asserts the twin has no components left and moves by
 `+2dx` like a simple glyph.
+
+### O1b — a compiled-corner build exits 1, and `--workdir` moves the legacy metadata with the state (ROUND 25)
+
+Two ways the CLI could ship a font that rests at the compiled corner:
+
+* `_failure_reasons` read `LAST_BUILD_STATUS == "degraded"` and
+  `LAST_ORIGIN_RELOCATION_ERROR`, but never `LAST_BUILD_DEGRADED` — the message
+  O1 introduced when the axis metadata declares no defaults for the mapped axes.
+  The studio's health panel showed it; in CI the exit status is the only thing
+  anyone reads. It is now a reason (exit 1, message on stderr).
+* Under `--workdir` the pre-check looked for the legacy metadata at
+  `source.parent/.avar2-studio/axis-metadata.json` while the build used
+  `WORKDIR/.avar2-studio/`. The pre-check passed, the build wrote an empty file
+  into the workdir and rested at the corner. `cli._axis_metadata_paths` now
+  resolves the legacy path exactly as `pipeline._get_preview_dir` does, and
+  `_build` assigns `WORKDIR_OVERRIDE` **before** the pre-check runs.
+
+Tests: `test_a_degraded_build_exits_1` (a healthy stub build exits 0, the same
+build with `LAST_BUILD_DEGRADED` set exits 1 and prints the reason) and
+`test_the_legacy_metadata_is_found_in_the_workdir` (metadata in the workdir
+passes; deleting it with no sibling gives exit 2). `pytest tests/ -q` → **672
+passed**; ruff clean.
