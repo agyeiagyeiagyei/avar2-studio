@@ -55,9 +55,10 @@ a clean checkout.
 - `avar2-studio doctor` gained `check_spac_injector` and
   `check_kinetikern_engine`, which report the path and how it was found (`via
   $AVAR2_…` when the override is in play) and name a broken override instead of
-  silently falling through. `doctor --strict` fails when either is missing, so
-  CI can assert a fresh install is complete — `release.yml` does that on the
-  built wheel.
+  silently falling through. Both checks are optional by design: an absent
+  accelerator passes, and `--strict` fails only when the environment NAMED one
+  and it is not there (`configured_missing`) or when a headless-build
+  prerequisite is missing. Nothing in this repo runs `doctor --strict` in CI.
 - The overrides stay first in the order: they are the escape hatch for testing
   a locally rebuilt binary.
 - Kinetikern availability is now a packaging property rather than a user setup
@@ -67,8 +68,9 @@ a clean checkout.
 ## Where it lives
 
 `hatch_build.py` (`NativeAcceleratorsHook.initialize`); `release.yml`'s
-`dist-platform-*` job (cargo builds, staging into `src/avar2_studio/bin/`,
-`doctor --strict` on the installed wheel); `kinetikern/__init__.py::engine_path`;
+`build-platform-wheels` job (cargo builds `spac-inject` and `libkinetikern2`,
+stages them into `src/avar2_studio/bin/`, tags the wheel `py3-none-<plat>`);
+`kinetikern/__init__.py::engine_path`;
 `transforms/builtin_spac_widthaware.py::_native_injector`;
 `doctor.py::check_spac_injector` / `check_kinetikern_engine`. Tests:
 `tests/test_kinetikern.py`, `tests/test_kinetikern_inject.py`,
