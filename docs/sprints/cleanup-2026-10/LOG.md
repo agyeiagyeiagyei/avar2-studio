@@ -2498,3 +2498,40 @@ Test: `test_the_engine_missing_503_names_no_repo_file` stubs `engine_path` to
 `None`, hits `/api/kinetikern/propose`, and asserts the 503 body carries no
 `native/` and no `.md`. `pytest tests/ -q` → **668 passed**; ruff clean. The tab
 and `kinetikern-copy.js` carry no other repo file names.
+
+## ROUND 23 checkpoint (2026-11-04)
+
+Thirteen items, one commit each, every one with its tests and its evidence row
+in `LOCAL_TEST_RESULTS.md`:
+
+| Item | Commit | What it fixed |
+|---|---|---|
+| E2e | `cb24a2f` | sidecars resolve against the ORIGINAL source, not the staging |
+| E1b | `b6d9e83` | the metadata's placeholders are never designspace axes |
+| E1d | `aab8092` | mappings are the build's own rows; no empty/default `<input/>` |
+| E2h | `c32a60b` | a symmetric SPAC range exports a twin at BOTH ends |
+| E2i | `b688994` | the spacing basis is the built font; a tightening is capped |
+| E2j | `ca70f8f` | composites take one shift; the studio's decompositions are flattened |
+| E1c | `305e62f` | both export paths write the same zip, naming the ORIGINAL |
+| E2f | `24ccd8d` | the default row rests exactly on the compiled origin (0.0 u) |
+| E2g | `a83072d` | `--format sources` needs the build; CLI.md says why |
+| D1a | `124d2be` … `49fc8c1` | every WRONG/OUTDATED factcheck row, one commit per document |
+| D1b | `89be9a8` | the reader set carries no routes, code names, test paths or `.py` |
+| D1c | `187e64b` | the secondary-axes guide 313 → 150 lines, walkthroughs to an appendix |
+| K5 | `c1c8aca` | the Kinetikern tab's engine-missing copy names no repo file |
+
+Gates: **668 backend tests passed**, ruff clean, ESLint 0 errors, the eleven
+node specs green. Real Crispy through the CLI with `roundtrip_compare.py`:
+
+- `fontmake` on the exported zip: **exit 0, 0 ERROR**, `Crispy-VF.ttf`;
+- 28 non-default rows: worst **3.0 u** (tolerance 3);
+- **SPAC +100: 28/28 rows inside 1 u, every glyph, composites included**;
+- **SPAC −100: 28/28 rows inside 1 u except `W`'s advance at the narrow rows**
+  (181 u worst) — the hairline master's advance is 249 u against a 442 u
+  change, and the studio's own font reports a NEGATIVE advance at that master,
+  which a UFO cannot carry. Recorded in the E2i section; the designer's lever is
+  the SPAC range, not the writer.
+
+Open, not absorbed: the composite TARGET (findings.md, "For the user — the
+studio's own composite rule") waits for the user's decision, and B11a–c stay
+gated behind the verifier marking this checkpoint verified.
