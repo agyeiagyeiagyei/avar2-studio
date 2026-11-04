@@ -98,8 +98,9 @@ desktop app.) [Guide](docs/guides/authoring-instances.md).
 ![The Instances sidebar: sample text, core and secondary parametric axes, and the avar2 mappings of the selected style](docs/images/sidebar-axes.png)
 
 **Secondary parametric axes.** Sliders that deform only the glyphs you give them,
-from brace layers pinned anywhere in the designspace — Crispy's `LCWD` renders
-lowercase at the heavy end *as if at* a lighter XOPQ while the capitals stay put.
+from brace layers pinned anywhere in the designspace — Crispy's `LCWD` moves the
+lowercase and leaves the capitals put (measured on the production font,
+2026-11-04: `a` 2001 → 1969 u, `A` 2443 → 2443 u at `LCWD` 0 → 100).
 Correction layers are re-derived on every build; the rest you draw in the
 **embedded Fontra editor**. [Guide](docs/guides/secondary-parametric-axes.md).
 
