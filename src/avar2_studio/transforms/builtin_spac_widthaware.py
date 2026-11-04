@@ -223,6 +223,14 @@ class WidthAwareSpacTransform(Transform):
                 # double it — skip.
                 if composite and any(c.flags & USE_MY_METRICS for c in glyph.components):
                     continue
+                if composite:
+                    # E2k (the user's rule): a composite tracks exactly like its
+                    # base letter — the base's amount on BOTH sides. ufoLib2 has
+                    # no per-component metrics flag, and the first component is
+                    # the flagged one in every glyphsLib composite.
+                    ink = inks.get(glyph.components[0].glyphName, 0.0)
+                    if ink <= 0:
+                        continue
 
                 factor = (ink / mean_ink) ** bias  # average-width glyph → factor 1.0 at any bias
 
@@ -233,15 +241,13 @@ class WidthAwareSpacTransform(Transform):
                     n = _gvar_point_count(glyph, glyf)
                     variations = gvar.variations.setdefault(name, [])
 
-                # Simple glyph: move both phantoms (±) for a symmetric grow.
-                # Composite: moving the LEFT phantom shifts the whole component,
-                # which opens BOTH sidebearings equally — so a right delta too
-                # would double the right side. Left phantom only.
+                # Both phantoms, simple or composite: ±dx gives left +dx and
+                # advance +2dx, i.e. each side +dx — the base's amount for a
+                # composite, its own for a simple glyph (E2k).
                 for support, amount in (((-1.0, -1.0, 0.0), lo), ((0.0, 1.0, 1.0), hi)):
                     coords = [None] * n
                     coords[-4] = (round(-amount * factor * scale), 0)
-                    if not composite:
-                        coords[-3] = (round(amount * factor * scale), 0)
+                    coords[-3] = (round(amount * factor * scale), 0)
                     variations.append(TupleVariation({"SPAC": support}, coords))
 
             # fvar axis + instance pinning (vendored from gen_spac.add_spacing_axis)

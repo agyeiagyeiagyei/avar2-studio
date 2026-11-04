@@ -393,14 +393,19 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     """Move one twin's metrics as the injector moves its phantom points.
 
     Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
-    both sidebearings open equally. Composite (the injector moves the LEFT
-    phantom only): the advance moves by ``dx`` and the left side by ``dx``, the
-    right one not at all — so each component's offset is corrected by the shift
-    its base already carries, or the composite inherits the base's move AND its
-    own (Cacute opened +246 and closed −123; E2j). A composition the studio's
-    build decomposes is flattened first and then tracks like a simple glyph.
+    both sidebearings open equally. A composite takes its BASE letter's amount
+    on both sides (E2k, the user's rule): its ink moves by ``dx_base`` and its
+    advance by ``2·dx_base``, exactly like the base — so each component's offset
+    is corrected by the shift its base already carries, and the composite's own
+    ink-derived amount is not used. A composition the studio's build decomposes
+    (transformed, or mixed components+contours) is flattened first and then
+    tracks like a simple glyph with its own amount.
+
+    E2i-c will make ``amount`` depend on the master's own ink; the base rule is
+    written against ``shifts`` so it follows that change.
     """
     shifts: Dict[str, int] = {}
+    pending: Dict[str, bool] = {}
     for name, ink in inks.items():
         if name not in twin:
             if name == ".notdef":
@@ -418,7 +423,8 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
             # studio's build does, so it tracks like a simple one (E2j-b).
             _flatten(glyph, original, name)
         composite = bool(glyph.components)
-        if composite and _use_my_metrics(glyph):
+        if composite:
+            pending[name] = True
             continue
         amount = (value if kind == "spac"
                   else value * ((ink / mean_ink) ** bias) * scale)
@@ -428,6 +434,31 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         if dx:
             shifts[name] = dx
 
+    # Composites: the base letter's amount, on both sides (E2k). ufoLib2 exposes
+    # `useMyMetrics` per GLYPH, not per component, so the base is the first
+    # component — which is the flagged one in every composite glyphsLib writes
+    # (`Aacute` = `A` + `acute`). Resolved in dependency order so a composite of
+    # a composite follows the same rule.
+    remaining = dict(pending)
+    while remaining:
+        progressed = False
+        for name in list(remaining):
+            components = twin[name].components
+            if not components:
+                remaining.pop(name)
+                progressed = True
+                continue
+            base = components[0].baseGlyph
+            if base in remaining:
+                continue
+            base_dx = shifts.get(base, 0)
+            if base_dx:
+                shifts[name] = base_dx
+            remaining.pop(name)
+            progressed = True
+        if not progressed:      # a component cycle; leave the rest unspaced
+            break
+
     for name, dx in shifts.items():
         glyph = twin[name]
         if glyph.components:
@@ -435,7 +466,7 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                 base_shift = shifts.get(component.baseGlyph, 0)
                 a, b, c, d, ox, oy = component.transformation
                 component.transformation = (a, b, c, d, ox + dx - base_shift, oy)
-            glyph.width += dx
+            glyph.width += 2 * dx
         else:
             _shift_metrics(glyph, dx)
             glyph.width += 2 * dx

@@ -244,10 +244,20 @@ fn uniform_extras(
 ) -> Result<HashMap<u16, Vec<NewTuple>>, JsError> {
     let mut extras = HashMap::new();
     for gid in 0..view.num_glyphs {
-        // gen_spac: `if not hasattr(glyph, "coordinates"): continue`
-        // (composites and empty glyphs have no outline coordinates) and
-        // `if not glyph_variations: continue`.
-        if !matches!(view.glyph(gid)?, Some(Glyph::Simple(_))) || !view.has_variations(gid)? {
+        // E2k: composites take their base letter's amount, which for the
+        // uniform transform is the same constant every glyph gets — so they are
+        // included. Empty glyphs have nothing to move and are skipped.
+        match view.glyph(gid)? {
+            Some(Glyph::Simple(_)) => {}
+            Some(Glyph::Composite(c)) => {
+                // A USE_MY_METRICS composite inherits its base's phantoms.
+                if view.has_use_my_metrics(&c) {
+                    continue;
+                }
+            }
+            _ => continue,
+        }
+        if !view.has_variations(gid)? {
             continue;
         }
         let n = view.gvar_point_count(gid)?;
@@ -293,8 +303,9 @@ fn widthaware_extras(
     }
     let mean_ink = inks.iter().map(|&(_, ink)| ink).sum::<f64>() / inks.len() as f64;
 
+    let ink_by_gid: HashMap<u16, f64> = inks.iter().copied().collect();
     let mut extras = HashMap::new();
-    for (gid, ink) in inks {
+    for (gid, own_ink) in inks {
         let composite = match view.glyph(gid)? {
             Some(Glyph::Composite(c)) => Some(c),
             _ => None,
@@ -308,20 +319,31 @@ fn widthaware_extras(
         {
             continue;
         }
+        // E2k (the user's rule): a composite tracks exactly like its base
+        // letter — the base's amount on both sides. The base is the first
+        // component (the flagged one in every composite the compilers write).
+        let ink = match composite.as_ref() {
+            Some(c) => c
+                .components()
+                .next()
+                .and_then(|comp| ink_by_gid.get(&(comp.glyph.to_u32() as u16)).copied())
+                .unwrap_or(0.0),
+            None => own_ink,
+        };
+        if ink <= 0.0 {
+            continue;
+        }
         let factor = (ink / mean_ink).powf(bias); // average-width glyph → 1.0 at any bias
         let n = view.gvar_point_count(gid)?;
         let mut tuples = Vec::with_capacity(2);
         for (norm, amount) in [(-1.0, lo as f64), (1.0, hi as f64)] {
             let mut tuple = brace_coords(total_axes, spac_idx, norm);
             tuple.deltas = vec![(0, 0); n];
-            // Simple glyph: move both phantoms (±) for a symmetric grow.
-            // Composite: left phantom only — moving it shifts the whole
-            // component, which opens BOTH sidebearings equally, so a
-            // right delta too would double the right side.
+            // Both phantoms, simple or composite: ±dx gives left +dx and
+            // advance +2dx, i.e. each side +dx — the base's amount for a
+            // composite, its own for a simple glyph (E2k).
             tuple.deltas[n - 4] = ((-amount * factor * scale).round_ties_even() as i16, 0);
-            if composite.is_none() {
-                tuple.deltas[n - 3] = ((amount * factor * scale).round_ties_even() as i16, 0);
-            }
+            tuple.deltas[n - 3] = ((amount * factor * scale).round_ties_even() as i16, 0);
             tuples.push(tuple);
         }
         extras.insert(gid, tuples);

@@ -711,15 +711,15 @@ def _rect(font, name, x0, width, height=700):
     return glyph
 
 
-def test_a_composite_tracks_like_the_injector_and_flipped_ones_decompose():
-    """E2j: composites open ONE side like the injector, and are never shifted twice.
+def test_a_composite_tracks_exactly_like_its_base_letter():
+    """E2k (the user's rule): a composite takes its base's amount on BOTH sides.
 
-    The injector moves a composite's LEFT phantom only (advance and left side
-    by `dx`, right side unchanged), and it moves the base glyph too — so the
-    composite inherits the base's move. Shifting the composite AND leaving the
-    inherited move in place opened Cacute +246 and closed it −123 on the real
-    Crispy. Transformed components (`w` = flipped `m`, `W` = flipped `M`) are
-    decomposed by the studio's build, so a twin has to decompose them too.
+    Advance +2·d_base, left +d_base, right +d_base — exactly what the base
+    glyph does. The old rule moved the composite's left side only (Cacute
+    opened +153 while C opened +153 on each side); the export also has to avoid
+    adding its own shift on top of the move the base already carries. Transformed
+    components (`w` = flipped `m`, `W` = flipped `M`) are decomposed by the
+    studio's build, so a twin decomposes them and they track like simple glyphs.
     """
     import ufoLib2
     from ufoLib2.objects import Component
@@ -749,13 +749,14 @@ def test_a_composite_tracks_like_the_injector_and_flipped_ones_decompose():
 
     m, M = twin["m"], twin["M"]
     assert m.width == 800 + 200, "simple: advance + 2·dx"
-    assert M.width == 800 + 100, "composite: advance + dx (the injector's rule)"
+    assert M.width == 800 + 200, (
+        "composite: the BASE's amount on both sides (advance + 2·d_base)")
     ox = M.components[0].transformation[4]
     assert ox == 0, (
         "the composite must not add a second shift on top of the move its base "
         f"already carries (component offset {ox})")
     nacute = twin["nacute"]
-    assert nacute.width == 700 + 100
+    assert nacute.width == 700 + 200, "accented: its base's amount too"
     assert [c.transformation[4] for c in nacute.components] == [0, 0]
     w = twin["w"]
     assert not w.components, "a transformed component is decomposed"

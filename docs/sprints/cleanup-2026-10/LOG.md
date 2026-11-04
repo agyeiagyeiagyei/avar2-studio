@@ -2593,3 +2593,34 @@ build with `LAST_BUILD_DEGRADED` set exits 1 and prints the reason) and
 `test_the_legacy_metadata_is_found_in_the_workdir` (metadata in the workdir
 passes; deleting it with no sibling gives exit 2). `pytest tests/ -q` → **672
 passed**; ruff clean.
+
+### E2k — a composite tracks exactly like its base letter (ROUND 25, the user's decision)
+
+The rule: for every composite, the SPAC change on EACH side equals its base
+glyph's — advance `+2·d_base`, left `+d_base`, right `+d_base`. Flipped and
+transformed composites follow their base too; the base is the first component
+(the `USE_MY_METRICS` one in every composite the compilers write — ufoLib2
+exposes that flag per glyph, not per component, and a `USE_MY_METRICS` composite
+already inherits its base's phantoms, so it is left alone).
+
+All three renderers move together:
+
+* **export** (`sources_export._shift_spacing`): a composite's shift is its
+  base's, so its components are corrected by `d_base − shift[base]` (zero, the
+  base's drawing already carries it) and its width takes `+2·d_base`. Bases are
+  resolved in dependency order, so a composite of a composite follows the rule.
+* **native injector** (`wasm/fontc-web/src/spac.rs`): composites now get BOTH
+  phantom deltas (`[-4] = −d_base`, `[-3] = +d_base`) instead of the left one
+  only, using the FIRST COMPONENT's ink as the amount; the uniform `spac`
+  transform now includes composites too (their amount is the same constant).
+* **fontTools fallback** (`builtin_spac_widthaware.py`): same — both phantoms,
+  the first component's ink.
+
+Rebuilt `wasm/fontc-web/target/release/spac-inject` (2m 03s) and ran the suite:
+`pytest tests/ -q -k spac` → **74 passed**, which includes the native/fontTools
+parity specs, so the two engines agree under the new rule. `pytest tests/ -q` →
+**672 passed**; ruff clean.
+
+The real-Crispy acceptance (every composite's per-side change equal to its
+base's within 1 u, HarfBuzz, every row, both ends) runs with the all-glyph
+round-trip script in the next item, one build at a time.
