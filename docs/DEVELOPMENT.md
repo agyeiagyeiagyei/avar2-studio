@@ -83,15 +83,15 @@ page under `site/` is static (Netlify) and not part of the package.
 
 ## Environment variables
 
-Every name the code reads. "Worker" marks the ones `build_jobs.ENV_KEYS`
-forwards into the build worker's environment; the rest are read where the
-process already is.
+Every name the code reads (package, tests and the e2e specs). "Worker" marks the
+ones `build_jobs.ENV_KEYS` forwards into the build worker's environment; the rest
+are read where the process already is.
 
 | Variable | Read by | Worker | Effect |
 |---|---|---|---|
 | `AVAR2_STUDIO_DEBUG` | `server.main` | — | `1`/`true`/`yes`: Flask debug + reloader (same as `--debug`); the reloader can kill an in-flight build |
 | `AVAR2_STUDIO_DEMO` | `routes/health.py` | — | `1`: the frontend shows the landing overlay for a shared host |
-| `AVAR2_FONTRA_PORT` | `state.py` (`fontra_port`) | — | Fontra's port, default 8001 — one studio instance owns it |
+| `AVAR2_FONTRA_PORT` | `state._fontra_port_from_env` | — | Fontra's port, default 8001 — one studio instance owns it |
 | `AVAR2_STUDIO_GFTOOLS_BUILDER` | `_perform_avar2_build`, `_export_pipeline` | yes | `1`: build through the external `gftools builder` subprocess instead of `_build_in_process` (a comparison valve) |
 | `AVAR2_RELOCATE_BUILD_DEFAULT` | `_build_in_process` | yes | `0`/`false`/`no` turns the build-time default relocation off (decision 0001); on by default |
 | `AVAR2_SPAC_INJECT` | `builtin_spac_widthaware._native_injector`, `doctor` | yes | path to the native `spac-inject` binary (overrides `wasm/fontc-web/target/release/spac-inject`) |
@@ -101,9 +101,11 @@ process already is.
 | `VITE_FONTRA_EMBED_URL` | `frontend/src/editor-bridge.js` (build time) | — | the fontra-embed bundle URL (default: the fontra-embed Pages site; dev `http://localhost:8099/editor.html`) |
 | `window.AVAR2_EMBED_URL` | `editor-bridge.js` (runtime) | — | runtime override of the embed URL, for tests and tools |
 | `AVAR2_PYTHON` | cargo oracle tests | — | the Python with fontTools + gftools the oracles shell out to; default `<crate>/../../.venv/bin/python`, then `python3` |
-| `AVAR2_SPIKE_FONT`, `AVAR2_ORACLE`, `AVAR2_CSV` | `tests/avar2_oracle.rs`, `braces_oracle.rs` | — | fixture overrides; the oracles build their own fixtures in `target/tmp/` when these are unset |
+| `AVAR2_SPIKE_FONT`, `AVAR2_ORACLE`, `AVAR2_CSV` | `wasm/fontc-web/tests/common/mod.rs` (the avar2, braces, spac and stat oracles) | — | fixture overrides; the oracles build their own fixtures in `target/tmp/` when these are unset |
 | `CORRECTION_FONT` | `tests/correction_oracle.rs` | — | the fixture that enables the otherwise `#[ignore]`d correction oracle |
-| `STUB_WORKER_MODE`, `STUB_WORKER_SLEEP` | `tests/stub_build_worker.py` | — | `ok` / `sleep` / `die` behaviour of the stub worker in the job-queue tests |
+| `STUB_WORKER_MODE`, `STUB_WORKER_SLEEP`, `STUB_WORKER_RUNS` | `tests/stub_build_worker.py` | — | `ok` / `sleep` / `die` behaviour of the stub worker in the job-queue tests, and how many runs `die` survives |
+| `AVAR2_STUDIO_COMMIT` | `sources_export._commit` | — | the commit the sources zip's README records when the checkout's git call is unavailable (CI) |
+| `STATIC_URL`, `GRADE_GLYPHS`, `GRADE_CONFIG`, `OUT_TTF`, `FONTRA_EMBED_DIST`, `WIDTH_MATCHER_RESOURCES` | the e2e specs and the plugin tests | — | the served demo's base URL, the grade-live fixtures, the reflection extractor's output, the fontra-embed bundle, and the Glyphs 3 resources dir |
 
 Note that `AVAR2_KK2_DYLIB` is not in `ENV_KEYS`: the worker finds the
 dylib through the same `engine_path()` default, so set it in the server's
@@ -113,9 +115,9 @@ environment only when the default location is wrong on both sides.
 
 ### Python
 
-`.venv/bin/python -m pytest tests/ -q` — **654 passed, 0 skipped** on 2026-10-29
-with fontc and the Kinetikern engine available (≈80 s; 620 `def test_` functions,
-the rest parametrised cases);
+`.venv/bin/python -m pytest tests/ -q` — **667 tests collected** (632 `def test_`
+functions; the rest parametrised cases), about two minutes with fontc and the
+Kinetikern engine available;
 `ruff check src tests` must be clean (the baseline is in `pyproject.toml`:
 E4/E7/E9/F/B/I001/RUF100/W, with E402, E501 and B905 ignored).
 
@@ -136,8 +138,8 @@ E4/E7/E9/F/B/I001/RUF100/W, with E402, E501 and B905 ignored).
   `test_sources_export.py` (that last one also skips without fontmake). Most
   resolve the compiler as `Path(sys.executable).with_name("fontc")`. The
   Kinetikern tests also need the dylib (`kinetikern.engine_path()`).
-- Glyphs-plugin tests (about 60 % of the suite) run against fake modules;
-  no Glyphs.app is needed.
+- Glyphs-plugin tests (about 20 % of the suite: 126 of the 632 `def test_`
+  functions) run against fake modules; no Glyphs.app is needed.
 
 ### Rust
 
@@ -145,25 +147,28 @@ E4/E7/E9/F/B/I001/RUF100/W, with E402, E501 and B905 ignored).
 out to Python (`AVAR2_PYTHON`, else the repo venv, else `python3` — in a worktree
 set `AVAR2_PYTHON` to a venv with fontTools and gftools) and write their outputs
 under `target/tmp/`. The fixtures are generated in-test from the crisp-mini
-example and from `tests/fixtures/` (`FoldedMini.glyphs` for the rounding
-classification, `StrandedMini.glyphs` for the clamp oracle, regenerated by
-`spike/make_stranded_fixture.py`), so nothing under `/tmp` is needed.
+example and from `wasm/fontc-web/tests/fixtures/` (`FoldedMini.glyphs` for the
+rounding classification, `StrandedMini.glyphs` for the clamp oracle, regenerated
+by `wasm/fontc-web/spike/make_stranded_fixture.py`), so nothing under `/tmp` is
+needed.
 
 `correction_oracle` is `#[ignore]`d with a reason; `CORRECTION_FONT=…
 cargo test -- --ignored` runs it.
 
 ### Frontend and end-to-end
 
-`npm run test:unit` runs the node-only specs: `avar2-eval.spec.mjs`
+`npm run test:unit` runs the eleven node-only specs: `avar2-eval.spec.mjs`
 (self-skips without its `/tmp/crispy-demo-live.ttf` fixture; regenerate
 with `reflection-extract.mjs`), `grade-model.spec.mjs` (caps vs the Python
-oracle), `avar2-lint.spec.mjs`. The Playwright specs use `playwright-core`
-with the system Chrome channel:
+oracle), `avar2-lint.spec.mjs`, and the likewise node-only `export-poll`,
+`build-wait`, `api-parity`, `instance-sync`, `promote-flush`, `kinetikern-copy`,
+`transforms-context` and `preview-coords` specs. The Playwright specs use
+`playwright-core` with the system Chrome channel:
 
 | Spec | Needs |
 |---|---|
-| `static-demo.spec.mjs` (28 sections) | `python scripts/snapshot_static_demo.py`, then `npx vite build --base=./ --outDir dist-pages` in `frontend/`, `python3 -m http.server 8123 -d frontend/dist-pages`, `STATIC_URL=http://localhost:8123`; the venv's Python (fontTools, Pillow) to verify downloads |
-| `editor-bridge.spec.mjs` (55 checks) | the same dist-pages plus a built fontra-embed served on 8099 |
+| `static-demo.spec.mjs` (31 sections) | `python scripts/snapshot_static_demo.py`, then `npx vite build --base=./ --outDir dist-pages` in `frontend/`, `python3 -m http.server 8123 -d frontend/dist-pages`, `STATIC_URL=http://localhost:8123`; the venv's Python (fontTools, Pillow) to verify downloads |
+| `editor-bridge.spec.mjs` (57 checks) | the same dist-pages plus a built fontra-embed served on 8099 |
 | `grade-live.spec.mjs`, `reflection-live.spec.mjs` | the designer's own font + its config; the live site or `STATIC_URL` |
 | `prod-smoke.mjs` | the live Pages demo and the live fontra-embed deploy; run after deploys |
 
@@ -189,10 +194,13 @@ not.
   `spac-inject` and `libkinetikern2` into `src/avar2_studio/bin/` and tags the
   wheel `py3-none-<plat>` — decision 0015), `release-platform-assets`, and the
   two publish jobs (`publish-pypi` on trusted publishing, `publish-testpypi` for
-  the rehearsal). As of 2026-10-30 **no `v*` tag has been cut**, so 0.1.0 is not
-  on PyPI; the README says so.
-- `.github/workflows/test.yml` — on every push and PR: `python` (a version
-  matrix running pytest + ruff), `cli-build` (builds the bundled example from an
+  the rehearsal). Tags `v0.1.0.dev1`–`dev6` exist (2026-06-06/07) and
+  `release.yml` ran green on each (GitHub Releases); there is **no final
+  `v0.1.0`**, and PyPI has no `avar2-studio` project (checked 2026-11-02).
+- `.github/workflows/test.yml` — on push and pull request for `main`,
+  `github-pages` and `cleanup-2026-10` (plus `workflow_dispatch`): `python` (an
+  **OS** matrix — `ubuntu-latest` and `macos-latest`, Python pinned to 3.11 —
+  running pytest + ruff), `cli-build` (builds the bundled example from an
   installed package and asserts the checkout stays clean), `frontend` (lint,
   typecheck, unit specs, build) and `rust` (`cargo test`). Six check names with
   the matrix, and the sprint's acceptance is that all of them are green.
@@ -220,7 +228,7 @@ not.
 ## Smoke playbook
 
 ```bash
-.venv/bin/python -m pytest tests/ -q                     # 654 passed, 0 skipped (fontc + engine present)
+.venv/bin/python -m pytest tests/ -q                     # 667 collected (fontc + engine present)
 .venv/bin/ruff check src tests
 cd frontend && npm run lint && npm run typecheck && npm run test:unit && npm run build && cd ..
 cd wasm/fontc-web && AVAR2_PYTHON=../../.venv/bin/python cargo test && cd ../..   # fixtures are generated in-test
