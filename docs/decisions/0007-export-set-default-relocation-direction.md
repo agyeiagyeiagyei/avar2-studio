@@ -66,10 +66,12 @@ build uses (decision 0001), made an explicit per-build parameter:
 - Until T3.8 lands, preview and a "set default" export are **not
   point-identical between masters**, and the export may be denser than
   intended. Both are known and accepted for now.
-- The baked-correction handling in `_build_export_source` (decision 0011)
-  — merging braces coincident with masters over the master glyph, and
-  dropping brace sources coincident with the new origin — stays
-  necessary for any method that stages a designspace.
+- The baked-correction handling (decision 0011) — merging braces
+  coincident with masters over the master glyph, and dropping brace
+  sources coincident with the new origin — was part of the
+  `_build_export_source` staging this decision retires; the built
+  pipeline composes the corrections into the source instead
+  (`control_axes.shadow_designspace`).
 
 ## Where it lives
 
