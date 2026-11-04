@@ -2111,3 +2111,12 @@ Each basis predicts its own font to the unit (`2 × round(100 × ink/mean × 1.2
 Put the numbers in LOG.md. crispy-mini's tests gain the four blind spots: a flipped composite, an accented composite, a symmetric SPAC range and an input-less row. Real-Crispy builds take ~6 GB: run one at a time and never alongside the probe studio.
 
 **Order (ROUND 23, amended):** E1d → E2h → E2i → E2j (composite targets once the user decides) → E1c → E2f → E2g → D1a → D1b → D1c → K5 → checkpoint.
+
+## User decision (2026-11-05) — composites track exactly like their base letter → E2k
+
+The user answered the open question from "Verifier review of E1b `b6d9e83`": **a composite tracks exactly like its base letter.** Today the studio's own font gives Cacute +153 on one side while C gets +153 on each side, and M (a composite) one side while its mirror W gets both.
+
+**E2k (approved, new; start after the verifier's verdict on the ROUND 24 checkpoint):**
+- **Rule.** For every composite glyph, the SPAC change on EACH side equals its base glyph's: advance +2·d_base, left +d_base, right +d_base. The base is the component flagged USE_MY_METRICS, else the first component. Flipped and transformed composites (w = flipped m, W = flipped M) follow the same rule with their base's amount.
+- **Scope.** The studio's injector (both the native and the fontTools path) and the sources export, together. Today's export targets match the old injector behaviour (E2j), so both must move.
+- **Acceptance.** On the real Crispy, at every non-default CSV row and at SPAC `lo` and `hi`, every composite's per-side change equals its base's within 1 u in the studio's TTF and in the fontmake build of the exported zip. Measure with HarfBuzz. fontTools' glyph set disagrees with HarfBuzz on composite phantom points (Cacute: HarfBuzz left +153, fontTools right +153), so say in LOG.md which renderer each number comes from, and report FreeType if it is available. Extend `roundtrip_compare.py` and the crispy-mini tests with an accented composite and a flipped one.
