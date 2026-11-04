@@ -16,7 +16,7 @@ of:
 | Source format | `.glyphs` | `.designspace` + 19 UFOs |
 | Parametric axes | `XTRA`, `XOPQ`, `YOPQ` (unified) | nine, case-scoped: `XOUC`/`YOUC`/`XTUC`, `XOLC`/`YOLC`/`XTLC`, `XOFI`/`YOFI`/`XTFI` |
 | Masters / sources | 8 (the corners of the three-axis box) | 19 (a base plus one source per axis extreme) |
-| Glyphs | 63 (`A–Z`, `a–z`, `0–9`, `space`, `.notdef`) | 63 (same subset) |
+| Glyphs | 63 (`A–Z`, `a–z`, `0–9`, `space`; no `.notdef` in the fixture) | 67 per UFO (the same 63 plus `.notdef`, `idot`, `idotless`, `jdotless`) |
 | Named rows | 8 in `CrispyMini-avar.csv`, with declared axis defaults, a `wght`/`wdth`/`opsz` mapping and a width-aware SPAC transform | none — the designspace declares one `Default` instance and no `wght` |
 | Shows | "one stroke vocabulary describes the whole font" | "each script case needs its own optical tuning" |
 
