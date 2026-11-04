@@ -40,7 +40,7 @@ def test_format_dedupes_and_keeps_order():
     assert formats == ["woff2", "ttf"]
 
 
-def _run_build(tmp_path, monkeypatch, argv, build_config=None):
+def _run_build(tmp_path, monkeypatch, argv, build_config=None, build_error=None):
     """Drive ``cli._build`` with a stubbed build and a stubbed exporter."""
     import json as _json
 
@@ -64,6 +64,10 @@ def _run_build(tmp_path, monkeypatch, argv, build_config=None):
     for name in ("LAST_BUILD_ERROR", "LAST_AVAR2_ERROR", "LAST_ORIGIN_RELOCATION_ERROR",
                  "LAST_GRADE_ERROR", "LAST_SOURCE_TRANSFORM_ERROR"):
         monkeypatch.setattr(state, name, None)
+    if build_error is not None:
+        # E2g: the sources export is not independent of the build.
+        monkeypatch.setattr(state, "LAST_BUILD_STATUS", "error")
+        monkeypatch.setattr(state, "LAST_BUILD_ERROR", build_error)
     monkeypatch.setattr(pipeline, "_get_preview_dir", lambda: tmp_path)
     calls = []
 
@@ -203,9 +207,10 @@ def test_an_export_failure_exits_1(tmp_path, monkeypatch, capsys):
 
 
 # --- E1: the sources format on the CLI -------------------------------------
-# ``--format sources`` writes <stem>-sources.zip from the ACTIVE SOURCE — no
-# build, no export pipeline — and says on stderr, once, that spacing is not in
-# it. It is a usage error to ask for sources AND a re-origin.
+# ``--format sources`` writes <family>-sources.zip from the ACTIVE SOURCE. It
+# still needs the FONT BUILD to succeed: the SPAC amounts normalise against the
+# built font at its resting default, exactly as the injector does (E2i/E2g). It
+# is a usage error to ask for sources AND a re-origin.
 
 MINIMAL_GLYPHS = """{
 .formatVersion = 3;
@@ -242,7 +247,7 @@ def _sources_env(monkeypatch, tmp_path):
 
 
 def test_sources_writes_the_zip_and_warns_once(tmp_path, monkeypatch, capsys):
-    from avar2_studio import sources_export
+    from avar2_studio import sources_export, state
 
     calls = _sources_env(monkeypatch, tmp_path)
     rc, _, out = _run_build(tmp_path, monkeypatch, ["--format", "sources"])
@@ -250,8 +255,22 @@ def test_sources_writes_the_zip_and_warns_once(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert (out / "CrispyMini-sources.zip").exists()
     assert len(calls) == 1
+    assert calls[0]["ink_font"] == state.VARIABLE_FONT_PATH, (
+        "E2i: the writer measures the built font, so the CLI hands it over")
     err = capsys.readouterr().err
     assert err.count(sources_export.RESTING_NOTE) == 1
+
+
+def test_sources_needs_the_build_to_succeed(tmp_path, monkeypatch, capsys):
+    """E2g: a failed build fails the run before any zip is written."""
+    calls = _sources_env(monkeypatch, tmp_path)
+    rc, _, out = _run_build(tmp_path, monkeypatch, ["--format", "sources"],
+                            build_error="fontc failed: boom")
+
+    assert rc == 1, "the build's failure is the run's failure"
+    assert calls == [], "no zip is written from a build that did not happen"
+    assert not (out / "CrispyMini-sources.zip").exists()
+    assert "boom" in capsys.readouterr().err
 
 
 def test_sources_repeats_with_a_font_format(tmp_path, monkeypatch):

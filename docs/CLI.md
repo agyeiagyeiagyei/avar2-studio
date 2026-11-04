@@ -30,12 +30,21 @@ artifact path on stdout, one per line.
 `--csv` still parses but is refused (exit 2): the build always reads
 `<stem>-avar.csv` beside the source, and pretending otherwise was a trap.
 
-`--format sources` writes from the active source, so it needs neither a built
-font nor the export pipeline. It refuses `--default` (`sources rest at the
-compiled origin; --default applies to ttf/woff2 only`) because a designspace
-default must be a master location. A one-line note on stderr says where the font
-rests: the compiled origin, not the studio's relocated default. Spacing rides the
-sources — a `SPAC` axis as metrics-only twin masters and the Kinetikern
+`--format sources` writes `<family>-sources.zip` from the active source, and it
+**needs the font build to succeed first** — the same build every other format
+uses. The spacing amounts are normalised against the built font at its resting
+default (`_ink_widths_from_build`), exactly as the injector normalises the font
+it is handed; without a build the writer would fall back to the designspace's
+default source, which on a parametric design is a different, much narrower one
+(Crispy's hairline: mean ink 96 u against 1,750 u). So a failed build fails the
+run (exit 1) before any zip is written — there is no sources-only shortcut.
+
+It refuses `--default` (`sources rest at the compiled origin; --default applies
+to ttf/woff2 only`) because a designspace default must be a master location. A
+one-line note on stderr says where the font rests: the compiled origin, not the
+studio's relocated default. Spacing rides the sources — a `SPAC` axis as
+metrics-only twin masters (one per range end, symmetric ranges included, capped
+where a master's advance is narrower than the amount) and the Kinetikern
 corrections as metrics-only brace layers, rendered from the same sidecars the
 built font uses.
 

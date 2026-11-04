@@ -1299,3 +1299,9 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   **0.0 u** (assert ≤ 1e-6); the old 8.1 u "dip" was the comparison's own
   error, not the export's
 - `pytest tests/ -q` → **666 passed**; ruff clean
+
+### ROUND 23 E2g — sources needs the build (2026-11-04)
+
+- choice recorded: keep the build (the SPAC basis is the built font), documented
+  in `docs/CLI.md`; a failed build exits 1 before any zip is written
+- `pytest tests/ -q` → **667 passed**; ruff clean

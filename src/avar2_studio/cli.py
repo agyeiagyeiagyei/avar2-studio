@@ -233,9 +233,9 @@ def _build(argv) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     written: list = []
-    # `sources` needs no built font and no export pipeline: it is written from
-    # the active source (E1). The spacing warning goes to stderr once, because
-    # the zip cannot carry that fact in its fonts.
+    # `sources` is written from the active source, but it is NOT independent of
+    # the build: the SPAC amounts normalise against the built font's ink (E2i),
+    # and the failure check above has already refused a failed build. E2g.
     if "sources" in formats:
         zip_path = _write_sources(args, state, server, hidden_axes)
         if zip_path is None:

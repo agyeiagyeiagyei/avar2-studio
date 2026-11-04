@@ -2413,3 +2413,22 @@ The comparison is now against the unmapped build at **its default**, and the
 assert is `worst <= 1e-6`. Measured: **0.0 u**. A leak of any mapping into the
 default location (E1d's defect) or a moved default source fails the test; the
 comment now says that instead of rationalising 8 u.
+
+### E2g — `--format sources` needs the font build, and CLI.md says so (ROUND 23)
+
+The choice the item left open (keep the build, or skip it for sources-only):
+**keep it**, because E2i made the writer depend on the built font — the SPAC
+amounts normalise against the font at its resting default, exactly as the
+injector normalises the font it is handed. Skipping the build would silently
+fall back to the designspace's default source, which on Crispy is the hairline
+(mean ink 96 u against 1,750 u) — the defect E2i exists to remove.
+
+`docs/CLI.md` said the opposite ("needs neither a built font nor the export
+pipeline"); it now states the dependency and why, and that a failed build fails
+the run before any zip is written. The stale comment in `cli.py` said the same
+thing and is corrected.
+
+Tests: `test_sources_writes_the_zip_and_warns_once` now also pins that the CLI
+hands the writer `ink_font = state.VARIABLE_FONT_PATH`, and
+`test_sources_needs_the_build_to_succeed` fails the build and asserts exit 1,
+no writer call, no zip. `pytest tests/ -q` → **667 passed**; ruff clean.
