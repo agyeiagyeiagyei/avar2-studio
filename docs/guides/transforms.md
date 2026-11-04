@@ -57,17 +57,14 @@ transform when it pins instance coordinates; blank = 0).
   left-phantom-only treatment, and `USE_MY_METRICS` composites inherit
   their base's delta and are skipped. The transform prefers the native
   Rust injector `spac-inject` (the same engine the browser demo runs,
-  parity-tested by `wasm/fontc-web/tests/spac_oracle.rs`; 300 s timeout)
+  parity-tested against the Python implementation; 300 s timeout)
   because it splices tuples with write-fonts' compact encoding; the fontTools
   fallback re-encodes the whole gvar table and can overflow its 64 KB
   per-glyph header ceiling on twin-heavy fonts, which is why the log says
-  which path ran. Per-style SPAC values never cross as CSV: Python
-  parses the CSV via csv_io (the one mappings reader) and hands the
-  values to the injector in the transforms JSON
+  which path ran. Per-style SPAC values never cross as CSV: the studio parses
+  the CSV once and hands the values to the injector in the transforms JSON
   (`params.instance_spac`), so style names containing commas survive on
-  the native path too — parity-pinned by
-  `wasm/fontc-web/tests/spac_csv_parity.rs` + the Python
-  `tests/test_spac_csv_parity.py`. The injector is found via
+  the native path too. The injector is found via
   `$AVAR2_SPAC_INJECT`, the wheel-carried `avar2_studio/bin/spac-inject`
   ([decision 0015](../decisions/0015-native-accelerators-ship-in-platform-wheels.md))
   or the repo build; `ENV_KEYS` forwards the override into the build worker
@@ -122,17 +119,16 @@ and keep their own `slnt`, so gftools' Italic set stays at full slant.
   stripped.
 - A transform that raises, or returns a path that does not exist, is
   skipped and the chain keeps the last good font; the failure is recorded
-  in `LAST_TRANSFORM_ERROR` (`transform_error` in `/api/health`) so the UI
-  can show an enabled-but-failing transform instead of a silent no-op. A
-  source-stage failure keeps the untransformed source and sets
-  `LAST_SOURCE_TRANSFORM_ERROR`; `avar2-studio build` exits 1 on it.
+  so the UI can show an enabled-but-failing transform instead of a silent
+  no-op. A source-stage failure keeps the untransformed source and sets a
+  separate error; `avar2-studio build` exits 1 on it.
 - Parameters are validated **before** they are persisted
   (`Transform.validate`), so a bad configuration is rejected at the API
   with a message rather than failing at build time.
 
 ## Writing your own
 
-Drop a `.py` file into `~/.avar2-studio/transforms/` (the studio creates
+Drop a Python file into `~/.avar2-studio/transforms/` (the studio creates
 the folder, with a README template, on first run). It must define a
 `Transform` subclass with a `spec = TransformSpec(id=…, name=…, params=[ParamSpec(…)])`
 and an `apply(self, vf_path, params, ctx) -> Path` that returns the

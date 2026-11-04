@@ -35,5 +35,5 @@ coordinates.
 The nine axes appear in the sidebar as control axes: they are case-scoped, so
 no single slider moves every glyph.
 [../../docs/guides/authoring-instances.md](../../docs/guides/authoring-instances.md)
-covers both layouts side by side, and `docs/animate_regular_to_bold.py` produces
-the Regular → Bold GIF beside it.
+covers both layouts side by side, and the Regular → Bold animation beside it
+comes from the web article's scripts.

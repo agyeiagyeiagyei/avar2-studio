@@ -56,9 +56,9 @@ so the secondary and transform axes only change how the panes render.
   the two things you can do from there (open the style in the Kinetikern tab, or
   remove its entry). An unspaced row shows nothing.
 - **Transforms menu** — a **Kinetikern** row switches the feature off for the
-  whole family (`PUT /api/kinetikern {enabled}`). Entries are kept while it is
-  off, and the row says so; while it is off the fonts carry no corrections and
-  the row badges disappear, because the build ignores every entry.
+  whole family. Entries are kept while it is off, and the row says so; while it
+  is off the fonts carry no corrections and the row badges disappear, because
+  the build ignores every entry.
 
 ## What a proposal is
 
@@ -89,11 +89,10 @@ Schema in [SIDECARS.md](../SIDECARS.md#stem-kinetikernjson).
 
 ## Verifying
 
-`tests/test_kinetikern.py` (skips without the engine),
-`tests/test_kinetikern_inject.py` (Crispy Mini through fontc, so it needs fontc)
-and `tests/test_kinetikern_enabled_route.py` (the family switch). On a real font:
-apply to all, wait for the rebuild, then `propose` on several styles must report
-a remaining mean of 0 and `|new − cur| ≤ 2`.
+On a real font: apply to all, wait for the rebuild, then `propose` on several
+styles must report a remaining mean of 0 and `|new − cur| ≤ 2`. The engine, the
+injector and the family switch each have their own regression tests in the
+suite (the injector's run Crispy Mini through fontc, so they need the compiler).
 
-The bake order, the route table and the API semantics for Kinetikern are in
-[ARCHITECTURE.md](../ARCHITECTURE.md) (pipeline order, `routes/kinetikern.py`).
+The bake order and the API semantics for Kinetikern are in
+[ARCHITECTURE.md](../ARCHITECTURE.md).

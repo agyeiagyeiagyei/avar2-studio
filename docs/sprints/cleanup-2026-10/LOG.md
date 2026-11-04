@@ -2432,3 +2432,28 @@ Tests: `test_sources_writes_the_zip_and_warns_once` now also pins that the CLI
 hands the writer `ink_font = state.VARIABLE_FONT_PATH`, and
 `test_sources_needs_the_build_to_succeed` fails the build and asserts exit 1,
 no writer call, no zip. `pytest tests/ -q` → **667 passed**; ruff clean.
+
+### D1b — the reader set speaks to designers again (ROUND 23)
+
+The register grep over the reader set — `README.md`, `docs/README.md`, the five
+guides and the three example READMEs — returned 20 hits of `/api/`,
+`_[a-z]+\(`, `.py`, `T[0-9]\.` and `tests/`. All of them are gone:
+
+- **routes** (`grade.md` ×4, `kinetikern.md` ×1, `secondary-parametric-axes.md`
+  ×1): the guides now describe what the panel and the sidecar do — "the Grade
+  panel shows a per-instance verdict", "the location is sent live by the shim" —
+  and the route tables stay in ARCHITECTURE.md, where the reader set does not
+  apply.
+- **internal file names** (`grade.py` ×2): "the rest is derived", "in both the
+  studio's font and the build".
+- **test paths** (`kinetikern.md` ×3, `transforms.md` ×2): prose — the injector's
+  tests "run Crispy Mini through fontc, so they need the compiler".
+- **`.py`** (`README.md` ×1, `transforms.md` ×1, both example READMEs ×1 each):
+  "your own Python transform scripts", "a Python file", and the example READMEs
+  point at the web article's scripts instead of a path that does not exist in
+  this repo.
+- **`/api/health`** (`grade.md`, `transforms.md`): the status banner / the exit
+  status, which is what the designer actually meets.
+
+Check: the grep returns nothing over the ten files; the link/anchor check over
+30 files (reader set + appendices + decisions) reports **0 broken**.

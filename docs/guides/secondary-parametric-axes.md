@@ -282,10 +282,8 @@ matching a glyph's bars to the ones that already read correctly — E's to
 H's — at the same designspace point. The HUD shows the edited glyph's
 pre-edit stem / bar / contrast / advance and the same figures for
 reference glyphs (`H,N,O` by default), all cut at the edited layer's exact
-coordinates with the secondary axis off (`GET
-/api/control-axes/<tag>/reference-metrics?glyph=&index=&refs=&location=`;
-the location is sent live by the shim so a glyph with several layers on
-the axis measures at the one being edited).
+coordinates with the secondary axis off (the location is sent live by the shim
+so a glyph with several layers on the axis measures at the one being edited).
 
 Saving in Fontra writes the shadow; the studio captures the drawing into
 the sidecar and rebuilds. The browser demo's editor is the separate

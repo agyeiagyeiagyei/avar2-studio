@@ -18,7 +18,7 @@ brace layers and the axis would collapse.
 
 ## The pure-weight model
 
-One `grade%` knob per instance; the rest is derived (`grade.py`):
+One `grade%` knob per instance; the rest is derived:
 
 - `dXOPQ = grade% × XOPQ` — stem weight, the driver
 - `dYOPQ = grade% × YOPQ` — horizontal weight, the second driver (`K_YOPQ = 1.0`)
@@ -42,8 +42,8 @@ fraction actually achieved (`grade.grade_coords`). Two things fall out:
   instance at the parametric box ceiling moved XTRA by the full amount:
   the "dark" brace became a pure counter-condense inside a held advance
   and the spacing deformed, worse as the percentage grew. The follower
-  now tracks the **achieved** driver move per side, in both engines
-  (`grade.py` and `braces.rs`); away from the edges nothing changed.
+  now tracks the **achieved** driver move per side, in both the studio's font
+  and the build; away from the edges nothing changed.
 - **`clamp_to_headroom`** (on by default, "Limit grade to counter
   headroom" in the menu): an instance pinned at the XTRA floor — the
   widest, heaviest corners, where counters are already as tight as the
@@ -70,11 +70,10 @@ exactly 0 is a real answer — an instance on the XTRA floor can take no
 grade — and is reported as such (filtering zero caps out once advertised
 the next-loosest axis's cap instead, which is how the widest instances
 came to offer grades that could only bleed into the counters).
-`GET /api/transforms/grade` returns the sidecar plus `max_pct` per
-instance and `diagnostics` — `error` (the axis will not build, or this
-instance contributes nothing), `warning` (builds but degraded), `info` —
-which the Grade panel shows, because these failure modes are invisible in
-the preview until you drag the slider to an extreme.
+The Grade panel also shows a per-instance verdict alongside the cap —
+**error** (the axis will not build, or this instance contributes nothing),
+**warning** (builds but degraded), **info** — because these failure modes are
+invisible in the preview until you drag the slider to an extreme.
 
 ## Source-level generation
 
@@ -91,9 +90,9 @@ fails with "Locations must be unique".
 
 Regeneration is idempotent — the pass starts from the freshly regenerated control
 shadow, so re-runs never stack braces. `.glyphs` sources only; `.designspace`
-grade is future work. A grade declared but not generated sets `LAST_GRADE_ERROR`
-(`grade_error` in `/api/health`) and `avar2-studio build` exits 1, because a font
-missing its GRAD axis must not pass as a release.
+grade is future work. A grade declared but not generated fails the build
+loudly (`avar2-studio build` exits 1 and the studio's status banner says why),
+because a font missing its GRAD axis must not pass as a release.
 
 ## Why the shipped font stays compact
 
@@ -111,10 +110,9 @@ deliberate difference: the static GRAD tuple is global along the axis (server
 braces are scoped to the instance's parametric location), so multiple grades sum
 there — the designer prefers the global behaviour for preview.
 
-## Routes and storage
+## Storage
 
-`GET|PUT /api/transforms/grade` (`enabled`, `default_pct`, `intensity`,
-`clamp_to_headroom`) and `PUT|DELETE /api/instances/<name>/grade` (`{pct}`,
-omitted = the default). Everything persists in `MyFont-grade.json`; per-instance
-grades survive the toggle being off, and the configuration bundle carries the
-whole declaration.
+Everything persists in `MyFont-grade.json`: the family switch (`enabled`), the
+default percentage, the intensity, `clamp_to_headroom`, and a percentage per
+instance (omitted = the default). Per-instance grades survive the toggle being
+off, and the configuration bundle carries the whole declaration.

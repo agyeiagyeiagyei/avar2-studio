@@ -40,5 +40,5 @@ Duplicate a row, tune its parametric coordinates, give it user-axis values, and
 the build writes an avar2 table that routes the familiar axes onto the point you
 authored.
 [../../docs/guides/authoring-instances.md](../../docs/guides/authoring-instances.md)
-walks one shipped row (`Narrow Heavy 144`) axis by axis, and
-`docs/animate_regular_condensed.py` produces the GIF beside it.
+walks one shipped row (`Narrow Heavy 144`) axis by axis; the animation beside it
+comes from the web article's scripts.

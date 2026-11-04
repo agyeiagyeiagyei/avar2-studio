@@ -1305,3 +1305,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - choice recorded: keep the build (the SPAC basis is the built font), documented
   in `docs/CLI.md`; a failed build exits 1 before any zip is written
 - `pytest tests/ -q` → **667 passed**; ruff clean
+
+### ROUND 23 D1b — reader-set register clean (2026-11-04)
+
+- `grep -nE '/api/|_[a-z]+\(|\.py|T[0-9]\.|tests/'` over README.md,
+  docs/README.md, docs/guides/*.md and the three example READMEs → **no hits**
+  (was 20)
+- link/anchor check over 30 files → **0 broken**

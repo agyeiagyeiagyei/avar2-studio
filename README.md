@@ -127,7 +127,7 @@ losing the work. Kerning is not part of this pass.
 
 **Build transforms.** Optional steps on every build: spacing uniform or
 width-aware (a `SPAC` axis), clean fvar, rebuild STAT, round corners (`ROND`),
-build-time slant (`slnt`) — plus your own `.py` transforms.
+build-time slant (`slnt`) — plus your own Python transform scripts.
 [Guide](docs/guides/transforms.md).
 
 **Configuration export / import.** Move a whole configuration between sources or
