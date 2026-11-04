@@ -74,9 +74,12 @@ reproducible. Every key is optional:
   `kinetikern`, `coordinates` and their spellings are edited in the studio, not
   in this file.
 
-The build reads the source, `<stem>-avar.csv` and
-`<stem>-axis-metadata.json` (the declared axis defaults — without it the build
-exits 2, because named styles would silently land off their mapped values).
+The build reads the source, `<stem>-avar.csv` and the declared axis defaults —
+`<stem>-axis-metadata.json` beside the source, or the legacy
+`.avar2-studio/axis-metadata.json`; it exits 2 only when **neither** exists,
+because without them each traditional axis' declared default (opsz 144 on
+Crispy) falls back to its column minimum and every named style lands off its
+mapped value.
 Everything design-authored — control axes, grade, Kinetikern, instance
 coordinates — is read from its sidecar and never written by the build.
 
@@ -121,15 +124,22 @@ output, relocation memo) is created beside the source, inside the checkout.
 
 ## `avar2-studio doctor`
 
-Reports what the build will resolve: the compiler (`fontc`, then `fontmake`),
-`gftools`, `glyphsLib`, the Fontra bridge, the static bundle, the two native
-accelerators (`spac-inject`, `libkinetikern2`), stale processes and install
-shadowing. `--strict` turns any missing requirement into a non-zero exit, which
-is how a release workflow asserts a fresh install is complete.
+Reports what the build will resolve: Python, `fontc`, `gftools`, `glyphsLib`,
+the static bundle, the Fontra bridge, the two native accelerators
+(`spac-inject`, `libkinetikern2`), install shadowing and stale processes. It
+does **not** look for `fontmake` — the build's compiler is `fontc`, and
+`gftools` carries the Python-side steps. `--strict` fails only on a
+**headless-build prerequisite** that is missing (`fontc`, `gftools`,
+`glyphsLib`) or on an environment override that names a file which does not
+exist (`$AVAR2_SPAC_INJECT`, `$AVAR2_KK2_DYLIB`); the UI-only pieces and an
+absent accelerator do not fail it — that is the code's contract (`doctor.run`),
+and no workflow in this repo runs `doctor --strict`.
 
 `doctor` finds `fontc` on `PATH`; the build also looks beside
-`sys.executable`. A `pointing at a missing file` note means an environment
-override is set and broken.
+`sys.executable`. A parenthesised note naming an override that `does not exist`
+(`($AVAR2_SPAC_INJECT=… does not exist)`, `($AVAR2_KK2_DYLIB=… does not
+exist)`) means an environment override is set and broken — that is what
+`--strict` refuses.
 
 ## `avar2-studio install-glyphs-plugins`
 
