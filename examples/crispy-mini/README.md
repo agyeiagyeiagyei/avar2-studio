@@ -3,7 +3,7 @@
 A small self-contained demo source derived from
 [Crispy](https://github.com/agyeiagyeiagyei/Crispy). Three parametric axes and
 eight masters at the corners of their box; **63 glyphs** (`A–Z`, `a–z`, `0–9`,
-`space`, `.notdef`).
+`space` — the fixture carries no `.notdef`; compilers synthesise one).
 
 ```bash
 avar2-studio examples/crispy-mini/sources/CrispyMini.glyphs
