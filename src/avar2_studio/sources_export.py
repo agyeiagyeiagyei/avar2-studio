@@ -322,12 +322,26 @@ def _decompose_transformed(glyph, original_font, name: str) -> bool:
     return _flatten(glyph, original_font, name)
 
 
+def _production_to_source(font) -> Dict[str, str]:
+    """``{built-font glyph name: UFO glyph name}``, from the source's own lib.
+
+    glyphsLib writes ``public.postscriptNames`` (source → production) into every
+    UFO it emits; the compiler applies it, so the built font's glyph order and
+    the UFOs' disagree exactly where a glyph has a production name (E2i-b).
+    """
+    names = (getattr(font, "lib", None) or {}).get("public.postscriptNames") or {}
+    out: Dict[str, str] = {}
+    for source_name, production in names.items():
+        out[str(production)] = str(source_name)
+    return out
+
+
 def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     """Give every source the same glyph structure, as the studio's build does.
 
     Two shapes are normalised away, both because fontmake refuses a designspace
-    whose masters disagree ("differing number of contours in glyph U") and
-    because the studio's fontc build decomposes them anyway:
+    whose masters disagree and because the studio's fontc build flattens them
+    anyway:
 
     * a component that is more than a translation (the flipped ``w``/``W``),
       which fontc's ``--decompose-transformed-components`` flattens;
@@ -383,7 +397,14 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     shifts: Dict[str, int] = {}
     for name, ink in inks.items():
         if name not in twin:
-            continue
+            if name == ".notdef":
+                # The sources carry no `.notdef`; the compiler synthesises the
+                # box, and the zip's README says it is not spaced.
+                continue
+            raise SourcesError(
+                f"the built font measures {name!r}, but the sources have no "
+                "glyph by that name — the spacing would silently skip it "
+                "(E2i-b). Check the production names (public.postscriptNames).")
         glyph = twin[name]
         _decompose_transformed(glyph, original, name)
         composite = bool(glyph.components)
@@ -445,11 +466,24 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # default source — so the renderer measures the built font when it has one
     # (E2i) and only falls back to the default source otherwise (a caller with
     # no build, e.g. a test).
+    default_source = next(
+        (s for s in doc.sources if not s.layerName), doc.sources[0])
     if ink_font is not None and Path(ink_font).exists():
         inks = _ink_widths_from_build(Path(ink_font))
+        # E2i-b: the built font speaks PRODUCTION names (`Euro`, `uni0162`), the
+        # UFOs speak source names (`euro`, `Tcedilla`). Without this the spacing
+        # skipped every renamed glyph and its composites, silently.
+        renames = _production_to_source(default_source.font)
+        remapped: Dict[str, float] = {}
+        for name, ink in inks.items():
+            source_name = renames.get(name, name)
+            if source_name in remapped:
+                raise SourcesError(
+                    f"the built font's {name!r} and another glyph both map to "
+                    f"the source glyph {source_name!r}")
+            remapped[source_name] = ink
+        inks = remapped
     else:
-        default_source = next(
-            (s for s in doc.sources if not s.layerName), doc.sources[0])
         inks = _ink_widths(default_source.font)
     mean_ink = (sum(inks.values()) / len(inks)) if inks else 0.0
 

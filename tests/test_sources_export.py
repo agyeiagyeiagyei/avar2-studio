@@ -843,3 +843,71 @@ def test_the_cli_zip_and_the_dialog_zip_have_the_same_content(project, tmp_path)
     assert dialog[0] == cli_side[0], "same files in the zip"
     assert dialog[1] == cli_side[1], "same README"
     assert dialog[2] == cli_side[2], "same designspace"
+
+
+@needs_fontc
+@pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
+def test_a_glyph_with_a_production_name_still_gets_its_spacing(project, tmp_path):
+    """E2i-b: the built font says `uni0061`, the sources say `a`.
+
+    The ink basis comes from the built font, whose glyph order uses PRODUCTION
+    names; the twins are UFOs and use SOURCE names. The lookup used to skip
+    every renamed glyph silently — on the real Crispy that was `Euro` and ~43
+    composites, unspaced at both ends (verifier, ROUND 24).
+    """
+    import glyphsLib
+    import ufoLib2
+
+    from avar2_studio.transforms.builtin_spac_widthaware import _ink_width
+
+    source = glyphsLib.load(str(project["source"]))
+    source.glyphs["a"].production = "uni0061"
+    renamed = tmp_path / "Renamed.glyphs"
+    source.save(str(renamed))
+    shutil.copy2(project["source"].parent / "CrispyMini-avar.csv",
+                 tmp_path / "Renamed-avar.csv")
+    shutil.copy2(project["source"].parent / "CrispyMini-axis-metadata.json",
+                 tmp_path / "Renamed-axis-metadata.json")
+    shutil.copy2(project["source"].parent / "CrispyMini-transforms.json",
+                 tmp_path / "Renamed-transforms.json")
+
+    quiet = sources_export.build_sources_zip(
+        renamed, tmp_path / "quiet.zip", csv_path=tmp_path / "Renamed-avar.csv",
+        metadata=project["metadata"], family_name="Renamed")
+    work = tmp_path / "quiet"
+    work.mkdir()
+    with zipfile.ZipFile(quiet) as zf:
+        zf.extractall(work)
+    res = subprocess.run([FONTMAKE, "-m", str(next(work.glob("*.designspace"))),
+                          "-o", "variable", "--output-dir", str(tmp_path / "fm")],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, (res.stderr or "")[-1200:]
+    built = next((tmp_path / "fm").glob("*.ttf"))
+    assert "uni0061" in TTFont(str(built)).getGlyphOrder(), \
+        "the compiler applies the production name"
+
+    zip_path = sources_export.build_sources_zip(
+        renamed, tmp_path / "spaced.zip", csv_path=tmp_path / "Renamed-avar.csv",
+        metadata=project["metadata"], family_name="Renamed", ink_font=built)
+    work = tmp_path / "spaced"
+    work.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(work)
+    doc = DesignSpaceDocument.fromfile(str(next(work.glob("*.designspace"))))
+    spac = next(a for a in doc.axes if a.tag == "SPAC")
+    master = next(s for s in doc.sources
+                  if not s.layerName and s.location.get(spac.name) is None)
+    twin = next(s for s in doc.sources
+                if s.styleName == f"{master.styleName} SPAC40")
+    master_width = ufoLib2.Font.open(str(work / master.filename))["a"].width
+    twin_width = ufoLib2.Font.open(str(work / twin.filename))["a"].width
+    assert twin_width != master_width, (
+        "the source-named glyph must take the built font's amount, not be "
+        "skipped because the built font calls it uni0061")
+
+    basis = TTFont(str(built))
+    ink = _ink_width(basis.getGlyphSet(), "uni0061")
+    inks = sources_export._ink_widths_from_build(built)
+    mean = sum(inks.values()) / len(inks)
+    assert twin_width - master_width == 2 * round(40 * (ink / mean) * 1.25)
+

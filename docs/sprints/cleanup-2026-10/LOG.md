@@ -2535,3 +2535,27 @@ node specs green. Real Crispy through the CLI with `roundtrip_compare.py`:
 Open, not absorbed: the composite TARGET (findings.md, "For the user — the
 studio's own composite rule") waits for the user's decision, and B11a–c stay
 gated behind the verifier marking this checkpoint verified.
+
+### E2i-b — production names map to source names, and a missing glyph raises (ROUND 25)
+
+The ink basis comes from the built font, whose glyph order uses **production**
+names (`Euro`, `uni0162`, `uni021A`), while the twins are UFOs with **source**
+names (`euro`, `Tcedilla`, `Tcommaaccent`). `if name not in twin_font: continue`
+skipped every renamed glyph silently: on the real Crispy that was `Euro` and
+about 43 composites, unspaced at both ends — and worse for the composites,
+whose components moved while the composite did not (`Tcedilla` kept advance 156
+while its `T` moved, closing its right side by 162 u at +100).
+
+`_production_to_source` inverts glyphsLib's `public.postscriptNames` (162 entries
+on Crispy) and the basis is remapped before it reaches the twins; two production
+names collapsing onto one source name raise. `_shift_spacing` now raises
+`SourcesError` naming the glyph when an inked glyph of the built font has no
+source counterpart, instead of skipping. `.notdef` is the one documented
+exception: the sources carry none (the compiler synthesises the box), and the
+zip's README says it is not spaced.
+
+Test: `test_a_glyph_with_a_production_name_still_gets_its_spacing` sets
+`glyph.production = "uni0061"` on the mini source, builds the quiet font with
+fontmake (the TTF really is `uni0061`), then exports with that font as the basis
+and asserts the twin's `a` takes the built amount.
+
