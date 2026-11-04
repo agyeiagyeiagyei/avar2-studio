@@ -290,10 +290,13 @@ def sources_warning() -> str:
 
 
 def _write_sources(args, state, server, hidden_axes):
-    """E1: write ``<stem>-sources.zip`` into ``--out``; None on a usage error."""
+    """E1: write ``<Family>-sources.zip`` into ``--out``; None on a usage error."""
     from . import pipeline as _pipeline
     from . import sources_export
-    out = args.out / f"{args.source.stem}-sources.zip"
+    family = server.get_font_family_name(state.GLYPHS_PATH)
+    # E1c: the zip is named after the FAMILY in both paths, not after the file
+    # name the CLI happens to have been given.
+    out = args.out / f"{family.replace(' ', '')}-sources.zip"
     try:
         from .kinetikern import sidecar as _kk_sidecar
 
@@ -301,7 +304,7 @@ def _write_sources(args, state, server, hidden_axes):
             state.GLYPHS_PATH, out,
             csv_path=_pipeline._get_preview_csv_path(),
             metadata=_pipeline._load_axis_metadata(),
-            family_name=server.get_font_family_name(state.GLYPHS_PATH),
+            family_name=family,
             hidden_axes=hidden_axes,
             kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or state.GLYPHS_PATH),
             original_path=state.ORIGINAL_PATH,

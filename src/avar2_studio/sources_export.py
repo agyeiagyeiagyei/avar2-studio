@@ -784,7 +784,6 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
                       metadata: Optional[Dict[str, Dict]] = None,
                       family_name: Optional[str] = None,
                       hidden_axes: Iterable[str] = (),
-                      composed: Sequence[str] = (),
                       kinetikern: Optional[Dict] = None,
                       original_path: Optional[Path] = None,
                       ink_font: Optional[Path] = None) -> Path:
@@ -803,6 +802,13 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     # Sidecars resolve against the designer's file (ORIGINAL_PATH), never the
     # staged active copy. See the docstring.
     sidecar_base = Path(original_path) if original_path else source_path
+    # E1c: the composed list is the writer's, read from the same sidecar the
+    # build reads — so the CLI's zip and the dialog's zip say the same thing
+    # instead of each caller describing its own view.
+    from .transforms import config as _tx_config
+
+    composed = [e.get("type") for e in _tx_config.entries(sidecar_base)
+                if e.get("enabled")]
     if csv_path is None or not Path(csv_path).exists():
         raise SourcesError("the mappings are not authored yet, so there is "
                            "nothing to map in the designspace")
@@ -894,8 +900,10 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
         ds_name = f"{family.replace(' ', '')}.designspace"
         ds_path = tmp / ds_name
         _write_designspace(doc, ds_path, hidden_axes=hidden_axes, mappings=mappings)
+        # E1c: the hash and the name in the README are the DESIGNER's file, not
+        # the staged shadow the masters were read from.
         (tmp / "README.txt").write_text(
-            _readme(family, source_path, composed=composed,
+            _readme(family, sidecar_base, composed=composed,
                     default_row_name=default_rows[0] if default_rows else None,
                     designspace_name=ds_name,
                     spacing=_spacing_summary(kinetikern, spac_tag)), encoding="utf-8")

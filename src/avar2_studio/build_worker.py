@@ -119,7 +119,6 @@ def _run_export_job(pipeline, spec, progress):
             out_dir,
             hidden_axes=spec.get("hidden_axes") or [],
             family_name=spec.get("family_name"),
-            composed=spec.get("composed_transforms") or [],
         )
     else:
         artifact = pipeline._export_pipeline(

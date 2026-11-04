@@ -169,18 +169,9 @@ def export_font():
         if not requested:
             return jsonify({"error": "default_location has no known axis values"}), 400
 
-    composed = []
-    if fmt == "sources":
-        # Name the composed source-stage transforms in the README; the list is
-        # the enabled entries the build itself reads.
-        from ..transforms import config as _tx_config
-        base = state.ORIGINAL_PATH or state.GLYPHS_PATH
-        composed = [e.get("type") for e in _tx_config.entries(base)
-                    if e.get("enabled")]
     job_id = server.JOBS.submit_export(hidden_axes=hidden, default_location=default_location,
                                 format=fmt,
-                                family_name=server.get_font_family_name(state.GLYPHS_PATH),
-                                composed_transforms=composed)
+                                family_name=server.get_font_family_name(state.GLYPHS_PATH))
     if job_id is None:
         return jsonify({"error": "No source loaded"}), 400
     return jsonify({"job_id": job_id, "status": "queued"}), 202

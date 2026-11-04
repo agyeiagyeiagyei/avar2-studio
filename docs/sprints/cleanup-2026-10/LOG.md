@@ -2371,3 +2371,30 @@ builds a small ufoLib2 font with m/n/acute, a plain composite `M`, an accented
 component offset is NOT shifted again, the accented one stays put for both
 components, and the flipped one is decomposed and then tracks like a simple
 glyph. `pytest tests/ -q` → **664 passed**; ruff clean.
+
+### E1c — one zip from two paths: the ORIGINAL is named and hashed, the writer composes the list (ROUND 23)
+
+Three ways the CLI's zip and the dialog's zip could disagree, all gone:
+
+* **The README described the staged file.** `_readme` hashed `source_path`,
+  which in the worker is `.avar2-studio/active-<name>.glyphs` — a file that is
+  deleted after the job and whose bytes are not the designer's. It now names and
+  hashes the ORIGINAL (`sidecar_base`), the same anchor the sidecars use.
+* **The composed list came from the caller.** The route computed it from the
+  transforms sidecar and pushed it through the job spec to the worker; the CLI
+  passed nothing, so a CLI zip listed nothing composed while the dialog's listed
+  the transforms. The writer computes it now (`_tx_config.entries(sidecar_base)`,
+  enabled only) and the parameter, the job field and the route's copy are gone.
+* **The zip name came from the CLI's argument.** `--source Whatever.glyphs`
+  named the zip after the file; the dialog named it after the family. Both use
+  `f"{family.replace(' ', '')}-sources.zip"` now.
+
+Tests: `test_the_readme_names_and_hashes_the_original_source` stages a modified
+`active-<name>.glyphs` and asserts the README carries the ORIGINAL's name and
+sha256, plus the enabled transform and not the disabled one;
+`test_the_cli_zip_and_the_dialog_zip_have_the_same_content` runs
+`cli._write_sources` and `pipeline._sources_pipeline` on the same project and
+compares the file list, the README and the designspace byte for byte (they were
+already equal — the test is the guarantee). The route test now pins that
+`composed_transforms` is NOT in the job spec. `pytest tests/ -q` → **666
+passed**; ruff clean.

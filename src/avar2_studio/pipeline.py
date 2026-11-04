@@ -1567,7 +1567,7 @@ def _save_woff2(font_path, out_path):
 
 
 def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
-                      family_name=None, composed=()):
+                      family_name=None):
     """Write the sources zip (E1). Runs in the build worker for an export job
     whose format is ``sources``.
 
@@ -1595,7 +1595,6 @@ def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
         # default source — the injector's own basis.
         ink_font=state.VARIABLE_FONT_PATH,
         hidden_axes=hidden_axes,
-        composed=composed,
     )
 
 

@@ -1282,3 +1282,13 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - 788 components in 17 glyphs flattened so every source (and twin) agrees on
   the glyph structure fontmake interpolates
 - `pytest tests/ -q` → **664 passed**; ruff clean
+
+### ROUND 23 E1c — the CLI and dialog zips are the same zip (2026-11-04)
+
+- README names + sha256 the ORIGINAL source (a staged `active-<name>.glyphs`
+  with different bytes is provably not what is hashed)
+- the composed list is the writer's (enabled transforms only); the route, job
+  spec and worker no longer carry one
+- both paths name the zip `CrispyMini-sources.zip`; file list, README and
+  designspace compare byte for byte
+- `pytest tests/ -q` → **666 passed**; ruff clean

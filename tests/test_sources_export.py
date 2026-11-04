@@ -763,3 +763,85 @@ def test_a_composite_tracks_like_the_injector_and_flipped_ones_decompose():
     assert not w.components, "a transformed component is decomposed"
     assert w.width == 800 + 200, "…and then tracks like a simple glyph"
     assert w.contours, "the decomposed outlines are there"
+
+
+def test_the_readme_names_and_hashes_the_original_source(project, tmp_path):
+    """E1c: the README describes the DESIGNER's file, not the staged shadow.
+
+    The worker reads the masters from `.avar2-studio/active-<name>.glyphs`;
+    naming and hashing that file told the Google Fonts team nothing (the staged
+    copy is deleted, and its bytes are not what the designer has). The composed
+    list is the writer's too: the enabled transforms the build itself reads.
+    """
+    import hashlib
+
+    staged_dir = project["source"].parent / ".avar2-studio"
+    staged_dir.mkdir(exist_ok=True)
+    active = staged_dir / f"active-{project['source'].name}"
+    shutil.copy2(project["source"], active)
+    with active.open("a", encoding="utf-8") as fh:   # different bytes on purpose
+        fh.write("\n")
+
+    sidecar = project["source"].parent / "CrispyMini-transforms.json"
+    sidecar.write_text(json.dumps({"version": 1, "transforms": [
+        {"type": "spac_widthaware", "enabled": True,
+         "params": {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}},
+        {"type": "slant", "enabled": False, "params": {}},
+    ]}))
+
+    out = tmp_path / "orig.zip"
+    sources_export.build_sources_zip(
+        active, out, csv_path=project["csv"], metadata=project["metadata"],
+        family_name="CrispyMini", original_path=project["source"])
+    with zipfile.ZipFile(out) as zf:
+        readme = zf.read("README.txt").decode()
+
+    assert f"Source file: {project['source'].name}" in readme, readme
+    assert f"sha256: {hashlib.sha256(project['source'].read_bytes()).hexdigest()}" in readme, (
+        "the hash is the designer's file, not the staged copy")
+    assert "spac_widthaware" in readme, "the enabled transform is named"
+    assert "slant" not in readme, "a disabled transform is not composed"
+
+
+def test_the_cli_zip_and_the_dialog_zip_have_the_same_content(project, tmp_path):
+    """E1c: both paths produce the same zip, named after the family.
+
+    The dialog goes through the build worker (`pipeline._sources_pipeline`),
+    the CLI through `cli._write_sources`. Nothing user-visible may depend on
+    which one wrote it.
+    """
+    from avar2_studio import cli, server
+
+    dialog_dir = tmp_path / "dialog"
+    dialog_zip = pipeline._sources_pipeline(
+        project["source"], dialog_dir, hidden_axes=["opsz"],
+        family_name="CrispyMini")
+
+    cli_dir = tmp_path / "cli"
+    cli_dir.mkdir()
+
+    class Args:  # the two fields _write_sources reads
+        out = cli_dir
+        source = project["source"]
+
+    monkeypatch_original = state.ORIGINAL_PATH
+    try:
+        cli_zip = cli._write_sources(Args(), state, server, ["opsz"])
+    finally:
+        state.ORIGINAL_PATH = monkeypatch_original
+    assert cli_zip is not None
+
+    assert dialog_zip.name == cli_zip.name == "CrispyMini-sources.zip", (
+        f"{dialog_zip.name} vs {cli_zip.name}")
+
+    def contents(path):
+        with zipfile.ZipFile(path) as zf:
+            names = sorted(zf.namelist())
+            ds = [n for n in names if n.endswith(".designspace")][0]
+            return names, zf.read("README.txt"), zf.read(ds)
+
+    dialog = contents(dialog_zip)
+    cli_side = contents(cli_zip)
+    assert dialog[0] == cli_side[0], "same files in the zip"
+    assert dialog[1] == cli_side[1], "same README"
+    assert dialog[2] == cli_side[2], "same designspace"

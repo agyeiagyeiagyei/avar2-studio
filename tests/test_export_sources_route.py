@@ -52,18 +52,6 @@ def _post(client, **body):
 
 
 def test_sources_is_queued_and_carries_the_readme_facts(client, built_font, submitted, monkeypatch):
-    from avar2_studio.transforms import config as tx_config
-
-    asked = []
-
-    def fake_entries(source_path):
-        # The real signature takes the source path; a lambda with no arguments
-        # hid a 500 on the first live run, so pin the call shape here.
-        asked.append(source_path)
-        return [{"type": "slant", "enabled": True},
-                {"type": "gen_stat", "enabled": False}]
-
-    monkeypatch.setattr(tx_config, "entries", fake_entries)
     r = _post(client, format="sources", hidden_axes=["opsz"])
 
     assert r.status_code == 202, r.get_json()
@@ -71,9 +59,10 @@ def test_sources_is_queued_and_carries_the_readme_facts(client, built_font, subm
     spec = submitted[0]
     assert spec["format"] == "sources"
     assert spec["family_name"] == "CrispyMini"
-    assert spec["composed_transforms"] == ["slant"], "only the enabled entries"
     assert spec["hidden_axes"] == ["opsz"]
-    assert asked and asked[0] == state.GLYPHS_PATH, "entries() gets the source path"
+    # E1c: the composed list is the WRITER's (read from the sidecar it already
+    # reads for SPAC), so the route no longer computes or ships one.
+    assert "composed_transforms" not in spec
 
 
 def test_sources_cannot_be_re_origined(client, built_font, submitted):
