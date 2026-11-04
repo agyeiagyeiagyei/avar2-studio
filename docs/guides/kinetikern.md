@@ -69,9 +69,11 @@ punctuation mark and symbol to the engine, and runs Pass 1 only (`coupling = 0`,
 variation (a SPAC tuple, an earlier Kinetikern tuple) moves hmtx and leaves the
 outline where it was, and the contours handed to the engine are shifted to where
 they actually render. The answer lists, per glyph, the current and proposed
-`lsb` / `rsb` / `advance` with an `applied` flag (`new` equals `cur` for a glyph
-the engine leaves alone; the word space is never set by the engine), plus
-`location`, `looseness_applied`, `upm`, and a few statistics
+`lsb` / `rsb` / `advance` (`new` equals `cur` for a glyph the engine leaves
+alone; the word space is never set by the engine), plus a per-glyph `spaced`
+boolean and the `applied` pair — the `[left, right]` delta the sidecar already
+carries for that glyph — and, for the answer as a whole, `location`,
+`looseness_applied`, `upm` and a few statistics
 (`mean_lsb_delta_per_1000`, `mean_rsb_delta_per_1000`, `ms`, `engine`).
 
 ## What gets stored
