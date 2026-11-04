@@ -86,7 +86,7 @@ decision 0010).
 | `__init__.py`, `__main__.py` | package; `python -m avar2_studio` → `cli.main` |
 | `cli.py` | dispatch: `doctor`, `build SOURCE --out DIR` (`--workdir`, `--hide-axes`, `--default`, `--format ttf|woff2|sources`, `--config`, `--write-config`), `install-glyphs-plugins`, otherwise `server.main()`; `build` runs the same pipeline as the app and refuses without axis metadata |
 | `server.py` | the Flask app: construction, the build gate (`before_request`), route registration (`routes.register`), the source-file read/CRUD helpers routes share, the debounced-build triggers, `main()` (argparse + wiring: watcher via `watch.WATCHER`, periodic fallback, `app.run`). Pipeline functions are imported back from `pipeline.py`, so `server.X` call sites stay valid |
-| `state.py` | the 34 mutable runtime-state globals as plain module attributes; everyone reads/writes `state.X` (never `from state import X` — that binds a copy) |
+| `state.py` | the 45 mutable runtime-state globals as plain module attributes; everyone reads/writes `state.X` (never `from state import X` — that binds a copy) |
 | `watch.py` | the source-file watcher: `GlyphsFileHandler` (classification, debounce, suppression watermarks, settle/dedup, mid-build and idle branches) + `SourceWatcher` (`start`/`stop`/`reschedule` — `/api/load-source` re-points it); call-ins go through late-bound `server.X` |
 | `routes/` | one Flask blueprint per route group (`ui`, `source`, `health`, `build`, `text_width`, `coverage`, `config`, `transforms_grade`, `kinetikern`, `avar2`, `instances`, `control_axes`, `load`, `fontra` incl. the proxy + websocket); handlers read `state.X` and call pipeline/server helpers late-bound; `tests/test_url_map_snapshot.py` pins the route table |
 | `pipeline.py` | Flask-free build/export pipeline: source-path model (`_apply_source_path`, `_resolve_active_source`), build (`_run_build`, `_perform_avar2_build`, `_build_in_process`, `build_variable_font`), transform chain (`_apply_transform_chain`, `_strip_injected_axes`, `_stamp_control_instance_values`), export (`_export_pipeline`, `_save_woff2`), the preview-path getters and axis metadata (`_load_axis_metadata`, `_save_axis_metadata`, `_derive_traditional_range`, `_repair_placeholder_ranges`), `_builder_env`/`_declared_axis_ranges`, watcher suppression (`_suppress_watcher`) |
@@ -98,7 +98,7 @@ decision 0010).
 | `sidecar_io.py` | `atomic_writer` / `write_json` / `write_text` and the process-wide `LOCK` every sidecar writer takes |
 | `sources_export.py` | the UFO + designspace 5 zip (`--format sources`) |
 | `studio_log.py` | the log handler the server and worker share |
-| `examples.py` | the bundled example projects and their staging into `~/.avar2-studio/workspace/` |
+| `examples.py` | the `_BUILTIN_EXAMPLES` registry of the bundled example projects (what they are called and where they live); the STAGING into `~/.avar2-studio/workspace/` is `routes/load.py::_staged_workspace_for` |
 | `source_font.py` | format dispatch (`.glyphs` via glyphsLib, `.designspace` via designspaceLib); `load_source_cached` (keyed on path, mtime, size — `.glyphs` only); `save_font_atomically`; axes, masters, instances and instance CRUD on the source |
 | `csv_io.py` | CSV readers, the parametric/user column split, source→CSV sync (`update_csv_from_glyphs`), `backup_sidecar`, `normalize_in_axis_name` |
 | `control_axes/` | package re-exporting the old flat module's namespace: `schema.py` (`-control.json` I/O and normalisation; layer delta / reseed), `naming.py`, `outlines.py`, `shadow_glyphs.py` / `shadow_designspace.py` (shadow regeneration, seeds, virtual masters, seed signatures, `capture_outlines` / `_extract_brace_outlines`) |
@@ -111,6 +111,9 @@ decision 0010).
 | `_fontra_launch.py`, `_fontra_patch.py` | the Fontra subprocess entry and the fontra-glyphs monkeypatch |
 | `doctor.py`, `glyphs_install.py` | environment checks (incl. `spac-inject` and the Kinetikern dylib); Glyphs plugin symlinks + launcher record |
 | `glyphs/` | seven Glyphs 3 bundles (the hub + six tools), documented in `glyphs/README.md` |
+| `glyphsapp/` | two AppleScripts the server runs for Glyphs (open-the-source, reveal-in-Glyphs), read by `server.py` |
+| `fontra/` | the Fontra embed assets (`focus.css`, `shim.js`, `embed-shim.js`) `routes/fontra.py` serves to the iframe |
+| `build/__init__.py` | the `build` package marker (the generator, shims and `config_generator` live beside it) |
 | `static/` | the built frontend (gitignored, `.gitkeep` kept so the wheel's force-include never fails) |
 
 ### Frontend — `frontend/src/`
@@ -130,15 +133,18 @@ decision 0010).
 | `editor-bridge.js` | parent side of the fontra-embed editor (§7) |
 | `fontc-compile.js`, `fontc-worker.js`, `wasm/fontc-web/` | the wasm worker and the committed `wasm-pack` output |
 | `fontLoad.js`, `mac-glyph-names.js`, `utils/`, `lib/` | preview face registration from bytes; helpers |
-| `components/` | `Header.tsx`, `Sidebar.jsx`, `InstanceRows` / `InstanceRow` / `InstanceFlyout`, `AxisControl`, `ControlAxes` + `LayersEditor` + `AddControlAxisModal` + `AddBraceLocationModal` + `EditAxisModal`, `AddAxisModal`, `DeleteInstanceModal`, `DuplicateModal`, `GradeBadge` / `GradeDiagnostics`, `RoundingBadge`, `SlantBadge`, `PreviewTab`, `TesterTab`, `KinetikernTab`, `FontraEditorModal`, `ImportConfigModal.tsx`, `DemoLanding`, `ui/` (Radix dialog and dropdown) |
+| `components/` | `Header.tsx`, `Sidebar.jsx`, `InstanceRows` / `InstanceRow` / `InstanceFlyout`, `InstancesTab`, `AxisControl`, `ControlAxes` + `LayersEditor` + `AddControlAxisModal` + `AddBraceLocationModal` + `EditAxisModal`, `AddAxisModal`, `DeleteInstanceModal`, `DuplicateModal`, `GradeBadge` / `GradeDiagnostics`, `RoundingBadge`, `SlantBadge`, `PreviewTab`, `TesterTab`, `KinetikernTab` + `KinetikernBadge`, `BuildVeil`, `StatusBanners`, `FontraEditorModal`, `ImportConfigModal.tsx`, `DemoLanding`, `ui/` (Radix dialog and dropdown) |
+| `hooks/` | `useBuildStatus`, `useBuildWait`, `useControlAxes`, `useInstanceEditing`, `useStudioData`, `useTransforms` |
+| top-level helpers | `build-wait.js`, `export-formats.js` (the export copy, shared with the backend's constants), `instance-sync.js`, `kinetikern-copy.js`, `preview-coords.js`, `promote-flush.js` |
 | `e2e/` (`frontend/e2e/`) | Playwright and node specs — see DEVELOPMENT |
 
 ### Rust — `wasm/fontc-web/` (cdylib + rlib)
 
 `lib.rs` exports `compile_glyphs`, `compile_with_overlays`, `glyph_model`,
-`round_corners_source`, `slant_source`, `add_avar2`, `apply_control_axes`,
-`apply_grade`, `apply_transforms`, `set_default_location`, `set_hidden_axes`,
-`regen_stat`, `measure_at`, `pin_corner`, `clamp_out_of_range`. Modules:
+`round_corners_source`, `round_corners_source_result`, `slant_source`,
+`add_avar2`, `apply_control_axes`, `apply_grade`, `apply_transforms`,
+`set_default_location`, `set_hidden_axes`, `regen_stat`, `measure_at`,
+`pin_corner`, `clamp_out_of_range`. Modules:
 `braces.rs` (control-axis and grade tuples), `spac.rs` + `bin/spac-inject.rs`
 (the SPAC engine, also built natively as the `spac-inject` CLI the desktop
 prefers), `round_corners.rs`, `slanting.rs`, `fix.rs` (instance cleanup,
@@ -254,7 +260,6 @@ ORIGINAL_PATH          the designer's file. Never written by studio
    - **1** `fontc -o … --flatten-components --decompose-transformed-components`;
    - **2** `gftools.fix.fix_font`; **3** STAT from the config;
    - **3.5** default relocation: fontTools instancer moves the parametric
-   After the relocation, `pipeline._fit_gvar_headers` keeps every glyph's gvar header block under the u16 limit by dropping only sub-visible tuples (≤2 u) where it overflows, or fails with a readable error naming the glyph (far interior defaults on twin-heavy fonts).
      fvar defaults to the ORIGIN row's `out` on the still avar-free font
      (`AVAR2_RELOCATE_BUILD_DEFAULT`, default on — decision 0001);
    - **4** `gen_avar2_mapping` with `gen_fvar_axes` patched (drop `in:`
@@ -262,6 +267,10 @@ ORIGINAL_PATH          the designer's file. Never written by studio
      `[min, default, max]`);
    - **5** `gen_fvar_instances`;
    - sanity: duplicate fvar tags fail the avar2 build loudly.
+   (`_fit_gvar_headers` runs right after the relocation: it keeps every
+   glyph's gvar header block under the u16 limit by dropping only
+   sub-visible tuples (≤2 u) where it overflows, or fails with a readable
+   error naming the glyph — far interior defaults on twin-heavy fonts.)
 4. `_apply_transform_chain` (the single chokepoint, also on the plain-VF
    fallback and on exports):
    - strip previously injected **font-stage** axes (`_strip_injected_axes`
@@ -299,14 +308,13 @@ last good font still ships — the UI shows them, the exit status does not.
 
 Copy the current built font; if a `default_location` was requested, map it
 (an exact authored CSV row wins over the built table, because the preview
-table cannot express the ORIGIN row with relocation off), stage an
-interpolated origin master as a designspace (`_build_export_source`:
-non-exporting glyphs stripped, baked-correction braces merged into
-coincident masters, sources coincident with the new origin dropped),
-regenerate the config with blank cells materialised, run
-`_build_in_process` with `default_overrides`, then the transform chain;
-flag hidden axes; convert to WOFF2 on request. Decision 0007 records why
-this still densifies and where it is going.
+table cannot express the ORIGIN row with relocation off), regenerate the
+config with blank cells materialised, run `_build_in_process` with
+`default_overrides` and `relocate_default=True` (the lossless relocation
+decision 0007 describes as built), then the transform chain; flag hidden axes;
+convert to WOFF2 on request. `format: "sources"` does not go through this
+function at all — it is `_sources_pipeline`, which writes the UFO/designspace
+zip from the active source.
 
 ### Static rebuild (`static-api.js rebuildUploadFont`)
 
@@ -386,7 +394,8 @@ of unsaved changes); `GET /api/examples`; `POST /api/load-source` (JSON
 
 **Build, artifacts, jobs** — `POST /api/build` (request + wait for idle;
 blocks); `GET /api/build/status` (`running {job_id, kind, elapsed, phase}`,
-`queued`, `last`, `sizes`); `DELETE /api/build/<job_id>` (cancel);
+`queued`, `last`, `sizes`); `GET /api/build/<job_id>` (one job's status);
+`DELETE /api/build/<job_id>` (cancel);
 `POST /api/export-font` (`{hidden_axes, default_location, format}` → 202 +
 `job_id`); `GET /api/export/<job_id>/download`; `GET /api/font`
 (`?download=1` attachment; `?format=woff2` the cache or 409);
@@ -425,7 +434,8 @@ drawings across a replace); `POST /api/control-axes/<tag>/reseed`
 `clamp_to_headroom`; the GET adds `max_pct` and `diagnostics`);
 `PUT|DELETE /api/instances/<name>/grade`.
 
-**Kinetikern** — `GET /api/kinetikern`; `GET /api/kinetikern/propose`
+**Kinetikern** — `GET /api/kinetikern`; `PUT /api/kinetikern` (the family
+switch); `GET /api/kinetikern/propose`
 (`instance=` or `coordinates=`, `looseness=`; 503 without the engine);
 `PUT|DELETE /api/kinetikern/instances/<name>`; `PUT /api/kinetikern/all`.
 
@@ -448,23 +458,23 @@ drawings across a replace); `POST /api/control-axes/<tag>/reseed`
 | Rounding, slant | source-stage on the shadow | same engines ported, node-identical oracles |
 | SPAC | native `spac-inject` (fontTools fallback) | wasm `apply_transforms` |
 | Kinetikern | engine routes + tab | not available (tab hidden) |
-| Export options | worker job: hidden axes, set default (inserted origin master), TTF/WOFF2 | `set_default_location` + `set_hidden_axes` + `regen_stat` in-browser |
+| Export options | worker job: hidden axes, set default (lossless relocation), TTF/WOFF2/sources | `set_default_location` + `set_hidden_axes` + `regen_stat` in-browser; no sources zip |
 | Source writeback, reseed from source | yes | throws with guidance |
 | Outline editor | Fontra subprocess, same-origin proxy | fontra-embed iframe over postMessage |
 | Coverage audit / corner pins / out-of-range drop | — (live routes exist but are dead since the Space tab went) | `coverage.js` + `measure_at`, `pin_corner`, `clamp_out_of_range` (no UI since T1.17) |
 | Persistence | files next to the source | IndexedDB session + workspace zip |
 
 Provider method drift, measured on `api.js` vs `static-api.js`'s
-`staticOverrides` (`tests/e2e/api-parity.spec.mjs` pins the parity):
+`staticOverrides` (`frontend/e2e/api-parity.spec.mjs` pins the parity):
 
-- **live only:** `getBuildStatus`, `cancelBuild`, `getKinetikern`,
-  `proposeKinetikern`, `applyKinetikern`, `revertKinetikern`,
-  `applyKinetikernAll`, `getWoff2PreviewUrl`, `getWoff2DownloadUrl`;
+- **live only:** `getBuildStatus`, `getBuildJob`, `cancelBuild`, `getMasters`,
+  `setKinetikernEnabled`, `getKinetikern`, `proposeKinetikern`,
+  `applyKinetikern`, `revertKinetikern`, `applyKinetikernAll`,
+  `getWoff2PreviewUrl`, `getWoff2DownloadUrl`;
 - **static only:** `addMappingRow`, `checkSyncStatus`, `clampOutOfRange`,
   `exportWorkspaceUrl`, `flushEditorRebuilds`, `forgetSession`,
   `getCoverage`, `pinCorner`;
-- `getMasters` is stubbed to `[]` in static; `openControlAxisInEditor`
-  takes two extra arguments there.
+- `openControlAxisInEditor` takes two extra arguments in static.
 
 ## 7. Fontra contracts
 
@@ -527,11 +537,14 @@ layers read-only, structural ops rejected. Decision 0010.
   config import), `_RESOLVE_LOCK` (RLock; serializes
   `_resolve_active_source`), `control_axes._INSTANCE_VALUES_LOCK`,
   `_MAPPED_FONT_LOCK` (the mapped-location font cache),
-  `_REBUILD_TIMER_LOCK`. Every sidecar write and every shadow save
-  (`save_font_atomically`) is atomic (`sidecar_io.atomic_writer` /
-  `write_json`) and runs under `sidecar_io.LOCK`, as do `result.json` and
-  promotion. Exactly one thing is not: `config.yaml`, which is written by the
-  worker into the job directory and promoted by rename.
+  `_REBUILD_TIMER_LOCK`. Every sidecar write is atomic (`sidecar_io.atomic_writer` /
+  `write_json`) and runs under `sidecar_io.LOCK`. Two exceptions, both
+  atomic-by-rename but NOT locked: `save_font_atomically` writes the shadow
+  through its own `mkstemp` + `os.replace`, and the worker writes `result.json`
+  and promotes the artifact by rename (`shutil.move`) with no `sidecar_io.LOCK`
+  at all — `build_jobs.py` never imports `sidecar_io`. `config.yaml` is the
+  other unlocked write (the worker writes it into the job directory; promotion
+  copies it back).
 - The watcher (`GlyphsFileHandler.on_modified`) classifies each event
   (`_classify_watched_path`: `source`, `original`, `shadow`, `glif`),
   debounces 0.5 s per path, drops self-writes by window **and** mtime
