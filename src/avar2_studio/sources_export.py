@@ -214,6 +214,34 @@ def _ink_widths(font) -> Dict[str, float]:
     return out
 
 
+def _ink_widths_from_build(font_path: Path) -> Dict[str, float]:
+    """``{glyph: ink width}`` measured on the BUILT font at its default.
+
+    E2i: the injector normalises against the built font's own average ink, at
+    the studio's relocated default — not the designspace's default source. On
+    Crispy those are different designs: the default source is the 47-1-1
+    hairline master (mean ink 96.3 u) while the studio rests at the relocated
+    default (mean ~1,750 u), so every SPAC amount came out ~18× too strong
+    (`i` +6 u against the injector's +58). The measurement is the injector's
+    own function, so the two renderers can only agree.
+    """
+    from fontTools.ttLib import TTFont
+
+    from .transforms.builtin_spac_widthaware import _ink_width
+
+    font = TTFont(str(font_path))
+    try:
+        glyph_set = font.getGlyphSet()
+        out = {}
+        for name in font.getGlyphOrder():
+            ink = _ink_width(glyph_set, name)
+            if ink > 0:
+                out[name] = float(ink)
+        return out
+    finally:
+        font.close()
+
+
 def _shift_metrics(glyph, dx: int) -> None:
     """Move the drawing right by ``dx`` (the LSB grows), origin unchanged."""
     for contour in glyph:
@@ -222,6 +250,26 @@ def _shift_metrics(glyph, dx: int) -> None:
     for component in glyph.components:
         a, b, c, d, ox, oy = component.transformation
         component.transformation = (a, b, c, d, ox + dx, oy)
+
+
+def _fit_dx(dx: int, width: float, composite: bool) -> int:
+    """Cap a NEGATIVE move so the twin's advance cannot go below 1 u.
+
+    A UFO/designspace source cannot carry a negative advance width, and
+    fontTools refuses to compile one. Crispy's hairline masters are narrower
+    than the amount the injector applies at SPAC −100 (hairline `n` advance
+    166 u against a 258 u tightening), so the exact amount is not representable
+    there and the export caps it instead of writing a font fontmake rejects.
+    Everywhere the design can carry the amount the twin is exact; the default
+    design (where the injector's amounts come from) always can.
+    """
+    if dx >= 0:
+        return dx
+    if composite:                       # advance moves by dx
+        lowest = 1 - int(width)
+    else:                               # advance moves by 2·dx
+        lowest = -((int(width) - 1) // 2)
+    return max(dx, lowest)
 
 
 def _use_my_metrics(glyph) -> bool:
@@ -234,7 +282,37 @@ def _use_my_metrics(glyph) -> bool:
     return bool(lib.get("public.useMyMetrics") or lib.get("com.glyphs.useMyMetrics"))
 
 
-def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[str]:
+def _shift_spacing(twin, inks: Dict[str, float], mean_ink: float, *,
+                   kind: str, value: float, bias: float, scale: float) -> None:
+    """Move one twin's metrics as the injector moves its phantom points.
+
+    Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
+    both sidebearings open equally; a composite moves its left side only.
+    """
+    for name, ink in inks.items():
+        if name not in twin:
+            # `.notdef` is in the ink basis but glyphsLib did not write it; the
+            # compiler will synthesise the same box.
+            continue
+        glyph = twin[name]
+        amount = (value if kind == "spac"
+                  else value * ((ink / mean_ink) ** bias) * scale)
+        dx = round(amount)
+        if not dx:
+            continue
+        composite = bool(glyph.components)
+        if composite and _use_my_metrics(glyph):
+            continue
+        if dx < 0:
+            dx = _fit_dx(dx, glyph.width, composite)
+            if dx == 0:
+                continue
+        _shift_metrics(glyph, dx)
+        glyph.width += dx if composite else 2 * dx
+
+
+def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
+                      ink_font: Optional[Path] = None) -> Optional[str]:
     """Add ``SPAC`` as metrics-only twin sources (E2).
 
     Per master and per end of the range, a twin source with the same outlines and
@@ -264,10 +342,16 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[s
         return None
 
     # The injector normalises against the built font's own average ink width at
-    # its default location, so the renderer measures the default source.
-    default_source = next(
-        (s for s in doc.sources if not s.layerName), doc.sources[0])
-    inks = _ink_widths(default_source.font)
+    # ITS default — the studio's relocated default, not the designspace's
+    # default source — so the renderer measures the built font when it has one
+    # (E2i) and only falls back to the default source otherwise (a caller with
+    # no build, e.g. a test).
+    if ink_font is not None and Path(ink_font).exists():
+        inks = _ink_widths_from_build(Path(ink_font))
+    else:
+        default_source = next(
+            (s for s in doc.sources if not s.layerName), doc.sources[0])
+        inks = _ink_widths(default_source.font)
     mean_ink = (sum(inks.values()) / len(inks)) if inks else 0.0
 
     import copy as _copy
@@ -291,22 +375,8 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[s
     for source in [s for s in doc.sources if not s.layerName]:
         for value in ends:
             twin_font = _copy.deepcopy(source.font)
-            for name, ink in inks.items():
-                if name not in twin_font:
-                    # `.notdef` is in the ink basis but glyphsLib did not write
-                    # it; the compiler will synthesise the same box.
-                    continue
-                glyph = twin_font[name]
-                amount = (value if kind == "spac"
-                          else value * ((ink / mean_ink) ** bias) * scale)
-                dx = round(amount)
-                if not dx or dx == 0:
-                    continue
-                composite = bool(glyph.components)
-                if composite and _use_my_metrics(glyph):
-                    continue
-                _shift_metrics(glyph, dx)
-                glyph.width += dx if composite else 2 * dx
+            _shift_spacing(twin_font, inks, mean_ink, kind=kind,
+                           value=value, bias=bias, scale=scale)
             twin = SourceDescriptor()
             twin.font = twin_font
             twin.familyName = source.familyName
@@ -617,7 +687,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
                       hidden_axes: Iterable[str] = (),
                       composed: Sequence[str] = (),
                       kinetikern: Optional[Dict] = None,
-                      original_path: Optional[Path] = None) -> Path:
+                      original_path: Optional[Path] = None,
+                      ink_font: Optional[Path] = None) -> Path:
     """Write ``<family>-sources.zip`` next to nothing else: masters, a
     designspace 5 and a README. Returns the zip path.
 
@@ -660,7 +731,7 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     doc = glyphsLib.to_designspace(font)
     # E2: spacing rides the sources as a metrics-only SPAC axis rendered from
     # the transforms sidecar, so a fontmake build of the zip is spaced.
-    spac_tag = _add_spacing_axis(doc, sidecar_base)
+    spac_tag = _add_spacing_axis(doc, sidecar_base, ink_font=ink_font)
     # Created user axes: declared min/default/max, appended after the
     # parametric ones glyphsLib emitted from the masters.
     existing = {a.tag.lower() for a in doc.axes}

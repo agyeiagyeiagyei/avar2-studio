@@ -2271,3 +2271,54 @@ scales each glyph's amount by ink measured on the **hairline default source**
 (mean 96.3 u) instead of the design the injector sees (mean ~1,750 u), so the
 negative end over-tightens. E2i is next and the combined round trip is its
 acceptance.
+
+### E2i — the spacing amounts use the built font's ink, and the negative end is capped (ROUND 23)
+
+The injector normalises against the font it is handed: the studio's build at
+ITS default, which on Crispy is the relocated default (`Default 400 MaxOpsz`,
+mean ink ≈1,750 u). `_add_spacing_axis` measured the designspace's **default
+source** — the 47-1-1 hairline master, mean ink 96.3 u — so every amount came
+out ~18× too strong (`i` +6 u where the injector gives +58; the verifier's
+table).
+
+The writer now takes `ink_font` and measures it with the injector's own
+`_ink_width` over the built font's default instance. Both callers pass the font
+the studio just built: `pipeline._sources_pipeline` (`state.VARIABLE_FONT_PATH`,
+the worker's current font) and `cli._write_sources` (the same global after the
+CLI's build). With no built font (a test, a caller with no build) it falls back
+to the default source, as before.
+
+**The negative end needs a cap.** With the right basis, the amount at SPAC −100
+is bigger than some masters' advances: the 47-1-1 hairline has `W` at **249 u**
+while the injector's change is **−442 u**, so the exact twin would carry a
+negative width and fontTools refuses to compile it (`The width should not be
+negative: 'A'` — the first symptom, on `A`). `_fit_dx` caps a tightening so the
+advance stays at least 1 u (simple: `dx ≥ −(width−1)/2`; composite:
+`dx ≥ 1−width`). Everywhere the design can carry the amount, the twin is exact.
+
+This is a representability limit, not a choice: at the true hairline master the
+studio's own font reports a NEGATIVE advance for `W` at SPAC −100 (it moves
+phantom points, which may cross), and a UFO cannot carry it. The consequence is
+measured and stated below; the option to make the negative end exact is to
+narrow the SPAC range (the hairlines carry about −56 units for `W`), which is
+the designer's call, not the writer's.
+
+Evidence — real Crispy through the CLI, same copy, `roundtrip_compare.py`
+(committed here; HarfBuzz, avar2 applied by both fonts):
+
+* the zip **builds**: `fontmake -m Crispy.designspace -o variable` → exit 0,
+  0 ERROR lines, `Crispy-VF.ttf`;
+* **rows**: 28 non-default CSV rows, worst deviation **3.0 u** (`o` rsb at
+  `Narrow 900 MaxOpsz`), none outside the 3 u tolerance — E1d's empty-input
+  offset is gone;
+* **SPAC +100**: every simple glyph matches the studio's font to the unit
+  (a o g n H e i C: 0 u);
+* **SPAC −100**: exact where the masters can carry the amount; the capped
+  glyphs under-tighten (up to ~134 u at a narrow row);
+* composites still deviate at BOTH ends (W +442 against +221, Cacute-style
+  double shifts) — E2j, next.
+
+Tests: `test_the_spacing_basis_is_the_built_font` (a font whose ink differs
+from the source's drives the twin amounts) and
+`test_a_twin_never_carries_a_negative_advance` (the cap's rule, with Crispy's
+own numbers). `pytest tests/ -q` → **663 passed**; ruff clean.

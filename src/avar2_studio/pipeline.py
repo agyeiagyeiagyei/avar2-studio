@@ -1590,6 +1590,10 @@ def _sources_pipeline(source_path, export_dir, *, hidden_axes=(),
         # same sidecar the binary-stage bake reads.
         kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or Path(source_path)),
         original_path=state.ORIGINAL_PATH,
+        # E2i: the spacing amounts normalise against the built font at ITS
+        # default (the studio's relocated default), not the designspace's
+        # default source — the injector's own basis.
+        ink_font=state.VARIABLE_FONT_PATH,
         hidden_axes=hidden_axes,
         composed=composed,
     )

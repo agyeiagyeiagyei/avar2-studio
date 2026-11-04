@@ -602,3 +602,100 @@ def test_the_validator_rejects_an_empty_or_default_mapping_input(project, tmp_pa
     # A row at the default location is the DEFAULT row: skipped, not rejected.
     sources_export._validate_designspace(doc, rows=[at_default],
                                          default_row_name="At Default")
+
+
+@needs_fontc
+@pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
+def test_the_spacing_basis_is_the_built_font(project, tmp_path):
+    """E2i: the amounts normalise against the built font, not the default source.
+
+    The injector measures the font it is handed — the studio's build at ITS
+    default (on Crispy the relocated default, mean ink ~1,750 u), not the
+    designspace's default source (the 47-1-1 hairline master, mean 96.3 u).
+    Measuring the source made every amount ~18× too strong (`i` +6 u where the
+    injector gives +58). The renderer now takes the same measurement from the
+    built font; this test passes a font whose ink differs from the source and
+    checks the twin's amount follows IT.
+    """
+    from avar2_studio.transforms.builtin_spac_widthaware import _ink_width
+
+    # A built font of the same project (no SPAC), then one glyph fattened so
+    # its share of the mean ink is nothing like the source's.
+    quiet = tmp_path / "quiet-basis"
+    quiet.mkdir()
+    for name in ("CrispyMini.glyphs", "CrispyMini-avar.csv",
+                 "CrispyMini-axis-metadata.json"):
+        shutil.copy2(project["source"].parent / name, quiet / name)
+    quiet_zip = _zip({"source": quiet / "CrispyMini.glyphs",
+                      "csv": quiet / "CrispyMini-avar.csv",
+                      "metadata": project["metadata"]}, quiet)
+    quiet_work = quiet / "rt"
+    quiet_work.mkdir()
+    with zipfile.ZipFile(quiet_zip) as zf:
+        zf.extractall(quiet_work)
+    res = subprocess.run([FONTMAKE, "-m", str(next(quiet_work.glob("*.designspace"))),
+                          "-o", "variable", "--output-dir", str(quiet / "fm")],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, (res.stderr or "")[-1200:]
+    built = TTFont(str(next((quiet / "fm").glob("*.ttf"))))
+    fat = built["glyf"]["i"]
+    fat.coordinates.scale((8, 1)) if hasattr(fat.coordinates, "scale") else None
+    if not hasattr(fat.coordinates, "scale"):  # simple glyph: x *= 8
+        xs = fat.coordinates.x
+        fat.coordinates.x = [int(round(x * 8)) for x in xs]
+    basis_path = quiet / "basis.ttf"
+    built.save(str(basis_path))
+
+    basis = TTFont(str(basis_path))
+    glyph_set = basis.getGlyphSet()
+    inks = {n: _ink_width(glyph_set, n) for n in basis.getGlyphOrder()}
+    inks = {n: w for n, w in inks.items() if w > 0}
+    mean_ink = sum(inks.values()) / len(inks)
+    expected_dx = round(40 * (inks["i"] / mean_ink) * 1.25)
+
+    zip_path = _zip(project, tmp_path, ink_font=basis_path)
+    work = tmp_path / "rt-basis"
+    work.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(work)
+    doc = DesignSpaceDocument.fromfile(str(next(work.glob("*.designspace"))))
+    spac = next(a for a in doc.axes if a.tag == "SPAC")
+    master = next(s for s in doc.sources
+                  if not s.layerName and s.location.get(spac.name) is None)
+    twin = next(s for s in doc.sources
+                if s.styleName == f"{master.styleName} SPAC40")
+    import ufoLib2
+
+    master_width = ufoLib2.Font.open(str(work / master.filename))["i"].width
+    twin_width = ufoLib2.Font.open(str(work / twin.filename))["i"].width
+    assert twin_width - master_width == 2 * expected_dx, (
+        f"the twin must use the built font's ink: {twin_width - master_width} "
+        f"against the expected {2 * expected_dx}")
+
+    # The source basis would give a different amount — the test can fail.
+    source_basis = sources_export._ink_widths(
+        ufoLib2.Font.open(str(work / master.filename)))
+    mean_source = sum(source_basis.values()) / len(source_basis)
+    source_dx = round(40 * (source_basis["i"] / mean_source) * 1.25)
+    assert abs(source_dx - expected_dx) > 5, (
+        "the fixture must make the two bases disagree, or it proves nothing")
+
+
+def test_a_twin_never_carries_a_negative_advance():
+    """E2h/E2i: the tightening is capped where a master cannot absorb it.
+
+    Crispy's hairline master has `n` at 166 u while the injector's amount at
+    SPAC −100 is 258 u of advance change — a negative width, which fontTools
+    refuses to compile (`The width should not be negative: 'A'`). The cap keeps
+    at least 1 u; everywhere the design can carry the amount, the twin is exact.
+    """
+    from avar2_studio.sources_export import _fit_dx
+
+    assert _fit_dx(-129, 166, False) == -82, "simple: 166 + 2·(−82) = 2 u"
+    assert _fit_dx(-156, 175, False) == -87
+    assert _fit_dx(-129, 4000, False) == -129, "roomy masters keep the amount"
+    assert _fit_dx(-300, 100, True) == -99, "composite: advance + dx ≥ 1"
+    assert _fit_dx(129, 166, False) == 129, "loosening is never capped"
+    for width in (0, 1, 2, 3, 66, 166):
+        assert width + 2 * _fit_dx(-500, width, False) >= 0, width
+

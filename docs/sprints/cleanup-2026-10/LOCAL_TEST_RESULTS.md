@@ -1261,3 +1261,14 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `pytest tests/test_sources_export.py -q` → **11 passed**; the fontmake build
   of the real zip is blocked by E2i (negative widths from the hairline ink
   basis), not by this item
+
+### ROUND 23 E2i — the budgets use the built font's ink (2026-11-04)
+
+- real Crispy via the CLI: `fontmake` on the zip → **exit 0, 0 ERROR**,
+  `Crispy-VF.ttf` built
+- round trip (`roundtrip_compare.py`, HarfBuzz): 28 non-default rows, worst
+  **3.0 u** (tolerance 3); SPAC **+100 exact** for every simple glyph;
+  SPAC −100 capped where a master's advance is narrower than the amount
+  (hairline `W`: 249 u against a 442 u change) — up to ~134 u at narrow rows
+- `pytest tests/ -q` → **663 passed**; ruff clean
+- composites still deviate (E2j next)

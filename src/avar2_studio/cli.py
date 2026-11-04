@@ -305,6 +305,9 @@ def _write_sources(args, state, server, hidden_axes):
             hidden_axes=hidden_axes,
             kinetikern=_kk_sidecar.load(state.ORIGINAL_PATH or state.GLYPHS_PATH),
             original_path=state.ORIGINAL_PATH,
+            # E2i: spacing normalises against the built font at its default
+            # (the studio's relocated default), as the injector does.
+            ink_font=state.VARIABLE_FONT_PATH,
         )
     except sources_export.SourcesError as exc:
         print(f"error: {exc}", file=sys.stderr)
