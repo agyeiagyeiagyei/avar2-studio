@@ -2457,3 +2457,30 @@ guides and the three example READMEs — returned 20 hits of `/api/`,
 
 Check: the grep returns nothing over the ten files; the link/anchor check over
 30 files (reader set + appendices + decisions) reports **0 broken**.
+
+### D1c — the secondary-axes guide is a reference again; the walkthroughs are an appendix (ROUND 23)
+
+313 lines → **150**, with the removed material living in
+[`docs/guides/secondary-parametric-axes-appendix.md`](../../guides/secondary-parametric-axes-appendix.md),
+linked from the guide's opening paragraph (per section: coverage fixes, the
+correction anchor, the shadow file, Fontra editing) and from `docs/README.md`.
+
+What moved out, and why: the brace-layer/non-default-location explanation, the
+"what good coverage looks like" table, the extrapolation fix, the
+one-location-for-all-glyphs recipe, the worked `LCOR` correction axis, the
+leak/anchor recipe, the static-app correction note, the shadow file layout
+(including the `Re-seed` outcomes) and the full Fontra section (multi-source
+batch editing, the reference-measurement HUD, the browser demo's editor). What
+stays is the reference: vocabulary, coverage, the correction concept, per-style
+values, previewing, source-format scope and what is not built — each failure
+shape points at the recipe that fixes it.
+
+The Crispy leak table went with the appendix section it belonged to, **without
+its numbers**: the factcheck could not reproduce them from the repo (they are
+the designer's production measurements), and D1's rule is to measure or remove.
+The mechanism that causes the leak — an axis whose normalized peak is 0 drops
+out of the tuple — and the anchor that bounds it are kept, so the recipe is
+still complete.
+
+Check: reader-set register grep **0 hits**; link/anchor check over 31 files
+**0 broken**.

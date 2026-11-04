@@ -1312,3 +1312,11 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   docs/README.md, docs/guides/*.md and the three example READMEs → **no hits**
   (was 20)
 - link/anchor check over 30 files → **0 broken**
+
+### ROUND 23 D1c — secondary-axes guide 313 → 150 lines (2026-11-04)
+
+- walkthroughs/leak table/recipes in `docs/guides/secondary-parametric-axes-appendix.md`,
+  linked from the guide and `docs/README.md`; guide at **150 lines**
+- the unreproducible Crispy leak numbers removed; the mechanism and the anchor
+  recipe kept
+- register grep **0 hits**; links/anchors **0 broken** over 31 files
