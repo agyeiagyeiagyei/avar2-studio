@@ -2,7 +2,7 @@
 
 - **Status:** Accepted and **built** (2026-10-19, see the status update at the end). The inserted-master staging is gone; the export compiles the resolved source with a lossless relocation.
 - **Date:** 2026-07-21 inserted-origin-master export (`edd4b5a`); 2026-10-04 measurements; 2026-10-16 direction recorded (audit §2); 2026-10-19 built
-- **Area:** `server._export_pipeline`, `server._build_export_source`, `server._build_in_process`
+- **Area:** `pipeline._export_pipeline`, `pipeline._build_in_process`
 
 ## Context
 
@@ -48,13 +48,18 @@ build uses (decision 0001), made an explicit per-build parameter:
 - `_build_in_process(..., relocate_default)` replaces the environment
   read (the env value stays the default); the export passes `False`
   for the step it does not want, or the requested location for the one
-  it does;
+  it does — **as built**, the export hard-codes `relocate_default=True` and
+  there is no relocation key in the job spec: `ENV_KEYS` still carries
+  `AVAR2_RELOCATE_BUILD_DEFAULT`, which `_build_in_process` reads when
+  `relocate_default is None` (the preview build's path);
 - the `round()` vs decimal-row mismatch is reconciled (a tolerance, or
   the rounded location written back);
-- the flag travels in the job `spec`, not `ENV_KEYS`;
+- a plain build keeps the environment switch — the spec does not carry one;
 - `_declared_axis_ranges` is computed once per build (done, T1.8);
-- the first export test asserts that tuple counts stay natural
-  (`_export_pipeline` has none today).
+- the export tests assert that tuple counts stay natural
+  (`tests/test_export_relocation.py`, `test_export_active_source.py`,
+  `test_cli_export_options.py`, `test_gvar_header_fit.py` — `_export_pipeline`
+  had none when this was written).
 
 ## Consequences
 
@@ -68,10 +73,13 @@ build uses (decision 0001), made an explicit per-build parameter:
 
 ## Where it lives
 
-- `server._build_export_source` (docstring), `server._export_pipeline`
+- `pipeline._export_pipeline`
   (the "authored rows come FIRST" lookup — an exact row match uses the
   authored `out:` because the preview table cannot express the ORIGIN
-  row when relocation is off), `server._build_in_process` step 3.5.
+  row when relocation is off), `pipeline._build_in_process` step 3.5.
+  `server._build_export_source` is gone (the 2026-10-19 status update
+  below); `_export_pipeline` and `_build_in_process` live in
+  `pipeline.py`, not `server.py`.
 - `build_jobs.JobQueue._stage` (export spec), `build_worker._run_export_job`.
 - History: archived `HANDOVER-2026-10.md` §4.2 (the Oct 4 method note).
 
