@@ -144,6 +144,32 @@ def _is_default_row(row, declared: Dict[str, Tuple[float, float, float]]) -> boo
     return True
 
 
+def _prepare_rows(rows, font, source_path: Path):
+    """The build's own row preparation: ``_fill_identity_in_axes``.
+
+    E1d: an unfinished CSV row with no traditional inputs reached the
+    designspace as ``<input />``, which fontmake reads as THE default
+    location — every other mapping then landed offset by that row's output
+    (4,913 u on the real Crispy). The studio build has always filled such a
+    row from the source's instance coordinates (identity when the row names
+    an instance the source does not declare), so the export calls the same
+    function with the same config shape instead of keeping a copy.
+    """
+    from . import source_font
+
+    family = source_font.get_family_name(font, Path(source_path))
+    tags = sorted(a["tag"] for a in source_font.get_axes(font) if a.get("tag"))
+    font_key = f"{family}[{','.join(tags)}].ttf" if tags else f"{family}-VF.ttf"
+    fvar_instances = [
+        {"name": entry["name"],
+         "coordinates": {str(t).lower(): float(v)
+                         for t, v in entry["coordinates"].items()}}
+        for entry in source_font.get_source_instances(font)
+    ]
+    config = {"fvarInstances": {font_key: fvar_instances}}
+    return config_generator._fill_identity_in_axes(rows, config, font_key)
+
+
 SPAC_TAG = "SPAC"
 SPAC_NAME = "Spacing"
 
@@ -413,7 +439,9 @@ def _spacing_summary(kinetikern: Optional[Dict], spac_tag: Optional[str]):
     return out
 
 
-def _validate_designspace(doc: DesignSpaceDocument) -> None:
+def _validate_designspace(doc: DesignSpaceDocument, rows=None,
+                          axis_names: Optional[Dict[str, str]] = None,
+                          default_row_name: Optional[str] = None) -> None:
     """Refuse a designspace fontmake cannot use, with the reason named.
 
     Three things went wrong on the real Crispy and none of them raised: duplicate
@@ -421,6 +449,10 @@ def _validate_designspace(doc: DesignSpaceDocument) -> None:
     default that fell back to an axis minimum. A zip that builds is the whole
     point of the export, so these are errors here rather than surprises in
     fontmake's log.
+
+    E1d adds the mapping half: a mapping whose input is empty — or whose input
+    dimensions all sit at the axes' defaults, which is the same location —
+    shifts every other mapping by its output in fontmake's avar2.
     """
     tags = [a.tag for a in doc.axes]
     names = [a.name for a in doc.axes]
@@ -439,6 +471,34 @@ def _validate_designspace(doc: DesignSpaceDocument) -> None:
             "no source sits at the axes' defaults, so the designspace has no "
             f"default source (axes whose default nothing reaches: "
             f"{', '.join(missing) or 'unknown'}) — fontmake cannot build it")
+    if rows is None:
+        return
+    defaults = {}
+    for axis in doc.axes:
+        defaults[axis.name] = float(axis.default)
+        defaults[str(axis.tag).upper()] = float(axis.default)
+    for row in rows:
+        if default_row_name is not None and row.instance_name == default_row_name:
+            continue
+        if not row.in_axes:
+            raise SourcesError(
+                f"mapping row {row.instance_name!r} has no input: an empty "
+                "<input/> IS the default location, so fontmake would offset "
+                "every other mapping by this row's output")
+        at_default = True
+        for tag, value in row.in_axes.items():
+            axis_default = defaults.get(_axis_name(tag, axis_names or {}))
+            if axis_default is None:
+                axis_default = defaults.get(str(tag).upper())
+            if axis_default is None or abs(float(value) - axis_default) > 1e-9:
+                at_default = False
+                break
+        if at_default:
+            raise SourcesError(
+                f"mapping row {row.instance_name!r} has an input at the "
+                "default location, which fontmake would apply to every other "
+                "mapping as an offset — give the row its own location or "
+                "remove it")
 
 
 def _mapping_xml(doc: DesignSpaceDocument, rows, declared, axis_names: Dict[str, str],
@@ -578,7 +638,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
             "source is a .designspace")
 
     family = family_name or getattr(font, "familyName", None) or source_path.stem
-    rows = config_generator.read_csv_mappings(Path(csv_path))
+    rows = _prepare_rows(config_generator.read_csv_mappings(Path(csv_path)),
+                         font, source_path)
     user_axes = declared_user_axes(metadata or {})
     declared = {tag: (float(e["min"]), _default_of(e, tag), float(e["max"]))
                 for tag, e in user_axes}
@@ -638,7 +699,8 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
         raise SourcesError(
             "more than one mapping row sits at the axis defaults — the studio "
             "builds this fine only because it dedupes first; fix the mappings")
-    _validate_designspace(doc)
+    _validate_designspace(doc, rows=rows, axis_names=axis_names,
+                          default_row_name=default_rows[0] if default_rows else None)
 
     mappings = _mapping_xml(doc, rows, declared, axis_names,
                             default_rows[0] if default_rows else None)

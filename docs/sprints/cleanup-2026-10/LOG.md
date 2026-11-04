@@ -2187,3 +2187,47 @@ Tests: `pytest tests/test_sources_export.py -q` → **9 passed**, including a ca
 that injects `GRAD`/`LCWD`/`YMOD`/`SPAC` and a default-less `XTRA2` and asserts
 none of them become axes, exactly one `SPAC`, unique tags and names, and a findable
 default source. `pytest tests/ -q` → **658 passed**; `ruff check src tests` clean.
+
+### E1d — the mappings are the build's own rows, never an empty input (ROUND 23)
+
+The verifier's round trip of the E1b build showed every mapping landing offset:
+`Wide 400 MinOpsz` read XTRA 0.084 where the studio's TTF has 0.853, XOPQ 0.240
+vs 0.342, YOPQ 0.406 vs 0.848 (worst advance difference across the 30 rows:
+4,913 u). Cause: Crispy's CSV line 27 (`Wide 400 MinOpsz,1420.1,149.9,122.1,,,,
+14.1`) has parametric outputs and **no** WGHT/WDTH/OPSZ, so `read_csv_mappings`
+returned empty `in_axes` and `_mapping_xml` wrote `<input />` — which fontmake
+reads as THE default location. Every other mapping then landed offset by that
+row's output, exactly to the observed digits (0.908 − 0.823 = 0.085, …).
+
+The studio build never does this: it runs every row through
+`config_generator._fill_identity_in_axes`, which fills an input-less row from the
+source's instance coordinates, or makes it an identity mapping when the row names
+an instance the source does not declare. The export now calls **that function**
+(not a copy) with the same config shape the studio generates
+(`fvarInstances` from `source_font.get_source_instances`, keyed exactly as
+`_initialize_preview_config_from_glyphs` keys it).
+
+`_validate_designspace` gained the two shapes fontmake misreads, both fatal and
+both naming the row: a mapping with **no input at all**, and a mapping whose
+input dimensions **all sit at the axes' defaults** (the same location as an
+empty `<input/>`). The default row itself stays exempt — it is skipped from
+`<mappings>` for the reason decision 0001 documents.
+
+Evidence — the real Crispy (`~/e1b-check/sources`, the designer's checkout
+untouched):
+
+- the export's 30 prepared rows are **identical, row for row, to the rows the
+  studio build maps** (`_fill_identity_in_axes` over the runtime-generated
+  config: 1 instance, `Default 400 MaxOpsz`, so the unfinished row takes the
+  identity fill) — checked by comparing every `in_axes` dict;
+- `Wide 400 MinOpsz` now maps from XTRA 1420.1 / XOPQ 149.9 / YOPQ 122.1;
+- the real designspace carries **29 mappings, 29 `<input>` elements, 0 empty**;
+- `pytest tests/test_sources_export.py -q` → **11 passed** (new: the unfinished
+  row keeps its parametric input; the validator rejects the empty and
+  at-default shapes and exempts the default row);
+- `pytest tests/ -q` → **660 passed**; `ruff check src tests` clean.
+
+Not yet evidenced here: the fontmake round trip that shows the mappings landing
+on the studio's rows — that is the combined acceptance for E1d/E2h/E2i/E2j the
+verifier specified, and it needs the spacing fixes first (they change the same
+build).

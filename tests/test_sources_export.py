@@ -522,3 +522,66 @@ def test_the_studio_placeholders_never_become_axes(project, tmp_path):
     assert len({a.name for a in doc.axes}) == len(doc.axes), \
         [a.name for a in doc.axes]
     assert doc.findDefault() is not None, "a default source must exist"
+
+
+def test_an_unfinished_row_never_writes_an_empty_mapping_input(project, tmp_path):
+    """E1d: a row with no traditional inputs takes the build's identity fill.
+
+    Crispy's CSV line 27 (``Wide 400 MinOpsz,1420.1,149.9,122.1,,,,14.1``) has
+    parametric outputs and no WGHT/WDTH/OPSZ. The export wrote ``<input />``,
+    which fontmake reads as THE default location, so every other mapping
+    landed offset by that row's output — 4,913 u on the real Crispy
+    (verifier, ROUND 23).
+    """
+    from xml.etree import ElementTree as ET
+
+    csv_path = project["csv"]
+    text = csv_path.read_text(encoding="utf-8-sig").rstrip("\n")
+    csv_path.write_text(
+        text + "\nUnfinished Row,2000.0,50.0,40.0,,,\n", encoding="utf-8")
+
+    out = tmp_path / "e1d.zip"
+    sources_export.build_sources_zip(
+        project["source"], out, csv_path=csv_path,
+        metadata=project["metadata"], family_name="CrispyMini",
+        original_path=project["source"])
+    work = tmp_path / "e1d"
+    work.mkdir()
+    with zipfile.ZipFile(out) as zf:
+        zf.extractall(work)
+    tree = ET.parse(str(next(work.glob("*.designspace"))))
+    inputs = tree.findall(".//mappings/mapping/input")
+    assert inputs, "the designspace carries mappings"
+    assert not [i for i in inputs if len(i) == 0], (
+        "no mapping may carry an empty <input/> — fontmake reads it as the "
+        "default location and offsets every other mapping (E1d)")
+    doc = DesignSpaceDocument.fromfile(str(next(work.glob("*.designspace"))))
+    name_of = {a.tag: a.name for a in doc.axes}
+    row_inputs = [{d.get("name"): float(d.get("xvalue")) for d in i}
+                  for i in inputs]
+    assert {name_of["XTRA"]: 2000.0, name_of["XOPQ"]: 50.0,
+            name_of["YOPQ"]: 40.0} in row_inputs, (
+        "the unfinished row's input is its own parametric location, the same "
+        f"identity fill the studio build uses: {row_inputs}")
+
+
+def test_the_validator_rejects_an_empty_or_default_mapping_input(project, tmp_path):
+    """E1d: the two shapes fontmake misreads as "the default location"."""
+    doc = _designspace(_zip(project, tmp_path), tmp_path)
+    xtra = next(a for a in doc.axes if a.tag == "XTRA")
+    make = config_generator.RowMapping
+
+    empty = make(instance_name="No Inputs", in_axes={},
+                 out_axes={"XTRA": 100.0}, out_axis_order=["XTRA"])
+    with pytest.raises(sources_export.SourcesError, match="No Inputs"):
+        sources_export._validate_designspace(doc, rows=[empty])
+
+    at_default = make(instance_name="At Default",
+                      in_axes={"XTRA": xtra.default},
+                      out_axes={"XTRA": 100.0}, out_axis_order=["XTRA"])
+    with pytest.raises(sources_export.SourcesError, match="At Default"):
+        sources_export._validate_designspace(doc, rows=[at_default])
+
+    # A row at the default location is the DEFAULT row: skipped, not rejected.
+    sources_export._validate_designspace(doc, rows=[at_default],
+                                         default_row_name="At Default")

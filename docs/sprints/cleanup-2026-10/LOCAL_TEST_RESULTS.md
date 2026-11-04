@@ -1235,3 +1235,16 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - `fontmake -m Crispy.designspace -o variable` → **exit 0, 0 ERROR lines**, `Crispy-VF.ttf` 627 KB / 499 glyphs / **avar 2.0**
 - `pytest tests/test_sources_export.py -q` → **9 passed**; `pytest tests/ -q` → **658 passed**; `ruff check src tests` clean
 - reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071, 8001, `~/avar2-studio-test`
+
+### ROUND 23 E1d — mappings are the build's rows, never an empty input (2026-11-04)
+
+- real Crispy (`~/e1b-check/sources`): the export's 30 prepared rows equal the
+  studio build's rows row-for-row; `Wide 400 MinOpsz` maps from XTRA 1420.1 /
+  XOPQ 149.9 / YOPQ 122.1; the real designspace has 29 mappings, **0 empty
+  `<input/>`**
+- `pytest tests/test_sources_export.py -q` → **11 passed**; `pytest tests/ -q` →
+  **660 passed**; `ruff check src tests` clean
+- fontmake round trip for E1d deferred to the combined E1d/E2h/E2i/E2j
+  acceptance (spacing fixes change the same build)
+- reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071,
+  8001, `~/avar2-studio-test`
