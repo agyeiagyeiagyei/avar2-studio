@@ -2058,3 +2058,56 @@ Fix: always write a twin at each non-zero end (`lo` and `hi`), whatever the symm
 **E2h memory budget.** The verifier's CLI `--format sources` run on the real Crispy (full font build, then the writer deep-copying 36 masters in memory for the twins) took about **6 GB** of RAM and slowed the designer's 16 GB machine (user report, 2026-11-03). E2h doubles the twins, and the dialog export runs the same writer inside the studio process. Measure peak RSS of the real-Crispy export before and after E2h (`/usr/bin/time -l`, "maximum resident set size") and put both numbers in LOG.md; if E2h raises it materially, build and write each twin to disk one at a time instead of holding all the deep copies at once.
 
 **Order (ROUND 23, amended):** E1b → E2h → E1c → E2f → E2g → D1a → D1b → D1c → K5 → checkpoint.
+
+## Verifier review of E1b `b6d9e83` (2026-11-04) — E1b VERIFIED; the real-Crispy round trip finds E1d (every mapping off), E2i (spacing amounts) and E2j (components); the composite rule needs the user
+
+**Method — no new real-Crispy build** (it costs ~6 GB of RAM on the designer's machine). Compared, with fontTools glyph sets and HarfBuzz (uharfbuzz 0.57), the agent's own fontmake build of the `b6d9e83` real-Crispy zip (`~/e1b-check/fm/Crispy-VF.ttf`; its CSV is byte-identical to `~/Documents/Crispy/sources/Crispy-avar.csv`) against the studio's TTF of the 5e28b47 gate run (`~/avar2-verifier/out-5e28b47/`). Control: with the studio's default parametric point set explicitly, the two fonts agree within 0.5 u advance / 0.9 u bounds for n a g o H e, at the default and with slnt −11, ROND 100, GRAD 10. The masters and outlines are right; what follows is mappings and spacing.
+
+**E1b — VERIFIED** (b6d9e83). The exported designspace (`~/e1b-check/rt/Crispy.designspace`) has 12 axes, unique tags and names, one `SPAC`, no lowercase placeholders; fontmake exit 0, avar 2.0; `_validate_designspace` and the placeholder test are in. 658 tests, CI 41641912202 green.
+
+**E1d (blocking, new) — every mapping in the fontmake build lands in the wrong place.** Through `wght/wdth/opsz` alone:
+
+| row Wide 900 MinOpsz | `n` advance | XTRA normalized | XOPQ | YOPQ |
+|---|---|---|---|---|
+| studio TTF | 4552.1 | 0.853 (= CSV 1560.8) | 0.237 | 0.729 |
+| fontmake build of the zip | **1807.4** | **0.084** (expected 0.908) | **0.240** (expected 0.342) | **0.406** (expected 0.848) |
+
+Across the 30 CSV rows the worst advance difference (a g o n H e W) is 4,913 u, the median 1,913 u. With the parametric point set explicitly, the export gives the studio's 4552.1, so the avar2 table is at fault, not the masters.
+
+Root cause: CSV line 27, `Wide 400 MinOpsz,1420.1,149.9,122.1,,,,14.1`, has parametric outputs but no WGHT/WDTH/OPSZ (an unfinished row in the designer's file). `read_csv_mappings` gives it empty `in_axes`, and `_mapping_xml` writes `<mapping><input /><output>…1420.1/149.9/122.1…</output></mapping>`. An empty input IS the default location, so fontmake offsets every other mapping by that output: XTRA 0.908 − 0.823 = **0.085**, XOPQ 0.342 − 0.102 = **0.240**, YOPQ 0.848 − 0.442 = **0.406**, exactly the observed values. The studio's build never does this: `config_generator._fill_identity_in_axes` fills such a row from the instance's own coordinates, or makes it an identity mapping.
+
+Fix: the export takes its rows through the same preparation the build uses (the same function, not a copy), so the designspace mappings are the studio's avar2 rows. It never writes a mapping whose input is empty or sits at the default location; `_validate_designspace` rejects both, naming the row. Test: crispy-mini with an input-less row added.
+
+**E2i (blocking, new) — the spacing amounts use the wrong ink basis.** The injector normalises against the ink widths of the built font at ITS default, which on Crispy is the relocated default (decision 0001, the `Default 400 MaxOpsz` design). `_add_spacing_axis` measures the default SOURCE, the 47-1-1 hairline master. Mean ink: studio basis **1749.8 u**, export basis **96.3 u**. Advance change SPAC 0→100 at the default (simple glyphs):
+
+| glyph | i | n | o | e | H | m |
+|---|---|---|---|---|---|---|
+| studio TTF | 58 | 258 | 266 | 250 | 306 | 410 |
+| export | **6** | 246 | 254 | **202** | **254** | 426 |
+
+Each basis predicts its own font to the unit (`2 × round(100 × ink/mean × 1.25)`), so this is the only cause for simple glyphs. On crispy-mini the default row sits at the compiled origin, so the two bases coincide; that is why the ROUND 22 renderer check read 0.00 u. Fix: measure the ink basis on the design the injector sees, the studio's default (the default row's location). Do it from the quiet build the pipeline already makes, or by interpolating the sources there.
+
+**E2j (blocking, new) — components break the twin arithmetic.** Per-side change SPAC 0→100 at the default, HarfBuzz (fontTools glyph sets give the same numbers for the export):
+
+| glyph (what it is) | studio TTF adv / L / R | export adv / L / R |
+|---|---|---|
+| C (simple) | +306 / +153 / +153 | +246 / +123 / +123 |
+| Cacute (C + acute) | +153 / +153 / 0 | +123 / **+246** / **−123** |
+| m (simple) | +410 / +205 / +205 | +426 / +213 / +213 |
+| w (flipped m) | +410 / +205 / +205 | +213 / **0** / +213 |
+| M (composite) | +221 / +221 / 0 | +223 / **+446** / **−223** |
+| W (flipped M) | +442 / +221 / +221 | +223 / **−223** / **+446** |
+
+- **Transformed components.** The studio decomposes them (`pipeline.py:927`, `--decompose-transformed-components`), so w and W are simple glyphs there and track on both sides by their own ink. The export keeps them as composites and applies the composite rule. w opens on the right only, and W's flipped M carries M's own shift mirrored, so W's outline moves LEFT.
+- **Plain composites are shifted twice.** `_shift_metrics` moves the base glyph's contours by its `d`, which every composite using it inherits, and then the composite is shifted by its own `d`. Cacute opens +246 on the left and CLOSES −123 on the right; M does the same at twice the scale. The export TTF has 118 composites against the studio's 106; 112 of 207 inked glyphs miss the writer's own rule (fontTools).
+- Fix: a twin reproduces the studio's font glyph by glyph. Components the studio decomposes are decomposed in the twin, or treated as simple glyphs. A composite moves only by its own amount, with the base shift compensated, and mirrored for a flipped component. The composite TARGET waits for the user (next paragraph). Do the rest meanwhile.
+
+**For the user — the studio's own composite rule (pre-existing, outside the approved scope).** In the studio's TTF, composites do not track like their bases. Cacute gets +153 on ONE side while C gets +153 on EACH side. M (a composite) gets +221 on one side while its mirror W (decomposed) gets +221 on each. Which side moves depends on the renderer: HarfBuzz says left, fontTools' glyph set says right. The injector's comment ("moving the LEFT phantom … opens BOTH sidebearings equally") holds in neither. Recommendation: a composite tracks exactly like its base glyph, the base's amount on both sides. This changes the injector and the export together, so it needs the user's approval; until then E2j's composite targets are open.
+
+**Round-trip acceptance for E1d, E2h, E2i and E2j together.** Commit a comparison script in this folder. It builds the real-Crispy zip with fontmake and compares it, with HarfBuzz, to the studio's TTF of the same copy:
+- at every non-default CSV row, the renormalized parametric location matches within 0.001, and every glyph's advance and extents match within 3 u;
+- at SPAC `lo` and `hi` at each of those rows, every glyph's advance change and both sidebearing changes match within 1 u.
+
+Put the numbers in LOG.md. crispy-mini's tests gain the four blind spots: a flipped composite, an accented composite, a symmetric SPAC range and an input-less row. Real-Crispy builds take ~6 GB: run one at a time and never alongside the probe studio.
+
+**Order (ROUND 23, amended):** E1d → E2h → E2i → E2j (composite targets once the user decides) → E1c → E2f → E2g → D1a → D1b → D1c → K5 → checkpoint.
