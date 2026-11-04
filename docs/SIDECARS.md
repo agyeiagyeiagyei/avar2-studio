@@ -7,11 +7,16 @@ path is resolved against `ORIGINAL_PATH` — the designer's file — never
 against the shadow. The schemas below are what the `_normalise` / `load` functions accept and what
 the writers emit, as of 2026-10-30.
 
-Every writer here goes through `sidecar_io`: `atomic_writer` for text and
+The sidecars below go through `sidecar_io`: `atomic_writer` for text and
 `write_json` for JSON (temporary file + replace, so a crash leaves the old file
 whole), and the whole load → mutate → save sequence under the one process-wide
-`sidecar_io.LOCK` (an `RLock`, so nesting is safe). The studio is the only
-writer; external edits are picked up on read.
+`sidecar_io.LOCK` (an `RLock`, so nesting is safe). The two exceptions are named
+in the table — `.avar2-studio/instance-renames.json` (`instance_aliases.save`
+writes it with a plain `write_text`) and `.avar2-studio/config.yaml`
+(`config_generator.write_config` backs it up with `shutil.copy2` and writes it
+with `write_text`; only `_initialize_preview_config_from_glyphs` uses
+`atomic_writer`). Both are whole-file writes of small documents. The studio is
+the only writer; external edits are picked up on read.
 
 | File | Commit? | Writer(s) | Backup | Atomic | Locked |
 |---|---|---|---|---|---|
@@ -21,14 +26,18 @@ writer; external edits are picked up on read.
 | `<stem>-transforms.json` | yes | Transforms menu, config import | yes | yes | yes |
 | `<stem>-kinetikern.json` | yes | Kinetikern tab, the family switch | no | yes | yes |
 | `<stem>-axis-metadata.json` | yes | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | yes | yes |
-| `.avar2-studio/instance-renames.json` | no | instance rename | no | yes | yes |
-| `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.update_config` in the worker, promoted back) | optional | yes | yes |
+| `.avar2-studio/instance-renames.json` | no | instance rename | no | no — plain `write_text` | no |
+| `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.write_config` in the worker, promoted back) | optional (`shutil.copy2` to `.yaml.backup`) | no — `write_text` except the initializer's `atomic_writer` | no |
 
 Backups go to `.avar2-studio/backups/<filename>.<YYYYMMDD-HHMMSS>`, the last **20
 per filename**; a slider session can evict the last pre-edit copy in seconds, so a
 backup is a convenience, not an archive. Every loader returns an empty
-schema-shaped document for a missing **or unreadable** file and the next writer
-overwrites it — corrupt files are not surfaced as errors yet. `version` is
+schema-shaped document for a missing or unreadable file and the next writer
+overwrites it — **except a control sidecar that does not parse**, which is
+recorded and refused rather than overwritten: `control_axes/schema.py` raises
+`SidecarCorruptError` and remembers it in `load_errors()`, `GET /api/health`
+reports the map as `sidecar_errors`, and the next control write fails with the
+file's name instead of replacing the designer's layers. `version` is
 re-emitted where the schema defines one (grade, transforms and Kinetikern always
 write their current schema version); **unknown keys are carried through** by the control sidecar
 (`_KNOWN_TOP_KEYS` and friends exist precisely so a newer studio's file is not
@@ -215,8 +224,11 @@ The declared axis metadata is **committed beside the source** as
 tool-managed, gitignored `.avar2-studio/`, so a clean checkout built with
 each column's minimum as the default and every named style landed off its
 mapped value. `.avar2-studio/axis-metadata.json` is still read when the
-sibling is absent — and migrated to the sibling (then removed) on first
-access. Display names and ranges of the axes the studio knows about, keyed by
+sibling is absent — and on first access it is **copied** to the sibling, with
+the legacy copy deliberately kept (a second, older studio on the same folder
+still stages that name, and a hand-edited old file must not vanish silently;
+the sibling is read first, so a stale legacy file is never consulted). Display
+names and ranges of the axes the studio knows about, keyed by
 **uppercase** tag:
 
 ```jsonc
