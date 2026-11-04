@@ -2152,3 +2152,29 @@ The user answered the open question from "Verifier review of E1b `b6d9e83`": **a
 **FAILED — D1a (docs).** `factcheck-c1c8aca.md` is the D1a2 spec, with its convergence rule. Last round's rows are fixed except three (A: all seven fixed; B: 40 fixed, 3 still wrong). The deeper pass finds new rows: reader set ~30 plus register rows the D1b grep patterns miss, appendices ~45. The user-facing one comes first: **CLI.md's install recipe installs stale code.** GitHub's default branch is `main` at `a37ca53` (2026-09-12), where `build` has no `--config/--workdir` and `doctor` no `--strict`. Pin the branch the docs describe, or state the PyPI form once it exists.
 
 **Order for the agent (ROUND 25):** E2i-b → E2j-b → O1b → E2k (the user's composite rule) → D1a2 → `roundtrip_compare.py` over all glyphs, with the numbers per class and end in LOG.md → checkpoint. E2i-c waits for the user's answer on negative widths and is NOT a checkpoint condition. Until it lands, the docs state its measured reach. Real-Crispy builds take ~6 GB: run them one at a time.
+
+## User decision (2026-11-05) — the spacing amount scales with each instance's own width → E2i-c
+
+The user approved the verifier's recommendation for tightening beyond a glyph's advance. Today the studio's SPAC amount per glyph is one constant, measured at the default design. At the thinnest, narrowest style it exceeds the glyph's advance: the studio's TTF has 96 negative raw advances at Narrow 1 MaxOpsz at SPAC −100, and the export's cap distorts 26 of 27 rows. From now on **the amount scales with the instance**.
+
+**Rule.** For glyph g at design location L and SPAC value v, the per-side amount is
+
+    d_g(v, L) = v × scale × (ink_g(L) / mean_ink(L))^bias × (mean_ink(L) / mean_ink(D))
+
+- `ink` is the glyph's ink width.
+- `mean_ink` is the average over inked glyphs, as today.
+- `D` is the studio's default design, the relocated default the injector measures today.
+
+At L = D this is exactly today's amount, so the default does not change. With bias = 1 it reduces to `v × scale × ink_g(L) / mean_ink(D)`: each glyph's change is proportional to its own ink at that style. A thin, narrow style therefore tightens and loosens proportionally less.
+
+The font carries the amount exactly at the masters and interpolates between them. Composites take their base letter's amount at L (E2k). Per-instance SPAC overrides from the CSV are unaffected.
+
+**Scope.** The studio's injector (native and fontTools paths) and the sources export, together. In the export each master's twin carries that master's own amounts, so the cap (`_fit_dx`) has nothing left to do. Remove it, or prove it never triggers: the count of capped glyphs is 0. The implementation is the agent's choice, within decision 0004's budget. Interaction tuples with the parametric master regions, or SPAC composed at source level as the export does, are both acceptable if the numbers below hold. Write the choice and the reason in LOG.md, with a decision record if it changes 0004's reasoning.
+
+**Acceptance (real Crispy, all glyphs by glyph id, HarfBuzz for per-side changes, fontTools for raw advances):**
+1. At the default row, every glyph's SPAC ±100 change equals today's within 1 u.
+2. At every parametric master location, every glyph's per-side change equals the rule within 1 u, in the studio's TTF.
+3. No negative raw advance for any glyph at any CSV row at SPAC `lo` or `hi`, in the studio's TTF and in the fontmake build of the export. Today the studio's TTF has 96.
+4. The export round trip holds at BOTH ends: every glyph, every non-default row, within 1 u, with no cap.
+5. Budget: the gvar tuple count of `g` against today's 1,476, the largest per-glyph tuple header against the 64 KB ceiling, and the real-Crispy CLI build time and peak RSS, before and after, all in LOG.md.
+6. crispy-mini tests pin the rule at two masters and the default. The Transforms guide and any UI copy describing the width-aware spacing say what it now does, in the guide's register.
