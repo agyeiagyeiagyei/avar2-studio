@@ -339,12 +339,16 @@ def _production_to_source(font) -> Dict[str, str]:
 def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     """Give every source the same glyph structure, as the studio's build does.
 
-    Two shapes are normalised away, both because fontmake refuses a designspace
+    Three shapes are normalised away, all because fontmake refuses a designspace
     whose masters disagree and because the studio's fontc build flattens them
     anyway:
 
     * a component that is more than a translation (the flipped ``w``/``W``),
       which fontc's ``--decompose-transformed-components`` flattens;
+    * a MIXED glyph — components AND contours (``Q`` = ``O`` + a tail,
+      ``cent`` = ``c`` + a bar): a TrueType composite cannot carry its own
+      contours, so every compiler decomposes the components and the glyph
+      tracks as a simple one (E2j-b);
     * a glyph that is a composite in some sources and contours in others
       (``colon``), which no compiler can interpolate.
 
@@ -364,6 +368,8 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                     (len(glyph.contours), len(glyph.components)))
                 if any(_is_transformed(c.transformation)
                        for c in glyph.components):
+                    targets.add(name)
+                if glyph.components and glyph.contours:
                     targets.add(name)
     targets |= {name for name, seen in signatures.items() if len(seen) > 1}
 
@@ -407,6 +413,10 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                 "(E2i-b). Check the production names (public.postscriptNames).")
         glyph = twin[name]
         _decompose_transformed(glyph, original, name)
+        if glyph.components and glyph.contours:
+            # A mixed glyph cannot compile as a composite: flatten it, as the
+            # studio's build does, so it tracks like a simple one (E2j-b).
+            _flatten(glyph, original, name)
         composite = bool(glyph.components)
         if composite and _use_my_metrics(glyph):
             continue

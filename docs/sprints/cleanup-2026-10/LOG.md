@@ -2559,3 +2559,15 @@ Test: `test_a_glyph_with_a_production_name_still_gets_its_spacing` sets
 fontmake (the TTF really is `uni0061`), then exports with that font as the basis
 and asserts the twin's `a` takes the built amount.
 
+### E2j-b — mixed glyphs flatten and track as simple glyphs (ROUND 25)
+
+`Q` is `O` plus a tail contour, `cent` is `c` plus a bar. A TrueType composite
+cannot carry its own contours, so every compiler decomposes the components and
+the glyph tracks on BOTH sides; the twin kept the component and applied the
+composite rule. `_decompose_transformed_sources` now flattens every mixed glyph
+in every source and layer (so the masters stay consistent), and `_shift_spacing`
+flattens one it is handed directly (the unit-test path).
+
+Test: `test_a_mixed_glyph_flattens_and_tracks_like_a_simple_one` builds `Q` as
+contour + component, asserts the twin has no components left and moves by
+`+2dx` like a simple glyph.

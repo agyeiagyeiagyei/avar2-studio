@@ -911,3 +911,45 @@ def test_a_glyph_with_a_production_name_still_gets_its_spacing(project, tmp_path
     mean = sum(inks.values()) / len(inks)
     assert twin_width - master_width == 2 * round(40 * (ink / mean) * 1.25)
 
+
+def test_a_mixed_glyph_flattens_and_tracks_like_a_simple_one():
+    """E2j-b: `Q` is `O` plus a tail contour; a compiler decomposes it.
+
+    A TrueType composite cannot carry its own contours, so the studio's build
+    flattens mixed glyphs and they track on BOTH sides. The twin used to keep
+    the component and apply the composite rule.
+    """
+    import copy as _copy
+
+    import ufoLib2
+    from ufoLib2.objects import Component
+
+    from avar2_studio.sources_export import _shift_spacing
+
+    font = ufoLib2.Font()
+    font.info.unitsPerEm = 1000
+    o = font.newGlyph("O")
+    pen = o.getPen()
+    pen.moveTo((100, 0))
+    pen.lineTo((500, 0))
+    pen.lineTo((500, 700))
+    pen.lineTo((100, 700))
+    pen.closePath()
+    o.width = 700
+    q = font.newGlyph("Q")
+    q.components.append(Component(baseGlyph="O", transformation=(1, 0, 0, 1, 0, 0)))
+    tail = q.getPen()
+    tail.moveTo((450, 0))
+    tail.lineTo((620, -80))
+    tail.lineTo((450, -120))
+    tail.closePath()
+    q.width = 700
+
+    twin = _copy.deepcopy(font)
+    inks = {"O": 400.0, "Q": 400.0}
+    _shift_spacing(twin, font, inks, 400.0, kind="spac", value=100,
+                   bias=1.0, scale=1.0)
+
+    assert not twin["Q"].components, "mixed glyphs are flattened like the build does"
+    assert twin["Q"].width == 900, "advance +2dx, as a simple glyph"
+    assert twin["O"].width == 900
