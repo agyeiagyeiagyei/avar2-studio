@@ -2231,3 +2231,43 @@ Not yet evidenced here: the fontmake round trip that shows the mappings landing
 on the studio's rows — that is the combined acceptance for E1d/E2h/E2i/E2j the
 verifier specified, and it needs the spacing fixes first (they change the same
 build).
+
+### E2h — a symmetric SPAC range exports a twin at BOTH ends (ROUND 23)
+
+`ends = [hi] + ([lo] if abs(lo + hi) > 1e-9 else [])` treated a symmetric range
+as needing one twin. It does not: an axis with no master below the default has
+no negative side, so fontmake interpolates flat at SPAC < 0 while the injector
+tightens (crispy-mini at −40: 0.0 u against −88 u). Crispy's range is −100…0…100,
+so its real zip shipped 36 twins and the whole negative half was dead. The
+docstring said "one twin per end defines the axis" — the reasoning was wrong,
+not just the code. Both non-zero ends are now written (`[hi] if lo == hi else
+[hi, lo]`).
+
+Test: `test_the_sources_carry_the_spacing_axis` is parametrized over the
+asymmetric (−20…40) and the symmetric (−40…40) range and compares the advance
+change at **both** ends against the injector within 1 u. With the old `ends`
+the symmetric case fails on the twin count (8 sourced twins instead of 16);
+with the fix both parametrizations pass. It also asserts the twins' locations
+are exactly `{lo, hi}`.
+
+Memory budget (the verifier's ask) — real Crispy through the CLI
+(`--format sources`, `~/e1b-check/sources`), one run at a time, measured with
+`/usr/bin/time -l`, old code vs new code, same command:
+
+| | sources | twin sources | zip | wall | max RSS | peak footprint |
+|---|---|---|---|---|---|---|
+| before E2h | 132 | 36 | 27.5 MB | 100.9 s | 1.34 GB | 498 MB |
+| after E2h | **168** | **72** | 41.4 MB | 114.6 s | 1.42 GB | 604 MB |
+
+The extra end costs **+6 % resident** and 14 s, not a second copy of the
+masters held twice over: the twins are built, written and released per source
+inside the same loop. No streaming rework needed at this size, so the writer
+keeps the simpler shape. (The 72 twins are the verifier's predicted count:
+36 masters × 2.)
+
+The fontmake build of the new real-Crispy zip fails early with `The width
+should not be negative: 'A'` — that is E2i, not this item: the renderer still
+scales each glyph's amount by ink measured on the **hairline default source**
+(mean 96.3 u) instead of the design the injector sees (mean ~1,750 u), so the
+negative end over-tightens. E2i is next and the combined round trip is its
+acceptance.

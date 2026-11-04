@@ -245,8 +245,11 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[s
     left side (advance ``+d``), and a ``USE_MY_METRICS`` composite is left alone
     because it inherits its base's delta.
 
-    The transform is linear in SPAC, so one twin per end defines the axis: at the
-    maximum always, and at the minimum when the range is not symmetric.
+    The transform is linear in SPAC, so the axis is defined by its ends — and
+    BOTH non-zero ends need a twin, symmetric range or not. With only the
+    maximum, nothing sits below the default, so a fontmake build is flat at
+    negative SPAC while the injector tightens (crispy-mini at −40: 0.0 u vs
+    −88 u; Crispy is −100…100) — E2h.
     """
     entry = _spacing_transform(source_path)
     if entry is None:
@@ -279,7 +282,9 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path) -> Optional[s
     axis.maximum = hi
     doc.addAxis(axis)
 
-    ends = [hi] + ([lo] if abs(lo + hi) > 1e-9 else [])
+    # One twin per non-zero end. A symmetric range is NOT an exception: an
+    # axis with no master below the default has no negative side at all.
+    ends = [hi] if lo == hi else [hi, lo]
     twins = []
     # Only the masters get twins: a sparse brace source is an extra layer of its
     # master's UFO and rides along in the deep copy.

@@ -286,20 +286,30 @@ def _outline_distance(a, b, loc, glyphs):
 
 @needs_fontc
 @pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
-def test_the_sources_carry_the_spacing_axis(project, tmp_path):
+@pytest.mark.parametrize("lo,hi", [(-20, 40), (-40, 40)])
+def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
     """E2: the source-level SPAC renderer is the injector's arithmetic.
 
     Two builds of the same project: one with the SPAC twins in the sources, one
     with spacing switched off in the sidecar. The second is then spaced by the
     **injector** itself (`WidthAwareSpacTransform.apply`), and the two per-glyph
-    ADVANCE CHANGES from ``SPAC = 0`` to ``SPAC = max`` must agree within 1 u at
-    every non-default mapping row — the source renderer and the binary one
-    producing the same spacing is the whole claim.
+    ADVANCE CHANGES from ``SPAC = 0`` to each END of the range must agree
+    within 1 u at every non-default mapping row — the source renderer and the
+    binary one producing the same spacing is the whole claim.
+
+    The symmetric range (−40…40) is E2h: with a twin at the maximum only, the
+    sources were flat below the default (0.0 u at SPAC −40 against the
+    injector's −88 u), because nothing sat at the negative end.
 
     Comparing against the studio's built TTF would also drag in the build-time
     default relocation (decision 0001), so the comparison is between the two
     renderers instead, on the same masters.
     """
+    transforms = project["source"].parent / "CrispyMini-transforms.json"
+    sidecar = json.loads(transforms.read_text())
+    sidecar["transforms"][0]["params"].update({"min": lo, "max": hi})
+    transforms.write_text(json.dumps(sidecar))
+
     zip_path = _zip(project, tmp_path)
     work = tmp_path / "rt"
     work.mkdir()
@@ -309,9 +319,13 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path):
     doc = DesignSpaceDocument.fromfile(str(ds_path))
     spac = next((a for a in doc.axes if a.tag == "SPAC"), None)
     assert spac is not None, [a.tag for a in doc.axes]
-    assert (spac.minimum, spac.default, spac.maximum) == (-20.0, 0.0, 40.0)
+    assert (spac.minimum, spac.default, spac.maximum) == (float(lo), 0.0, float(hi))
     twins = [s for s in doc.sources if s.location.get(spac.name) not in (None, 0)]
-    assert len(twins) == 2 * 8, f"{len(twins)} twin sources for 8 masters"
+    assert len(twins) == 2 * 8, (
+        f"{len(twins)} twin sources for 8 masters — one per end, symmetric "
+        "range included (E2h)")
+    ends = {s.location[spac.name] for s in twins}
+    assert ends == {float(lo), float(hi)}, f"twins at both ends: {sorted(ends)}"
 
     res = subprocess.run([FONTMAKE, "-m", str(ds_path), "-o", "variable",
                           "--output-dir", str(tmp_path / "fm")],
@@ -354,7 +368,7 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path):
     shutil.copy2(plain, target)
     ctx = BuildContext(build_dir=quiet, source_path=project["source"],
                        glyphs_path=project["source"], family="CrispyMini")
-    params = {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}
+    params = {"min": lo, "max": hi, "bias": 1.0, "scale": 1.25}
     # apply() returns the font it wrote — it may not be the file passed in.
     injected = WidthAwareSpacTransform().apply(target, params, ctx)
 
@@ -367,10 +381,13 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path):
         user = {t: float(v) for t, v in row.in_axes.items()}
         for name in glyphs:
             base = _one_metric(with_spac, name, "advance", {**user, "SPAC": 0.0})
-            top = _one_metric(with_spac, name, "advance", {**user, "SPAC": 40.0})
             ref_base = _one_metric(injected, name, "advance", {**user, "SPAC": 0.0})
-            ref_top = _one_metric(injected, name, "advance", {**user, "SPAC": 40.0})
-            worst = max(worst, abs((top - base) - (ref_top - ref_base)))
+            for end in (lo, hi):
+                moved = _one_metric(with_spac, name, "advance",
+                                    {**user, "SPAC": float(end)})
+                ref = _one_metric(injected, name, "advance",
+                                  {**user, "SPAC": float(end)})
+                worst = max(worst, abs((moved - base) - (ref - ref_base)))
     assert worst <= 1.0, f"the SPAC shape differs by {worst:.2f} u"
 
 

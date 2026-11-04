@@ -1248,3 +1248,16 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   acceptance (spacing fixes change the same build)
 - reserved paths/ports untouched: `~/Documents/Crispy` (copy only), 5070, 5071,
   8001, `~/avar2-studio-test`
+
+### ROUND 23 E2h — a symmetric SPAC range exports both ends (2026-11-04)
+
+- crispy-mini, symmetric −40…40: **16 twins** (8 masters × 2), locations
+  exactly {−40, +40}; the advance change matches the injector within 1 u at
+  **both** ends. Old code: 8 twins, assertion fails (reproduced)
+- real Crispy via the CLI: 36 → **72** twins, 132 → **168** sources, zip
+  27.5 → 41.4 MB
+- peak RSS 1.34 → **1.42 GB** (+6 %), peak memory footprint 498 → 604 MB,
+  wall 100.9 → 114.6 s — no streaming rework needed
+- `pytest tests/test_sources_export.py -q` → **11 passed**; the fontmake build
+  of the real zip is blocked by E2i (negative widths from the hairline ink
+  basis), not by this item
