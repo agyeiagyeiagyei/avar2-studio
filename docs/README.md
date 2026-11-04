@@ -4,7 +4,7 @@
 
 | Read this | When you want |
 |---|---|
-| [../README.md](../README.md) | what the studio is, the browser demo, install, the files it reads and writes, the six features |
+| [../README.md](../README.md) | what the studio is, the browser demo, install, the files it reads and writes, the seven features |
 | [guides/authoring-instances.md](guides/authoring-instances.md) | instances and avar2 mappings, walked on the example fonts |
 | [guides/secondary-parametric-axes.md](guides/secondary-parametric-axes.md) | glyph-scoped axes: coverage, brace and correction layers, drawing them in Fontra |
 | [guides/grade.md](guides/grade.md) | grade: headroom, intensity, the caps, how the GRAD braces are generated |
