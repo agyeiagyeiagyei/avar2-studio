@@ -2,7 +2,7 @@
 
 A designspace fixture derived from Roboto Delta, showing the **case-split**
 parametric layout: nine axes in three trios, one per script case, across
-**19 sources** and **63 glyphs**.
+**19 sources** and **67 glyphs** per UFO.
 
 ```bash
 avar2-studio examples/roboto-delta-mini/sources/RobotoDeltaMini.designspace
@@ -21,9 +21,9 @@ digits.
 ## What ships
 
 - `RobotoDeltaMini.designspace` — the nine axes, **19 sources** (a base plus one
-  source per axis extreme; the sources are named `temp_master.N` because they came
-  out of a generated split) and a single `Default` instance at the trios'
-  defaults.
+  source per axis extreme; each source is named for its location,
+  `RobotoDeltaMini-<tag><value>.ufo`, e.g. `RobotoDeltaMini-XOUC310.ufo`) and a
+  single `Default` instance at the trios' defaults.
 - 19 UFOs, one per source.
 
 There is **no mappings CSV and no `wght` axis**: this fixture is about the
