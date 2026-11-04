@@ -282,33 +282,132 @@ def _use_my_metrics(glyph) -> bool:
     return bool(lib.get("public.useMyMetrics") or lib.get("com.glyphs.useMyMetrics"))
 
 
-def _shift_spacing(twin, inks: Dict[str, float], mean_ink: float, *,
+def _is_transformed(transformation) -> bool:
+    """True when a component is more than a translation (scale/flip/rotate).
+
+    glyphsLib's ``--decompose-transformed-components``, which the studio's
+    build passes, flattens these; a twin has to match it glyph for glyph, or a
+    flipped ``w`` tracks like a composite there and like a simple glyph here
+    (E2j).
+    """
+    a, b, c, d, _ox, _oy = transformation
+    return (abs(a - 1) > 1e-9 or abs(b) > 1e-9
+            or abs(c) > 1e-9 or abs(d - 1) > 1e-9)
+
+
+def _flatten(glyph, provider, name: str) -> bool:
+    """Replace ``glyph``'s components with their outlines, in place."""
+    if not glyph.components:
+        return False
+    from fontTools.pens.pointPen import SegmentToPointPen
+    from fontTools.pens.recordingPen import DecomposingRecordingPen
+
+    pen = DecomposingRecordingPen(provider)
+    provider[name].draw(pen)
+    glyph.clearContours()
+    glyph.clearComponents()
+    pen.replay(SegmentToPointPen(glyph.getPointPen()))
+    return True
+
+
+def _decompose_transformed(glyph, original_font, name: str) -> bool:
+    """Flatten ``glyph``'s components from the UNSHIFTED original.
+
+    The original font is used on purpose: the twin's own base glyphs already
+    carry their SPAC shift by the time this runs, and drawing through them
+    would bake that shift in twice (E2j's double-shifted composites).
+    """
+    if not any(_is_transformed(c.transformation) for c in glyph.components):
+        return False
+    return _flatten(glyph, original_font, name)
+
+
+def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
+    """Give every source the same glyph structure, as the studio's build does.
+
+    Two shapes are normalised away, both because fontmake refuses a designspace
+    whose masters disagree ("differing number of contours in glyph U") and
+    because the studio's fontc build decomposes them anyway:
+
+    * a component that is more than a translation (the flipped ``w``/``W``),
+      which fontc's ``--decompose-transformed-components`` flattens;
+    * a glyph that is a composite in some sources and contours in others
+      (``colon``), which no compiler can interpolate.
+
+    Plain composites stay composites: the injector's composite rule depends on
+    them.
+    """
+    signatures: Dict[str, set] = {}
+    targets = set()
+    for source in doc.sources:
+        font = source.font
+        if font is None:
+            continue
+        for layer in font.layers:
+            for name in layer.keys():
+                glyph = layer[name]
+                signatures.setdefault(name, set()).add(
+                    (len(glyph.contours), len(glyph.components)))
+                if any(_is_transformed(c.transformation)
+                       for c in glyph.components):
+                    targets.add(name)
+    targets |= {name for name, seen in signatures.items() if len(seen) > 1}
+
+    done = 0
+    for source in doc.sources:
+        font = source.font
+        if font is None:
+            continue
+        for layer in font.layers:
+            for name in list(layer.keys()):
+                if name in targets and _flatten(layer[name], layer, name):
+                    done += 1
+    if done:
+        log.info("sources_export: %d components decomposed (%d glyphs)",
+                 done, len(targets))
+    return done
+
+
+def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                    kind: str, value: float, bias: float, scale: float) -> None:
     """Move one twin's metrics as the injector moves its phantom points.
 
     Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
-    both sidebearings open equally; a composite moves its left side only.
+    both sidebearings open equally. Composite (the injector moves the LEFT
+    phantom only): the advance moves by ``dx`` and the left side by ``dx``, the
+    right one not at all — so each component's offset is corrected by the shift
+    its base already carries, or the composite inherits the base's move AND its
+    own (Cacute opened +246 and closed −123; E2j). A composition the studio's
+    build decomposes is flattened first and then tracks like a simple glyph.
     """
+    shifts: Dict[str, int] = {}
     for name, ink in inks.items():
         if name not in twin:
-            # `.notdef` is in the ink basis but glyphsLib did not write it; the
-            # compiler will synthesise the same box.
             continue
         glyph = twin[name]
-        amount = (value if kind == "spac"
-                  else value * ((ink / mean_ink) ** bias) * scale)
-        dx = round(amount)
-        if not dx:
-            continue
+        _decompose_transformed(glyph, original, name)
         composite = bool(glyph.components)
         if composite and _use_my_metrics(glyph):
             continue
+        amount = (value if kind == "spac"
+                  else value * ((ink / mean_ink) ** bias) * scale)
+        dx = round(amount)
         if dx < 0:
             dx = _fit_dx(dx, glyph.width, composite)
-            if dx == 0:
-                continue
-        _shift_metrics(glyph, dx)
-        glyph.width += dx if composite else 2 * dx
+        if dx:
+            shifts[name] = dx
+
+    for name, dx in shifts.items():
+        glyph = twin[name]
+        if glyph.components:
+            for component in glyph.components:
+                base_shift = shifts.get(component.baseGlyph, 0)
+                a, b, c, d, ox, oy = component.transformation
+                component.transformation = (a, b, c, d, ox + dx - base_shift, oy)
+            glyph.width += dx
+        else:
+            _shift_metrics(glyph, dx)
+            glyph.width += 2 * dx
 
 
 def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
@@ -375,7 +474,7 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     for source in [s for s in doc.sources if not s.layerName]:
         for value in ends:
             twin_font = _copy.deepcopy(source.font)
-            _shift_spacing(twin_font, inks, mean_ink, kind=kind,
+            _shift_spacing(twin_font, source.font, inks, mean_ink, kind=kind,
                            value=value, bias=bias, scale=scale)
             twin = SourceDescriptor()
             twin.font = twin_font
@@ -729,6 +828,10 @@ def build_sources_zip(source_path: Path, out_zip: Path, *,
     _add_kinetikern_braces(font, kinetikern or {}, rows)
 
     doc = glyphsLib.to_designspace(font)
+    # E2j: the studio's compiler decomposes transformed components; the
+    # sources carry the same glyph structure so fontmake accepts them and the
+    # twins' arithmetic matches the studio's font glyph for glyph.
+    _decompose_transformed_sources(doc)
     # E2: spacing rides the sources as a metrics-only SPAC axis rendered from
     # the transforms sidecar, so a fontmake build of the zip is spaced.
     spac_tag = _add_spacing_axis(doc, sidecar_base, ink_font=ink_font)

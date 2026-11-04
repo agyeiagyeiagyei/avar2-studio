@@ -2322,3 +2322,52 @@ Tests: `test_the_spacing_basis_is_the_built_font` (a font whose ink differs
 from the source's drives the twin amounts) and
 `test_a_twin_never_carries_a_negative_advance` (the cap's rule, with Crispy's
 own numbers). `pytest tests/ -q` → **663 passed**; ruff clean.
+
+### E2j — composites: one shift, and the ones the studio decomposes are flattened (ROUND 23)
+
+Two defects, both measured on the real Crispy:
+
+1. **Plain composites were shifted twice.** `_shift_metrics` moves the base
+   glyph's drawing by its own `dx`, which every composite using that base
+   inherits, and the composite was then moved by its own `dx` on top. Cacute
+   opened +246 and closed −123 where the studio's font opens +153 and closes
+   0; M did the same at twice the scale.
+2. **Transformed components were not decomposed.** fontc runs the studio's
+   build with `--decompose-transformed-components`, so `w` (flipped `m`) and
+   `W` (flipped `M`) are simple glyphs there, while the export kept them as
+   composites and applied the composite rule: `w` opened on one side only, and
+   `W`'s flipped `M` moved its outline LEFT.
+
+The writer now applies the injector's rule per twin, in two passes: every
+glyph's shift is computed first, then components are corrected by the shift
+their base already carries (`ox += dx − shift[base]`), so the composite's left
+side moves by exactly `dx` and the right side not at all — the injector's
+left-phantom behaviour. Components that are more than a translation are
+flattened before that, from the **unshifted** original, so the base's shift is
+never baked in twice.
+
+**Structure uniformity.** Decomposing only the twins made fontmake refuse the
+designspace (`Fonts had differing number of contours in glyph U` — the masters
+kept the composites). Two shapes are therefore normalised across every source
+and layer before the twins are made: a transformed component, and a glyph that
+is a composite in some sources and contours in others (`colon`). Plain
+composites stay composites — the injector's rule depends on them. 788
+components in 17 glyphs are flattened on the real Crispy.
+
+Evidence — real Crispy, same copy, `roundtrip_compare.py`:
+
+* `fontmake -m Crispy.designspace -o variable` → **exit 0, 0 ERROR**,
+  `Crispy-VF.ttf`;
+* **rows**: 28 non-default rows, worst **3.0 u**;
+* **SPAC +100**: 28/28 rows inside 1 u — every glyph, composites included;
+* **SPAC −100**: 28/28 rows inside 1 u except `W`'s advance at the narrow
+  rows, where the E2i cap applies (181 u worst, at the hairline corner; the
+  master cannot carry the amount — see E2i's paragraph). `w`, `M`, `Cacute`
+  and the rest match.
+
+Test: `test_a_composite_tracks_like_the_injector_and_flipped_ones_decompose`
+builds a small ufoLib2 font with m/n/acute, a plain composite `M`, an accented
+`nacute` and a flipped `w`; asserts the composite takes `+dx` (not `+2dx`), its
+component offset is NOT shifted again, the accented one stays put for both
+components, and the flipped one is decomposed and then tracks like a simple
+glyph. `pytest tests/ -q` → **664 passed**; ruff clean.

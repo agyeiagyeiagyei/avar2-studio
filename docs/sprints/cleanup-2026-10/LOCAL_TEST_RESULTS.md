@@ -1272,3 +1272,13 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
   (hairline `W`: 249 u against a 442 u change) — up to ~134 u at narrow rows
 - `pytest tests/ -q` → **663 passed**; ruff clean
 - composites still deviate (E2j next)
+
+### ROUND 23 E2j — composites track like the injector's phantoms (2026-11-04)
+
+- real Crispy: `fontmake` → **exit 0, 0 ERROR**; rows worst **3.0 u**;
+  SPAC **+100: 28/28 rows inside 1 u, every glyph incl. composites**;
+  SPAC −100: 28/28 inside 1 u except `W` advance at narrow rows (the E2i cap,
+  181 u worst, master advance 249 u against a 442 u change)
+- 788 components in 17 glyphs flattened so every source (and twin) agrees on
+  the glyph structure fontmake interpolates
+- `pytest tests/ -q` → **664 passed**; ruff clean

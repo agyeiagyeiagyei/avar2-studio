@@ -14,6 +14,7 @@ route and the CLI both produce it; no UI copy names a sidecar.
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import subprocess
@@ -699,3 +700,66 @@ def test_a_twin_never_carries_a_negative_advance():
     for width in (0, 1, 2, 3, 66, 166):
         assert width + 2 * _fit_dx(-500, width, False) >= 0, width
 
+
+def _rect(font, name, x0, width, height=700):
+    glyph = font.newGlyph(name)
+    pen = glyph.getPen()
+    pen.moveTo((x0, 0))
+    pen.lineTo((x0 + width, 0))
+    pen.lineTo((x0 + width, height))
+    pen.lineTo((x0, height))
+    pen.closePath()
+    glyph.width = width + 2 * x0
+    return glyph
+
+
+def test_a_composite_tracks_like_the_injector_and_flipped_ones_decompose():
+    """E2j: composites open ONE side like the injector, and are never shifted twice.
+
+    The injector moves a composite's LEFT phantom only (advance and left side
+    by `dx`, right side unchanged), and it moves the base glyph too — so the
+    composite inherits the base's move. Shifting the composite AND leaving the
+    inherited move in place opened Cacute +246 and closed it −123 on the real
+    Crispy. Transformed components (`w` = flipped `m`, `W` = flipped `M`) are
+    decomposed by the studio's build, so a twin has to decompose them too.
+    """
+    import ufoLib2
+    from ufoLib2.objects import Component
+
+    from avar2_studio.sources_export import _shift_spacing
+
+    font = ufoLib2.Font()
+    font.info.unitsPerEm = 1000
+    _rect(font, "m", 100, 600)
+    _rect(font, "n", 100, 500)
+    _rect(font, "acute", 200, 100)
+    plain = font.newGlyph("M")                      # plain composite of m
+    plain.components.append(Component("m", (1, 0, 0, 1, 0, 0)))
+    plain.width = 800
+    accented = font.newGlyph("nacute")              # two translated components
+    accented.components.append(Component("n", (1, 0, 0, 1, 0, 0)))
+    accented.components.append(Component("acute", (1, 0, 0, 1, 0, 0)))
+    accented.width = 700
+    flipped = font.newGlyph("w")                    # transformed → decomposed
+    flipped.components.append(Component("m", (-1, 0, 0, 1, 700, 0)))
+    flipped.width = 800
+
+    twin = copy.deepcopy(font)                      # what the writer does
+    inks = {name: 600.0 for name in ("m", "n", "acute", "M", "nacute", "w")}
+    _shift_spacing(twin, font, inks, 600.0, kind="spac", value=100.0,
+                   bias=1.0, scale=1.0)
+
+    m, M = twin["m"], twin["M"]
+    assert m.width == 800 + 200, "simple: advance + 2·dx"
+    assert M.width == 800 + 100, "composite: advance + dx (the injector's rule)"
+    ox = M.components[0].transformation[4]
+    assert ox == 0, (
+        "the composite must not add a second shift on top of the move its base "
+        f"already carries (component offset {ox})")
+    nacute = twin["nacute"]
+    assert nacute.width == 700 + 100
+    assert [c.transformation[4] for c in nacute.components] == [0, 0]
+    w = twin["w"]
+    assert not w.components, "a transformed component is decomposed"
+    assert w.width == 800 + 200, "…and then tracks like a simple glyph"
+    assert w.contours, "the decomposed outlines are there"
