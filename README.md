@@ -90,8 +90,10 @@ Every format is specified in [docs/SIDECARS.md](docs/SIDECARS.md).
 
 **Instances & avar2 mappings.** Named instances tuned with the sidebar sliders,
 each rendering live in the built font; user-axis coordinates under **AVAR2
-MAPPINGS** turn a row into an avar2 mapping, and **mapping lint** flags rows the
-build would silently drop. [Guide](docs/guides/authoring-instances.md).
+MAPPINGS** turn a row into an avar2 mapping. (The browser demo additionally
+lints the mappings — rows the build would silently drop and unmapped grid
+points; that lint ships only with the static demo's dataset, not with the
+desktop app.) [Guide](docs/guides/authoring-instances.md).
 
 ![The Instances sidebar: sample text, core and secondary parametric axes, and the avar2 mappings of the selected style](docs/images/sidebar-axes.png)
 
