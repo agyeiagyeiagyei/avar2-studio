@@ -109,9 +109,11 @@ you can name only one or two places where a Bold `a` should be thinner than a Bo
 
 ## What a couple of instances buys you
 
-Two points define a line, not a designspace. The Crispy production font has **30
-authored instances spanning three widths, five weights and two optical sizes**;
-Roboto Delta has dozens more. Two rows already give a workable single-axis range;
+Two points define a line, not a designspace. The Crispy production font's
+mapping CSV has **30 rows spanning three widths, five weights and two optical
+sizes** (`Crispy-avar.csv`, measured 2026-11-04: `wdth` 5/100/220, `wght`
+1/100/400/900/1000, `opsz` 14/144); Roboto Delta has more. Two rows already give
+a workable single-axis range;
 `Thin` and `Black` extend it, a condensed row puts `wdth` in play, and optical
 sizes that prefer thicker thin-strokes at 9 pt put `opsz` in play. Each row is a
 few minutes in the studio.
