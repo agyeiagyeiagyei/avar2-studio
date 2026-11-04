@@ -27,7 +27,7 @@ def kinetikern_propose():
     if not (state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists()):
         return jsonify({"error": "Variable font not built yet."}), 404
     if _kinetikern.engine_path() is None:
-        return jsonify({"error": "Kinetikern2 engine not built (native/kinetikern2/README.md)."}), 503
+        return jsonify({"error": "Kinetikern2 engine not available in this installation, so the Kinetikern tab is disabled."}), 503
     name = request.args.get("instance")
     if name:
         coords = server._grade_instance_coords().get(name)
@@ -140,7 +140,7 @@ def _kinetikern_ready():
     if not (state.VARIABLE_FONT_PATH and state.VARIABLE_FONT_PATH.exists()):
         return jsonify({"error": "Variable font not built yet."}), 404
     if _kinetikern.engine_path() is None:
-        return jsonify({"error": "Kinetikern2 engine not built (native/kinetikern2/README.md)."}), 503
+        return jsonify({"error": "Kinetikern2 engine not available in this installation, so the Kinetikern tab is disabled."}), 503
     return None
 
 

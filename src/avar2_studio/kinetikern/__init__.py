@@ -56,7 +56,7 @@ def _engine():
     if _ENGINE is None:
         path = engine_path()
         if path is None:
-            raise kb.EngineError("Kinetikern2 engine not built; see native/kinetikern2/README.md")
+            raise kb.EngineError("Kinetikern2 engine not available in this installation")
         _ENGINE = kb.Engine(str(path))
     return _ENGINE
 

@@ -1320,3 +1320,10 @@ item; the loop from C8 will use `~/avar2-agent/`). Ports used by the agent:
 - the unreproducible Crispy leak numbers removed; the mechanism and the anchor
   recipe kept
 - register grep **0 hits**; links/anchors **0 broken** over 31 files
+
+### ROUND 23 K5 — engine-missing copy (2026-11-04)
+
+- the 503 body is "Kinetikern2 engine not available in this installation, so the
+  Kinetikern tab is disabled." (both route sites and `EngineError`); no
+  `native/…README.md`
+- `pytest tests/ -q` → **668 passed**; ruff clean

@@ -2484,3 +2484,17 @@ still complete.
 
 Check: reader-set register grep **0 hits**; link/anchor check over 31 files
 **0 broken**.
+
+### K5 — the Kinetikern tab's engine-missing copy names no repo file (ROUND 23)
+
+The 503 the tab renders verbatim read `Kinetikern2 engine not built
+(native/kinetikern2/README.md).` — a path inside this repository, shown to a
+designer who has never seen it. Both route sites and the engine loader's own
+`EngineError` now say **"Kinetikern2 engine not available in this installation,
+so the Kinetikern tab is disabled."** The build instruction stays where it
+belongs: `doctor`'s `fix=` line, which is a developer surface.
+
+Test: `test_the_engine_missing_503_names_no_repo_file` stubs `engine_path` to
+`None`, hits `/api/kinetikern/propose`, and asserts the 503 body carries no
+`native/` and no `.md`. `pytest tests/ -q` → **668 passed**; ruff clean. The tab
+and `kinetikern-copy.js` carry no other repo file names.

@@ -66,3 +66,22 @@ def test_the_route_needs_a_source(monkeypatch, client):
     c, _src, _rebuilds = client
     monkeypatch.setattr(state, "ORIGINAL_PATH", None)
     assert c.put("/api/kinetikern", json={"enabled": False}).status_code == 400
+
+
+def test_the_engine_missing_503_names_no_repo_file(monkeypatch, client):
+    """K5: the tab renders this string verbatim, so it must speak to a designer.
+
+    The 503 used to read "Kinetikern2 engine not built
+    (native/kinetikern2/README.md)." — a path inside the repository shown in the
+    studio's own Kinetikern tab (verifier, factcheck aside).
+    """
+    c, _src, _rebuilds = client
+    monkeypatch.setattr(kinetikern, "engine_path", lambda: None)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", Path(__file__))
+
+    resp = c.get("/api/kinetikern/propose?coordinates=%7B%7D")
+
+    assert resp.status_code == 503, resp.get_json()
+    message = resp.get_json()["error"]
+    assert "native/" not in message and ".md" not in message, message
+    assert "engine" in message.lower(), message
