@@ -2949,3 +2949,35 @@ what makes the budget predictable: corners = masters (6–9 on Crispy) instead o
 Nothing is committed to the E2i-c branch for this yet — the interface change is
 the next piece of work, and it has to land before the 8 capped moves can be
 classified on the export, the 8.02 u fixture gap traced, or the round trip re-run.
+
+#### E2i-c: the corner plumbing lands — 9 corners, 6 s, SPAC back, budget measured
+
+`e2ic-wip` `138fdc7`. The caller now supplies the corners instead of the
+injector guessing them:
+
+- `BuildContext.master_locations` — normalized design-space locations, `{}` for
+  the default, `None` = infer from gvar as before;
+- `pipeline._master_locations` reads the active designspace, keeps the axes some
+  master moves off its default, normalizes per axis and dedupes →
+  **9 corners on Crispy, 8 on Crispy Mini** (the real master grid, including
+  XOPQ 0.238877 / YOPQ 0.927007 of the 47-700-* masters);
+- the transform prefers them, logs the count, and keeps the old inference only
+  as a fallback for callers with no designspace.
+
+Measured on the real unspaced Crispy build [verified]:
+
+| number | value |
+|---|---|
+| injector time | **6 s** (the failed build took 422.8 s and ended with no SPAC) |
+| corners | **9** (inference gave 1,280) |
+| gvar tuples | 123,788 → **127,442**, i.e. +3,654 = 18/glyph (9 × 2 ends) |
+| worst tuples/glyph | 1,474 → **1,492** |
+| worst per-glyph header | ≈32.4 KB → **≈32.8 KB** of the 65,535 ceiling (~50 % headroom) |
+| axes in the result | XTRA XOPQ YOPQ LCWD YMOD GRAD slnt ROND **SPAC** |
+
+The 64 KB ceiling was never the rule's fault: it was 1,280 corners × 2 ends
+(+56 KB of headers) against the 9 the designspace actually has.
+
+Still open, in order: the 8 capped moves on the exported designspace (floor or
+`blocked`), the 8.02 u fixture parity gap, the four export-test expectations,
+then the all-glyph round trip on the real Crispy under E2i-c and the checkpoint.
