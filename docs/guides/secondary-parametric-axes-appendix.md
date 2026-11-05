@@ -82,7 +82,9 @@ correction applies at *every* value of the omitted axis.
 
 Crispy hits this squarely. Its default master is at XTRA 47, and the natural
 correction corner (47 · 1462 · 275) is *also* at XTRA 47 — so XTRA drops out of
-the tuple and the lowercase correction leaks across the whole width axis.
+the tuple and the lowercase correction leaks across the whole width axis. (The
+numbers are production Crispy's, read from its shipped `fvar` on 2026-11-05:
+XTRA 47/47/1715, XOPQ 1/1/1462, YOPQ 1/1/275 — min/default/max.)
 
 The fix is an **anchor**: a second layer for the same glyph, at the same
 secondary-axis value, at a *different* value of the unpinned axis, with **no
@@ -145,8 +147,9 @@ Brace-layer outlines are edited inline through an **embedded Fontra**, opened
 from the ↗ button on any layer row, in a resizable **right-side drawer** trimmed
 to a brace-edit surface — sidebars and drawing tools are hidden — that drops
 straight into edit mode on the chosen glyph at the brace location. Fontra runs
-same-origin behind the studio's own server (ARCHITECTURE §7); "Open in new tab"
-opens the raw editor.
+same-origin behind the studio's own server (ARCHITECTURE §7). The drawer's one
+button is **Done editing**, which closes it and rebuilds the preview from the
+shadow; drawing, saving and the layer list are Fontra's own, inside the drawer.
 
 **Multi-source batch editing.** In a studio-axis session the drawer exposes
 Fontra's sources list, trimmed to *studio layers only*, so you can edit several
@@ -158,11 +161,14 @@ the batch in sync.
 
 **Reference measurements.** Drawing a horizontal correction means matching a
 glyph's bars to the ones that already read correctly — E's to H's — at the same
-designspace point. The HUD shows the edited glyph's pre-edit stem / bar /
-contrast / advance and the same figures for reference glyphs (`H,N,O` by
-default), all cut at the edited layer's exact coordinates with the secondary
-axis off (the location is sent live by the shim so a glyph with several layers
-on the axis measures at the one being edited).
+designspace point. The HUD compares the edited glyph with one reference glyph in
+three columns — **bar**, **stem** and **s/b** (sidebearing) — re-measured every
+400 ms as you draw, and both rows are cut at the edited layer's exact
+coordinates with the secondary axis off (the location is sent live by the shim so
+a glyph with several layers on the axis measures at the one being edited). Type
+the reference's glyph name into the field (its placeholder is `H`); clear it to
+hide the reference row and the overlay. There is no advance column: the width is
+what the s/b column is there to keep an eye on.
 
 Saving in Fontra writes the shadow; the studio captures the drawing into the
 sidecar and rebuilds. The browser demo's editor is the separate
