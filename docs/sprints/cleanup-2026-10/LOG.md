@@ -2856,3 +2856,27 @@ before any floor work is judged.
 State: WIP as a commit on local branch **`e2ic-wip`** (`b8341d9`), restored from
 stash `24e89bb` by SHA (stash kept). Round-trip artifacts moved from `/tmp` to
 `test-output/rt-crispy/` (gitignored, 53 MB). Sprint branch clean.
+
+#### Correction: my "nothing floors on Crispy" was measured on the wrong master set
+
+The real E2i-c build (`avar2-studio build … --format ttf --format sources` on the
+staged Crispy, 422.8 s + 14.6 s) exits clean but the export still warns:
+**"8 per-glyph moves still hit the negative-advance cap"** — with 72 SPAC twins,
+i.e. 36 masters.
+
+My earlier classification walked the raw `Crispy.glyphs` masters (9) and found
+no case below 1 u. That was incomplete, not wrong: the exported designspace
+carries the **slant and round derived masters** too (36 masters, not 9), and the
+8 capped moves live in the ones I never measured. The fixture conclusion
+(`CrispyMini`, 8 masters, no derived ones) stands, and the seven fixture cases
+are still category (a) — a UFO-basis artefact — as recorded above.
+
+So the floor **does** have work to do on the real font, and the classification
+must be run on the exported designspace (the zip's own UFOs), not the source
+`.glyphs`. That is the next step; then the user's condition applies — every
+floored (glyph, master) must have overhang, or the state becomes `blocked` with
+the list.
+
+Artifacts for that run: `test-output/rt-e2ic/` (E2i-c studio TTF + sources zip),
+`test-output/e2ic-fixture/` (fixture build). WIP on branch `e2ic-wip`
+(`b8341d9`).
