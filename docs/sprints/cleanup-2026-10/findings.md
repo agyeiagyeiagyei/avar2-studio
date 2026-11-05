@@ -2403,7 +2403,7 @@ The user's words: "yes i will do that. i'll know that without that i'll have a b
 
 **E2i-c (completes B):**
 - **Coinciding case.** When the resting location is the source's default master, keep today's corners. **Acceptance:** run the real-Crispy round trip on a COPY whose ORIGIN row and default master coincide (do not edit the user's sources). It passes at both SPAC ends for every class, including slanted and rounded rows. Show the default move is a no-op there (no extra regions) and report the studio TTF's size.
-- **Off-master case.** When the resting location is anywhere else, the user accepts a bigger file. Read as: the studio stays exact, using the corner grid (16:16 note: every master coordinate plus the resting location, per parametric axis, valued from the sources' masters-only model).
+- **Off-master case.** When the resting location is anywhere else, the user accepts a bigger file. Read as: the studio stays exact, using the corner grid (18:16 note: every master coordinate plus the resting location, per parametric axis, valued from the sources' masters-only model).
   - Measure tuples per glyph and the size against decision 0004 and the 64 KB per-glyph ceiling.
   - If the ceiling breaks, STATE: awaiting user decision, with the numbers.
   - The verifier has told the user this reading, and they can still choose approximate instead.
