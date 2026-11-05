@@ -2526,3 +2526,28 @@ The user's words: "yes i will do that. i'll know that without that i'll have a b
   - H has multi-axis SPAC tuples;
   - .notdef has none;
   - raw avar = fvar.
+
+## Verifier finding (2026-11-06 00:10) — `nine` (a 180°-rotated `six`) misses the grade layers in the export: a decomposed composite does not follow its base glyph's sparse layers
+
+The user's pointer: "9 is a component based on 6". In the source, every one of nine's 9 master layers is the single component `six` at `angle = 180`, with pos.x varying per master. Neither glyph has brace layers in the .glyphs.
+
+**Measured (rt-coincide2; the export code is the same on both branches, so this does not depend on the injector):**
+
+| row (HarfBuzz) | six lsb/rsb, studio | six lsb/rsb, sources | nine lsb/rsb, studio | nine lsb/rsb, sources |
+|---|---|---|---|---|
+| Wide 900 MaxOpsz | 142 / 81 | 142 / 81 | **55 / 142** | **68 / 129** |
+| Default 900 MaxOpsz | 98 / 66 | 98 / 66 | 54 / 98 | 60 / 93 |
+| Default 400 MaxOpsz (on a master) | 200 / 100 | 200 / 100 | 100 / 200 | 100 / 200 |
+
+- **six is identical in both fonts.** In the studio, nine's rsb = six's lsb at every row, as a rotated copy should be. In the sources it is not.
+- **Cause.** The exported designspace carries **grade sparse layers** inside `Crispy-47-1-1.ufo` and its twins, at row locations for GRAD −10 / 0 / +10, e.g. `{726, 316.3, 235.2, 0, 100, 0, 0, 0}` and `{1560.8, 500.9, 233.4, 0, 100, 0, 0, 0}`.
+  - **six** has a glyph in them.
+  - **nine**, which the export decomposes because its component is transformed, is **missing from the GRAD 0 layers** at 726/316.3/235.2 (Default 900 MaxOpsz), 1560.8/500.9/233.4 (Wide 900), 123.7/212.9/165.8 and 663.1/202.5/121.8.
+  - At the GRAD ±10 layers at 1560.8, nine is present but is **not** rotated six (six lsb 231 vs nine rsb 199).
+  - So in fontmake, nine interpolates from its masters only while six follows its grade layer. That gives 6 u at Default 900 and 13 u at Wide 900, exactly the rows over tolerance.
+  - The studio follows: fontc builds the composite at the base glyph's brace locations, then decomposes it.
+- **Scope.** Every glyph the export decomposes ("908 components decomposed (19 glyphs)") whose components have sparse layers is at risk: grade layers now, correction or brace layers in general. The round trip only crossed 3 u on nine.
+
+**Fix direction (the agent's to choose; root cause, not a per-glyph patch):** when the export decomposes a composite, write the decomposed composite into every sparse layer where any of its components (recursively) has a glyph. Use that component layer, with the composite's own offset, angle and advance interpolated at that location; the advance must match what the studio produces there. Alternatively, do not decompose there and let the compiler handle the transformed component. Either way the gate is the same: nine at the 900 rows within 3 u, and a sweep proving no decomposed glyph lacks a sparse layer its base has.
+
+Separate question for the grade engine (check, not a finding yet): at GRAD ±10 the exported nine is not rotated six. Say whether the grade engine treats nine as its own glyph by design.
