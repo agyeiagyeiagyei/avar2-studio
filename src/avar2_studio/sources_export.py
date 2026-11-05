@@ -508,9 +508,17 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         if not progressed:      # a component cycle; leave the rest unspaced
             break
 
-    for name, dx in shifts.items():
+    for name in set(shifts) | set(pending):
+        dx = shifts.get(name, 0)
         glyph = twin[name]
         if glyph.components:
+            # Every component is corrected by the difference between THIS
+            # composite's amount and the shift its own base already carries —
+            # including when the composite's amount is zero. `IJ` is the case:
+            # its base `I` is a hairline stem whose amount rounds to 0, while
+            # its `J` component moved by J's full amount, so the right side
+            # collapsed by 63 u against the studio's 0 (E2k: a composite's ink
+            # tracks its base).
             for component in glyph.components:
                 base_shift = shifts.get(component.baseGlyph, 0)
                 a, b, c, d, ox, oy = component.transformation

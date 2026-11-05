@@ -910,6 +910,47 @@ def test_a_derived_master_with_no_parent_raises(tmp_path):
                                           "params": {}}))
 
 
+def test_a_composite_whose_base_has_no_amount_still_holds_its_ink():
+    """E2k, the `IJ` case: the base takes no amount, a component takes a lot.
+
+    `IJ` is `I` + `J`; `I` is a hairline stem whose amount rounds to 0 while `J`
+    moves by its full amount. The composite's ink must still track its BASE, so
+    the `J` component's offset has to be corrected even when the composite's own
+    amount is zero — otherwise the right side collapses by J's amount (measured
+    63 u against the studio's 0 on the real Crispy).
+    """
+    import ufoLib2
+    from ufoLib2.objects import Component
+
+    from avar2_studio.sources_export import _shift_spacing
+
+    font = ufoLib2.Font()
+    font.info.unitsPerEm = 1000
+    _rect(font, "I", 100, 100)                  # a hairline stem: tiny ink
+    _rect(font, "J", 100, 600)                  # wide
+    pair = font.newGlyph("IJ")
+    pair.components.append(Component("I", (1, 0, 0, 1, 0, 0)))
+    pair.components.append(Component("J", (1, 0, 0, 1, 200, 0)))
+    pair.width = 900
+
+    twin = copy.deepcopy(font)
+    # I is 1 u of ink against a 600 u mean, so its amount rounds to 0; J is far
+    # above the mean and takes a full amount.
+    inks = {"I": 1.0, "J": 900.0, "IJ": 600.0}
+    _shift_spacing(twin, font, inks, 600.0, kind="spac_widthaware", value=100.0,
+                   bias=1.0, scale=1.0)
+
+    assert twin["I"].width == font["I"].width, "the hairline base barely moves"
+    assert twin["J"].width == font["J"].width + 300, "J takes its own amount"
+    assert twin["IJ"].width == font["IJ"].width, (
+        "the composite takes its BASE's amount — 0 here")
+    before = [(c.transformation[4], c.transformation[5]) for c in font["IJ"].components]
+    after = [(c.transformation[4], c.transformation[5]) for c in twin["IJ"].components]
+    assert after[1][0] - before[1][0] == -150, (
+        "the J component's own shift must be cancelled (+100 from J's move, "
+        f"offset correction {after[1][0] - before[1][0]})")
+
+
 def test_the_readme_names_and_hashes_the_original_source(project, tmp_path):
     """E1c: the README describes the DESIGNER's file, not the staged shadow.
 
