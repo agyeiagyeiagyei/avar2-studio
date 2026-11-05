@@ -2624,3 +2624,36 @@ parity specs, so the two engines agree under the new rule. `pytest tests/ -q` �
 The real-Crispy acceptance (every composite's per-side change equal to its
 base's within 1 u, HarfBuzz, every row, both ends) runs with the all-glyph
 round-trip script in the next item, one build at a time.
+
+### E2i-c — the scaling rule: export half written, injector half is the blocker (ROUND 25, in progress)
+
+The user's rule is `d = v·scale·(ink_g(L)/mean(L))^bias·(mean(L)/mean(D))`, exact
+at the masters, and it must hold in BOTH the studio's injector and the export.
+
+* **Export half (written, parked unapplied):** per master, take that master's
+  own inks and mean, pass `mean_default` (the built font's mean at D) into
+  `_shift_spacing`, and the amount becomes `value·(ink_L/mean_L)^bias·
+  (mean_L/mean_D)·scale`. The `_fit_dx` cap then has nothing to do — it is kept
+  as a safety net and counted, and any hit is logged as a defect. This is a
+  ~100-line diff (`/tmp/e2ic_export_half.patch` in this session) and it leaves
+  the export and the injector DISAGREEING until the injector follows, which is
+  why it is not committed alone: four parity tests fail by design.
+* **Injector half (not written):** the amount has to vary across the design
+  box, and a gvar tuple carries one constant delta per support region. The
+  implementation therefore needs one tuple per master corner per SPAC end, with
+  the corner values the scaling rule gives:
+  - derive the parametric corner set (the axes the masters span — the metadata's
+    `is_parametric` flags, or the existing gvar supports' peak combinations);
+  - measure each glyph's ink at each corner (fontTools: instance the compiled
+    VF at the corner and measure; 2³ = 8 corners on Crispy);
+  - decompose the corner values into per-corner deltas (inclusion–exclusion over
+    the box, or `fontTools.varLib.models.VariationModel` when corners are
+    sparse) and emit `[-4] = −d`, `[-3] = +d` per corner, with the E2k base rule
+    for composites.
+  The native `spac-inject` engine would need the same; until it has it, it must
+  decline (`_native_injector()` returns None with a log line) so the fontTools
+  path runs — slower, but correct, and the gvar-header risk the native path
+  exists to avoid has to be measured (budget item 5).
+  This is a substantial change with a real budget risk (≈8–16 tuples per glyph
+  against today's 2, i.e. ~12k tuples vs 1,476), so it is the next piece of
+  work rather than something to land half-tested.
