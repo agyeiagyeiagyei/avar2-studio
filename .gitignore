@@ -72,3 +72,7 @@ wasm/fontc-web/target/
 # checkout fails metadata generation when it is missing.
 !src/avar2_studio/static/.gitkeep
 native/kinetikern2/target/
+
+# sprint scratch: build/fixture artifacts never belong in git
+test-output/
+scratch-e2ic/
