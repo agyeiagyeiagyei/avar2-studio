@@ -194,21 +194,21 @@ def _master_locations(source_path) -> Optional[list]:
                 masters[tuple(sorted(values.items()))] = values
         # A design axis is one some master moves off its default; the rest
         # (control axes, injected axes) are not corners of this grid.
+        #
+        # E2i-c-d: these are USER-SPACE values. Normalizing here would use the
+        # SOURCE designspace's default, which on Crispy is the 47-1-1 hairline,
+        # while the built font's default is the studio's relocated one — every
+        # derived corner would then sit on the + side and the narrow half would
+        # get the default's constant amount (H at Narrow 1 MaxOpsz reached a
+        # raw advance of −121.9 u). The injector normalizes against the font's
+        # own fvar/avar instead, which is the space gvar deltas live in.
         varying = {tag for values in masters.values()
                    for tag, value in values.items()
                    if abs(value - axes[tag].default) > 1e-9}
         corners = [{}]
         for values in masters.values():
-            location = {}
-            for tag, value in values.items():
-                if tag not in varying:
-                    continue
-                axis = axes[tag]
-                span = (axis.maximum - axis.default) if value > axis.default \
-                    else (axis.default - axis.minimum)
-                if span:
-                    location[tag] = round((value - axis.default) / span, 6)
-            location = {tag: norm for tag, norm in location.items() if norm}
+            location = {tag: float(value) for tag, value in values.items()
+                        if tag in varying}
             if location and location not in corners:
                 corners.append(location)
         return corners if len(corners) > 1 else None

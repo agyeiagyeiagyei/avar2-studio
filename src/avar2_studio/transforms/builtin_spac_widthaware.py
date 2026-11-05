@@ -137,6 +137,56 @@ def _parametric_corners(font) -> list:
     return corners
 
 
+def _normalize_corners(font, locations) -> list:
+    """Design-space-normalized corners from USER-SPACE master locations.
+
+    E2i-c-d: a master location must be normalized against the **built font's**
+    axis definitions, not the source designspace's. On Crispy the designspace
+    default is the 47-1-1 hairline while the studio relocates the default to the
+    ORIGIN row, so normalizing against the source put every derived corner on the
++ side, no SPAC tuple covered the narrow half, and that half got the default's
+    constant amount (H at Narrow 1 MaxOpsz: raw advance −121.9 u at SPAC −100).
+    fvar carries the relocated default and avar the segment maps, which is the
+    space gvar deltas are written in.
+    """
+    axes = {axis.axisTag: axis for axis in font["fvar"].axes}
+    avar = font["avar"].segments if "avar" in font else {}
+    out = []
+    for location in locations:
+        normalized = {}
+        for tag, value in (location or {}).items():
+            axis = axes.get(tag)
+            if axis is None or value is None:
+                continue
+            default, lo, hi = (axis.defaultValue, axis.minValue, axis.maxValue)
+            span = (hi - default) if value > default else (default - lo)
+            norm = ((value - default) / span) if span else 0.0
+            segment = avar.get(tag)
+            if segment is not None:
+                norm = _avar_map(norm, segment.mapping)
+            if norm:
+                normalized[tag] = round(norm, 6)
+        out.append(normalized)
+    return out
+
+
+def _avar_map(value: float, mapping) -> float:
+    """Apply an avar segment map (user-normalized → design-normalized)."""
+    points = sorted(mapping.items())
+    if not points:
+        return value
+    if value <= points[0][0]:
+        return points[0][1]
+    if value >= points[-1][0]:
+        return points[-1][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x0 <= value <= x1:
+            if x1 == x0:
+                return y1
+            return y0 + (y1 - y0) * (value - x0) / (x1 - x0)
+    return value
+
+
 def _ink_widths_at(font, location: dict) -> dict:
     """``{glyph: ink width}`` at one normalized location (fontTools instancing)."""
     glyph_set = font.getGlyphSet(location=location, normalized=True)
@@ -276,7 +326,8 @@ class WidthAwareSpacTransform(Transform):
             # inference returned 1,280 "corners" on Crispy (transform, grade and
             # control supports) against 9 real masters, and gvar overflowed.
             given = getattr(ctx, "master_locations", None)
-            corners = [dict(c) for c in given] if given else _parametric_corners(font)
+            corners = (_normalize_corners(font, given) if given
+                       else _parametric_corners(font))
             if given:
                 ctx.log(f"spac_widthaware: {len(corners)} master corner(s) from "
                         f"the designspace")
