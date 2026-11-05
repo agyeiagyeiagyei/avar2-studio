@@ -2263,3 +2263,34 @@ Rounded masters match upright, apart from 1–2 u. In running text this is harml
 **Consequence 2: the studio's font and the export disagree at every slanted style.** This is from reading the code, not yet measured. The injector's corners are `pipeline._master_locations`, the 9 masters of the `.glyphs` source. `slnt` and `ROND` are transform-injected, so they are not corners, and the injector's amount does not change along them. The export's twins measure the slanted ink. Calculated for the hairline H at SPAC −100: injector −7 per side, export −29 per side, a 44 u advance difference. The all-glyph round trip at slanted rows will show this. The fixture has no derived masters, so the 8.02 u fixture gap is a separate question.
 
 **Recommended fix (awaiting the user's decision; do NOT change the rule yet):** the spacing amount comes from the parametric masters only. Each transform-derived master (slanted, rounded, slanted-rounded) takes its parent master's amounts, which the injector already does, and the export follows. Expected effect: the floor has nothing left to do on Crispy (it stays as a safety net), and slanted rows agree. Meanwhile, step (2), the injector floor, goes ahead unchanged.
+
+## Verifier finding (2026-11-05 17:00) — E2i-c corners are normalized against the SOURCE default, so Crispy's narrow/hairline half gets the default's constant amount
+
+**Reproduced** with the `e2ic-wip` injector (`9e8801f`, archived read-only to `~/avar2-verifier/samples/code`) on the agent's real-Crispy build without SPAC (`rt-e2ic`). The project's params are −100…100, bias 1, scale 1.25. Corners come from `pipeline._master_locations(Crispy.glyphs)`:
+
+```
+{} {YOPQ:1} {XOPQ:.239,YOPQ:.927} {XOPQ:1} {XTRA:1} {XTRA:1,YOPQ:1} {XTRA:1,XOPQ:1} {XOPQ:1,YOPQ:1} {XTRA:.914,XOPQ:.478,YOPQ:1}
+```
+
+Every corner is on the + side. `_master_locations` normalizes each master against the source designspace's own axis default, which is the 47-1-1 master at the minimum. The built font's default is the studio's relocated one: XTRA 663.1, XOPQ 202.5, YOPQ 121.8. So in the font, the masters at XTRA 47, XOPQ 1 and YOPQ 1 are at **−1**, and no SPAC tuple covers that half. There, every glyph gets the default's amount, which is exactly the pre-E2i-c behaviour. At `Narrow 1 MaxOpsz` (XTRA 47, XOPQ 2, YOPQ 2), SPAC −100, raw advances measured with fontTools:
+
+| glyph | SPAC 0 | default's amount per side | raw advance at −100 |
+|---|---|---|---|
+| H | 182.1 | 152 | **−121.9** = 182.1 − 2·152 |
+| n | 170.0 | 128 | **−86.0** = 170 − 2·128 |
+| period | 36.3 | 22 | **−7.7** = 36.3 − 2·22 |
+
+(HarfBuzz shows 0, because it clamps.) The crispy-mini fixture does not relocate its default, which is why the tests pass.
+
+**The fix is verified in a sample (it is not the agent's code).** Normalize the masters against the built font's `fvar`, using its relocated default, and its `avar` segment maps. That gives 10 corners: the default plus 9 masters, with the narrow/hairline masters at −1. With the same injector:
+
+- 0 raw advances below 1 u over 112,080 glyph checks: 120 named styles (the user's 30 CSV instances × upright/Slanted/Rounded/Slanted Rounded) at SPAC −100 and at each instance's own SPAC, with glyphs that are zero-width at SPAC 0 excluded. **The floor never fires.**
+- The rule holds at the narrow end: H at `Narrow 1 MaxOpsz` is 164 / 182 / 200 at −100 / 0 / +100. The default is unchanged: H 2124 / 2428 / 2732.
+- The HarfBuzz (HVAR) and fontTools (gvar) advances agree to 0 u. Slanted and rounded changes equal upright to 0 u.
+- Cost: injection in 6.9 s, 0.65 GB peak.
+
+Script: `~/avar2-verifier/samples/make_sample.py`; the correction is the block marked "Verifier correction".
+
+**E2i-c-d (approved fix, no rule change):** corners must be normalized against the font being injected. The transform can normalize design locations itself from the font's `fvar`/`avar`, or the pipeline can normalize with the relocated default; the agent chooses. Add a crispy-mini case with a **relocated default**, which fails today and passes after the fix. Then re-check the 8 floored moves and the 8.02 u fixture gap, since both were measured with these corners.
+
+Also: `e2ic-wip` commits binaries under `test-output/` (two ~9 MB TTFs in `9e8801f`). They must not reach the sprint branch; drop them when the branch is squashed or merged.
