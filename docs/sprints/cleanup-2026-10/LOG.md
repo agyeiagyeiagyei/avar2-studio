@@ -2730,3 +2730,39 @@ plugin-test functions in 8 files; production Crispy `fvar` XTRA 47/47/1715,
 XOPQ 1/1/1462, YOPQ 1/1/275; `Crispy-avar.csv` 30 rows (WDTH 5/100/220, WGHT
 1/100/400/900/1000, OPSZ 14/144); the six dev-tag `release.yml` runs are
 successes. `pytest tests/ -q` → **672 passed**; ruff clean.
+
+### The all-glyph round trip on the real Crispy (ROUND 25) — numbers
+
+`roundtrip_compare.py` now compares **every glyph by name, mapped into each
+font's own glyph id** (the two compilers emit the same production names in
+different orders — comparing by id first produced 4,498 u phantom deltas), and
+reports per class and per SPAC end. `--failures` writes every over-tolerance
+record, so the counts below are checkable, not summarised.
+
+Build under test [verified]: the staged copy of the designer's project at
+`/tmp/rt-crispy` (original untouched) → `avar2-studio build … --format ttf
+--format sources` (build 43.6 s, compress 15.4 s; 72 SPAC twins, 30 rows, 12
+axes) → `fontmake -o variable` on the exported designspace → compare at the 28
+non-default rows and at SPAC ±100.
+
+| Class | Glyphs | Worst row (3 u tol.) | Worst SPAC +100 (1 u) | Worst SPAC −100 (1 u) |
+|---|---|---|---|---|
+| simple | 356 | 3.0 u | inside 1 u | **87 over** (worst `trademark` 315 u) |
+| composite | 106 | 3.0 u | inside 1 u | **90 over** (worst `M` 181 u) |
+| mixed (`Q`, `cent`) | 2 | 3.0 u | inside 1 u | **2 over** (`Q` 129 u) |
+| unencoded | 31 | 3.0 u | inside 1 u | **4 over** (worst `M.002` 181 u) |
+| `.notdef` | 1 | — | **114 u over** | **114 u over** |
+
+* **Rows: clean.** 28 rows × 496 glyphs, worst 3.0 u, **zero** records over the
+  3 u tolerance. E1d, E2h, E2i and E2j hold across the whole font, not the nine
+  letters the old script checked.
+* **SPAC +100: clean except `.notdef`.** All 495 real glyphs are inside 1 u, so
+  the composite rule (E2k), the ink basis (E2i) and the production-name mapping
+  (E2i-b) hold at the loosening end.
+* **SPAC −100: 183 glyphs over 1 u.** This is the E2i-c defect the verifier
+  measured: at the hairline master the amount exceeds the glyph's advance, the
+  export's `_fit_dx` caps it, and the capped twin distorts every location. The
+  fix is the per-master scaling rule, not a tolerance change.
+* **`.notdef` at both ends (114 u):** the studio's injector spaces the
+  synthesised `.notdef` box, the export skips it (`_shift_spacing` has no source
+  counterpart to twin). One of the two has to change for the class to pass.

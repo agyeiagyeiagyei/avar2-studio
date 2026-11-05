@@ -13,19 +13,28 @@ The default row is excluded by construction: the sources rest at the compiled
 origin while the studio relocates the default (decision 0001), and its mapping
 is deliberately absent from the designspace's ``<mappings>``.
 
+Every glyph is compared by glyph id, grouped by class — ``.notdef``, unencoded
+(no cmap entry), composite (a ``glyf`` composite), mixed (components *and*
+contours in the source, flattened by the compiler; needs ``--sources-zip``) and
+simple — and the numbers are reported per class and per SPAC end.
+
 Usage::
 
     python roundtrip_compare.py --studio Crispy[...].ttf \\
-        --fm Crispy-VF.ttf --csv Crispy-avar.csv [--glyphs aognHeWi] [--json out]
+        --fm Crispy-VF.ttf --csv Crispy-avar.csv [--sources-zip out.zip] \\
+        [--glyphs aognHeWi] [--json out]
 
-Exit status is 0 only when every check is inside tolerance.
+Without ``--glyphs`` every glyph in the font is compared. Exit status is 0 only
+when every check is inside tolerance.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import zipfile
 from pathlib import Path
 
 import uharfbuzz as hb
@@ -35,6 +44,7 @@ from avar2_studio.build import config_generator
 
 ROW_TOLERANCE = 3.0
 SPAC_TOLERANCE = 1.0
+CLASSES = ("simple", "composite", "mixed", "unencoded", ".notdef")
 
 
 def hb_font(path: Path) -> hb.Font:
@@ -42,15 +52,106 @@ def hb_font(path: Path) -> hb.Font:
     return hb.Font(hb.Face(blob))
 
 
-def _metrics(font: hb.Font, codepoint: int, location: dict):
-    """(advance, left sidebearing, ink width) for one glyph at one location."""
-    font.set_variations(location)
-    gid = font.get_nominal_glyph(codepoint)
+def _metrics(font: hb.Font, gid: int):
+    """(advance, left sidebearing, ink width) for one glyph, location already set."""
     advance = font.get_glyph_h_advance(gid)
     extents = font.get_glyph_extents(gid)
     if extents is None:
         return float(advance), 0.0, 0.0
     return float(advance), float(extents.x_bearing), float(extents.width)
+
+
+def _measure(font: hb.Font, gids, location: dict):
+    """Measure every gid at one location — one ``set_variations`` per location."""
+    font.set_variations(location)
+    return [_metrics(font, gid) for gid in gids]
+
+
+def _glyph_classes(path: Path, mixed=None):
+    """``{glyph name: class}`` from the built font, plus the mixed set."""
+    mixed = mixed or set()
+    ttf = TTFont(str(path), lazy=True)
+    try:
+        encoded = {name for name in ttf.getGlyphOrder()
+                   if _in_cmap(ttf, name)}
+        glyf = ttf["glyf"] if "glyf" in ttf else None
+        out = {}
+        for name in ttf.getGlyphOrder():
+            if name == ".notdef":
+                out[name] = ".notdef"
+            elif glyf is not None and ttf["glyf"][name].isComposite():
+                out[name] = "composite"
+            elif name in mixed:
+                out[name] = "mixed"
+            elif name not in encoded:
+                out[name] = "unencoded"
+            else:
+                out[name] = "simple"
+        return out
+    finally:
+        ttf.close()
+
+
+def _codepoint(path: Path, name: str) -> int:
+    """First unicode codepoint a glyph is mapped to, or -1."""
+    ttf = TTFont(str(path), lazy=True)
+    try:
+        for table in ttf["cmap"].tables:
+            if not table.isUnicode():
+                continue
+            for cp, gname in table.cmap.items():
+                if gname == name:
+                    return cp
+        return -1
+    finally:
+        ttf.close()
+
+
+def _mixed_from_glyphs(path: Path):
+    """Glyph names with components AND contours in the design source."""
+    import glyphsLib
+
+    font = glyphsLib.GSFont(str(path))
+    mixed = set()
+    for glyph in font.glyphs:
+        for layer in glyph.layers:
+            has_component = any(_is_component(s) for s in layer.shapes)
+            has_path = any(not _is_component(s) for s in layer.shapes)
+            if has_component and has_path:
+                mixed.add(glyph.name)
+                break
+    return mixed
+
+
+def _is_component(shape) -> bool:
+    return type(shape).__name__ == "GSComponent"
+
+
+def _in_cmap(ttf, name) -> bool:
+    for table in ttf["cmap"].tables:
+        if table.isUnicode() and name in table.cmap.values():
+            return True
+    return False
+
+
+def _mixed_from_zip(path: Path):
+    """Glyph names whose source has components AND contours (the flattening case)."""
+    mixed = set()
+    with zipfile.ZipFile(path) as zf:
+        masters = {n for n in zf.namelist() if n.endswith(".ufo/glyphs/")}
+        if not masters:
+            return mixed
+        master = sorted(masters)[0]
+        names = [n for n in zf.namelist()
+                 if n.startswith(master) and n.endswith(".glif")]
+        for entry in names:
+            text = zf.read(entry).decode("utf-8", "replace")
+            if "<component" not in text:
+                continue
+            match = re.search(r'<glyph[^>]*\bname="([^"]+)"', text)
+            if match and "<contour" in text:
+                mixed.add(match.group(1))
+        return mixed
 
 
 def _axes(path: Path) -> dict:
@@ -68,8 +169,16 @@ def main(argv=None) -> int:
     ap.add_argument("--studio", type=Path, required=True)
     ap.add_argument("--fm", type=Path, required=True)
     ap.add_argument("--csv", type=Path, required=True)
-    ap.add_argument("--glyphs", default="aognHeWiw")
+    ap.add_argument("--glyphs", default=None,
+                    help="compare only these characters (default: every glyph)")
+    ap.add_argument("--sources-zip", type=Path,
+                    help="the exported sources zip, to classify mixed glyphs")
+    ap.add_argument("--mixed-from", type=Path,
+                    help="the ORIGINAL .glyphs, whose mixed glyphs the export "
+                         "flattens (they compare as simple)")
     ap.add_argument("--json", type=Path)
+    ap.add_argument("--failures", type=Path,
+                    help="write every over-tolerance record here (JSON lines)")
     args = ap.parse_args(argv)
 
     studio = hb_font(args.studio)
@@ -95,36 +204,98 @@ def main(argv=None) -> int:
         print("error: every row sits at the defaults", file=sys.stderr)
         return 2
 
-    glyphs = [ord(ch) for ch in args.glyphs]
-    report = {"rows": {}, "spac": {}, "worst_row": 0.0, "worst_spac": 0.0}
+    mixed = _mixed_from_zip(args.sources_zip) if args.sources_zip else set()
+    if args.mixed_from:
+        mixed |= _mixed_from_glyphs(args.mixed_from)
+    classes = _glyph_classes(args.studio, mixed)
+    # Glyph ids are per font: the two compilers emit the same production names
+    # but may order them differently, so map by NAME and use each font's own id.
+    studio_ttf = TTFont(str(args.studio), lazy=True)
+    fm_ttf = TTFont(str(args.fm), lazy=True)
+    try:
+        fm_order = set(fm_ttf.getGlyphOrder())
+        order = [g for g in studio_ttf.getGlyphOrder()
+                 if g in classes and g in fm_order]
+        missing_glyphs = [g for g in studio_ttf.getGlyphOrder()
+                          if g in classes and g not in fm_order]
+        gids = [studio_ttf.getGlyphID(g) for g in order]
+        fm_gids = [fm_ttf.getGlyphID(g) for g in order]
+    finally:
+        studio_ttf.close()
+        fm_ttf.close()
+    if args.glyphs:
+        wanted = {chr(c) for c in map(ord, args.glyphs)}
+        keep = [(n, a) for n, a in enumerate(order)
+                if chr(_codepoint(args.studio, n)) in wanted]
+        order = [n for n, _ in keep]
+        gids = [gids[i] for _, i in keep]
+        fm_gids = [fm_gids[i] for _, i in keep]
+
+    over_tolerance = []
+    report = {"rows": {}, "spac": {}, "worst_row": 0.0, "worst_spac": 0.0,
+              "glyphs": len(order),
+              "classes": {c: sum(1 for n in order if classes[n] == c)
+                          for c in CLASSES},
+              "by_class": {}}
     failures = []
 
     for row in rows:
         user = {str(t).lower(): float(v) for t, v in row.in_axes.items()}
         worst, where = 0.0, ""
-        for cp in glyphs:
-            a_s, lsb_s, ink_s = _metrics(studio, cp, user)
-            a_b, lsb_b, ink_b = _metrics(built, cp, user)
+        per_class = {}
+        for name, ms, mb in zip(order,
+                                _measure(studio, gids, user),
+                                _measure(built, fm_gids, user)):
+            a_s, lsb_s, ink_s = ms
+            a_b, lsb_b, ink_b = mb
             rsb_s, rsb_b = a_s - lsb_s - ink_s, a_b - lsb_b - ink_b
+            cls = classes[name]
+            entry = per_class.setdefault(cls, {"worst": 0.0, "where": "",
+                                               "over": 0})
             for label, x, y in (("advance", a_s, a_b), ("lsb", lsb_s, lsb_b),
                                 ("rsb", rsb_s, rsb_b), ("ink", ink_s, ink_b)):
                 delta = abs(x - y)
+                if delta > entry["worst"]:
+                    entry["worst"], entry["where"] = delta, f"{name} {label}"
+                if delta > ROW_TOLERANCE:
+                    entry["over"] += 1
+                    over_tolerance.append({
+                        "kind": "row", "row": row.instance_name,
+                        "end": None, "glyph": name, "class": cls,
+                        "metric": label, "delta": round(delta, 2)})
                 if delta > worst:
-                    worst, where = delta, f"{chr(cp)} {label}"
+                    worst, where = delta, f"{name} {label} ({cls})"
         report["rows"][row.instance_name] = {"worst": round(worst, 2),
-                                             "where": where}
+                                             "where": where,
+                                             "by_class": {
+                                                 k: {"worst": round(v["worst"], 2),
+                                                     "where": v["where"],
+                                                     "over": v["over"]}
+                                                 for k, v in per_class.items()}}
         report["worst_row"] = max(report["worst_row"], round(worst, 2))
+        for cls, entry in per_class.items():
+            agg = report["by_class"].setdefault(
+                cls, {"worst": 0.0, "where": "", "over": 0})
+            if entry["worst"] > agg["worst"]:
+                agg["worst"], agg["where"] = entry["worst"], entry["where"]
+            agg["over"] += entry["over"]
         if worst > ROW_TOLERANCE:
             failures.append(f"row {row.instance_name!r}: {where} differs by "
                             f"{worst:.2f} u")
 
+        base_s = _measure(studio, gids, user)
+        base_b = _measure(built, fm_gids, user)
         for end in spac_ends:
             worst_end, where_end = 0.0, ""
-            for cp in glyphs:
-                a0_s, l0_s, i0_s = _metrics(studio, cp, user)
-                a0_b, l0_b, i0_b = _metrics(built, cp, user)
-                a1_s, l1_s, i1_s = _metrics(studio, cp, {**user, spac: end})
-                a1_b, l1_b, i1_b = _metrics(built, cp, {**user, spac: end})
+            per_class = {}
+            for name, before_s, before_b, after_s, after_b in zip(
+                    order, base_s, base_b,
+                    _measure(studio, gids, {**user, spac: end}),
+                    _measure(built, fm_gids, {**user, spac: end})):
+                a0_s, l0_s, i0_s = before_s
+                a0_b, l0_b, i0_b = before_b
+                a1_s, l1_s, i1_s = after_s
+                a1_b, l1_b, i1_b = after_b
                 r0_s, r0_b = a0_s - l0_s - i0_s, a0_b - l0_b - i0_b
                 r1_s, r1_b = a1_s - l1_s - i1_s, a1_b - l1_b - i1_b
                 checks = {
@@ -132,25 +303,61 @@ def main(argv=None) -> int:
                     "lsb": ((l1_s - l0_s), (l1_b - l0_b)),
                     "rsb": ((r1_s - r0_s), (r1_b - r0_b)),
                 }
+                cls = classes[name]
+                entry = per_class.setdefault(cls, {"worst": 0.0, "where": "",
+                                                   "over": 0})
                 for label, (x, y) in checks.items():
                     delta = abs(x - y)
+                    if delta > entry["worst"]:
+                        entry["worst"] = delta
+                        entry["where"] = f"{name} {label} {end:+g}"
+                    if delta > SPAC_TOLERANCE:
+                        entry["over"] += 1
+                        over_tolerance.append({
+                            "kind": "spac", "row": row.instance_name,
+                            "end": end, "glyph": name, "class": cls,
+                            "metric": label, "delta": round(delta, 2)})
                     if delta > worst_end:
-                        worst_end, where_end = delta, f"{chr(cp)} {label} {end:+g}"
+                        worst_end = delta
+                        where_end = f"{name} {label} {end:+g} ({cls})"
             key = f"{row.instance_name} {end:+g}"
             report["spac"][key] = {"worst": round(worst_end, 2),
-                                   "where": where_end}
+                                   "where": where_end,
+                                   "by_class": {
+                                       k: {"worst": round(v["worst"], 2),
+                                           "where": v["where"],
+                                           "over": v["over"]}
+                                       for k, v in per_class.items()}}
             report["worst_spac"] = max(report["worst_spac"],
                                        round(worst_end, 2))
+            for cls, entry in per_class.items():
+                agg = report["by_class"].setdefault(
+                    cls, {"worst": 0.0, "where": "", "over": 0})
+                if entry["worst"] > agg["worst"]:
+                    agg["worst"], agg["where"] = entry["worst"], entry["where"]
+                agg["over"] += entry["over"]
             if worst_end > SPAC_TOLERANCE:
                 failures.append(f"SPAC {end:+g} at {row.instance_name!r}: "
                                 f"{where_end} differs by {worst_end:.2f} u")
 
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")
+    if args.failures:
+        args.failures.write_text("".join(json.dumps(r) + "\n"
+                                        for r in over_tolerance))
 
     worst_row = max(report["rows"].items(), key=lambda kv: kv[1]["worst"])
+    print(f"glyphs compared: {len(order)}  classes: {report['classes']}")
+    if missing_glyphs:
+        print(f"  not in the fontmake build: {len(missing_glyphs)} "
+              f"({', '.join(missing_glyphs[:6])}…)")
     print(f"rows compared: {len(rows)}  worst row: {worst_row[0]!r} "
           f"{worst_row[1]['worst']} u ({worst_row[1]['where']})")
+    for cls in CLASSES:
+        agg = report["by_class"].get(cls)
+        if agg:
+            print(f"  {cls:<10} worst {agg['worst']:6.2f} u "
+                  f"({agg['where']})  over tolerance: {agg['over']}")
     if spac_ends:
         worst_spac = max(report["spac"].items(), key=lambda kv: kv[1]["worst"])
         print(f"SPAC ends: {spac_ends}  worst: {worst_spac[0]!r} "
