@@ -392,6 +392,26 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     return done
 
 
+#: Diagnostics from the last `_shift_spacing` calls: one dict per (glyph,
+#: master) the 1 u floor had to move. Read by test-output/e2ic_classify_export.
+CAPPED_MOVES: list = []
+
+
+def _ink_of(glyph) -> float:
+    """Outline bbox width of one UFO glyph (no composites to resolve here)."""
+    if not glyph.contours:
+        return 0.0
+    xs = [point.x for contour in glyph.contours for point in contour.points]
+    return float(max(xs) - min(xs)) if xs else 0.0
+
+
+def _lsb_of(glyph) -> float:
+    if not glyph.contours:
+        return 0.0
+    xs = [point.x for contour in glyph.contours for point in contour.points]
+    return float(min(xs)) if xs else 0.0
+
+
 def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                    kind: str, value: float, bias: float, scale: float,
                    mean_default: Optional[float] = None) -> int:
@@ -442,6 +462,24 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
             dx = _fit_dx(dx, glyph.width, composite)
             if dx != before:
                 capped += 1
+                ink_w = _ink_of(glyph)
+                lsb = _lsb_of(glyph)
+                CAPPED_MOVES.append({
+                    "glyph": name,
+                    "kind": kind,
+                    "value": value,
+                    "advance": glyph.width,
+                    "ink": ink_w,
+                    "lsb": lsb,
+                    "rsb": glyph.width - lsb - ink_w,
+                    "rule_dx": before,
+                    "floored_dx": dx,
+                    "rule_advance": glyph.width + 2 * before,
+                    "floored_advance": glyph.width + 2 * dx,
+                    "mean_L": mean_ink,
+                    "mean_D": mean_D,
+                    "ink_used": ink,
+                })
         if dx:
             shifts[name] = dx
 
