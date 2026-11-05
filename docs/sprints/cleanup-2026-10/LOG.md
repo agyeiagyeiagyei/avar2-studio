@@ -3299,3 +3299,65 @@ stands; it was the coordinate space that was wrong.
 
 Working copy of the reverted attempt: `/tmp/B_attempt_pipeline.py`,
 `/tmp/B_attempt_injector.py` (outside the repo; nothing half-done is committed).
+
+## ROUND 28 — the open questions answered, the avar header fixed, the coincide copy built
+
+**1. Which fonts each round-trip run compared.** Two different pairs, which is
+why the numbers disagree:
+
+| run | studio font | fontmake font | worst | `.notdef` |
+|---|---|---|---|---|
+| `rt.json` 17:44 | `rt-crispy/out/…ttf`, 10,563,072 B, **avar header 12** | `rt-crispy/fm/Crispy-VF.ttf`, 862,976 B | 397 u | 0 |
+| `roundtrip.json` + `failures.jsonl` 18:12 | top-level `rt-crispy/…ttf`, 10,511,868 B, **avar header 29** | `rt-crispy/Crispy-fm.ttf`, 773,824 B | 315 u | **114 u** |
+
+Neither is final for the current code. The 18:12 pair is the one the verifier
+saw, and its `.notdef` 114 u comes from the header-29 font, not from the sources.
+
+**2. Where the top-level, header-29 TTF came from — and who writes the 29.** It
+is a **headless `avar2-studio build --format ttf`** product, i.e. the CLI route
+the verifier's scripts use, not the server/`--format sources` route. Proven by
+rebuilding the *original* Crispy that way: **10,511,868 B and header 29**, the
+same size as the mystery file (the server route's `out/` is 51 KB larger and has
+12). The writer is fontTools' own `_a_v_a_r.compile()`, which sets
+`AxisCount = len(fvar.axes)` *at compile time*: a later stage drops fvar from 29
+axes to 12 without recompiling avar, and fontTools copies a table it never
+loaded straight through. Reproduced in a test (21 axes written, fvar cut to 4,
+header stays 21).
+
+Fixed: `pipeline._repair_avar_axis_count` runs at the end of the transform chain
+— the one place every route passes — and repairs the header when it disagrees
+with fvar. Verified on the real CLI build: **header 12 = fvar 12, was 29**.
+`tests/test_avar_axis_count.py` reads bytes 6–7 of the table itself, because
+decompiling an avar that no longer matches fvar fabricates one map per *fvar*
+axis and hides exactly this defect.
+
+**3. The 106.1 vs 55.7 table — retracted.** The verifier is right: on the
+committed code the masters agree. My table had two defects of its own: it was
+taken from the **reverted B-attempt build**, and it read the fontmake font at the
+**studio's normalized corners**, which land on different design points in the
+two fonts (their normalizations differ by the relocation). Pinning by user
+location, as the verifier did, gives agreement. "The interior masters disagree"
+was never a property of the shipped injector.
+
+**4. E2i-c, the coinciding copy (user decision 18:55).** Built `rt-coincide/`
+from a copy of Crispy — user sources untouched: `Variable Font Origin` set to the
+`47-1-1` default master, and the ORIGIN row (`Wide 400 MinOpsz`, whose `out` was
+1420.1/149.9/122.1) **dropped**, because with the default master already at the
+resting location it carries no information, and the export's validator refuses a
+default-input mapping row (fontmake would offset every other row by it).
+
+- studio TTF: **10,511,868 B**, 72 twins, avar 12/12, build 96 s / peak RSS 983 MB
+- fontmake on its export: 58.7 s / peak RSS 505 MB
+- `roundtrip_compare.py`: **still 56 checks out**, and they are two clean groups:
+  `.notdef` +114 u at SPAC **+100 at every row**, and `trademark` 169–315 u at
+  SPAC **−100**.
+
+**`.notdef` is a real defect, reproduced and located:** the studio TTF carries
+two constant SPAC tuples on `.notdef` (`{"SPAC": (-1,-1,0)}` and
+`{"SPAC": (0,1,1)}`, d = 57 → ±114 u), while the sources carry none. The
+width-aware injector is supposed to skip it (`inks` excludes `.notdef`), and the
+16:30 build did. Which writer added them is the next thing to pin.
+
+**Housekeeping:** the reverted B attempt now lives in `~/avar2-agent/`
+(`B_attempt_pipeline.py`, `B_attempt_injector.py`); nothing durable is under
+`/tmp`.
