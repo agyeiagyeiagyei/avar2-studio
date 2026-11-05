@@ -2391,3 +2391,32 @@ This is the faithful implementation of the user's B. It adds no new rule.
 **Cost to measure first.** The grid is an upper bound of 79 × 2 SPAC tuples per glyph, against 18 today. Drop all-zero tuples (YOPQ barely moves many advances), then report tuples per glyph, file size, injection time and peak RSS. Check the worst glyph against decision 0004's budget (g 1,476) and the 64 KB per-glyph gvar ceiling. If it does not fit, STATE: awaiting user decision, with the numbers.
 
 **Also:** the reverted attempt is parked in `/tmp`, and the sprint rule is nothing durable under `/tmp`. Move it to `~/avar2-agent/`.
+
+## User decision (2026-11-05 18:55) — the default lands on the default master; otherwise a bigger file, with a warning on export → E2i-c + new item E2l
+
+The user's words: "yes i will do that. i'll know that without that i'll have a bigger file. drop a warning on export, considering also that on export we have qa checkbox for default specificity".
+
+**What they confirmed:**
+- In Crispy, the master the ORIGIN row lands on becomes the **default master in the source** (Glyphs: Variable Font Origin).
+- The build's default move is then a no-op, and with spacing on, studio = sources **exactly with today's corners** (model test: 0.000).
+- **No grid is needed for Crispy.**
+
+**E2i-c (completes B):**
+- **Coinciding case.** When the resting location is the source's default master, keep today's corners. **Acceptance:** run the real-Crispy round trip on a COPY whose ORIGIN row and default master coincide (do not edit the user's sources). It passes at both SPAC ends for every class, including slanted and rounded rows. Show the default move is a no-op there (no extra regions) and report the studio TTF's size.
+- **Off-master case.** When the resting location is anywhere else, the user accepts a bigger file. Read as: the studio stays exact, using the corner grid (16:16 note: every master coordinate plus the resting location, per parametric axis, valued from the sources' masters-only model).
+  - Measure tuples per glyph and the size against decision 0004 and the 64 KB per-glyph ceiling.
+  - If the ceiling breaks, STATE: awaiting user decision, with the numbers.
+  - The verifier has told the user this reading, and they can still choose approximate instead.
+
+**E2l (new): a size warning on export.**
+- **When it shows.** TTF/WOFF2 export, when the font's resting location is not the source's **default master**. The resting location is the ORIGIN row, or the "Set default at" location when that checkbox is on, and the warning follows the checkbox and the preview location live.
+- **What it says.**
+  - The file is larger because the studio rebuilds the variations around a style that isn't the default master.
+  - The fix: if a master sits at that location, make it the default master in the source file (Glyphs: Variable Font Origin); otherwise add a master there and make it the default.
+  - Always visible, like the sources note; not a tooltip.
+  - UI copy names no sidecar, CSV or JSON files.
+- **When it stays silent.** No warning when the location is the default master, within the existing location tolerance.
+- **The sources note.** RESTING_NOTE ("the default row differs there") shows only when the ORIGIN row is NOT the default master, because otherwise it is false.
+- **Backend.** It says whether the resting location is the default master, another master (its name), or no master, so the dialog does not guess.
+- **Tests.** Default master / another master / no master, each with "Set default at" on and off, plus the sources note on and off. Also an e2e check that the text appears.
+- **Evidence.** Report the TTF size of the coinciding copy against the current Crispy.
