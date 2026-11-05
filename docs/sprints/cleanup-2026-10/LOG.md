@@ -3097,3 +3097,39 @@ re-verified here:
 
 Process lesson recorded: never report a grep-miss as evidence about the repo — re-
 read from `git show <ref>:<path>` on a clean tree, and check `git status` first.
+
+#### E2i-c-d landed — corners normalized against the built font, narrow half covered
+
+`e2ic-wip` `aec81b9`. The pipeline was handing over **designspace-normalized**
+master locations, normalized against the **source** default — Crispy's 47-1-1
+hairline — while the built font's default is the studio's relocated one. Every
+corner therefore sat on the + side, no SPAC tuple covered the narrow half, and
+that half fell back to the default's constant amount (the verifier measured `H`
+at `Narrow 1 MaxOpsz` reaching a raw advance of **−121.9 u** at SPAC −100).
+
+Fix, as the verifier specified: `pipeline._master_locations` returns **user-space**
+values (only space that survives relocation), and the injector normalizes them
+against the font's own `fvar` (min/default/max) plus the `avar` segment maps —
+`_normalize_corners` / `_avar_map` — which is the space gvar deltas live in.
+
+Measured on the real Crispy build without SPAC [verified]:
+
+| check | result |
+|---|---|
+| corners | **10** (default + 9 masters) |
+| narrow half present | `{XTRA −1, XOPQ −1, YOPQ −1}` against fvar defaults 663.1 / 202.5 / 121.8 |
+| injector time | 8 s |
+| floored pairs | **0** |
+| raw advances < 1 u at SPAC −100 | **0**, over every glyph × 30 CSV rows × 4 style variants (upright, slanted, rounded, slanted+rounded) |
+
+Not yet reproduced: the verifier's per-style numbers (`H` at `Narrow 1 MaxOpsz` =
+164 / 182 / 200). My sweep feeds the CSV's **user** coordinates to fontTools,
+which does not evaluate **avar2** — the parametric location `Narrow 1 MaxOpsz`
+reaches only through HarfBuzz or an explicit avar2 evaluation, so the tuple that
+sweep exercised was the default's. The sub-1u count is therefore sound as a
+no-negative-advance check but is not the same measurement as the verifier's
+112,080-check harness; that comparison needs the avar2-evaluated locations.
+
+Next, in the user's order: the export change (slanted/rounded masters take their
+parent master's amounts), then `.notdef`, then the four tests, then the
+real-Crispy round trip.
