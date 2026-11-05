@@ -2240,3 +2240,26 @@ The rule, implemented once and used by both renderers:
 
 3. No raw advance below 1 u for any glyph at any CSV row at SPAC `lo` or `hi`, in the studio's TTF and in the fontmake build of the export (fontTools, unclamped).
 4. The export round trip holds at BOTH ends: every glyph, every non-default row, within 1 u. The floor is the only departure from the rule. LOG lists every floored (glyph, corner) with the rule's amount, the floored amount and its sidebearings, on the fixture and on the real Crispy at −100.
+
+## Verifier spot check of `d3ba64c` (2026-11-05 16:00) — the 8 floored moves come from the slant, and the injector and the export disagree at slanted styles
+
+**Verified:** the classification log (`test-output/e2ic-diag/classify_transformed.log`). It shows 8 floored pairs, colon and exclam, all overhanging, and the export's UFOs agree.
+
+**Evidence.** These come from the export's own UFOs, in `classified-transformed.zip`, measured with ufoLib2 and BoundsPen. At every derived **Slanted** master, each glyph keeps its upright left sidebearing and its advance, and the right sidebearing takes the whole lean:
+
+| master | glyph | upright lsb / rsb | slanted lsb / rsb | ink upright → slanted |
+|---|---|---|---|---|
+| 47-1-1 | H | 40 / 40 | 40 / −271 | 98 → 409 |
+| 47-1-1 | l | 35 / 35 | 35 / −276 | 2 → 313 |
+| 47-1-1 | colon | 11 / 11 | 11 / −223 | 14 → 248 |
+| 47-1-1 | exclam | 17 / 17 | 17 / −294 | 2 → 313 |
+| 47-1-1 | period | 11 / 11 | 11 / 8 | (sits on the baseline) |
+| 47-1462-275 | H | 100 / 100 | 100 / −153 | 5942 → 6195 |
+
+Rounded masters match upright, apart from 1–2 u. In running text this is harmless: every glyph leans by the same amount at each height, so the gaps between letters are unchanged. But a sheared bounding box is not the glyph's width.
+
+**Consequence 1: the 8 floored moves are a slant artefact.** The export's E2i-c amount uses each of its 36 masters' own ink, so the slanted masters get the sheared ink. Colon at 47-1-1 Slanted gets `d = −100·1.25·248/1754.5 = −18`, which needs the floor. Upright it gets `−100·1.25·14/1754.5 = −1`, giving advance 34. At the hairline styles the slanted amounts are about 4× upright for H and 18× for colon.
+
+**Consequence 2: the studio's font and the export disagree at every slanted style.** This is from reading the code, not yet measured. The injector's corners are `pipeline._master_locations`, the 9 masters of the `.glyphs` source. `slnt` and `ROND` are transform-injected, so they are not corners, and the injector's amount does not change along them. The export's twins measure the slanted ink. Calculated for the hairline H at SPAC −100: injector −7 per side, export −29 per side, a 44 u advance difference. The all-glyph round trip at slanted rows will show this. The fixture has no derived masters, so the 8.02 u fixture gap is a separate question.
+
+**Recommended fix (awaiting the user's decision; do NOT change the rule yet):** the spacing amount comes from the parametric masters only. Each transform-derived master (slanted, rounded, slanted-rounded) takes its parent master's amounts, which the injector already does, and the export follows. Expected effect: the floor has nothing left to do on Crispy (it stays as a safety net), and slanted rows agree. Meanwhile, step (2), the injector floor, goes ahead unchanged.
