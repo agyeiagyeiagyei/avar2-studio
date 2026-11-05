@@ -150,7 +150,11 @@ def _normalize_corners(font, locations) -> list:
     space gvar deltas are written in.
     """
     axes = {axis.axisTag: axis for axis in font["fvar"].axes}
-    avar = font["avar"].segments if "avar" in font else {}
+    # fontTools ≤4.6x exposed each axis' segment map on an object (``.mapping``);
+    # from 4.68 ``segments`` is already ``{from: to}`` per axis.
+    avar = {tag: getattr(segments, "mapping", segments)
+            for tag, segments in (font["avar"].segments.items()
+                                  if "avar" in font else [])}
     out = []
     for location in locations:
         normalized = {}
@@ -163,10 +167,14 @@ def _normalize_corners(font, locations) -> list:
             norm = ((value - default) / span) if span else 0.0
             segment = avar.get(tag)
             if segment is not None:
-                norm = _avar_map(norm, segment.mapping)
+                norm = _avar_map(norm, segment)
             if norm:
                 normalized[tag] = round(norm, 6)
-        out.append(normalized)
+        # A master that sits at the built font's default normalises onto the
+        # default corner, so the two collapse — and fontTools' VariationModel
+        # refuses duplicate locations.
+        if normalized not in out:
+            out.append(normalized)
     return out
 
 
@@ -458,6 +466,14 @@ class WidthAwareSpacTransform(Transform):
             axis.maxValue = float(hi)
             fvar = font["fvar"]
             fvar.axes.append(axis)
+            if "avar" in font:
+                # avar carries one segment map per fvar axis, and fontTools
+                # compiles it only once the table is in memory — otherwise the
+                # old bytes are copied through and the shipped font has an avar
+                # axis count that no longer matches fvar, which makes consumers
+                # drop avar (and avar2) wholesale. Add the new axis' identity
+                # map, which also loads the table so it is recompiled.
+                font["avar"].segments.setdefault("SPAC", {})
             # Instance pinning: default 0 — EXCEPT instances the CSV gives a
             # per-instance SPAC coordinate (authored via the studio). Those
             # must survive injection, not be flattened to the default.
@@ -467,12 +483,14 @@ class WidthAwareSpacTransform(Transform):
                 inst.coordinates["SPAC"] = spac_overrides.get(iname, 0.0)
             add_HVAR(font)
 
-            # pad every VarStore's regions for the new axis
+            # pad every VarStore's regions for the new axis — avar v2 carries
+            # the avar2 mappings in its own VarStore, so it must be padded like
+            # the others (peak 0: a mapping does not vary with SPAC).
             spac_region = otTables.VarRegionAxis()
             spac_region.StartCoord = -1
             spac_region.PeakCoord = 0
             spac_region.EndCoord = 1
-            for table in ("MVAR", "HVAR", "BASE", "VVAR", "COLR", "GDEF"):
+            for table in ("avar", "MVAR", "HVAR", "BASE", "VVAR", "COLR", "GDEF"):
                 if table in font and hasattr(font[table].table, "VarStore"):
                     store = font[table].table.VarStore
                     store.VarRegionList.RegionAxisCount = len(fvar.axes)

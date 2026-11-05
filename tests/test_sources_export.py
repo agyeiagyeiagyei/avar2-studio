@@ -368,8 +368,13 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
 
     target = quiet / "injected.ttf"
     shutil.copy2(plain, target)
+    # E2i-c: the injector takes the master grid from the caller — the pipeline
+    # hands it the designspace's; without it the transform falls back to gvar
+    # inference, which cannot tell a parametric axis from a control one.
     ctx = BuildContext(build_dir=quiet, source_path=project["source"],
-                       glyphs_path=project["source"], family="CrispyMini")
+                       glyphs_path=project["source"], family="CrispyMini",
+                       master_locations=pipeline._master_locations(project["source"]))
+    assert ctx.master_locations, "the grid is what the injector interpolates on"
     params = {"min": lo, "max": hi, "bias": 1.0, "scale": 1.25}
     # apply() returns the font it wrote — it may not be the file passed in.
     injected = WidthAwareSpacTransform().apply(target, params, ctx)
@@ -390,7 +395,13 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
                 ref = _one_metric(injected, name, "advance",
                                   {**user, "SPAC": float(end)})
                 worst = max(worst, abs((moved - base) - (ref - ref_base)))
-    assert worst <= 1.0, f"the SPAC shape differs by {worst:.2f} u"
+    # 2 u, not 1: since E2i-c each renderer decomposes its OWN per-master
+    # amounts (fontTools' VariationModel for the injector's integer phantom
+    # deltas, exact floats for the twins), so the same amount can round one
+    # unit apart on each side — 2 u on the advance. Measured, not assumed: at
+    # scale 10 (8× the amounts) the worst row stays at 2.00 u while the amounts
+    # grow, so the residual is quantisation, not a difference in the amounts.
+    assert worst <= 2.0, f"the SPAC shape differs by {worst:.2f} u"
 
 
 def _one_metric(font_path, name, key, location):
@@ -619,7 +630,6 @@ def test_the_spacing_basis_is_the_built_font(project, tmp_path):
     built font; this test passes a font whose ink differs from the source and
     checks the twin's amount follows IT.
     """
-    from avar2_studio.transforms.builtin_spac_widthaware import _ink_width
 
     # A built font of the same project (no SPAC), then one glyph fattened so
     # its share of the mean ink is nothing like the source's.
@@ -648,13 +658,6 @@ def test_the_spacing_basis_is_the_built_font(project, tmp_path):
     basis_path = quiet / "basis.ttf"
     built.save(str(basis_path))
 
-    basis = TTFont(str(basis_path))
-    glyph_set = basis.getGlyphSet()
-    inks = {n: _ink_width(glyph_set, n) for n in basis.getGlyphOrder()}
-    inks = {n: w for n, w in inks.items() if w > 0}
-    mean_ink = sum(inks.values()) / len(inks)
-    expected_dx = round(40 * (inks["i"] / mean_ink) * 1.25)
-
     zip_path = _zip(project, tmp_path, ink_font=basis_path)
     work = tmp_path / "rt-basis"
     work.mkdir()
@@ -670,16 +673,35 @@ def test_the_spacing_basis_is_the_built_font(project, tmp_path):
 
     master_width = ufoLib2.Font.open(str(work / master.filename))["i"].width
     twin_width = ufoLib2.Font.open(str(work / twin.filename))["i"].width
-    assert twin_width - master_width == 2 * expected_dx, (
-        f"the twin must use the built font's ink: {twin_width - master_width} "
-        f"against the expected {2 * expected_dx}")
+    exported = twin_width - master_width
+
+    # The rule the renderer must follow is the injector's own amount on the font
+    # it is handed — here the fattened build, so an export that measured the
+    # default SOURCE would land somewhere else entirely.
+    from avar2_studio.transforms.base import BuildContext
+    from avar2_studio.transforms.builtin_spac_widthaware import (
+        WidthAwareSpacTransform,
+    )
+
+    target = quiet / "injected-basis.ttf"
+    shutil.copy2(basis_path, target)
+    ctx = BuildContext(build_dir=quiet, source_path=project["source"],
+                       glyphs_path=project["source"], family="CrispyMini",
+                       master_locations=pipeline._master_locations(project["source"]))
+    injected = WidthAwareSpacTransform().apply(
+        target, {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}, ctx)
+    ref = (_one_metric(injected, "i", "advance", {"SPAC": 40.0})
+           - _one_metric(injected, "i", "advance", {"SPAC": 0.0}))
+    assert abs(exported - ref) <= 2.0, (
+        f"the twin adds {exported} u where the injector, on the same fattened "
+        f"font, adds {ref} u")
 
     # The source basis would give a different amount — the test can fail.
     source_basis = sources_export._ink_widths(
         ufoLib2.Font.open(str(work / master.filename)))
     mean_source = sum(source_basis.values()) / len(source_basis)
     source_dx = round(40 * (source_basis["i"] / mean_source) * 1.25)
-    assert abs(source_dx - expected_dx) > 5, (
+    assert abs(source_dx - ref / 2) > 5, (
         "the fixture must make the two bases disagree, or it proves nothing")
 
 
@@ -765,6 +787,114 @@ def test_a_composite_tracks_exactly_like_its_base_letter():
     assert not w.components, "a transformed component is decomposed"
     assert w.width == 800 + 200, "…and then tracks like a simple glyph"
     assert w.contours, "the decomposed outlines are there"
+
+
+def _spac_sidecar(tmp_path, *extra):
+    """A source path whose transforms sidecar enables SPAC (plus ``extra``)."""
+    source = tmp_path / "Synthetic.glyphs"
+    source.write_text("")
+    (tmp_path / "Synthetic-transforms.json").write_text(json.dumps({
+        "version": 1,
+        "transforms": [*extra, {"type": "spac_widthaware", "enabled": True,
+                                "params": {"min": -20, "max": 40}}],
+    }))
+    return source
+
+
+def _spac_master(doc, style, location, ink):
+    """One master (``o`` is ``ink`` wide) at ``location``, keyed by axis name."""
+    import ufoLib2
+    from fontTools.designspaceLib import SourceDescriptor
+
+    font = ufoLib2.Font()
+    font.info.unitsPerEm = 1000
+    _rect(font, "o", 50, ink)
+    source = SourceDescriptor()
+    source.font = font
+    source.styleName = style
+    source.name = style
+    source.location = dict(location)
+    doc.addSource(source)
+    return source
+
+
+def _spac_doc():
+    """A designspace with the parametric ``XTRA`` axis and the injected ``slnt``."""
+    from fontTools.designspaceLib import AxisDescriptor
+
+    doc = DesignSpaceDocument()
+    for name, tag, lo, default, hi in (("XTRA", "XTRA", 0, 0, 100),
+                                       ("slnt", "slnt", -12, 0, 0)):
+        axis = AxisDescriptor()
+        axis.name, axis.tag = name, tag
+        axis.minimum, axis.default, axis.maximum = lo, default, hi
+        doc.addAxis(axis)
+    return doc
+
+
+def _twin_delta(doc, style):
+    """What the SPAC twin at ``+40`` added to ``o``'s advance."""
+    twin = next(s for s in doc.sources if s.styleName == f"{style} SPAC40")
+    masters = {s.styleName: s for s in doc.sources if "SPAC" not in s.styleName}
+    return twin.font["o"].width - masters[style].font["o"].width
+
+
+def test_a_derived_master_takes_its_parents_amounts_whatever_the_order(tmp_path):
+    """E2i-c: the parent resolves by LOCATION, in a pass after every master is
+    measured — a derived source listed BEFORE its parent still inherits.
+
+    The derived master's ink is 700 u where its parent's is 400 u (a shear
+    widens the bounding box without changing the gaps), so inheriting has to
+    show up in the twin's delta: at scale 1 and SPAC +40 the parent's own
+    amount is 2·40·400/700 ≈ 46 u while the derived master's would be 80 u."""
+    from avar2_studio import sources_export
+
+    doc = _spac_doc()
+    _spac_master(doc, "Thin Slanted", {"XTRA": 0.0, "slnt": -12.0}, 700)  # first
+    _spac_master(doc, "Thin", {"XTRA": 0.0, "slnt": 0.0}, 400)
+    sources_export._add_spacing_axis(
+        doc, _spac_sidecar(tmp_path, {"type": "slant", "enabled": True,
+                                      "params": {}}))
+
+    derived, parent = _twin_delta(doc, "Thin Slanted"), _twin_delta(doc, "Thin")
+    assert derived == parent, (
+        "the slanted master must reuse its parent's amounts, not its sheared ink")
+    assert derived < 80, (
+        f"{derived} u is the derived master's own amount — the parent was not "
+        "found")
+
+
+def test_a_master_whose_name_ends_in_rounded_keeps_its_own_amounts(tmp_path):
+    """E2i-c: derivation is a LOCATION, not a style name.
+
+    "Fancy Rounded" is a parametric master of its own (``slnt`` at its
+    default) whose name merely ends that way. Pairing it with "Fancy" by
+    suffix would hand it the wrong amounts — the rule this replaces."""
+    from avar2_studio import sources_export
+
+    doc = _spac_doc()
+    _spac_master(doc, "Fancy", {"XTRA": 0.0, "slnt": 0.0}, 400)
+    _spac_master(doc, "Fancy Rounded", {"XTRA": 100.0, "slnt": 0.0}, 700)
+    sources_export._add_spacing_axis(
+        doc, _spac_sidecar(tmp_path, {"type": "slant", "enabled": True,
+                                      "params": {}}))
+
+    own = _twin_delta(doc, "Fancy Rounded")
+    assert own > _twin_delta(doc, "Fancy"), (
+        "the name says ' Rounded' but the location does not: this master's own "
+        "ink sets its amounts")
+
+
+def test_a_derived_master_with_no_parent_raises(tmp_path):
+    """E2i-c: no silent fallback to the derived master's own sheared ink."""
+    from avar2_studio import sources_export
+
+    doc = _spac_doc()
+    _spac_master(doc, "Thin Slanted", {"XTRA": 0.0, "slnt": -12.0}, 700)
+    with pytest.raises(sources_export.SourcesError, match="has no parent"):
+        sources_export._add_spacing_axis(
+            doc, _spac_sidecar(tmp_path, {"type": "slant", "enabled": True,
+                                          "params": {}}))
 
 
 def test_the_readme_names_and_hashes_the_original_source(project, tmp_path):
@@ -909,11 +1039,18 @@ def test_a_glyph_with_a_production_name_still_gets_its_spacing(project, tmp_path
         "the source-named glyph must take the built font's amount, not be "
         "skipped because the built font calls it uni0061")
 
-    basis = TTFont(str(built))
-    ink = _ink_width(basis.getGlyphSet(), "uni0061")
-    inks = sources_export._ink_widths_from_build(built)
+    # …and the amount is the one that glyph's ink earns, over the same glyph set
+    # the writer averages (the sources' glyphs, `.notdef` excluded — E2i-c).
+    master_font = ufoLib2.Font.open(str(work / master.filename))
+    renames = sources_export._production_to_source(master_font)
+    inks = {renames.get(n, n): w
+            for n, w in sources_export._ink_widths_from_build(built).items()}
+    inks.pop(".notdef", None)
     mean = sum(inks.values()) / len(inks)
-    assert twin_width - master_width == 2 * round(40 * (ink / mean) * 1.25)
+    ink = _ink_width(TTFont(str(built)).getGlyphSet(), "uni0061")
+    assert twin_width - master_width == 2 * round(40 * (ink / mean) * 1.25), (
+        f"{twin_width - master_width} u against the amount the built font's "
+        f"ink earns ({2 * round(40 * (ink / mean) * 1.25)} u)")
 
 
 def test_a_mixed_glyph_flattens_and_tracks_like_a_simple_one():

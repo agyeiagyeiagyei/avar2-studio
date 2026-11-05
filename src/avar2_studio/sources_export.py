@@ -522,6 +522,75 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     return capped
 
 
+def _injected_axis_tags(source_path: Path) -> set:
+    """The fvar tags the enabled transforms add (``slnt``, ``ROND``, ``SPAC``…).
+
+    E2i-c resolves a derived master's parent by LOCATION, which needs to know
+    which axes the transforms created: those are the axes a derived master
+    moves off its default, and they are excluded from the location match."""
+    from .transforms import config as _tx_config
+    from .transforms import registry as _tx_registry
+
+    tags = set()
+    for entry in _tx_config.entries(Path(source_path)):
+        if not entry.get("enabled"):
+            continue
+        transform = _tx_registry.REGISTRY.get(str(entry.get("type", "")))
+        tag = getattr(getattr(transform, "spec", None), "injected_axis_tag", None)
+        if tag:
+            tags.add(tag)
+    return tags
+
+
+def _parent_master(index: int, location: Dict[str, float],
+                   measured: List[Tuple[object, Dict[str, float], Dict[str, float]]],
+                   injected: set, defaults: Dict[str, float],
+                   style_name: str) -> Optional[int]:
+    """The master ``index`` descends from, or None when it is not derived.
+
+    E2i-c (user decision): slanted and rounded styles take their parent
+    master's spacing amounts — a sheared bounding box is not the glyph's width
+    (on Crispy the slanted `colon` measures 248 u of ink against 14 upright,
+    which drove its amount into the 1 u floor). The injector already overrides
+    the masters it derives; the export must agree.
+
+    The parent resolves by LOCATION — the master at the defaults of every
+    transform-injected axis that agrees on all the others — so neither the
+    style names nor the order of ``doc.sources`` can change the answer, and a
+    designer's own master called "… Rounded" is left alone. A derived master
+    with no parent raises: keeping its own sheared measurement is exactly the
+    behaviour this rule replaced.
+    """
+    def at(where: Dict[str, float], tag: str) -> float:
+        return float(where.get(tag, defaults.get(tag, 0.0)))
+
+    derived_on = {t for t in injected if at(location, t) != defaults.get(t, 0.0)}
+    if not derived_on:
+        return None                       # the designer made this master
+    matches = [
+        other for other, (_, other_location, _) in enumerate(measured)
+        if other != index
+        # the parent sits at the injected axes' defaults ...
+        and not [t for t in injected if at(other_location, t) != defaults.get(t, 0.0)]
+        # ... and agrees on every axis the transforms did not inject.
+        and all(at(other_location, t) == at(location, t)
+                for t in (set(location) | set(other_location)) - injected)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise SourcesError(
+            f"the derived master {style_name!r} has no parent: no master sits "
+            f"at the default of {', '.join(sorted(derived_on))} at the same "
+            f"location on the other axes, so its spacing amounts are unknown "
+            f"(the export does not guess from style names)")
+    names = [repr(measured[other][0].styleName or measured[other][0].name)
+             for other in matches]
+    raise SourcesError(
+        f"the derived master {style_name!r} matches {len(matches)} candidate "
+        f"parents ({', '.join(names)}) — the source locations are ambiguous")
+
+
 def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
                       ink_font: Optional[Path] = None) -> Optional[str]:
     """Add ``SPAC`` as metrics-only twin sources (E2).
@@ -616,37 +685,33 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # master's UFO and rides along in the deep copy.
     tags_by_name = {axis.name: axis.tag for axis in doc.axes}
 
-    def _parent_name(style_name: str) -> str:
-        """The upright master a transform-derived one descends from.
-
-        E2i-c (user decision): slanted and rounded styles take their parent
-        master's spacing amounts. A sheared bounding box is not the glyph's
-        width — on Crispy the slanted `colon` measures 248 u of ink against 14
-        upright, which drove the amount into the 1 u floor — so the derived
-        masters reuse the amounts of the master they were derived from.
-        """
-        name = style_name or ""
-        for suffix in (" Slanted Rounded", " Slanted", " Rounded"):
-            if name.endswith(suffix):
-                return name[: -len(suffix)]
-        return name
-
-    measured_by_style = {}
+    # (source, location by tag, ink widths) for every master, measured before
+    # any parent is resolved so the order of doc.sources cannot change the
+    # answer (E2i-c).
+    measured: List[Tuple[object, Dict[str, float], Dict[str, float]]] = []
     for source in [s for s in doc.sources if not s.layerName]:
+        location = {tags_by_name[name]: float(value)
+                    for name, value in (source.location or {}).items()
+                    if tags_by_name.get(name)}
         if _inks_from_build is not None:
             # (B) measure the build at THIS master; (A) the master's UFO is the
             # fallback only when there is no build to instance.
-            location = {tags_by_name[name]: float(value)
-                        for name, value in (source.location or {}).items()
-                        if tags_by_name.get(name)}
-            measured = _inks_from_build(location)
+            inks = _inks_from_build(location)
         else:
-            measured = _ink_widths(source.font)
-        measured_by_style[source.styleName or source.name] = measured
-        parent = _parent_name(source.styleName or source.name)
-        if parent != (source.styleName or source.name) and parent in measured_by_style:
-            measured = measured_by_style[parent]
-        master_inks = {n: w for n, w in measured.items() if n in names}
+            inks = _ink_widths(source.font)
+        measured.append((source, location, inks))
+
+    injected = _injected_axis_tags(source_path)
+    defaults = {a.tag: float(a.default or 0.0) for a in doc.axes}
+    derived, parents = 0, set()
+    for index, (source, location, inks) in enumerate(measured):
+        parent = _parent_master(index, location, measured, injected, defaults,
+                                source.styleName or source.name)
+        if parent is not None:
+            derived += 1
+            parents.add(parent)
+            inks = measured[parent][2]
+        master_inks = {n: w for n, w in inks.items() if n in names}
         mean_L = ((sum(master_inks.values()) / len(master_inks))
                   if master_inks else mean_D)
         for value in ends:
@@ -667,6 +732,9 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
         doc.addSource(twin)
     log.info("sources_export: SPAC as %d metrics-only twin sources (%s, %g..%g)",
              len(twins), kind, lo, hi)
+    if derived:
+        log.info("sources_export: %d derived masters take their parents' "
+                 "spacing amounts (%d parents, by location)", derived, len(parents))
     if capped_total:
         # E2i-c made the amount proportional to each master's own ink, so a
         # tightening that outruns a glyph's advance should no longer happen.
