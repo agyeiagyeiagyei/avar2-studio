@@ -2314,3 +2314,35 @@ The user judged the verifier's sample (`~/avar2-verifier/samples/Crispy-SpacingS
 - A derived master with no parent **raises**. It does not fall back.
 - Add one test where the derived source comes before its parent, and one where a non-derived master's name ends in " Rounded".
 - LOG the count, for example "27 derived masters → 9 parents", on the real Crispy.
+
+## Verifier note (2026-11-05 17:55) — the avar axis-count defect predates E2i-c, is on `main`, and has a second form the new test cannot see
+
+The agent found it (87fa900): adding SPAC to fvar left avar's segment-map count behind. The verifier confirmed the impact and measured how far it reaches.
+
+**Impact, measured.** FreeType checks that avar's axis count equals fvar's. When they differ it ignores avar **and avar2**, so wght/wdth/opsz stop working; HarfBuzz tolerates the mismatch. H advance at wght 100 / 400 / 900:
+
+| font | HarfBuzz | FreeType |
+|---|---|---|
+| unspaced Crispy build (avar 11 = fvar 11) | 1699 / 2428 / 2963 | 1699 / 2428 / 2963 |
+| the same font with avar deleted (control) | 2428 / 2428 / 2428 | 2428 / 2428 / 2428 |
+| verifier's spacing sample (avar 11, fvar 12) | 1699 / 2428 / 2963 | **2428 / 2428 / 2428** |
+| studio build at c1c8aca (avar header **29**, fvar 12) | 1699 / 2428 / 2963 | **2428 / 2428 / 2428** |
+| Crispy's tracked `fonts/Crispy[…SPAC…].ttf`, 2026-09-17 (avar 9, fvar 10) | 178 → 1466 across wght | **178 at every wght, wdth, opsz** |
+
+**Reach.** Every SPAC-carrying TTF on this machine since 10-28 has a mismatched header, 37 of 37. That includes the builds verified at aa6b87f, 5e28b47 and c1c8aca, the agent's c1–c7 builds, and exports. The two SPAC-free builds are fine. `origin/main`'s injector has the same unguarded `fvar.axes.append`, and the comment says it was vendored from `gen_spac.add_spacing_axis`, which is where the September production font got it. **This is a defect in released code, not an E2i-c regression.**
+
+**Two forms.**
+- (a) **avar = fvar − 1**: the stale copy. Seen on the CLI and injector paths; 87fa900 fixes it by loading avar so fontTools recompiles it.
+- (b) **avar header 29, fvar 12**: every full studio-pipeline build (`.avar2-studio/build/…`, `out-*`). There are only 11 real segment maps, then the avar2 offsets; yet avar's own VarStore is already padded to 12 axes, so some step other than the old injector wrote it. The writer is not identified. Candidates are the Kinetikern injection, `_strip_injected_axes` (instancer), and the relocation's whole-font save.
+
+**Verifier simulation:** loading the c1c8aca build, doing `avar.segments.setdefault("SPAC", {})` and saving rewrites the header to 12. FreeType then equals HarfBuzz at wght 100/900, wdth 25, opsz 14 and wght 900 × SPAC ±100: [1699, 2963, 1006, 2385, 2657, 3269] on both. So 87fa900's mechanism should repair (b) as well when SPAC runs, because SPAC is late in the chain. **That is a prediction, not a verified result.**
+
+**The new test cannot see form (b).** bdcb670 asserts `set(font["avar"].segments) == set(fvar tags)`. fontTools pairs avar's maps with the fvar tags and drops the excess, so the c1c8aca font passes that assertion, 29-axis header and all.
+
+**Before the checkpoint (part of E2i-c; it is a correctness fix, not a rule change):**
+1. The test reads the **raw header**: `struct.unpack(">H", font.getTableData("avar")[6:8])[0] == len(fvar.axes)` on the saved file.
+2. Add one FreeType-vs-HarfBuzz parity assertion (H advance at a non-default wght) if freetype-py is available in the test env. Otherwise state in LOG that it was checked by hand.
+3. Name the writer of the 29 and fix it at the source, or show that it only occurs with SPAC present. A SPAC-off studio build must also have avar = fvar.
+4. On the real Crispy: a **studio-pipeline** build and the `--format sources` export round trip both pass checks 1 and 2.
+
+**Gate (added):** raw avar header = fvar axis count, and FreeType = HarfBuzz for H at wght 100/900, wdth 25, opsz 14 and SPAC ±100. Checked on the studio build, the CLI build and the export. Crispy's tracked production font is the user's to rebuild; this repo does not touch it.
