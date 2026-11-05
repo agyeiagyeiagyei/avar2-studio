@@ -2880,3 +2880,41 @@ the list.
 Artifacts for that run: `test-output/rt-e2ic/` (E2i-c studio TTF + sources zip),
 `test-output/e2ic-fixture/` (fixture build). WIP on branch `e2ic-wip`
 (`b8341d9`).
+
+#### E2i-c: the 64 KB gvar ceiling, and why — 1,280 corners instead of 9
+
+The E2i-c studio build produced a font with **no SPAC axis**, and the reason is
+the budget item the design note flagged, not a logic error. Running the
+transform by hand on the unspaced build raises:
+
+```
+OverflowError: int too big to convert       (fontTools gvar compile)
+→ RuntimeError: this font's per-glyph variation data is at gvar's 64KB ceiling
+  (slant/rounding twins multiply it), so the SPAC axis cannot be injected.
+```
+
+Cause, measured on that build: `_parametric_corners` collects the distinct peak
+vector of **every existing gvar tuple**, so it picked up the transform/grade
+supports too:
+
+| what | count |
+|---|---|
+| corners the injector used | **1,280** |
+| axes in those corners | `XTRA`, `XOPQ`, `YOPQ`, `slnt`, `ROND`, `GRAD`, `LCWD` |
+| corners restricted to `XTRA`/`XOPQ`/`YOPQ` | 157 |
+| design masters the designspace actually has | 6–9 |
+
+With 1,280 corners × 2 SPAC ends the per-glyph tuple data is orders of magnitude
+over the ceiling, so fontTools cannot compile gvar and the transform aborts —
+correctly, with the message — leaving the studio TTF without SPAC while the
+sources zip (which needs no gvar) still carries its 72 twins.
+
+**The fix is in the corner set, not the rule:** take the corners from the
+parametric/design axes only (the axes the designspace masters span — Crispy's
+`XTRA`/`XOPQ`/`YOPQ`, 6–9 corners), never from `slnt`/`ROND`/`GRAD`/control
+supports, and dedupe the combinations. That also makes the "per instance's own
+width" rule mean what the user said: the amount varies over the design space,
+not over the slant/rounding variants of one design.
+
+Budget numbers to record once that lands: corners, tuples per glyph (corners ×
+2 + existing), worst per-glyph header bytes vs the 64 KB limit, and build time.
