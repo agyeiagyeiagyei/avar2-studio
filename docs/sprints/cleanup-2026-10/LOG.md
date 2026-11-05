@@ -2766,3 +2766,40 @@ non-default rows and at SPAC ±100.
 * **`.notdef` at both ends (114 u):** the studio's injector spaces the
   synthesised `.notdef` box, the export skips it (`_shift_spacing` has no source
   counterpart to twin). One of the two has to change for the class to pass.
+
+### E2i-c — the injector half written and parked (ROUND 25)
+
+The rule `d = v·scale·(ink_g(L)/mean(L))^bias·(mean(L)/mean(D))` now has a
+working implementation on both sides, parked in
+`git stash@{0}` ("E2i-c WIP: per-corner injector + export half") because four
+export tests still assert the OLD constant rule and rewriting them without
+finishing the independent verification would be fitting the tests to the code.
+
+What the parked work does:
+
+* **Injector** (`transforms/builtin_spac_widthaware.py`): the corner set comes
+  from the built font's own gvar supports (`_parametric_corners`), each corner's
+  inks are measured by instancing the VF at that corner
+  (`font.getGlyphSet(location=…, normalized=True)`), and the per-corner amounts
+  are decomposed into gvar deltas by `fontTools.varLib.models.VariationModel` —
+  the exact inverse of the interpolation that reads them back. `.notdef` leaves
+  the ink basis and is not spaced, matching the export, which has no source
+  glyph to twin (this alone is the 114 u at both ends in the table above).
+* **Native engine declines** with a log line until `spac-inject` carries the
+  same decomposition, exactly as the design note requires; the fontTools path
+  runs in the meantime.
+* **Export** (`sources_export.py`, the parked `/tmp/e2ic_export_half.patch`):
+  per-master inks and means, `mean_default` for the renormalisation, and the
+  cap counted instead of silent.
+
+State when parked [verified]: `pytest -q -k 'spac or sources_export'` → 4 failed
+(`test_the_sources_carry_the_spacing_axis` ×2, `test_the_spacing_basis_is_the_built_font`,
+`test_a_glyph_with_a_production_name_still_gets_its_spacing`) and 85 passed —
+all four assert the pre-E2i-c amount. The tree is green again after stashing
+(672 passed, ruff clean), so nothing red is committed.
+
+Next for whoever picks this up: rewrite those four expectations to the scaling
+rule, then re-run the all-glyph round trip (the artifacts are still at
+`/tmp/rt-out`, `/tmp/rt-zip`, `/tmp/rt-crispy`) and confirm the 183 glyphs at
+SPAC −100 fall inside 1 u and no raw advance goes negative. The gvar tuple count
+and the 64 KB header ceiling are the budget items to record at that point.
