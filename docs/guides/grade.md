@@ -63,17 +63,20 @@ font, so it saves without a rebuild.
 
 ## Caps and diagnostics
 
-The badge's slider is bounded by **`max_pct`** (`grade.max_pct_for`): the
-largest percentage before any axis would clamp at that instance, so a
-grade the parametric space cannot deliver is simply unreachable. A cap of
-exactly 0 is a real answer — an instance on the XTRA floor can take no
-grade — and is reported as such (filtering zero caps out once advertised
-the next-loosest axis's cap instead, which is how the widest instances
-came to offer grades that could only bleed into the counters).
-The Grade panel also shows a per-instance verdict alongside the cap —
+The badge's popover holds a number input bounded by **`max_pct`**
+(`grade.max_pct_for`): the largest percentage before any axis would clamp at that
+instance, so a grade the parametric space cannot deliver is simply unreachable. A
+cap of exactly 0 is a real answer — an instance on the XTRA floor can take no
+grade — and there the input is deliberately **not** capped at 0: it keeps the
+full 0–100 range and the hint reads *no counter headroom at this style*, because
+the grade still lands when "limit grade to counter headroom" is off. (Filtering
+zero caps out once advertised the next-loosest axis's cap instead, which is how
+the widest instances came to offer grades that could only bleed into the
+counters.)
+The **G badge popover** also shows a per-instance verdict next to the input —
 **error** (the axis will not build, or this instance contributes nothing),
 **warning** (builds but degraded), **info** — because these failure modes are
-invisible in the preview until you drag the slider to an extreme.
+invisible in the preview until you type an extreme value.
 
 ## Source-level generation
 
@@ -90,16 +93,17 @@ fails with "Locations must be unique".
 
 Regeneration is idempotent — the pass starts from the freshly regenerated control
 shadow, so re-runs never stack braces. `.glyphs` sources only; `.designspace`
-grade is future work. A grade declared but not generated fails the build
-loudly (`avar2-studio build` exits 1 and the studio's status banner says why),
-because a font missing its GRAD axis must not pass as a release.
+grade is future work. A grade declared but not generated fails the build loudly:
+`avar2-studio build` exits 1, because a font missing its GRAD axis must not pass
+as a release. The studio's health payload carries `grade_error`, but no banner
+renders it yet — the CLI and the build log are where that reason is read today.
 
 ## Why the shipped font stays compact
 
 Brace layers bloat the intermediate `.glyphs`, but the compiler collapses
-them into `gvar` deltas — the built font grows by a few KB of gvar per
-graded instance, not by full masters. (The build-time default relocation,
-not grade, is what makes the *preview* font large — decision 0001.)
+them into `gvar` deltas — the built font carries one variation region per graded
+instance instead of a full master's outline set. (The build-time default
+relocation, not grade, is what makes the *preview* font large — decision 0001.)
 
 ## The static port
 
@@ -114,5 +118,7 @@ there — the designer prefers the global behaviour for preview.
 
 Everything persists in `MyFont-grade.json`: the family switch (`enabled`), the
 default percentage, the intensity, `clamp_to_headroom`, and a percentage per
-instance (omitted = the default). Per-instance grades survive the toggle being
-off, and the configuration bundle carries the whole declaration.
+instance. The studio writes the **resolved** percentage when it saves, so the
+file never depends on the current default; a hand-edited entry with no `pct`
+normalises to 0.25, not to `default_pct`. Per-instance grades survive the toggle
+being off, and the configuration bundle carries the whole declaration.
