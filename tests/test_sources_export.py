@@ -379,6 +379,19 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
     # apply() returns the font it wrote — it may not be the file passed in.
     injected = WidthAwareSpacTransform().apply(target, params, ctx)
 
+    # E2i-c: adding the axis must keep avar consistent. fontTools only compiles
+    # a table once it is in memory, so the stale bytes used to be copied
+    # through — 6 segment maps against 7 axes — and consumers that check the
+    # count drop avar, avar2 included.
+    injected_font = TTFont(str(injected))
+    axis_tags = [a.axisTag for a in injected_font["fvar"].axes]
+    assert set(injected_font["avar"].segments) == set(axis_tags), (
+        "every fvar axis needs an avar segment map")
+    store = getattr(injected_font["avar"].table, "VarStore", None)
+    if store is not None:
+        assert (store.VarRegionList.RegionAxisCount == len(axis_tags)), (
+            "the avar2 VarStore must be padded for the new axis")
+
     rows = config_generator.read_csv_mappings(project["csv"])
     glyphs = ["a", "o", "g", "w", "i"]
     worst = 0.0
