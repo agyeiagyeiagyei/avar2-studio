@@ -3073,3 +3073,27 @@ the rule yet**. The injector floor stays in as implemented (step 2), unchanged.
 So E2i-c is paused on a user decision, and the unblocked work is the 8.02 u
 fixture parity gap (the verifier confirms it is separate: the fixture has no
 derived masters) and the four export expectations.
+
+#### RETRACTION of the "16:00 section is not in the repo" note — it is (1feae88)
+
+The correction two entries above is **wrong and is retracted.** The verifier's
+spot check *is* committed: `1feae88` ("sprint: verifier spot check of `d3ba64c`
+— the floored moves are a slant artefact; injector and export disagree at slanted
+styles (awaiting the user)"), +23 lines in `findings.md` and present in the
+`cleanup-2026-10` tip. My `grep` that found nothing ran against a stale working
+tree while a `git pull --rebase` was replaying, and I reported its false negative
+as a finding instead of re-checking HEAD. The verifier's section stands, and its
+recommendation — parametric-only amounts, every transform-derived master taking
+its parent master's amounts, awaiting the user — is the open decision.
+
+Everything technical in that entry stands on its own measurement and is
+re-verified here:
+* the 8 floored export pairs really are `colon`/`exclam` at the four **Slanted**
+  derived masters, all overhanging;
+* the fixture parity trace under E2i-c found **16 differences over 0.5 u, all
+  `.notdef`** (export skips the box, injector still moves it ±732 u at the wide
+  rows); every real glyph agrees within 0.5 u, so the old 8.02 u figure no longer
+  reproduces and the `.notdef` exclusion is the thing to fix.
+
+Process lesson recorded: never report a grep-miss as evidence about the repo — re-
+read from `git show <ref>:<path>` on a clean tree, and check `git status` first.
