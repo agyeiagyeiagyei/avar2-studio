@@ -3404,3 +3404,52 @@ the coincide acceptance cannot be run on the user's file shape, and "no extra
 regions" cannot be demonstrated. Next step: find the caller (the build job
 reports `success=True` and still carries the relocation error) and short-circuit
 when the target equals the font's current defaults.
+
+## ROUND 30 — the right row: no relocation, a 14× smaller TTF, and the acceptance still not green
+
+**The verifier's correction was right and my ROUND 29 blocker was wrong.** Crispy's
+resting state is the only default-input row in the build's own config,
+`Default 400 MaxOpsz` → `out` XTRA 663.1 / XOPQ 202.5 / YOPQ 121.8.
+`Wide 400 MinOpsz` is a parametric identity row (in = out = its own
+XTRA/XOPQ/YOPQ) and never anchors the resting state. The step-3.5 per-axis
+short-circuit already existed and correctly did not fire. **No short-circuit was
+added.**
+
+Correction applied to `rt-coincide2`: the user's CSV is back verbatim except
+`Default 400 MaxOpsz` → `out` **1715 / 1 / 1**, with `Variable Font Origin =
+1715-1-1` and the copy's metadata defaults 1715/1/1.
+
+**The build is now clean** (`build.log` provenance: `e2ic-wip` `82b0807`, dirty 0):
+
+| | this copy | current Crispy |
+|---|---|---|
+| exit | **0**, no relocation, no error | 0 (with a degraded-relocation error before) |
+| studio TTF | **750,836 B** | 10,511,156 B |
+| avar raw / fvar | 12 / 12 | 12 / 12 |
+| avar2 regions (axis count) | **28 (12)** | 28 (12) — **no extra regions** |
+| gvar tuples total | 8,197 | 124,196 |
+| `H` SPAC tuples (multi-axis) | 59 (57) | 841 (839) |
+| rows exported | 30 (ORIGIN row kept) | 30 |
+
+That is the headline result: **resting on the default master removes the
+relocation's ~17× densification — 750,836 B against 10,511,156 B**, same region
+count.
+
+**But the acceptance does not pass yet.** fontmake on the copy's export: 68.3 s /
+500 MB, `Crispy-VF.ttf` 782,916 B. `roundtrip_compare.py`:
+
+- rows: worst **13.0 u** (`nine` lsb, `Wide 900 MaxOpsz`) — the 3 u row tolerance
+  fails too, not just the SPAC ends;
+- SPAC ends: **60 checks out**, in two clear groups:
+  - **`trademark` at −100 only**, 205–383 u (`uni0162`, `M.002`, `Q` in the same
+    class) — the tight-end amount differs, with +100 clean, which is the shape of
+    the export's 1 u floor (`_fit_dx`) against the injector's;
+  - **`IJ` right sidebearing at +100, a constant 166.00 u at every row** — a
+    composite whose right side moves in one renderer and not the other;
+- **`.notdef` moves ±78 u in the studio font and 0 in the sources** (worst 78).
+  So on this build `.notdef` *is* spaced, which contradicts the verifier's
+  signature ("an E2i-c build has none on .notdef") and re-opens that lead on
+  E2i-c code rather than on the old injector.
+
+Nothing is claimed as passing. Next: the `.notdef` ±78 (same two SPAC-only tuples,
+d = 39), then `IJ`'s constant 166 at the right side, then the −100 tight end.
