@@ -56,7 +56,7 @@ class SpacTransform(Transform):
     spec = TransformSpec(
         id="spac",
         name="Spacing — uniform (gftools)",
-        description="Inject a SPAC axis via gftools-gen-spac; every glyph tracks by the same amount, outlines unchanged.",
+        description="Inject a SPAC axis via gftools-gen-spac. Best with decomposed composites: like gftools, it tracks every outline glyph by the same amount and leaves composite glyphs at their own width.",
         params=[
             # gftools-gen-spac's numbers are per-side, so ±N ≈ ±2N advance
             # units. -20…40 matches Crispy's proven build; editable per project.

@@ -2657,3 +2657,45 @@ at the masters, and it must hold in BOTH the studio's injector and the export.
   This is a substantial change with a real budget risk (≈8–16 tuples per glyph
   against today's 2, i.e. ~12k tuples vs 1,476), so it is the next piece of
   work rather than something to land half-tested.
+
+### E2k-b — the uniform mode keeps gftools parity; its label says so (ROUND 25)
+
+The E2k push (`6085233`) turned the Test run red: `uniform_extras` had started
+injecting tuples for composites, so the uniform transform no longer matched
+`gen-spac`, which skips them (`if not hasattr(glyph, "coordinates"): continue`).
+E2k-b restores that parity and puts the user's rule where it belongs — the
+width-aware mode, which is the mode the sources export writes.
+
+* `wasm/fontc-web/src/spac.rs`: `uniform_extras` is back to
+  `Simple(_)` + `has_variations` only, exactly as before `6085233`. The
+  module docs now state both rules (uniform leaves composites at their own
+  width; width-aware gives them their base component's amount on both sides),
+  which the E2k edit had left stale ("left phantom only").
+* Descriptions (identical text in both mirrors — checked programmatically):
+  `transforms/builtin_spac.py` `SpacTransform.spec.description` and
+  `frontend/src/static-api.js` `spac.description` now read "Inject a SPAC axis
+  via gftools-gen-spac. Best with decomposed composites: like gftools, it
+  tracks every outline glyph by the same amount and leaves composite glyphs at
+  their own width."
+* `docs/guides/transforms.md`: the Uniform bullet carries the same note, in the
+  guide's register, and points at the width-aware mode for composites.
+* Unchanged, as the finding requires: the E2k rule stays in `widthaware_extras`,
+  in the fontTools fallback and in the sources export.
+
+Commands, results [verified]:
+* `cargo test -j 4 --manifest-path wasm/fontc-web/Cargo.toml` — the command
+  `test.yml:141` actually runs — → **22 passed, 0 failed** (all 14 test
+  binaries green, `spac_matches_studio_oracle` included).
+* `.venv/bin/python -m pytest tests/ -q` → **672 passed**; `ruff check src
+  tests` → clean; `pytest -q -k spac` → **74 passed** against the rebuilt
+  native binary (`target/release/spac-inject`, rebuilt after the revert; the
+  runtime loads it directly — there is no staged copy in
+  `src/avar2_studio/bin/`).
+
+**Memory trap, measured.** `cargo test --release` on this crate peaks **>12 GiB**
+on a 16 GiB machine: `Cargo.toml` sets `[profile.release] lto = true`, so every
+test binary fat-LTO-links the whole fontc graph, and cargo runs up to `ncpu` = 8
+of those at once. The same suite in the CI profile peaks at **0.57 GiB**
+(`/usr/bin/time -l`, `-j 4`). Rule: run `cargo test --manifest-path
+wasm/fontc-web/Cargo.toml` with no `--release` (that is what CI runs);
+`--release` belongs only to `cargo build --bin spac-inject`, one job.

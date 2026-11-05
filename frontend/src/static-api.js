@@ -579,7 +579,7 @@ const KNOWN_TRANSFORMS = {
   spac: {
     id: 'spac',
     name: 'Spacing — uniform (gftools)',
-    description: 'Inject a SPAC axis via gftools-gen-spac; every glyph tracks by the same amount, outlines unchanged.',
+    description: 'Inject a SPAC axis via gftools-gen-spac. Best with decomposed composites: like gftools, it tracks every outline glyph by the same amount and leaves composite glyphs at their own width.',
     injected_axis_tag: 'SPAC',
     params_schema: [
       { key: 'min', label: 'Min', type: 'int', default: -20 },

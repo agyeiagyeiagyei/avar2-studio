@@ -3,17 +3,20 @@
 //!
 //! - **Uniform `spac`** — `gftools gen-spac`
 //!   (`gftools/scripts/gen_spac.py`, mirrored by the studio's
-//!   `transforms/builtin_spac.py`): every glyph that already has gvar
-//!   variations tracks by the same per-side amount — two gvar tuples
+//!   `transforms/builtin_spac.py`): every outline glyph that already has
+//!   gvar variations tracks by the same per-side amount — two gvar tuples
 //!   per glyph on the phantom points `[-4]` (origin) and `[-3]`
 //!   (advance), so SPAC ±N moves each sidebearing by ±N (advance ±2N).
+//!   Composite glyphs are left at their own width, exactly as `gen-spac`
+//!   leaves them (E2k-b).
 //! - **Width-aware `spac_widthaware`** — the studio's own
 //!   `transforms/builtin_spac_widthaware.py`: the per-side amount
 //!   scales with `(ink / mean_ink) ** bias`, so the font loosens by a
 //!   consistent proportion of each glyph's own width (wider glyphs get
-//!   more). Composites are spaced too — left phantom only, and
-//!   USE_MY_METRICS composites are skipped (they already inherit their
-//!   base glyph's delta).
+//!   more). Composites are spaced too — with their base (first)
+//!   component's amount on both sides (E2k) — and USE_MY_METRICS
+//!   composites are skipped (they already inherit their base glyph's
+//!   delta).
 //!
 //! Both variants inject a SPAC fvar axis (range params.min..max,
 //! default 0) and rebuild HVAR from the gvar phantom deltas (fontTools
@@ -244,20 +247,11 @@ fn uniform_extras(
 ) -> Result<HashMap<u16, Vec<NewTuple>>, JsError> {
     let mut extras = HashMap::new();
     for gid in 0..view.num_glyphs {
-        // E2k: composites take their base letter's amount, which for the
-        // uniform transform is the same constant every glyph gets — so they are
-        // included. Empty glyphs have nothing to move and are skipped.
-        match view.glyph(gid)? {
-            Some(Glyph::Simple(_)) => {}
-            Some(Glyph::Composite(c)) => {
-                // A USE_MY_METRICS composite inherits its base's phantoms.
-                if view.has_use_my_metrics(&c) {
-                    continue;
-                }
-            }
-            _ => continue,
-        }
-        if !view.has_variations(gid)? {
+        // E2k-b: gftools parity — `gen-spac` skips composites
+        // (`if not hasattr(glyph, "coordinates"): continue`), so the uniform
+        // mode leaves them at their own width. The user's composite rule (E2k)
+        // belongs to the width-aware mode, which spaces them like their base.
+        if !matches!(view.glyph(gid)?, Some(Glyph::Simple(_))) || !view.has_variations(gid)? {
             continue;
         }
         let n = view.gvar_point_count(gid)?;

@@ -46,7 +46,10 @@ transform when it pins instance coordinates; blank = 0).
 
 - **Uniform** shells out to `gftools-gen-spac` on a copy with `--inplace`
   (its `--out` option is buggy upstream). Its numbers are **per side**:
-  ±N ≈ ±2N advance units.
+  ±N ≈ ±2N advance units. Like gftools, it tracks every outline glyph by the
+  same amount and leaves composite glyphs at their own width — the mode is best
+  with decomposed composites. The width-aware mode spaces composites like their
+  base letter.
 - **Width-aware** is the studio's own: each glyph's delta scales with its
   ink width relative to the font's own mean ink width (`(ink / mean_ink)
   ** bias`), so the font loosens by a consistent *proportion* — an
