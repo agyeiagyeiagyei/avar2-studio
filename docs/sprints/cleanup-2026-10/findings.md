@@ -2489,3 +2489,40 @@ The user's words: "yes i will do that. i'll know that without that i'll have a b
 - Then the acceptance as before: both SPAC ends, every class, slanted and rounded rows, the signature check, provenance in build.log, and the TTF size against the current Crispy.
 
 **Side observation (no action now):** relocating from the 1715-1-1 corner overflows Z, while relocating from the 47-1-1 corner fits. For E2l's "Set default at" exports on a font whose default master is a different corner, the overflow is the existing degraded-build path ("Export at the resting style, or reduce twin masters"). Note it in E2l's tests if the dialog shows that error.
+
+## Verifier note (2026-11-06 00:02) — ROUND 30's acceptance build ran `cleanup-2026-10` again; its own provenance header says so
+
+**Evidence:**
+- `test-output/rt-coincide2/build.log` (written 23:41) begins:
+
+  ```
+  commit: 2c8e7680668d…
+  branch: cleanup-2026-10
+  ```
+
+  The worktree reflog shows the checkout moving `e2ic-wip → cleanup-2026-10` at 23:30, with no move back before the 23:39 build. The LOG's "provenance: e2ic-wip 82b0807" is therefore wrong. The header was written but not read.
+- The font has the old injector's signature. In `rt-coincide2/out/…ttf` (750,836 B):
+  - **no glyph has a multi-axis SPAC tuple**;
+  - 204 glyphs have exactly 2 SPAC-only tuples and 292 have none;
+  - H has 2 SPAC-only tuples with d = 166. The LOG's "H 59 (57 multi-axis)" does not describe this file;
+  - .notdef has the two SPAC-only tuples with d = 39.
+- So all three acceptance items are again the pre-E2i-c injector (the 21:42 signature stands):
+  - (1) .notdef ±78;
+  - (2) IJ +100 constant 166 (166 is H's d, worth a look once on E2i-c);
+  - (3) trademark at −100.
+- **The 750,836 B size is valid only for the constant injector.** E2i-c's per-corner SPAC tuples will add to it. Re-measure.
+
+**What does stand from ROUND 30:**
+- The resting-row correction holds: target = compiled defaults, so `limits` is empty and nothing is relocated. That is independent of the injector.
+- **One code-independent lead.** Rows over 3 u are only `nine` lsb at the 900 rows: Default 900 Max/MinOpsz 6 u, Wide 900 Max/MinOpsz 13 u. The value is the same with SPAC blank (0) and 25.6, so it is not spacing. Re-check it on E2i-c. If it stays, diagnose it as an outline or metrics round-trip difference, before judging any SPAC end.
+
+**Process fix: the build must not depend on what the shared worktree has checked out.**
+- Build from code that cannot move under you. Two options:
+  - a dedicated worktree, e.g. `git worktree add ~/avar2-agent/e2ic-wt e2ic-wip`;
+  - an export, e.g. `git archive e2ic-wip | tar -x -C ~/avar2-agent/e2ic-src`.
+  Run the build with that path as `PYTHONPATH`. The sprint worktree stays on `cleanup-2026-10` for docs.
+- The build script must **assert** the branch and commit it expects, and fail if `avar2_studio.__file__` is not under that path.
+- Check the signature before running `roundtrip_compare.py`:
+  - H has multi-axis SPAC tuples;
+  - .notdef has none;
+  - raw avar = fvar.
