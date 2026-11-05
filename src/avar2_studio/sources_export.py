@@ -214,7 +214,7 @@ def _ink_widths(font) -> Dict[str, float]:
     return out
 
 
-def _ink_widths_from_build(font_path: Path) -> Dict[str, float]:
+def _ink_widths_from_build(font_path: Path, location=None) -> Dict[str, float]:
     """``{glyph: ink width}`` measured on the BUILT font at its default.
 
     E2i: the injector normalises against the built font's own average ink, at
@@ -231,7 +231,11 @@ def _ink_widths_from_build(font_path: Path) -> Dict[str, float]:
 
     font = TTFont(str(font_path))
     try:
-        glyph_set = font.getGlyphSet()
+        # E2i-c (B): instancing the build at a master's own location is the only
+        # way the export and the studio's injector read the same ink — the
+        # injector can only ever see the built font, never the UFO masters.
+        glyph_set = (font.getGlyphSet(location=location) if location
+                     else font.getGlyphSet())
         out = {}
         for name in font.getGlyphOrder():
             ink = _ink_width(glyph_set, name)
@@ -389,7 +393,8 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
 
 
 def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
-                   kind: str, value: float, bias: float, scale: float) -> None:
+                   kind: str, value: float, bias: float, scale: float,
+                   mean_default: Optional[float] = None) -> int:
     """Move one twin's metrics as the injector moves its phantom points.
 
     Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
@@ -404,6 +409,8 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     E2i-c will make ``amount`` depend on the master's own ink; the base rule is
     written against ``shifts`` so it follows that change.
     """
+    mean_D = mean_default if mean_default else mean_ink
+    capped = 0
     shifts: Dict[str, int] = {}
     pending: Dict[str, bool] = {}
     for name, ink in inks.items():
@@ -427,10 +434,14 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
             pending[name] = True
             continue
         amount = (value if kind == "spac"
-                  else value * ((ink / mean_ink) ** bias) * scale)
+                  else value * ((ink / mean_ink) ** bias) * (mean_ink / mean_D)
+                  * scale)
         dx = round(amount)
         if dx < 0:
+            before = dx
             dx = _fit_dx(dx, glyph.width, composite)
+            if dx != before:
+                capped += 1
         if dx:
             shifts[name] = dx
 
@@ -470,6 +481,7 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         else:
             _shift_metrics(glyph, dx)
             glyph.width += 2 * dx
+    return capped
 
 
 def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
@@ -509,6 +521,7 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # no build, e.g. a test).
     default_source = next(
         (s for s in doc.sources if not s.layerName), doc.sources[0])
+    renames: Dict[str, str] = {}
     if ink_font is not None and Path(ink_font).exists():
         inks = _ink_widths_from_build(Path(ink_font))
         # E2i-b: the built font speaks PRODUCTION names (`Euro`, `uni0162`), the
@@ -523,10 +536,20 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
                     f"the built font's {name!r} and another glyph both map to "
                     f"the source glyph {source_name!r}")
             remapped[source_name] = ink
-        inks = remapped
+        basis = remapped
+        build_font = Path(ink_font)
+
+        def _inks_from_build(location):
+            """This master's ink, read from the BUILD at that master's
+            location — the injector's own measurement (E2i-c, option B)."""
+            out: Dict[str, float] = {}
+            for name, ink in _ink_widths_from_build(build_font,
+                                                    location).items():
+                out.setdefault(renames.get(name, name), ink)
+            return out
     else:
-        inks = _ink_widths(default_source.font)
-    mean_ink = (sum(inks.values()) / len(inks)) if inks else 0.0
+        basis = _ink_widths(default_source.font)
+        _inks_from_build = None
 
     import copy as _copy
 
@@ -543,14 +566,35 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # One twin per non-zero end. A symmetric range is NOT an exception: an
     # axis with no master below the default has no negative side at all.
     ends = [hi] if lo == hi else [hi, lo]
+    # E2i-c: the amount scales with EACH MASTER's own ink, so both means are
+    # taken over the same glyph set — the sources' names, minus `.notdef` (the
+    # sources carry none; the compiler synthesises the box). `mean_D` is the
+    # default design's, from the built font when there is one.
+    names = [n for n in basis if n in default_source.font and n != ".notdef"]
+    mean_D = (sum(basis[n] for n in names) / len(names)) if names else 0.0
+    capped_total = 0
     twins = []
     # Only the masters get twins: a sparse brace source is an extra layer of its
     # master's UFO and rides along in the deep copy.
+    tags_by_name = {axis.name: axis.tag for axis in doc.axes}
     for source in [s for s in doc.sources if not s.layerName]:
+        if _inks_from_build is not None:
+            # (B) measure the build at THIS master; (A) the master's UFO is the
+            # fallback only when there is no build to instance.
+            location = {tags_by_name[name]: float(value)
+                        for name, value in (source.location or {}).items()
+                        if tags_by_name.get(name)}
+            measured = _inks_from_build(location)
+        else:
+            measured = _ink_widths(source.font)
+        master_inks = {n: w for n, w in measured.items() if n in names}
+        mean_L = ((sum(master_inks.values()) / len(master_inks))
+                  if master_inks else mean_D)
         for value in ends:
             twin_font = _copy.deepcopy(source.font)
-            _shift_spacing(twin_font, source.font, inks, mean_ink, kind=kind,
-                           value=value, bias=bias, scale=scale)
+            capped_total += _shift_spacing(
+                twin_font, source.font, master_inks, mean_L, kind=kind,
+                value=value, bias=bias, scale=scale, mean_default=mean_D)
             twin = SourceDescriptor()
             twin.font = twin_font
             twin.familyName = source.familyName
@@ -564,6 +608,13 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
         doc.addSource(twin)
     log.info("sources_export: SPAC as %d metrics-only twin sources (%s, %g..%g)",
              len(twins), kind, lo, hi)
+    if capped_total:
+        # E2i-c made the amount proportional to each master's own ink, so a
+        # tightening that outruns a glyph's advance should no longer happen.
+        # Say so loudly if it ever does: the cap distorts every location.
+        log.warning("sources_export: %d per-glyph moves still hit the "
+                    "negative-advance cap (E2i-c should have removed them)",
+                    capped_total)
     return SPAC_TAG
 
 

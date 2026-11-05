@@ -309,7 +309,32 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
     sidecar["transforms"][0]["params"].update({"min": lo, "max": hi})
     transforms.write_text(json.dumps(sidecar))
 
-    zip_path = _zip(project, tmp_path)
+    # E2i-c (B): the export measures each master by instancing THIS build,
+    # the same font the injector is applied to — otherwise the two read
+    # different ink and disagree at every SPAC end (8 u on this fixture).
+    # The same project with spacing off, then spaced by the injector.
+    quiet = tmp_path / "quiet"
+    quiet.mkdir()
+    for name in ("CrispyMini.glyphs", "CrispyMini-avar.csv",
+                 "CrispyMini-axis-metadata.json"):
+        shutil.copy2(project["source"].parent / name, quiet / name)
+    quiet_zip = _zip({"source": quiet / "CrispyMini.glyphs",
+                      "csv": quiet / "CrispyMini-avar.csv",
+                      "metadata": project["metadata"]}, quiet)
+    quiet_work = quiet / "rt"
+    quiet_work.mkdir()
+    with zipfile.ZipFile(quiet_zip) as zf:
+        zf.extractall(quiet_work)
+    quiet_ds = next(quiet_work.glob("*.designspace"))
+    assert not [a for a in DesignSpaceDocument.fromfile(str(quiet_ds)).axes
+                if a.tag == "SPAC"], "no SPAC axis without the transform"
+    resealed = subprocess.run([FONTMAKE, "-m", str(quiet_ds), "-o", "variable",
+                               "--output-dir", str(quiet / "fm")],
+                              capture_output=True, text=True)
+    assert resealed.returncode == 0, (resealed.stderr or "")[-1500:]
+    plain = next((quiet / "fm").glob("*.ttf"))
+
+    zip_path = _zip(project, tmp_path, ink_font=plain)
     work = tmp_path / "rt"
     work.mkdir()
     with zipfile.ZipFile(zip_path) as zf:
@@ -335,28 +360,6 @@ def test_the_sources_carry_the_spacing_axis(project, tmp_path, lo, hi):
     with_spac = next((tmp_path / "fm").glob("*.ttf"))
     assert TTFont(str(with_spac))["avar"].table.Version == 0x00020000, \
         "E1a's assert stays: the mappings must still build"
-
-    # The same project with spacing off, then spaced by the injector.
-    quiet = tmp_path / "quiet"
-    quiet.mkdir()
-    for name in ("CrispyMini.glyphs", "CrispyMini-avar.csv",
-                 "CrispyMini-axis-metadata.json"):
-        shutil.copy2(project["source"].parent / name, quiet / name)
-    quiet_zip = _zip({"source": quiet / "CrispyMini.glyphs",
-                      "csv": quiet / "CrispyMini-avar.csv",
-                      "metadata": project["metadata"]}, quiet)
-    quiet_work = quiet / "rt"
-    quiet_work.mkdir()
-    with zipfile.ZipFile(quiet_zip) as zf:
-        zf.extractall(quiet_work)
-    quiet_ds = next(quiet_work.glob("*.designspace"))
-    assert not [a for a in DesignSpaceDocument.fromfile(str(quiet_ds)).axes
-                if a.tag == "SPAC"], "no SPAC axis without the transform"
-    resealed = subprocess.run([FONTMAKE, "-m", str(quiet_ds), "-o", "variable",
-                               "--output-dir", str(quiet / "fm")],
-                              capture_output=True, text=True)
-    assert resealed.returncode == 0, (resealed.stderr or "")[-1500:]
-    plain = next((quiet / "fm").glob("*.ttf"))
 
     from avar2_studio.transforms.base import BuildContext
     from avar2_studio.transforms.builtin_spac_widthaware import (
