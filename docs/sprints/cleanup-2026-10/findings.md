@@ -2178,3 +2178,23 @@ The font carries the amount exactly at the masters and interpolates between them
 4. The export round trip holds at BOTH ends: every glyph, every non-default row, within 1 u, with no cap.
 5. Budget: the gvar tuple count of `g` against today's 1,476, the largest per-glyph tuple header against the 64 KB ceiling, and the real-Crispy CLI build time and peak RSS, before and after, all in LOG.md.
 6. crispy-mini tests pin the rule at two masters and the default. The Transforms guide and any UI copy describing the width-aware spacing say what it now does, in the guide's register.
+
+## Verifier check of the ROUND 25 pushes (2026-11-05 08:30) — E2k breaks the Test run → E2k-b
+
+Pushed since the gate: `5fbae7a` E2i-b, `9471ca8` E2j-b, `f660c42` O1b (Test run 41885366553 green), `6085233` E2k (Test run **41888373892 red**). Those four items are reviewed at the next gate; this entry is about the red run only.
+
+**Evidence.** Both `rust` jobs fail in `cargo test --manifest-path wasm/fontc-web/Cargo.toml`, test `spac_matches_studio_oracle`. Section 1 (width-aware vs `WidthAwareSpacTransform`) matches on all 64 glyphs at −20/0/20/40. Section 2 (uniform vs gftools `gen-spac` through `SpacTransform`) fails at −20, +20 and +40 on the same five glyphs, 40 u each, which is 2 × 20 at −20 and 2 × 20 at +20 and +40:
+
+```
+✗ SPAC -20 (5 differ: {'U': (130, 170), 'W': (283, 323), 'u': (126, 166), 'w': (234, 274), 'nine': (116, 156)})
+✗ SPAC +20 (5 differ: {'U': (210, 170), 'W': (363, 323), 'u': (206, 166), 'w': (314, 274), 'nine': (196, 156)})
+✗ SPAC +40 (5 differ: {'U': (250, 170), …})          (wasm, oracle)
+```
+
+(The `only one SPAC transform can be enabled` line and the wasm-bindgen panic above it come from the deliberate `TRANSFORMS_BOTH` rejection check, not from this failure.)
+
+**Root cause.** `6085233` changed `uniform_extras` in `wasm/fontc-web/src/spac.rs` to include composites (the LOG says "the uniform `spac` transform now includes composites too"). The Python path for `spac` shells out to gftools `gen-spac`, which skips composites (`if not hasattr(glyph, "coordinates"): continue`). Those five CrispyMini glyphs are non-`USE_MY_METRICS` composites, so they now track in the native engine and stay fixed in the Python one. The mode the user picks as "Spacing — uniform (gftools)" now gives a different font depending on which engine runs it. The LOG's "74 passed" ran `pytest -k spac`, which does not run the cargo oracle, so the break was not seen locally.
+
+**E2k-b (approved fix, smallest safe change).** Restore `uniform_extras` to gftools parity: composites skipped, exactly as before `6085233`. Keep the E2k change in `widthaware_extras`, the fontTools fallback and the export: the user's rule is about the studio's width-aware spacing, which is the mode the export writes. Add one sentence to the uniform row of `docs/guides/transforms.md`: like gftools, the uniform mode leaves composites that are not decomposed at their own width; the width-aware mode spaces them like their base letter. Acceptance: `cargo test --manifest-path wasm/fontc-web/Cargo.toml` passes locally and the LOG says so; the Test run on the push is green in all six jobs. From now on, any change to `wasm/fontc-web/src/spac.rs` runs that cargo test before its push.
+
+If the user wants the uniform mode to follow the composite rule as well, that is a separate decision. The Python path would then post-process gftools' output, the oracle would change, and the mode would no longer be "gftools".
