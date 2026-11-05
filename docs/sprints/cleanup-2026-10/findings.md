@@ -2420,3 +2420,49 @@ The user's words: "yes i will do that. i'll know that without that i'll have a b
 - **Backend.** It says whether the resting location is the default master, another master (its name), or no master, so the dialog does not guess.
 - **Tests.** Default master / another master / no master, each with "Set default at" on and off, plus the sources note on and off. Also an e2e check that the text appears.
 - **Evidence.** Report the TTF size of the coinciding copy against the current Crispy.
+
+## Verifier note (2026-11-05 21:42) — ROUND 28: the avar repair holds; the coincide run built the wrong code, so (a) and (b) in NEXT are artefacts
+
+**1. 932de1b (avar repair) — verified on real fonts.** `~/avar2-verifier/scripts/ft_hb_check.py` reads the raw header and compares FreeType with HarfBuzz advances (H n o W period trademark .notdef g m i) at 9 locations: default, wght min/max, wdth min/max, opsz min, SPAC min/max, and wght max + wdth min + SPAC min.
+
+| font | raw avar / fvar | worst \|FT−HB\| |
+|---|---|---|
+| `rt-crispy/Crispy[…].ttf` (18:12, header 29) | 29 / 12 | **3,923** (wdth min: FT H 2428, HB 626) |
+| `rt-cli-check/out/…ttf` (21:29, with the repair) | 12 / 12 | **0.0** |
+| `rt-crispy/avar-recompile-check.ttf` | 12 / 12 | 0.0 |
+
+- The repaired font's HarfBuzz advances equal the header-29 font's HarfBuzz advances at every location (wght min H 1610, wdth min 626). So the repair changes nothing HarfBuzz showed, and FreeType now agrees.
+- Nothing is lost. The 17 extra "maps" in the header-29 table are not segment maps: the 13th holds 170 pairs whose from-values are not ascending (0, 0.0038, 0, 0, …). FT and HB never read them for any fvar axis.
+- **The LOG's account of the writer does not fit the bytes.** fontTools compiling avar against a 29-axis fvar would also set the avar2 VarStore's `RegionAxisCount` to 29 (`otTables.VarRegionList.preWrite` forces it to `len(fvar.axes)`). In this table it is 12, with 28 regions. So something else wrote the 29 maps. The repair is a sound backstop; name the real writer when convenient (log the raw header after each stage of one CLI build). This does not block.
+
+**2. The coincide run (rt-coincide, 21:15) and rt-cli-check (21:29) ran `cleanup-2026-10`, which does not contain E2i-c.**
+- `git merge-base --is-ancestor bdcb670 cleanup-2026-10` is false. `_parent_master` and `_master_locations` exist only on `e2ic-wip`, and the worktree has been on `cleanup-2026-10` since 18:12.
+- The fonts carry the old constant-amount signature: every glyph has 2 SPAC-only tuples, .notdef included. An E2i-c injector build has 20 SPAC tuples on H/n/trademark, 18 of them multi-axis, and none on .notdef.
+
+| build | .notdef | H | trademark |
+|---|---|---|---|
+| rt-coincide/out (21:15) | 2 SPAC tuples, 0 multi-axis | 2 / 0 | 2 / 0 |
+| rt-cli-check/out (21:29) | 2 / 0 | 2 / 0 | 2 / 0 |
+| rt-crispy/out (18:00, e2ic-wip code) | **0** | 20 / 18 | 20 / 18 |
+
+- **NEXT (a), the .notdef ±114 u**, is the pre-E2i-c injector, which spaces .notdef; E2i-c already excludes it. There is no new writer to hunt.
+- **NEXT (b), trademark 169–315 u at −100**, is most likely the old capped tightening (b688994) against the export. Re-check it on E2i-c code before diagnosing anything.
+- **The LOG's "avar 12/12" for rt-coincide is wrong.** Its raw header is **29**: it was built before the repair. Correct the LOG.
+- **Do not reuse the rt-crispy/out (18:00) numbers either.** At the default location its SPAC −100 change for H is −846, but the rule gives the old constant amount there (−306 in the other builds). That build is the reverted B attempt, as the LOG says.
+- `~/avar2-agent/venv` holds a non-editable avar2_studio install dated 11-02 that matches neither branch. Its `avar2-studio` command runs neither branch's code.
+
+**3. The acceptance build must be the code that will land, with provenance recorded.**
+- **Code.** Bring 932de1b onto `e2ic-wip` with a cherry-pick or merge, no rewrite or force-push. Alternatively, merge e2ic-wip into the sprint branch once it is ready for review.
+- **Provenance at the head of every build.log:**
+  - `git rev-parse HEAD`
+  - the `git status --porcelain` count of the code checkout
+  - `python -c "import avar2_studio; print(avar2_studio.__file__)"`
+- **Signature check before comparing anything:** H has multi-axis SPAC tuples, .notdef has none, and the raw avar header = fvar.
+
+**4. The coincide copy should be the file the user will actually have.**
+- **Keep the ORIGIN row, with `out` = the default master's coordinates.** The export already leaves the default row out of `<mappings>` (sources_export docstring), so nothing should refuse it. If anything does, that is a defect to fix, because the user's file will keep the row.
+- **Use a master other than 47-1-1 as Variable Font Origin**, e.g. 1715-1-1 (nearest today's ORIGIN at 1420.1/149.9/122.1), or the master the user picks. With 47-1-1 nothing moves at all, so the run only proves the no-relocation path. The user's real file moves the default master, and that is the path to prove: the sources' axis defaults and normalization change, and the studio's move must be a no-op.
+- **Optional baseline.** One 47-1-1 run (ORIGIN kept) as a baseline. Each run costs about 96 s / 1 GB plus fontmake 59 s / 0.5 GB, one at a time.
+- **Pass criteria (unchanged):** both SPAC ends, every class, slanted and rounded rows included; no extra regions; TTF size against the current Crispy.
+
+**5. E2l evidence already in hand.** rt-coincide's build.log prints RESTING_NOTE ("the default row differs there") although the resting location there IS the default master. That is the false note E2l removes; use it as a test case.
