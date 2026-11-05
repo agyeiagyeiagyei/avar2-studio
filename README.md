@@ -19,10 +19,13 @@ alongside — draw those glyphs' brace layers in an embedded editor.
 
 The [hosted demo](https://agyeiagyeiagyei.github.io/avar2-studio/) runs the studio
 in your browser, nothing to install. It opens on Crispy Mini; **Load Font ▾ →
-Examples** also has Roboto Delta Mini. Both are live: edit instances and mappings,
-declare secondary axes, grade styles, rebuild — compiled in the browser by
-[fontc](https://github.com/googlefonts/fontc) as WebAssembly. Work persists until
-you choose **Forget this project**.
+Examples** also has Roboto Delta Mini. Crispy Mini is live end to end: edit
+instances and mappings, declare secondary axes, grade styles, rebuild — compiled
+in the browser by [fontc](https://github.com/googlefonts/fontc) as WebAssembly.
+Roboto Delta Mini loads and previews, but it is a `.designspace` and the browser
+cannot compile UFO sources, so every action that needs a rebuild — **Rebuild**,
+saving a grade, adding a secondary axis — refuses with *needs the full app*.
+Work persists until you choose **Forget this project**.
 
 Your own font comes in through **Load Font ▾ → Upload .glyphs or project .zip…**.
 The browser cannot write back to your source (export with **Config ▾ → Download
@@ -57,7 +60,10 @@ the platform wheels, and from a checkout you build them with `cargo build
 0015](docs/decisions/0015-native-accelerators-ship-in-platform-wheels.md)).
 Without them spacing falls back to a slower pure-Python path and Kinetikern
 reports the engine is not built. `avar2-studio doctor` says what is present;
-`--strict` exits non-zero when something is missing.
+`--strict` exits non-zero only for a missing **headless-build** prerequisite
+(`fontc`, `gftools-builder`, `glyphsLib` — the names `doctor` prints) or an
+environment override that names a file which does not exist — an absent
+accelerator is reported, never fatal.
 
 **In Glyphs.** `avar2-studio install-glyphs-plugins` links the bundled plugins
 into Glyphs 3: a **Window → avar2 Studio** menu that opens the studio on the font
@@ -74,13 +80,13 @@ authoring: once studio brace layers exist, builds compile from a shadow copy in
 
 | File | Commit? | Holds |
 |---|---|---|
-| `MyFont.glyphs` / `.designspace` | yes, it's yours | the source — touched only on an explicit row action |
+| `MyFont.glyphs` / `.designspace` | yes, it's yours | the source — written when you act on an instance row or edit a source-derived axis layer through ↗ (that opens the original in Fontra) |
 | `MyFont-avar.csv` | yes | named instances and avar2 mappings |
 | `MyFont-control.json` | yes | secondary parametric axes, their layers and drawings |
 | `MyFont-transforms.json` | yes | which transforms are on, with their parameters |
 | `MyFont-grade.json` | yes | grade on/off, default %, intensity, headroom clamp, per-style anchors |
 | `MyFont-kinetikern.json` | yes | per-style spacing corrections |
-| `<stem>-axis-metadata.json` | yes | declared axis defaults and display names — the build exits 2 without it |
+| `<stem>-axis-metadata.json` | yes | declared axis defaults and display names — the build exits 2 without it and without the legacy `.avar2-studio/axis-metadata.json` |
 | `<stem>-build.json` | optional | reproducible export choices for `avar2-studio build` |
 | `.avar2-studio/` | no, gitignore it | build output, shadow, exports, jobs, config, backups |
 
@@ -126,14 +132,17 @@ losing the work. Kerning is not part of this pass.
 [Guide](docs/guides/kinetikern.md).
 
 **Build transforms.** Optional steps on every build: spacing uniform or
-width-aware (a `SPAC` axis), clean fvar, rebuild STAT, round corners (`ROND`),
-build-time slant (`slnt`) — plus your own Python transform scripts.
+width-aware (a `SPAC` axis), clean fvar, rebuild STAT, smooth unhinted rendering
+(`gasp` + `prep`), round corners (`ROND`), build-time slant (`slnt`) — plus your
+own Python transform scripts.
 [Guide](docs/guides/transforms.md).
 
 **Configuration export / import.** Move a whole configuration between sources or
 machines as one file: secondary axes with drawings, mappings, transforms, grade.
-Import validates first and applies nothing until you confirm, and **Download
-workspace (.zip)…** packs source, studio files and the current build together.
+Import validates first and applies nothing until you confirm. In the hosted demo,
+**Download workspace (.zip)…** also packs source, studio files and the current
+build into one project zip that loads back into either the demo or the app; the
+desktop app has no such item, because its project already lives on disk.
 
 ## Command line
 

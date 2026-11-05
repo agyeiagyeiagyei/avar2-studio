@@ -146,9 +146,9 @@ the static bundle, the Fontra bridge, the two native accelerators
 (`spac-inject`, `libkinetikern2`), install shadowing and stale processes. It
 does **not** look for `fontmake` — the build's compiler is `fontc`, and
 `gftools` carries the Python-side steps. `--strict` fails only on a
-**headless-build prerequisite** that is missing (`fontc`, `gftools`,
-`glyphsLib`) or on an environment override that names a file which does not
-exist (`$AVAR2_SPAC_INJECT`, `$AVAR2_KK2_DYLIB`); the UI-only pieces and an
+**headless-build prerequisite** that is missing (`fontc`, `gftools-builder`,
+`glyphsLib` — the names it prints) or on an environment override that names a
+file which does not exist (`$AVAR2_SPAC_INJECT`, `$AVAR2_KK2_DYLIB`); the UI-only pieces and an
 absent accelerator do not fail it — that is the code's contract (`doctor.run`),
 and no workflow in this repo runs `doctor --strict`.
 
