@@ -2551,3 +2551,54 @@ The user's pointer: "9 is a component based on 6". In the source, every one of n
 **Fix direction (the agent's to choose; root cause, not a per-glyph patch):** when the export decomposes a composite, write the decomposed composite into every sparse layer where any of its components (recursively) has a glyph. Use that component layer, with the composite's own offset, angle and advance interpolated at that location; the advance must match what the studio produces there. Alternatively, do not decompose there and let the compiler handle the transformed component. Either way the gate is the same: nine at the 900 rows within 3 u, and a sweep proving no decomposed glyph lacks a sparse layer its base has.
 
 Separate question for the grade engine (check, not a finding yet): at GRAD ±10 the exported nine is not rotated six. Say whether the grade engine treats nine as its own glyph by design.
+
+## Verifier finding (2026-11-06 03:15) — ROUND 31: the pinned build holds; the SPAC-end residual starts at the masters (per-tuple rounding); nine's layer must interpolate nine
+
+**Verified on `rt-coincide2`** (build.log: `~/avar2-agent/e2ic-wt`, e2ic-wip `80e96e8`, 0 dirty, `avar2_studio` from the worktree):
+- TTF 765,636 B. Raw avar 12 = fvar 12. avar2 has 28 regions, RegionAxisCount 12.
+- FreeType = HarfBuzz at 9 locations: 0.0, and 1.0 at the wght max + wdth min + SPAC min corner (integer rounding).
+- `.notdef` has 0 tuples.
+- H has 75 tuples, 18 of them SPAC (16 multi-axis). 203 of 496 glyphs carry multi-axis SPAC tuples.
+- Correction to the LOG: H has 68 multi-axis tuples of 75, not 73.
+- Stale evidence: `failures.jsonl` (02:31) comes from an attempt build (nine 5,046 u) and does not match `rt.json` (02:48). Regenerate it on every run or delete it.
+
+**The SPAC-end residual is not rounding noise.** Over 28 rows × 496 glyphs, the signed studio − sources change in advance averages +0.06 u at −100 and −0.06 u at +100. Per glyph, though, it has one sign:
+- g and its accented forms (gbreve, gcaron, …), slash, backslash and yen sit at +1.7 u at −100 and −1.6 u at +100.
+- 46–51 glyphs have a mean of at least 1 u.
+
+The difference starts at the parametric masters (`~/avar2-verifier/scripts/spac_at_masters.py`). There the exported twin UFO and fontmake's TTF agree exactly; the studio does not:
+
+| master | glyph | twin UFO = fontmake (−100) | studio (−100) |
+|---|---|---|---|
+| 47-1-1 | period | −2 | 0 |
+| 47-1-1 | g | −10 | −8 |
+| 1715-1462-1 | g | −842 | −840 |
+| 1715-1-275 | slash | −144 | −142 |
+| 47-1462-1 | H | −570 | −572 |
+
+The +100 end mirrors this.
+
+**Cause** (read in the code; confirm with the master check after the fix): the injector passes FLOAT corner amounts to `model.getDeltas()` and then rounds each tuple delta on its own (`round(delta)`). At a master the font therefore gives Σ round(Δᵢ), while the export writes `dx = round(amount)` per master. A 1 u error per side becomes 2 u on the advance, and it interpolates into every row.
+
+**Fix:**
+- Compute each corner's per-side amount as the export's integer: the same `round()` and the same integer floor as `_fit_dx`, ideally one shared function.
+- Then call `model.getDeltas(ints, round=round)`. fontTools rounds sequentially, so every corner reconstructs exactly.
+
+**Gate:**
+- The studio equals the twin at every master, at both ends, to 0 u.
+- At rows, worst ≤ 2 u (four integer HarfBuzz reads).
+- No glyph has a signed mean of 0.5 u or more across rows (`spac_signed.py`, `spac_perglyph.py` in `~/avar2-verifier/scripts/`).
+- The 1 u SPAC tolerance in `roundtrip_compare.py` cannot tell rounding from a real offset; replace it with this pair.
+
+**nine: the synthesized layer must interpolate nine at the layer's location.** I measured the four GRAD 0 sparse locations (studio vs sources):
+- Advance already agrees: 2779/2779, 5173/5172, 1149/1149, 2196/2196. Ink agrees too.
+- Only the position is off: lsb 54/60, 55/68, 40/41, 66/68.
+- In the studio, nine's rsb equals six's lsb exactly at all four locations (98, 142, 46, 107). So the rotated six sits at an x-offset equal to nine's own advance there.
+
+So the layer at L is:
+- the advance and the component transform interpolated from nine's OWN masters at L (masters-only, as fontmake already does for nine);
+- the outline: six's layer at L under that transform.
+
+Attempt 3's advance of 127 is nine's advance and offset at its parent master 47-1-1 (pos.x 127), copied instead of interpolated. six's advance (1,365) is not the target either.
+
+The studio's nine is a simple glyph (fontc flattens it), so the studio is the reference here.
