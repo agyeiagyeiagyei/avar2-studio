@@ -280,9 +280,16 @@ class WidthAwareSpacTransform(Transform):
             if given:
                 ctx.log(f"spac_widthaware: {len(corners)} master corner(s) from "
                         f"the designspace")
-            corner_inks, corner_means = [], []
+            corner_inks, corner_means, corner_advances = [], [], []
             for corner in corners:
                 at = _ink_widths_at(font, corner)
+                # normalized=True: the corner dicts are design-space peaks, and
+                # reading them as user units silently returns the DEFAULT's
+                # advances (which floored 439 innocent glyphs on the first run).
+                adv_set = (font.getGlyphSet(location=corner, normalized=True)
+                           if corner else font.getGlyphSet())
+                corner_advances.append(
+                    {n: float(adv_set[n].width) for n in font.getGlyphOrder()})
                 shared = [n for n in inks if n in at]
                 if not shared:
                     break
@@ -351,8 +358,31 @@ class WidthAwareSpacTransform(Transform):
                 ink_name = base_name or name
                 per_corner = [amount_at(i, corner_inks[i].get(ink_name, 0.0))
                               for i in range(len(corners))]
-                lo_deltas = model.getDeltas([lo * scale * f for f in per_corner])
-                hi_deltas = model.getDeltas([hi * scale * f for f in per_corner])
+                amounts_lo = [lo * scale * f for f in per_corner]
+                amounts_hi = [hi * scale * f for f in per_corner]
+                # The user's 1 u floor (findings.md, "E2i-c gets a 1 u width
+                # floor"): TIGHT END ONLY, the same bound the export's _fit_dx
+                # applies, so both renderers floor the same corner values.
+                # `d` is the per-side amount; a simple glyph's advance moves by
+                # 2d, a composite's by d (E2k), so the bounds differ.
+                if lo < 0:
+                    for i, amount in enumerate(amounts_lo):
+                        corner_adv = corner_advances[i].get(name, 0.0)
+                        if not corner_adv:
+                            continue
+                        limit = ((1.0 - corner_adv) / 2.0 if not composite
+                                 else 1.0 - corner_adv)
+                        floored = max(amount, limit)
+                        if floored != amount:
+                            ctx.log(
+                                f"spac_widthaware floor: {name} at corner "
+                                f"{sorted(corners[i].items())} rule "
+                                f"{amount:.1f} -> {floored:.1f} (advance "
+                                f"{corner_adv:.1f} -> "
+                                f"{corner_adv + (2 if not composite else 1) * floored:.1f})")
+                            amounts_lo[i] = floored
+                lo_deltas = model.getDeltas(amounts_lo)
+                hi_deltas = model.getDeltas(amounts_hi)
                 # Both phantoms, simple or composite: ±dx gives left +dx and
                 # advance +2dx, i.e. each side +dx — the base's amount for a
                 # composite, its own for a simple glyph (E2k).
