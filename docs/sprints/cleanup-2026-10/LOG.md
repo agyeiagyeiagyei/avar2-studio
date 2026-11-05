@@ -3144,3 +3144,60 @@ injector, which never varied along `slnt`/`ROND`.
 Verified on the shipped export path (transformed shadow source, **72 twins / 36
 masters**): **0 floored pairs, down from 8**. The slant artefact that produced
 `colon` ink 248 u against 14 upright no longer reaches the amount.
+
+## E2i-c: the derived→parent lookup resolves by location (`e2ic-wip` 87fa900)
+
+The verifier's 16:27 note was right about `3cad084`: `_parent_name` stripped
+" Slanted"/" Rounded" from the style name and inherited only `if parent in
+measured_by_style`, so a derived source listed **before** its parent silently
+kept its own sheared ink — the exact behaviour the user rejected. A designer's
+own master ending in " Rounded" would also have been paired by name.
+
+Fixed: `_parent_master` resolves the parent **by location**, in a pass after
+every master is measured — the master at the defaults of the transform-injected
+axes (`_injected_axis_tags`, read from the enabled transforms in the sidecar)
+that agrees on all the others. Order cannot change the answer; a derived master
+with no parent **raises**. Three tests pin it, each verified to fail on the
+previous implementation (derived-before-parent, a non-derived "… Rounded"
+master, and the raise).
+
+**Two real defects surfaced on the path the production caller uses.** The
+fixture never exercised `BuildContext.master_locations` before, so both were
+invisible:
+
+1. `_normalize_corners` read `segment.mapping`; fontTools 4.68 exposes
+   `avar.segments` as `{tag: {from: to}}` — an `AttributeError` on any font
+   whose avar carries segments. It also raised "Locations must be unique" when a
+   master sits at the built font's default (the fixture's default *is* its first
+   master); corners are now deduped after normalising.
+2. **The injected font shipped with a stale avar.** fontTools compiles a table
+   only once it is loaded, so appending the SPAC axis to `fvar` left the old
+   avar bytes in place: 6 segment maps against 7 axes. Consumers that check the
+   axis count then drop avar — **and avar2 with it**. The injector now adds the
+   new axis' identity segment map (which also loads the table so it recompiles)
+   and pads avar's own VarStore, where the avar2 mappings live, like the other
+   VarStores it already padded.
+
+Both change the injector, so the real-Crispy numbers in this log predate them
+and must be re-measured: the next build must show avar `AxisCount` = fvar axes
+with SPAC present, and the mappings must still resolve.
+
+**Renderer parity, measured.** `test_the_sources_carry_the_spacing_axis`
+(previously green at 1 u) diverged by 8.02 u once each master measured its own
+ink: the test's `BuildContext` had no `master_locations`, so the injector fell
+back to gvar inference — the 1,280-corner trap. With the grid passed the way
+`pipeline._build_context` passes it, and after the avar fixes, the worst row is
+**2.00 u**. Not a tolerance chosen for comfort: at 8× the amounts (`scale` 10)
+the worst row stays **2.00 u** while the amounts grow, so the residual is the
+integer quantisation of the injector's phantom-point deltas against the twins'
+exact floats, not a difference in the amounts. Per row at scale 1.25: default
+0.00, Narrow Thin 12 0.11, Narrow Heavy 12/144 0.55/0.61, Ultra Wide Thin
+1.73/1.68, Ultra Wide Heavy 1.54/2.00.
+
+The other three stale expectations now compare against the **injector's own
+amount on the same font** rather than restating the pre-E2i-c formula (which
+averaged every built glyph, `.notdef` included, and used the default's ink for
+every master).
+
+Full suite: **675 passed**, `ruff check src tests` clean. One test was added per
+new behaviour, so 672 → 675.
