@@ -3361,3 +3361,46 @@ width-aware injector is supposed to skip it (`inks` excludes `.notdef`), and the
 **Housekeeping:** the reverted B attempt now lives in `~/avar2-agent/`
 (`B_attempt_pipeline.py`, `B_attempt_injector.py`); nothing durable is under
 `/tmp`.
+
+## ROUND 29 — corrections accepted; the user-faithful coincide copy trips a relocation that should not run
+
+**Corrections to ROUND 28, as the verifier found them:**
+- `rt-coincide` and `rt-cli-check` were built from `cleanup-2026-10`, which does
+  **not** contain E2i-c (`bdcb670` is not an ancestor). Their fonts carry the old
+  constant-amount injector: two SPAC-only tuples per glyph, `.notdef` included.
+  **NEXT (a) and (b) are withdrawn** — the `.notdef` ±114 u and the `trademark`
+  169–315 u are that injector, not new defects. E2i-c already excludes `.notdef`.
+- **`rt-coincide`'s raw avar header is 29, not 12/12.** It was built before the
+  repair. Corrected here.
+- `rt-crispy/out` (18:00) is the reverted B attempt and its numbers are not to
+  be reused.
+- The avar repair (932de1b) is **verified**: FreeType = HarfBuzz at 9 locations
+  on `rt-cli-check/out` (worst 0.0), against 3,923 on the header-29 font. The
+  writer of the 29 is still unnamed — the VarStore `RegionAxisCount` is 12 in
+  that table, which fontTools compiling against a 29-axis fvar would not leave.
+
+**Code.** `932de1b` is cherry-picked onto `e2ic-wip` (**82b0807**), no rewrite,
+no force-push; the branch is pushed.
+
+**The user-faithful copy (`rt-coincide2/`)** — ORIGIN row kept, its `out` set to
+the `1715-1-1` master, and `Variable Font Origin` set to that master. Build
+provenance is at the head of `build.log` (commit `82b0807`, dirty files 0,
+`avar2_studio.__file__` in the checkout).
+
+It exposed a real problem. The designspace and the compiled font both come out
+right — default source `Crispy 1715-1-1`, `fvar` defaults `XTRA 1715 / XOPQ 1 /
+YOPQ 1` — and the ORIGIN row's `out` is the same point, so **the relocation has
+nothing to move**. The build still runs it and fails:
+
+```
+origin relocation failed (degraded build …): glyph 'Z' has too many variation
+tuples … after relocating the default (2011 tuples; dropping the 575
+sub-visible ones was not enough)
+```
+
+So some caller relocates even when `limits` should be empty, and at this target
+the relocation cannot fit gvar's per-glyph ceiling anyway. Until that is resolved
+the coincide acceptance cannot be run on the user's file shape, and "no extra
+regions" cannot be demonstrated. Next step: find the caller (the build job
+reports `success=True` and still carries the relocation error) and short-circuit
+when the target equals the font's current defaults.
