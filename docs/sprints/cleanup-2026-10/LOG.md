@@ -3014,3 +3014,36 @@ The earlier "18 twins, 0 floored" run is explained: calling the export on the
 **original** `.glyphs` gives 9 masters with no derived ones and no caps. The 8
 live in the transformed source's slant/round masters — which is why the
 classification had to run there.
+
+#### E2i-c: the injector floor lands, and exposes a corner-set divergence
+
+`e2ic-wip` `9e8801f`. The fontTools path now floors each corner's amount at the
+**tight end only** so the advance stays above 1 u — using that corner's own
+advance, with the advance moving by `2d` for a simple glyph and `d` for a
+composite (E2k) — and logs every floored (glyph, corner) with the rule amount,
+the floored amount and the before/after advance. `hi`, the default and SPAC 0
+never floor, per the user's decision.
+
+Two things came out of running it on the real font:
+
+1. **A bug in my own first attempt, caught by its own output:** I read the corner
+   advances with `getGlyphSet(location=corner)` and no `normalized=True`, so the
+   read returned the *default's* advances and 439 innocent glyphs looked
+   floor-worthy (`A` "rule −643.4"). With the read fixed: **0 floored pairs**.
+2. **A divergence the floor cannot fix:** the injector floors **0**, the export
+   floors **8**, because they disagree about what a corner *is*. The injector's
+   corners are the 9 designspace masters (from `pipeline._master_locations`);
+   the export twins **36**, which include the slant/round **derived** masters
+   that only exist after the font-stage transforms. `colon`/`exclam` hit the
+   floor on those derived masters and nowhere else.
+
+That is a rule question, not arithmetic: does the spacing amount vary over the
+**parametric design space** (9 corners — the injector's reading, and what the
+user's "each instance's own width" most directly means for the parametric
+axes), or over **every master the compiled font has** (36 — the export's
+reading, where a slanted style also gets its own amount)? The two renderers must
+answer the same way or the round trip can never be exact at the tight end.
+
+Until that is decided, the round trip is expected to disagree exactly on the
+derived-master glyphs, and the `colon`/`exclam` floor rows above are the
+measurable tip of it.
