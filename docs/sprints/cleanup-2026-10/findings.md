@@ -2315,7 +2315,7 @@ The user judged the verifier's sample (`~/avar2-verifier/samples/Crispy-SpacingS
 - Add one test where the derived source comes before its parent, and one where a non-derived master's name ends in " Rounded".
 - LOG the count, for example "27 derived masters → 9 parents", on the real Crispy.
 
-## Verifier note (2026-11-05 17:55) — the avar axis-count defect predates E2i-c, is on `main`, and has a second form the new test cannot see
+## Verifier note (2026-11-05 17:40) — the avar axis-count defect predates E2i-c, is on `main`, and has a second form the new test cannot see
 
 The agent found it (87fa900): adding SPAC to fvar left avar's segment-map count behind. The verifier confirmed the impact and measured how far it reaches.
 
@@ -2346,3 +2346,30 @@ The agent found it (87fa900): adding SPAC to fvar left avar's segment-map count 
 4. On the real Crispy: a **studio-pipeline** build and the `--format sources` export round trip both pass checks 1 and 2.
 
 **Gate (added):** raw avar header = fvar axis count, and FreeType = HarfBuzz for H at wght 100/900, wdth 25, opsz 14 and SPAC ±100. Checked on the studio build, the CLI build and the export. Crispy's tracked production font is the user's to rebuild; this repo does not touch it.
+
+## Verifier note (2026-11-05 17:55) — the A/B fork does not close the round-trip gap: the studio injector does not interpolate between masters the way the sources do
+
+The agent attributes the 56 failing SPAC-end checks to one point: the relocated default, where the studio measures its own ink (H 152 u) and the sources interpolate (96 u). It offers (A) export a twin at the default, or (B) give the injector's default corner the interpolated value. **Neither changes the rows.**
+
+**Cause, measured.** The injector builds `VariationModel(corners)` over 10 points: the relocated default plus the 9 masters, normalized against the built font. In that model each master's contribution is the product of its normalized coordinates, so on any axis line through the default the amount stays the default's. The sources' model, with its default at 47-1-1, interpolates across the whole box. The two agree only at the 10 points; every CSV row lies between them.
+
+- **Real fonts** (rt-crispy, HarfBuzz). The row "Width 220, Weight 400" sits on an axis line through the default, and H there is 3489 u, 44% wider than at the default (2428). The change at SPAC −100 is:
+
+  | font | at the default | at "Width 220, Weight 400" |
+  |---|---|---|
+  | studio, `out/` | −304 | **−304** (identical; O, n, o, a, e, m identical too) |
+  | sources → fontmake, `fm/` | — | −432, in proportion to width |
+
+  B would make the studio's value about −192 at that row (2 × 96), further from the sources' −432.
+- **Structural test** (`~/avar2-verifier/scripts/model_fork.py`): Crispy's 9 real master locations and 29 mapping rows, with a known amount that is linear in XTRA/XOPQ/YOPQ. The sources reproduce it exactly at every row. The studio is off by up to 42.8 on a scale of about 90; on-axis rows get exactly the default's value. The worst gap is **42.8 today, 42.8 with B and 42.8 with A**: in this ideal case the default's measured and interpolated values coincide, so neither option touches the rows.
+
+**What this means for the rule.** The exported sources follow the user's E2i-c rule between masters ("the spacing amount scales with each instance's own width"). The studio's preview does not: rows on an axis line through the default get the default's amount however wide they are.
+
+**Recommendation (C), pending the user's OK.** The sources are the reference; they are what fontmake and Google Fonts build. The studio injector reproduces the sources' amount function: the source model over the masters, re-expressed in the built font's space the way the build-time relocation re-expresses outlines. That means corners on the grid of every master coordinate plus the relocated default per parametric axis, valued from the source model, which is at most 4 × 5 × 4 points on Crispy. The agent picks the mechanism. **Cost to measure first:** SPAC tuples per glyph against the budget in decision 0004 (g 1,476) and the 64 KB per-glyph gvar ceiling. If it does not fit, the user decides between a heavier font and an approximate preview.
+
+**Acceptance (unchanged, and now reachable):** studio = sources within tolerance at all 28 rows × both SPAC ends × every class, with slanted and rounded rows included.
+
+**Also, from the rt-crispy artifacts:**
+- Two runs disagree. `rt.json` (17:44) has worst 397 u and `.notdef` 0. `roundtrip.json` and `failures.jsonl` (17:48) have worst 315 u and **`.notdef` 114 u at every row and both ends** (168 checks). Say which pair of fonts each run compared, and which is final.
+- The top-level `rt-crispy/Crispy[…].ttf` (sha ae3325b3) still has the **header-29 avar**, and FreeType drops wght/wdth/opsz there. `out/` and the studio-pipeline build in `work/` (identical, sha cf971a15) have 12/12, and FreeType equals HarfBuzz within 1 u. Say where the top-level file came from. The raw-header test from the 17:40 note is still needed.
+- Keep exactly one `STATE:` line in STATUS and put the detail in `NEXT:`. The verifier's scripts now read only the first `STATE:` line.
