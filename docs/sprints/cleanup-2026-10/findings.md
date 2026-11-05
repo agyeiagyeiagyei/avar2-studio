@@ -2304,3 +2304,13 @@ The user judged the verifier's sample (`~/avar2-verifier/samples/Crispy-SpacingS
 **Why (the user's model):** a shear moves every glyph by the same amount at each height, so the gaps between letters are unchanged, and a sheared bounding box is not a width. Per-instance spacing (the CSV's SPAC column) then means the same thing on a slanted instance as on an upright one, so a designer can tune a slanted instance with its own SPAC value.
 
 **Acceptance (added to E2i-c):** at every derived master, every glyph's per-side twin delta equals its parent's within 1 u. The all-glyph round trip includes slanted and rounded rows and holds at both SPAC ends. The 1 u floor stays as the user's safety net, and LOG lists anything it touches (expected: nothing, once E2i-c-d is in).
+
+## Verifier note (2026-11-05 16:27) — the export's parent lookup (`e2ic-wip` 3cad084) is name- and order-dependent, and it falls back silently
+
+`sources_export._parent_name` strips " Slanted Rounded", " Slanted" or " Rounded" from the style name. The derived master uses the parent's amounts only `if parent in measured_by_style`, so only when the parent source comes **earlier** in `doc.sources`. Otherwise it silently keeps its own sheared measurement, which is exactly the behaviour the user rejected. A designer's own master whose name ends in " Rounded" would also be paired with another master by name.
+
+**Before the checkpoint (part of E2i-c, no rule change):**
+- Resolve parents **by location**: the source whose location matches on every axis except the transform-injected ones (`slnt`, `ROND`, …), with those at their defaults. Resolve in a separate pass after measuring all sources, so order does not matter.
+- A derived master with no parent **raises**. It does not fall back.
+- Add one test where the derived source comes before its parent, and one where a non-derived master's name ends in " Rounded".
+- LOG the count, for example "27 derived masters → 9 parents", on the real Crispy.
