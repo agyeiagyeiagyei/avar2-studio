@@ -37,15 +37,18 @@ Secondary parametric axes are **parallel to**, not a replacement for, AVAR2
 MAPPINGS axes: the former are declared with the secondary-axis modal (or read
 from the source), act through brace layers / alternate UFO masters, and are
 stored in `<stem>-control.json` when studio-declared; the latter are declared
-with the AVAR2 modal, route through `<stem>-avar.csv` onto the parametric
-output axes, and mutate the source directly. They appear in their own sidebar
+with the AVAR2 modal and route through `<stem>-avar.csv` onto the parametric
+output axes — declaring one writes the CSV and `<stem>-axis-metadata.json`, not
+the source. The source itself is written only by instance-row actions (and by
+the ↗ editor on a source-derived axis). They appear in their own sidebar
 sections and never mix.
 
 There are **no hybrids** and no explicit "axis type" field. Routing is by
-**coverage**: an axis that moves every glyph stays under AVAR2 MAPPINGS, an
-axis that moves some of them is *scoped* and appears under SECONDARY
-PARAMETRIC AXES. A tag that exists both source-derived *and* studio-declared
-merges into one row.
+**coverage**: an axis with master coverage renders under **Core / parametric
+axes** (an empty mapping target such as `wght` lives under AVAR2 MAPPINGS with
+the rows that drive it), an axis that moves some glyphs is *scoped* and appears
+under SECONDARY PARAMETRIC AXES. A tag that exists both source-derived *and*
+studio-declared merges into one row.
 
 
 ## Applicable glyphs and coverage
@@ -102,9 +105,11 @@ instance at build time.
 
 Every declared axis gets a slider in the **Instances tab sidebar** (under
 its own group; only applicable glyphs change), the **Preview tab** and the
-**Kinetikern tab**. The value is **preview state, not instance data** — it
-never lands in the CSV or the source — and the eye icon disables the axis
-for a session-local with/without comparison.
+**Kinetikern tab**. In the Instances sidebar the value belongs to the row you
+are sitting on — the group is labelled *glyph-scoped · saved per row* and the
+number is written to the control sidecar (never a CSV column, never the
+source). The eye icon is the only session-local part: it disables the axis for
+a with/without comparison until you reload.
 
 ## The shadow source file
 
@@ -130,19 +135,21 @@ complete backup. The file layout and the regeneration sequence are in
 ## Editing the outlines
 
 Brace-layer outlines are edited inline through an **embedded Fontra**, opened
-from the ↗ button on any layer row and trimmed to a brace-edit surface; in a
+from the ↗ button on a layer row and trimmed to a brace-edit surface; in a
 studio-axis session it can carry several studio layers at once. Saving writes
-the shadow, the studio captures the drawing into the sidecar and rebuilds.
-Multi-source batch editing, the reference-measurement HUD and the browser
-demo's editor are in
-[the appendix](secondary-parametric-axes-appendix.md#editing-in-fontra).
+the shadow, the studio captures the drawing into the sidecar and rebuilds. On a
+**source-derived** axis the same ↗ opens the original source in Fontra and
+saves it there — that is the one path that writes your font file. Multi-source
+batch editing, the reference-measurement HUD and the browser demo's editor are
+in [the appendix](secondary-parametric-axes-appendix.md#editing-in-fontra).
 
 ## Not built
 
 - **Push-to-source / demote** — nothing writes a studio axis into the
   original; add/delete mutate only the sidecar.
 - **Sync-state tri-state** for axes — the red/orange/green state and SRC badge
-  exist only for *instances*; axis rows carry `studio` and `scoped`.
+  exist only for *instances*; source-derived axis rows carry `scoped`, studio
+  rows carry no kind badge, and the slider carries `secondary`.
 - **Editing-context trio** — interpolation-compatibility validation on save,
   context-string editing, axis-aware context rendering.
 - **Persisted disable-in-preview** — the eye toggle is session-local.
