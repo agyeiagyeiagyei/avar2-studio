@@ -20,10 +20,10 @@ artifact path on stdout, one per line.
 | Flag | What it does |
 |---|---|
 | `--out DIR` | **required.** Where the built font (or the sources zip) is written; created if missing |
-| `--workdir DIR` | Put the tool workdir (config, shadow, build output, relocation memo) under `DIR` instead of beside the source, so a CI checkout stays untouched |
+| `--workdir DIR` | Put the tool workdir (config, shadow, build output, relocation memo) under `DIR` instead of beside the source, so a CI checkout stays untouched. The two design-authored files below are still created beside the source on a first run — commit them |
 | `--hide-axes XOPQ,XTRA` | Set the `fvar` HIDDEN flag so font pickers stop surfacing those axes |
 | `--default wght=400,opsz=14` | Re-origin the export at that resting style: the parametric defaults move to the mapped location and the avar2 table is regenerated around it, every axis range intact |
-| `--format ttf` / `woff2` / `sources` | Output format, repeatable; default `ttf`. `sources` writes `<family>-sources.zip` (masters as UFOs + a designspace 5 with the mappings) instead of a font |
+| `--format ttf` / `woff2` / `sources` | Output format, repeatable; default `ttf`. `sources` writes `<family>-sources.zip` (masters as UFOs + a designspace 5 with the mappings) instead of a font, and it needs a `.glyphs` source — a `.designspace` project exits 2 ("sources can only be written from a .glyphs file") |
 | `--config FILE` | The committed build config (default: `<stem>-build.json` beside the source, when present) |
 | `--write-config` | Write `<stem>-build.json` from the current sidecars and exit, without building |
 
@@ -81,7 +81,14 @@ because without them each traditional axis' declared default (opsz 144 on
 Crispy) falls back to its column minimum and every named style lands off its
 mapped value.
 Everything design-authored — control axes, grade, Kinetikern, instance
-coordinates — is read from its sidecar and never written by the build.
+coordinates — is read from its sidecar and never written by the build. Two
+files are the exception, and only on a first run: when `<stem>-avar.csv` is
+missing the build writes it from the source's own instances (header plus one
+row each), and when `<stem>-axis-metadata.json` is missing it is created empty
+(`{}`) or migrated from the legacy `.avar2-studio/axis-metadata.json`. Both
+land beside the source even under `--workdir`, because they are the designer's
+to commit — an empty metadata file is logged as a warning, since it leaves the
+font resting at the compiled corner.
 
 ## Exit codes
 
@@ -89,7 +96,7 @@ coordinates — is read from its sidecar and never written by the build.
 |---|---|
 | 0 | Built (or wrote the config) |
 | 1 | The build itself failed. The `error:` lines name the stage — build, avar2 mapping, origin relocation, grade, source transform — and why |
-| 2 | Usage or load error: bad flag value, unreadable source, missing/unreadable build config, design-only key in the config, or missing axis metadata |
+| 2 | Usage or load error: bad flag value, unreadable or unparsable source, missing/unreadable build config, design-only key in the config, missing axis metadata, `--write-config` failing to write its file, or a sources write the designspace cannot carry (mappings not authored, duplicate axis tags/names, a row with no input or at the axis defaults, no default source) |
 
 A relocation that cannot fit exits **1**, not 2: the font builds, the reason
 reads `origin relocation failed (degraded build — the avar2 mapping is not the
@@ -100,11 +107,18 @@ plain fallback font is never a pass.
 ## Building in CI
 
 ```bash
-pip install "git+https://github.com/agyeiagyeiagyei/avar2-studio"  # until 0.1.0 is on PyPI
+# until 0.1.0 is on PyPI: pin the ref this page documents
+pip install "git+https://github.com/agyeiagyeiagyei/avar2-studio@cleanup-2026-10"
 avar2-studio doctor --strict        # fail early, with the missing piece named
 avar2-studio build sources/MyFont.glyphs --config sources/MyFont-build.json \
     --workdir "$RUNNER_TEMP/avar2" --out fonts/
 ```
+
+The pin matters. Unpinned, `pip install` takes GitHub's default branch (`main`,
+last updated 2026-09-12), whose `build` has neither `--config` nor `--workdir`
+and whose `doctor` has no `--strict` — the commands above exit 2 there. Point
+the pin at whatever ref carries these flags; `avar2-studio build --help |
+grep -q -- --workdir` exits 0 exactly when it does.
 
 A font repo's workflow:
 
@@ -112,7 +126,7 @@ A font repo's workflow:
 - uses: actions/checkout@v4
 - uses: actions/setup-python@v5
   with: {python-version: "3.11"}
-- run: pip install "git+https://github.com/agyeiagyeiagyei/avar2-studio"
+- run: pip install "git+https://github.com/agyeiagyeiagyei/avar2-studio@cleanup-2026-10"
 - run: avar2-studio doctor --strict
 - run: >
     avar2-studio build sources/MyFont.glyphs
@@ -121,6 +135,9 @@ A font repo's workflow:
 
 `--workdir` matters in CI: without it the tool workdir (config, shadow, build
 output, relocation memo) is created beside the source, inside the checkout.
+`<stem>-avar.csv` and `<stem>-axis-metadata.json` are created beside the source
+either way on a first run, so a clean CI job should either commit them or
+export them from the studio first.
 
 ## `avar2-studio doctor`
 
@@ -145,7 +162,9 @@ exist)`) means an environment override is set and broken — that is what
 
 Symlinks the Glyphs 3 plugins (`avar2 Studio` hub and the six design tools) into
 `~/Library/Application Support/Glyphs 3/Plugins/`. Restart Glyphs afterwards;
-edits in the checkout are live from then on. See
+edits in the checkout are live from then on. `--uninstall` removes the links this
+command made — a link that points elsewhere, or a real directory, is left alone
+and reported — and deletes the config that records the interpreter. See
 [`../src/avar2_studio/glyphs/README.md`](../src/avar2_studio/glyphs/README.md).
 
 ## Environment variables
