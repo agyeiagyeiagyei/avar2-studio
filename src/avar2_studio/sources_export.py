@@ -376,6 +376,7 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     them.
     """
     signatures: Dict[str, set] = {}
+    bases_by_glyph: Dict[str, set] = {}
     targets = set()
     for source in doc.sources:
         font = source.font
@@ -386,6 +387,8 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 glyph = layer[name]
                 signatures.setdefault(name, set()).add(
                     (len(glyph.contours), len(glyph.components)))
+                bases_by_glyph.setdefault(name, set()).update(
+                    c.baseGlyph for c in glyph.components)
                 if any(_is_transformed(c.transformation)
                        for c in glyph.components):
                     targets.add(name)
@@ -427,7 +430,9 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 if name not in targets or name in present:
                     continue
                 glyph = default[name]
-                bases = {c.baseGlyph for c in glyph.components}
+                # The bases come from the PRE-flatten scan: by now the default
+                # glyph has no components left.
+                bases = bases_by_glyph.get(name, set())
                 if not bases or not (bases & present):
                     continue
                 layer.insertGlyph(copy.deepcopy(glyph), name)
