@@ -2918,3 +2918,34 @@ not over the slant/rounding variants of one design.
 
 Budget numbers to record once that lands: corners, tuples per glyph (corners ×
 2 + existing), worst per-glyph header bytes vs the 64 KB limit, and build time.
+
+#### E2i-c: the font cannot name its own design axes — the corners must come from the caller
+
+I tried to fix the 1,280-corner overflow by inferring the design masters from
+gvar inside the injector. Measured on the real unspaced Crispy build, every
+heuristic fails:
+
+| rule | corners | why it fails |
+|---|---|---|
+| all supports, minus `SPAC` (current) | **1,280** | includes `GRAD`/`ROND`/`slnt`/`LCWD` regions |
+| minus the transform axes (`SPAC GRAD ROND slnt`) | **229** | still `LCWD`-decorated |
+| minus the control axes too | **202** | gvar stores the *model's* regions, not the master grid — single-axis and intermediate peaks (0.863, 0.869) |
+| full-corner supports over every non-injected fvar axis | **0** | `LCWD`/`YMOD` are in fvar, so no support covers all of them |
+
+The root cause is architectural, not arithmetic: **a built font does not say
+which of its axes are the design axes.** `LCWD`/`YMOD` look exactly like `XTRA`
+from inside `fvar`/`gvar`, and the derived masters' supports are indistinguishable
+from the model's interaction regions.
+
+So the corner set has to be **passed in by the caller**, which is the only party
+that knows the designspace: the pipeline has the master locations (it built the
+designspace) and can hand them to the transform as `params.master_locations`
+(normalized design-axis locations), with the current gvar-support inference kept
+only as a fallback for callers that have none. That is a small interface change
+in `builtin_spac_widthaware.apply` plus the pipeline's transform call, and it is
+what makes the budget predictable: corners = masters (6–9 on Crispy) instead of
+1,280, i.e. tuples/glyph = 2 × masters (+ existing) rather than thousands.
+
+Nothing is committed to the E2i-c branch for this yet — the interface change is
+the next piece of work, and it has to land before the 8 capped moves can be
+classified on the export, the 8.02 u fixture gap traced, or the round trip re-run.
