@@ -3133,3 +3133,14 @@ no-negative-advance check but is not the same measurement as the verifier's
 Next, in the user's order: the export change (slanted/rounded masters take their
 parent master's amounts), then `.notdef`, then the four tests, then the
 real-Crispy round trip.
+
+#### E2i-c: derived masters take their parent's amounts — the export floors nothing
+
+`e2ic-wip`. Per the user's decision, `sources_export` now groups the masters by
+their upright parent (strip ` Slanted Rounded`, ` Slanted`, ` Rounded`) and reuses
+the parent's measured inks for the derived master, so the export follows the
+injector, which never varied along `slnt`/`ROND`.
+
+Verified on the shipped export path (transformed shadow source, **72 twins / 36
+masters**): **0 floored pairs, down from 8**. The slant artefact that produced
+`colon` ink 248 u against 14 upright no longer reaches the amount.
