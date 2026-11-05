@@ -2373,3 +2373,21 @@ The agent attributes the 56 failing SPAC-end checks to one point: the relocated 
 - Two runs disagree. `rt.json` (17:44) has worst 397 u and `.notdef` 0. `roundtrip.json` and `failures.jsonl` (17:48) have worst 315 u and **`.notdef` 114 u at every row and both ends** (168 checks). Say which pair of fonts each run compared, and which is final.
 - The top-level `rt-crispy/Crispy[…].ttf` (sha ae3325b3) still has the **header-29 avar**, and FreeType drops wght/wdth/opsz there. `out/` and the studio-pipeline build in `work/` (identical, sha cf971a15) have 12/12, and FreeType equals HarfBuzz within 1 u. Say where the top-level file came from. The raw-header test from the 17:40 note is still needed.
 - Keep exactly one `STATE:` line in STATUS and put the detail in `NEXT:`. The verifier's scripts now read only the first `STATE:` line.
+
+## Verifier note (2026-11-05 18:25) — B, as the user chose it ("amounts live at the masters and are interpolated everywhere else"), holds between masters only with a full corner grid; the 10-corner plan still fails the rows
+
+**1. The interior-master gap does not reproduce on the committed code.** On rt-crispy `out/` (studio, bdcb670) against `fm/` (fontmake), HarfBuzz, H/O/n pinned at each of the 9 masters, the advances and the change at SPAC −100 agree within 2 u. That includes Black Narrow Max 47-350-255 (−212 / −212) and Max 900 1571-700-275 (−846 / −846). The LOG's 106.1 against 55.7 and 423.0 against 376.3 must come from the reverted attempt's build or from other points. State which. As written, "the interior masters disagree" is not a property of the committed injector.
+
+**2. Fixing the default corner, in any coordinate space, leaves the rows wrong.** The plan in NEXT keeps one gvar corner per master plus the base. That model is flat along every axis line through the relocated default (17:55 note: row "Width 220, Weight 400" gets the default's change, −304, where the sources give −432). Giving the base the sources' value only moves the flat level; that row would then read about −192.
+
+**3. What makes B hold everywhere (verified with the model test, `~/avar2-verifier/scripts/model_fork.py`).**
+- Take the **corners on the grid** of every master coordinate plus the relocated default, per parametric axis: XTRA {47, 663.1, 1571, 1715} × XOPQ {1, 202.5, 350, 700, 1462} × YOPQ {1, 121.8, 255, 275}. That is 79 corners besides the base.
+- **Value** each corner with the **sources' model**: the masters only, normalized against the designspace axes. It is still "amounts live at the masters", which is the user's B.
+- The supports stay in the built font's normalization.
+- Result: studio = sources to **0.000000** at all 29 mapping rows and at 2,000 random points. The 10-corner version is off by up to 128 at the random points.
+
+This is the faithful implementation of the user's B. It adds no new rule.
+
+**Cost to measure first.** The grid is an upper bound of 79 × 2 SPAC tuples per glyph, against 18 today. Drop all-zero tuples (YOPQ barely moves many advances), then report tuples per glyph, file size, injection time and peak RSS. Check the worst glyph against decision 0004's budget (g 1,476) and the 64 KB per-glyph gvar ceiling. If it does not fit, STATE: awaiting user decision, with the numbers.
+
+**Also:** the reverted attempt is parked in `/tmp`, and the sprint rule is nothing durable under `/tmp`. Move it to `~/avar2-agent/`.
