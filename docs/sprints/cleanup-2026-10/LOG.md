@@ -2981,3 +2981,36 @@ The 64 KB ceiling was never the rule's fault: it was 1,280 corners × 2 ends
 Still open, in order: the 8 capped moves on the exported designspace (floor or
 `blocked`), the 8.02 u fixture parity gap, the four export-test expectations,
 then the all-glyph round trip on the real Crispy under E2i-c and the checkpoint.
+
+#### E2i-c: the eight floored moves, classified — all overhanging, floor is legitimate
+
+Ran the export on the **shipped path** (the transformed shadow source that the
+CLI exports from, 72 SPAC twins = 36 masters) with the classification hook now
+in `sources_export` (`CAPPED_MOVES`, one record per (glyph, master) the 1 u floor
+touched, with advance, ink, sidebearings, the rule's `dx` and the floored `dx`).
+`e2ic-wip` `b7e3c49`.
+
+**Eight pairs, two glyphs, the four slant/round derived masters:**
+
+| glyph | advance | ink | lsb | rsb | rule `d` | floored | rule advance | after floor |
+|---|---|---|---|---|---|---|---|---|
+| `colon` | 36 | 248 | 11 | **−223** | −18 | −17 | **0.0** | 2.0 |
+| `exclam` | 36 | 313 | 17 | **−294** | −22 | −17 | **−8.0** | 2.0 |
+
+**8 overhanging, 0 without overhang** → the user's condition is met, the floor is
+legitimate, and `STATE` stays `working` rather than `blocked`.
+
+Two facts worth recording:
+
+* Both glyphs are punctuation with ink 7–9× their advance (rsb −223 / −294): the
+  rule is being asked to tighten a 36 u advance by 18–22 u per side, which is
+  exactly the overhanging case the floor exists for.
+* The floor lands at **2.0 u**, not 1.0: `dx` is integral, so at advance 36 the
+  smallest admissible `dx` is −17 and 36 + 2·(−17) = 2. The 1 u value is the
+  bound, reachable only at even advances — worth stating in the decision record
+  rather than pretending the exact value.
+
+The earlier "18 twins, 0 floored" run is explained: calling the export on the
+**original** `.glyphs` gives 9 masters with no derived ones and no caps. The 8
+live in the transformed source's slant/round masters — which is why the
+classification had to run there.
