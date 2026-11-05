@@ -299,22 +299,6 @@ def _is_transformed(transformation) -> bool:
             or abs(c) > 1e-9 or abs(d - 1) > 1e-9)
 
 
-class _Layered:
-    """Glyph lookup across layers: the sparse one first, then the default.
-
-    `_flatten` draws through a provider; inside a sparse layer a base may live
-    in the default layer, so the provider has to see both."""
-
-    def __init__(self, *layers):
-        self.layers = layers
-
-    def __getitem__(self, name):
-        for layer in self.layers:
-            if name in layer:
-                return layer[name]
-        raise KeyError(name)
-
-
 def _flatten(glyph, provider, name: str) -> bool:
     """Replace ``glyph``'s components with their outlines, in place."""
     if not glyph.components:
@@ -376,7 +360,6 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     them.
     """
     signatures: Dict[str, set] = {}
-    bases_by_glyph: Dict[str, set] = {}
     targets = set()
     for source in doc.sources:
         font = source.font
@@ -387,8 +370,6 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 glyph = layer[name]
                 signatures.setdefault(name, set()).add(
                     (len(glyph.contours), len(glyph.components)))
-                bases_by_glyph.setdefault(name, set()).update(
-                    c.baseGlyph for c in glyph.components)
                 if any(_is_transformed(c.transformation)
                        for c in glyph.components):
                     targets.add(name)
@@ -397,57 +378,17 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     targets |= {name for name, seen in signatures.items() if len(seen) > 1}
 
     done = 0
-    originals: Dict[str, object] = {}
     for source in doc.sources:
         font = source.font
         if font is None:
             continue
         for layer in font.layers:
             for name in list(layer.keys()):
-                if name in targets:
-                    # Keep the glyph WITH its components: the sparse-layer pass
-                    # below has to decompose it per layer, not copy the already
-                    # flattened default outlines (which pins the shape there).
-                    originals.setdefault(name, copy.deepcopy(layer[name]))
-                    if _flatten(layer[name], layer, name):
-                        done += 1
+                if name in targets and _flatten(layer[name], layer, name):
+                    done += 1
     if done:
         log.info("sources_export: %d components decomposed (%d glyphs)",
                  done, len(targets))
-
-    # A decomposed glyph must exist wherever one of its bases has a sparse
-    # layer, or fontmake interpolates it from the masters alone and drops that
-    # correction: `nine` is a 180°-rotated `six`, `six` carries the grade
-    # braces, and `nine` had none, so its lsb drifted 13 u at the 900 rows
-    # (verifier, 2026-11-06). Build the missing layer from the default outlines
-    # with each base resolved in its own layer, so the offset and advance
-    # follow the same correction the base got.
-    added = 0
-    for source in doc.sources:
-        font = source.font
-        if font is None:
-            continue
-        default = font.layers.defaultLayer
-        for layer in list(font.layers):
-            if layer is default:
-                continue
-            present = set(layer.keys())
-            for name in list(default.keys()):
-                if name not in targets or name in present:
-                    continue
-                # The bases come from the PRE-flatten scan: by now the default
-                # glyph has no components left.
-                bases = bases_by_glyph.get(name, set())
-                if not bases or not (bases & present):
-                    continue
-                if name not in originals:
-                    continue
-                layer.insertGlyph(copy.deepcopy(originals[name]), name)
-                if _flatten(layer[name], _Layered(layer, default), name):
-                    added += 1
-    if added:
-        log.info("sources_export: %d sparse layers added for decomposed glyphs",
-                 added)
     return done
 
 
