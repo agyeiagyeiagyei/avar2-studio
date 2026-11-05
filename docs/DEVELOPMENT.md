@@ -25,8 +25,10 @@ sidecar formats in [SIDECARS.md](SIDECARS.md).
   `AVAR2_SPAC_INJECT` / `AVAR2_KK2_DYLIB` point at a build elsewhere. Without
   `spac-inject` the width-aware SPAC transform falls
   back to fontTools (slower; can overflow gvar's 64 KB ceiling) and says
-  so in the log; without the dylib the Kinetikern routes answer 503.
-  `avar2-studio doctor` reports both.
+  so in the log; without the dylib the Kinetikern **propose** route, and the two
+  write-backs (`PUT /api/kinetikern/instances/<name>`, `PUT /api/kinetikern/all`),
+  answer 503 with the reason; the tab hides itself. `avar2-studio doctor` reports
+  both.
 - **Check the interpreter, not the version.** A stale released wheel in the
   system Framework Python runs old code silently (endpoints 404, the sidebar
   breaks), and `ps` shows every venv process as the Framework binary, so it
@@ -115,7 +117,7 @@ environment only when the default location is wrong on both sides.
 
 ### Python
 
-`.venv/bin/python -m pytest tests/ -q` — **667 tests collected** (632 `def test_`
+`.venv/bin/python -m pytest tests/ -q` — **672 tests collected** (637 `def test_`
 functions; the rest parametrised cases), about two minutes with fontc and the
 Kinetikern engine available;
 `ruff check src tests` must be clean (the baseline is in `pyproject.toml`:
@@ -138,15 +140,18 @@ E4/E7/E9/F/B/I001/RUF100/W, with E402, E501 and B905 ignored).
   `test_sources_export.py` (that last one also skips without fontmake). Most
   resolve the compiler as `Path(sys.executable).with_name("fontc")`. The
   Kinetikern tests also need the dylib (`kinetikern.engine_path()`).
-- Glyphs-plugin tests (about 20 % of the suite: 126 of the 632 `def test_`
-  functions) run against fake modules; no Glyphs.app is needed.
+- Glyphs-plugin tests (about a fifth of the suite: 136 of the 637 `def test_`
+  functions across 8 files — `test_*_plugin.py`, plus the installer and
+  launcher) run against fake modules; no Glyphs.app is needed.
 
 ### Rust
 
-`cargo test` in `wasm/fontc-web` compiles 15 test binaries. The oracles shell
+`cargo test` in `wasm/fontc-web` compiles 15 test binaries (`tests/*.rs`) plus
+the lib and the `spac-inject` binary's own harness — 17 targets in all. The
+oracles shell
 out to Python (`AVAR2_PYTHON`, else the repo venv, else `python3` — in a worktree
 set `AVAR2_PYTHON` to a venv with fontTools and gftools) and write their outputs
-under `target/tmp/`. The fixtures are generated in-test from the crisp-mini
+under `target/tmp/`. The fixtures are generated in-test from the crispy-mini
 example and from `wasm/fontc-web/tests/fixtures/` (`FoldedMini.glyphs` for the
 rounding classification, `StrandedMini.glyphs` for the clamp oracle, regenerated
 by `wasm/fontc-web/spike/make_stranded_fixture.py`), so nothing under `/tmp` is
@@ -182,20 +187,23 @@ not.
 ## CI, Pages and releases
 
 - `.github/workflows/pages.yml` — on push to `main` or `github-pages`:
-  `pip install -e .`, `scripts/snapshot_static_demo.py`, Node 22, `npm ci`,
-  lint + typecheck + test:unit, `cargo install wasm-pack` then
-  `wasm-pack build` for the wasm binary, `vite build --base=/avar2-studio/
+  `pip install -e .`, `scripts/snapshot_static_demo.py`, then `cargo install
+  wasm-pack` + `wasm-pack build` for the wasm binary, then Node 22, `npm ci`,
+  lint + typecheck + test:unit, `vite build --base=/avar2-studio/
   --outDir dist-pages`, deploy (decision 0014 — the binary is a build output and
   is not committed). Commit + push is the deploy.
-- `.github/workflows/release.yml` — five jobs on a `v*` tag (bump
-  `pyproject.toml` first): `build` (Node, frontend, rsync into
+- `.github/workflows/release.yml` — five jobs, four of them on a `v*` tag
+  (`publish-testpypi` runs only on `workflow_dispatch` with
+  `publish_to: testpypi`; bump `pyproject.toml` first): `build` (cargo install
+  wasm-pack + `wasm-pack build`, then Node, frontend, rsync into
   `src/avar2_studio/static/`, `python -m build`, `twine check`, the GitHub
   Release), `build-platform-wheels` (the macOS/Linux matrix that cargo-builds
   `spac-inject` and `libkinetikern2` into `src/avar2_studio/bin/` and tags the
   wheel `py3-none-<plat>` — decision 0015), `release-platform-assets`, and the
   two publish jobs (`publish-pypi` on trusted publishing, `publish-testpypi` for
   the rehearsal). Tags `v0.1.0.dev1`–`dev6` exist (2026-06-06/07) and
-  `release.yml` ran green on each (GitHub Releases); there is **no final
+  `release.yml` succeeded on each — six `success` runs, re-checked with
+  `gh run list --workflow=release.yml` on 2026-11-05. There is **no final
   `v0.1.0`**, and PyPI has no `avar2-studio` project (checked 2026-11-02).
 - `.github/workflows/test.yml` — on push and pull request for `main`,
   `github-pages` and `cleanup-2026-10` (plus `workflow_dispatch`): `python` (an
@@ -248,8 +256,7 @@ scoped axes show the read-only layers panel with thumbnails, and
 `open-editor` returns `editing_original: true` with the `.designspace` as
 project. In the UI: add a brace layer on a studio axis — the save is
 instant, "rebuilding preview…" appears, the preview catches up in a few
-seconds (shadow regen ≈1 s, fontc ≈0.09 s on the example; a full Crispy
-build is ≈36 s wall-clock). Verify font-level claims by reading the built
+seconds on the example. Verify font-level claims by reading the built
 tables with fontTools, never by eyeballing the preview; verify UI changes
 with headless-Chrome screenshots you have actually looked at.
 
