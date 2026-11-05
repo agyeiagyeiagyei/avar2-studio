@@ -2466,3 +2466,26 @@ The user's words: "yes i will do that. i'll know that without that i'll have a b
 - **Pass criteria (unchanged):** both SPAC ends, every class, slanted and rounded rows included; no extra regions; TTF size against the current Crispy.
 
 **5. E2l evidence already in hand.** rt-coincide's build.log prints RESTING_NOTE ("the default row differs there") although the resting location there IS the default master. That is the false note E2l removes; use it as a test case.
+
+## Verifier note (2026-11-05 23:35) — ROUND 29's blocker is the wrong row: Crispy rests at "Default 400 MaxOpsz", not "Wide 400 MinOpsz"; the relocation is doing real work
+
+**Evidence (rt-coincide2, e2ic-wip 82b0807):**
+- The build's own `work/.avar2-studio/config.yaml` has exactly **one** default-input row: in `wght 400 / wdth 100 / opsz 144` → out **XTRA 663.1 / XOPQ 202.5 / YOPQ 121.8**. That is the CSV row **"Default 400 MaxOpsz"**, and it is what `pipeline._is_default_row` selects as `default_rows[0]`, the relocation target. Every Crispy studio build rests there; it is the D of the 17:55 and 18:16 model tests.
+- "Wide 400 MinOpsz" has blank user inputs. The config generator turns it into a parametric identity row: in = out = its own XTRA/XOPQ/YOPQ, which is row 0 in rt-coincide2's config, 1715/1/1 after the edit. It never anchors the resting state.
+- So in rt-coincide2 the compiled font rests at the new Variable Font Origin, 1715/1/1 (the degraded final TTF, 765,636 B, has those fvar defaults), and the target is 663.1/202.5/121.8.
+  - The existing per-axis short-circuit (`abs(v - ax.defaultValue) < 1e-6: continue`, pipeline step 3.5) correctly does NOT fire, because the target differs.
+  - The relocation from the 1715-1-1 corner to that interior point overflows Z (2,011 tuples).
+- **There is no "relocation runs when the target equals the defaults" bug. Do not add a short-circuit**: one already exists and it is right.
+- The ROUND 28 copy had the same misidentification. With "Wide 400 MinOpsz" dropped, the font still rested at 663.1/202.5/121.8 and was relocated, which is why its TTF is the same 10.5 MB as the original's.
+- My 21:42 note repeated it ("nearest today's ORIGIN at 1420.1/149.9/122.1"). That was wrong: the resting location is 663.1/202.5/121.8.
+
+**The user-faithful coincide copy, corrected:**
+- **Revert the "Wide 400 MinOpsz" edit**: keep the user's row as it is.
+- **Set "Default 400 MaxOpsz" `out` to a master's coordinates**, and make that master the Variable Font Origin with matching metadata defaults.
+- **Use 1715-1-1, as now**, for the non-trivial case where the default master moves away from 47-1-1. Expected outcome:
+  - target = compiled defaults, so `limits` is empty and the relocation never runs;
+  - no Z overflow, no extra regions, and a much smaller studio TTF (the relocation's ~17× gvar densification is gone).
+- Alternative, closer to the user's real file: add a master at 663.1/202.5/121.8 and make it the default. That is a design change only the user can make. Do not attempt it in the copy beyond what Glyphs-free tooling can do faithfully.
+- Then the acceptance as before: both SPAC ends, every class, slanted and rounded rows, the signature check, provenance in build.log, and the TTF size against the current Crispy.
+
+**Side observation (no action now):** relocating from the 1715-1-1 corner overflows Z, while relocating from the 47-1-1 corner fits. For E2l's "Set default at" exports on a font whose default master is a different corner, the overflow is the existing degraded-build path ("Export at the resting style, or reduce twin masters"). Note it in E2l's tests if the dialog shows that error.
