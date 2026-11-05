@@ -2803,3 +2803,27 @@ rule, then re-run the all-glyph round trip (the artifacts are still at
 `/tmp/rt-out`, `/tmp/rt-zip`, `/tmp/rt-crispy`) and confirm the 183 glyphs at
 SPAC −100 fall inside 1 u and no raw advance goes negative. The gvar tuple count
 and the 64 KB header ceiling are the budget items to record at that point.
+
+#### E2i-c, follow-up: option B landed in the parked work; the last 8 u are the cap
+
+The user chose **(B) with (A) as the fallback**: the export now reads each
+master's ink by instancing the build at that master's own location
+(`_ink_widths_from_build(..., location)`, production→source names applied), and
+falls back to the master's UFO only when there is no build — which is what makes
+"the injector and the export agree" a property rather than a coincidence. The
+parity test now builds the unspaced font first and hands it in as `ink_font`,
+so both renderers measure the same file.
+
+Two real bugs were fixed on the way: the corner set omitted the default
+(`VariationModelError: Base master not found` on any real font), and composites
+were read with their own ink instead of their base's at every corner (the E2k
+rule).
+
+**The residual 8.02 u is not the measurement.** With both sides reading the same
+build the number did not move at all, and the export logged *"7 per-glyph moves
+still hit the negative-advance cap"* at SPAC −40 on the fixture. The export
+clamps a tightening so the advance stays ≥ 1 (`_fit_dx`); the injector does not.
+Hypothesis [not yet verified]: capping the injector's per-corner amounts against
+each corner's own advance closes the gap, and it is also the "no negative raw
+advance" invariant the checkpoint asks for. Parked as `stash@{0}` (v3); tree
+green at 672 passed.
