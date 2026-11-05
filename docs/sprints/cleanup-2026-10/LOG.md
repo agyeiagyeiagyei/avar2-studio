@@ -3201,3 +3201,61 @@ every master).
 
 Full suite: **675 passed**, `ruff check src tests` clean. One test was added per
 new behaviour, so 672 → 675.
+
+## E2i-c: the real-Crispy round trip — masters agree, the RELOCATED DEFAULT cannot
+
+Run on the final code (branch `e2ic-wip` @ `bdcb670`), artifacts under
+`test-output/rt-crispy/`:
+
+* studio build via `avar2-studio build --format ttf --format sources --workdir`:
+  **72 twins, SPAC −100…100**, `SPAC as 72 metrics-only twin sources`, and the
+  log line the verifier asked for: **"27 derived masters take their parents'
+  spacing amounts (9 parents, by location)"**. 240 s wall, **peak RSS 1.66 GB**
+  (one build at a time, as instructed).
+* the fresh TTF's avar is **consistent** — every one of the 12 `fvar` axes has a
+  segment map (SPAC's is identity) and the avar2 `VarStore`
+  `RegionAxisCount` = 12 with 28 mapping regions. The earlier build on this
+  machine had **no avar table at all**, which is why the stale-avar defect
+  (previous entry) never showed here.
+* `fontmake` on the exported sources: 33 s, peak RSS 507 MB.
+* `roundtrip_compare.py`: **496 glyphs** (simple 356, composite 106, mixed 2,
+  unencoded 31, `.notdef` 1), **28 rows**, row worst **3.0 u** — inside
+  tolerance. `.notdef` **0.00 u**. But the SPAC ends: **56 checks outside
+  tolerance**, worst **397 u** (`trademark` at Wide 900 MaxOpsz).
+
+**What the numbers say.** At every REAL master the two renderers agree to the
+unit — the twins carry d = 7, 7, 106, 423, 245, 245, 661, 423, 423 for `H`, and
+the injector's corner model gives the same values (243.5…245.0 rounding), the
+amount is flat along `slnt` in both fonts (inheritance works), and the ink each
+side measures at each master is identical to the byte (2136 / 97 / 97 / 1494.1 /
+5942 / …). At the design-space default the fonts differ:
+
+| | `H` amount at the origin row |
+|---|---|
+| studio (injector, measured there) | **152 u** |
+| fontmake (sources, interpolated) | **96 u** |
+
+Cause, verified: the injector's corner set includes the **relocated default**
+(decision 0001 — the ORIGIN row, a point in the middle of the parametric space)
+because `VariationModel` needs a base master. That point is **not a designspace
+master**, so the exported sources cannot carry an amount there: they can only
+interpolate the nine real masters, and with E2i-c's per-master amounts the
+interpolation no longer equals the ink measured at that point (before E2i-c the
+amount was one constant per glyph, so every interpolation reproduced it — which
+is why the earlier round trip was clean at +100).
+
+**This blocks the checkpoint's round-trip criterion** and is a user decision,
+not a bug I should pick a side on:
+
+* **(A) per-point truth.** Give the export a twin AT the relocated default —
+  outlines taken from the build's own default instance — so both renderers share
+  the injector's corner set and the origin row keeps an amount from its own ink.
+  Cost: the zip gains a source at a location the designer's `.glyphs` does not
+  contain, and it joins the outline interpolation grid.
+* **(B) renderer parity by interpolation.** Keep the twins at the real masters
+  only, and let the injector's base corner take the value the masters
+  interpolate at the origin instead of measuring the ink there. Cost: the ORIGIN
+  row — the row designers use most — no longer gets an amount from its own
+  width, which is the rule the user set for E2i-c.
+
+STATE: awaiting the user's choice (A) or (B).
