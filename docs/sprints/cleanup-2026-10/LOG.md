@@ -3047,3 +3047,29 @@ answer the same way or the round trip can never be exact at the tight end.
 Until that is decided, the round trip is expected to disagree exactly on the
 derived-master glyphs, and the `colon`/`exclam` floor rows above are the
 measurable tip of it.
+
+#### Verifier spot check 16:00 acknowledged — the 8 are a slant artefact, and the rule change is the user's call
+
+The verifier measured the export's own UFOs (`classified-transformed.zip`) and
+found the mechanism my classification pointed at: at every **Slanted** derived
+master a glyph keeps its upright lsb and advance and the right sidebearing takes
+the whole lean — `colon` lsb 11 / rsb 11 upright becomes 11 / **−223** slanted,
+with the sheared bbox ink going 14 → 248. That sheared ink is what makes
+`d = −100·1.25·248/1754.5 = −18` and needs the floor; upright the same glyph gets
+`−1`, advance 34.
+
+Two consequences, both now agreed between us:
+1. the 8 floored moves are a **slant artefact**, not the rule running out of room;
+2. the renderers disagree at **every slanted style** — the injector's 9 designspace
+   corners do not vary along `slnt`/`ROND`, the export's 36 twins do. The verifier
+   calculates hairline `H` at SPAC −100 as injector −7 per side against the
+   export's −29 (44 u of advance), to be confirmed by the round trip.
+
+The verifier's recommended fix — **the amount comes from the parametric masters
+only, every transform-derived master taking its parent master's amounts** — is
+awaiting the user's decision, and the instruction is explicit: **do not change
+the rule yet**. The injector floor stays in as implemented (step 2), unchanged.
+
+So E2i-c is paused on a user decision, and the unblocked work is the 8.02 u
+fixture parity gap (the verifier confirms it is separate: the fixture has no
+derived masters) and the four export expectations.
