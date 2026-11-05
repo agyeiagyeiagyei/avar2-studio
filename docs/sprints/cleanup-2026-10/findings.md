@@ -2210,3 +2210,16 @@ The user: "we just need a label that tells designers that the tool is best with 
 ## Verifier note (2026-11-05 09:45) — the parked E2i-c export half lives only in /tmp
 
 LOG (`81cf599`) parks the E2i-c export half as `/tmp/e2ic_export_half.patch` (5,035 bytes, 08:53). Nothing durable goes under `/tmp`, and a reboot would lose that work. The verifier keeps a copy at `~/avar2-verifier/saved/e2ic_export_half.2026-11-05.patch` (sha256 `f04dd1f02086a522…`, identical). Next loop: move the patch into the repo, as `docs/sprints/cleanup-2026-10/wip/e2ic_export_half.patch` in a sprint-docs commit, and point the LOG at that path. Do not apply it to the code before the injector half follows; the design note's reasoning stands. The E2i-c budget numbers (item 5 of its acceptance) are still owed at the checkpoint, with the corner-tuple design measured, not estimated.
+
+## Verifier note (2026-11-05 11:50) — E2i-c: a cap in the injector changes the user's rule; measure the seven cases first
+
+LOG `972858b`: the parked v3 work leaves an 8.02 u residual, and the export logs "7 per-glyph moves still hit the negative-advance cap" at SPAC −40 on the fixture. The hypothesis is to cap the injector's per-corner amounts too. Two things before any code:
+
+1. **A cap is not the user's rule.** The user approved `d = v·scale·(ink_g(L)/mean(L))^bias·(mean(L)/mean(D))` with no cap. The point of the rule was that the cap never fires. If it still fires, the rule and the user's "no negative advances" requirement conflict there, and choosing between them is the user's decision, not an implementation detail. The same applies to capping both sides so they agree.
+2. **Measure, then report.** List the seven moves: glyph (and its base, if composite), master location, that master's advance, ink and sidebearings, the rule's `d`, and the resulting advance. Then say which of these it is:
+   - (a) a measurement or bookkeeping error (wrong ink, wrong width passed to `_fit_dx`, a composite read with its own ink, a production/source name mix-up). Fix it and the cap stops firing.
+   - (b) the rule itself drives the advance below 1 u. At bias 1 the change is `−2·|v|·scale·ink_g(L)/mean(D)`, so this can only happen where ink exceeds about `advance·mean(D)/(2·|v|·scale)`, which in practice means overhanging glyphs (negative sidebearings) at hairline masters. Then run the same count on the real Crispy at its −100 end, from the existing artifacts if possible, and put both counts in LOG.
+
+   If it is (b), park E2i-c at that point and set `STATE: blocked` with the numbers, so the verifier can bring the choice to the user. Do not add the injector cap.
+
+Also: the v3 WIP went into the shared stash again (`24e89bb`, after the 11:40 note). The verifier has a copy at `~/avar2-verifier/saved/e2ic_wip_v3_stash_24e89bb.patch`. Restore it by SHA. Next time, a commit on a local branch.
