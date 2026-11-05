@@ -2827,3 +2827,32 @@ Hypothesis [not yet verified]: capping the injector's per-corner amounts against
 each corner's own advance closes the gap, and it is also the "no negative raw
 advance" invariant the checkpoint asks for. Parked as `stash@{0}` (v3); tree
 green at 672 passed.
+
+#### E2i-c bookkeeping check — the seven fixture cases are (a), and nothing floors
+
+Ran the verifier's check (findings.md, 11:50 note) before writing any floor code.
+
+**The seven capped moves were a measurement artefact.** With the UFO-master basis
+the default's mean is **98.0 u** (Crispy Mini's default source is the hairline),
+so `d = −40·1.25·ink/98` and `four`, `one`, `seven` (no overhang at all) and `R`
+(rsb −14) fall under 1 u. With the shipped (B) basis — the build instanced per
+master — the same default mean is **105.5 u**, every amount is ~7 % smaller, and
+**no** (glyph, master) falls below 1 u: the export logs no capped move any more.
+So the earlier "7 per-glyph moves still hit the negative-advance cap" was the
+defect E2i-c exists to remove, not the rule running out of room.
+
+**On the real Crispy at −100 nothing floors either.** `mean_D` is **1754.5 u**
+(the studio's relocated default) over 203 glyphs; classified per master against
+the existing build, **zero** glyphs are driven below 1 u. The floor is therefore a
+safety net that fires nowhere today — worth having, but it cannot be what closes
+the 183-glyph gap at the negative end.
+
+**The 8.02 u fixture parity gap survives both changes**, so it is neither the cap
+nor the measurement basis: the export's twins and the injector's tuples still
+disagree somewhere between the masters. Instrumenting the per-glyph diff is the
+next step, and the round trip on the real Crispy has to be re-run under E2i-c
+before any floor work is judged.
+
+State: WIP as a commit on local branch **`e2ic-wip`** (`b8341d9`), restored from
+stash `24e89bb` by SHA (stash kept). Round-trip artifacts moved from `/tmp` to
+`test-output/rt-crispy/` (gitignored, 53 MB). Sprint branch clean.
