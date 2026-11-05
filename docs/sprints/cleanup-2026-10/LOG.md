@@ -2703,3 +2703,30 @@ wasm/fontc-web/Cargo.toml` with no `--release` (that is what CI runs);
 **Test run [verified]:** `64321df` → run **41954971494**, conclusion `success`,
 all six jobs green (cli-build, rust ×2, python ×2, frontend). E2k-b closes the
 red run that `6085233` opened.
+
+### D1a2 — every row of factcheck-c1c8aca.md applied (ROUND 25)
+
+Nine documents, one commit each, the row list in each message. Nothing was
+softened: a claim the code does not support is corrected to what the code does,
+and an unmeasurable production claim is either measured with its date or
+removed.
+
+| Commit | Document | Rows |
+|---|---|---|
+| `c25e407` | `docs/CLI.md` | install pin, `--workdir`'s scope, exit 2, `--uninstall` |
+| `bff7249` | `README.md` (+ the doctor names in CLI.md) | demo scope, `--strict`, source writes, exit 2, transforms, Download workspace |
+| `56a9e67` | `authoring-instances.md` + the two example READMEs | avar2 claim, Crispy Mini's ranges, the unmeasured Roboto Delta rows |
+| `3f999b5` | `docs/guides/grade.md` | the number input and cap 0, the badge popover, no banner, sidecar `pct` |
+| `ed1e16c` | `docs/guides/kinetikern.md` + README | the 503's real text |
+| `d1b0f2a` | `secondary-parametric-axes.md` | what declaring writes, sidebar grouping, per-row values, ↗, badges |
+| `a6c94c1` | the guide's appendix | dated Crispy numbers, no new-tab escape, the HUD that exists |
+| `d6dee8d` | `docs/ARCHITECTURE.md` | 18 rows (see the commit) |
+| `cac92fa` | `docs/SIDECARS.md` | the lock's shape, the import's destination, the missing files |
+| `598a19b` | `docs/DEVELOPMENT.md` | re-measured counts, CI order, dated claims |
+| `947a0b6` | decisions 0007 + 0015, `glyphs/README.md` | past tense, the spec's env, the any-wheel, View → Show |
+
+Measured for the rows [verified 2026-11-05]: 672 tests / 637 `def test_`, 136
+plugin-test functions in 8 files; production Crispy `fvar` XTRA 47/47/1715,
+XOPQ 1/1/1462, YOPQ 1/1/275; `Crispy-avar.csv` 30 rows (WDTH 5/100/220, WGHT
+1/100/400/900/1000, OPSZ 14/144); the six dev-tag `release.yml` runs are
+successes. `pytest tests/ -q` → **672 passed**; ruff clean.
