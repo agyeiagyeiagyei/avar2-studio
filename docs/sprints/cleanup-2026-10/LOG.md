@@ -3259,3 +3259,43 @@ not a bug I should pick a side on:
   width, which is the rule the user set for E2i-c.
 
 STATE: awaiting the user's choice (A) or (B).
+
+## E2i-c: user chose B; the first implementation missed the real cause
+
+User decision (2026-11-05): **B — amounts live at the masters and are
+interpolated everywhere else.** Implemented, rebuilt the real Crispy (230 s,
+peak RSS 1.12 GB) and measured: the built default came out at **423 u** where
+the sources give 96, so the implementation is wrong and has been **reverted**
+(the tree is green at `bdcb670`, 675 tests). What the attempt taught is worth
+more than the attempt:
+
+**The 152-vs-96 gap was not the whole story.** Comparing the two fonts at all
+nine masters — not just the two I checked first — shows the **interior** masters
+disagree:
+
+| master (studio corner) | studio | fontmake |
+|---|---|---|
+| 47-1-1, 47-1-275, 47-1-1462, 1715-1-1, 1715-1-275, 1715-1462-1 | 7 / 7 / 423 / 245 / 245 / 661 | identical |
+| Black Narrow Max `{XTRA −1, XOPQ 0.117, YOPQ 0.869}` | 106.1 | **55.7** |
+| Max 900 `{XTRA 0.863, XOPQ 0.395, YOPQ 1.0}` | 423.0 | **376.3** |
+
+**Root cause, and it is structural.** The two fonts normalise the same master in
+different spaces: the injector against the **built font's** fvar — whose default
+is the studio's RELOCATED default (decision 0001) — and fontmake against the
+**sources'** designspace axes. The six extreme masters land on ±1 either way, so
+they agree exactly; the interior masters land on *different* coordinates in the
+two spaces, so their amounts are read at the wrong place and the model misses
+them. Fitting the injection against the wrong coordinates then produced 423 at
+the default instead of 96.
+
+**So the implementation of B needs the sources' coordinates, not the built
+font's:** the pipeline must hand the injector (a) the master locations
+normalised against the *designspace* axes and (b) the ORIGIN row's location in
+that same space. Then the base corner's amount is the sources' own model
+evaluated there, while the gvar *supports* keep using the built font's
+normalisation — which is correct and stays as it is. Everything else in the
+attempt (VariationModel over masters only, base = the sources' default master)
+stands; it was the coordinate space that was wrong.
+
+Working copy of the reverted attempt: `/tmp/B_attempt_pipeline.py`,
+`/tmp/B_attempt_injector.py` (outside the repo; nothing half-done is committed).
