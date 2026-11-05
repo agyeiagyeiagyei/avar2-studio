@@ -154,6 +154,70 @@ def _gc_paused():
         # drains the garbage without blocking the world.
 
 
+def _master_locations(source_path) -> Optional[list]:
+    """Normalized master locations of the active designspace (E2i-c).
+
+    The transforms that carry one amount per master need the master grid. A
+    built font cannot supply it: ``fvar`` makes ``LCWD`` look exactly like
+    ``XTRA``, and ``gvar`` holds the interpolation model's regions rather than
+    the masters (inference measured 1,280 "corners" on Crispy against 9 real
+    masters, and the SPAC tuples then overflowed gvar's per-glyph ceiling). So
+    the pipeline — which has the designspace — reads it here and hands it over.
+
+    Returns ``[{tag: normalized}, …]`` including ``{}`` (the default), or
+    ``None`` when the source cannot be read (the caller falls back to the old
+    gvar inference).
+    """
+    if not source_path:
+        return None
+    try:
+        from . import source_font
+
+        font, fmt = source_font.load_source(Path(source_path))
+        if "glyphs" in str(fmt).lower():
+            import glyphsLib
+
+            doc = glyphsLib.to_designspace(font)
+        else:
+            doc = font
+        axes = {axis.tag: axis for axis in doc.axes}
+        masters = {}
+        for source in doc.sources:
+            if source.layerName:
+                continue
+            values = {}
+            for name, value in (source.location or {}).items():
+                axis = next((a for a in doc.axes if a.name == name), None)
+                if axis is not None and value is not None:
+                    values[axis.tag] = float(value)
+            if values:
+                masters[tuple(sorted(values.items()))] = values
+        # A design axis is one some master moves off its default; the rest
+        # (control axes, injected axes) are not corners of this grid.
+        varying = {tag for values in masters.values()
+                   for tag, value in values.items()
+                   if abs(value - axes[tag].default) > 1e-9}
+        corners = [{}]
+        for values in masters.values():
+            location = {}
+            for tag, value in values.items():
+                if tag not in varying:
+                    continue
+                axis = axes[tag]
+                span = (axis.maximum - axis.default) if value > axis.default \
+                    else (axis.default - axis.minimum)
+                if span:
+                    location[tag] = round((value - axis.default) / span, 6)
+            location = {tag: norm for tag, norm in location.items() if norm}
+            if location and location not in corners:
+                corners.append(location)
+        return corners if len(corners) > 1 else None
+    except Exception as e:
+        log.info(f"master locations unavailable ({e}); transforms infer them "
+                 "from the built font")
+        return None
+
+
 def _build_context():
     """Read-only build state handed to each transform's apply()."""
     return _transforms.BuildContext(
@@ -162,6 +226,7 @@ def _build_context():
         glyphs_path=state.GLYPHS_PATH,
         family=(state.GLYPHS_PATH.stem if state.GLYPHS_PATH else "font"),
         log=lambda m: log.info(f"[transform] {m}"),
+        master_locations=_master_locations(state.ORIGINAL_PATH or state.GLYPHS_PATH),
     )
 
 

@@ -270,7 +270,16 @@ class WidthAwareSpacTransform(Transform):
             # region, so the corners' amounts are decomposed into deltas by
             # fontTools' own model (the exact inverse of the interpolation that
             # will read them back).
-            corners = _parametric_corners(font)
+            # E2i-c: the corners are the designspace masters, handed in by the
+            # caller that has the designspace. Inferring them from the font is
+            # the fallback: inside a built font every axis looks alike, so the
+            # inference returned 1,280 "corners" on Crispy (transform, grade and
+            # control supports) against 9 real masters, and gvar overflowed.
+            given = getattr(ctx, "master_locations", None)
+            corners = [dict(c) for c in given] if given else _parametric_corners(font)
+            if given:
+                ctx.log(f"spac_widthaware: {len(corners)} master corner(s) from "
+                        f"the designspace")
             corner_inks, corner_means = [], []
             for corner in corners:
                 at = _ink_widths_at(font, corner)

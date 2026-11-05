@@ -138,6 +138,13 @@ class BuildContext:
     glyphs_path: Path                  # active source (shadow or original)
     family: str                        # source stem, for output naming
     log: Callable[[str], None] = lambda _m: None
+    #: Normalized design-space locations of the designspace masters (E2i-c).
+    #: A built font cannot name its own design axes — LCWD looks like XTRA
+    #: from inside fvar, and gvar stores the interpolation model's regions,
+    #: not the master grid (measured: 1,280 inferred "corners" against 9
+    #: masters) — so the caller, which has the designspace, passes them in.
+    #: ``None`` means "derive from gvar", the pre-E2i-c behaviour.
+    master_locations: Optional[list] = None
 
 
 class Transform:
