@@ -2699,3 +2699,7 @@ of those at once. The same suite in the CI profile peaks at **0.57 GiB**
 (`/usr/bin/time -l`, `-j 4`). Rule: run `cargo test --manifest-path
 wasm/fontc-web/Cargo.toml` with no `--release` (that is what CI runs);
 `--release` belongs only to `cargo build --bin spac-inject`, one job.
+
+**Test run [verified]:** `64321df` → run **41954971494**, conclusion `success`,
+all six jobs green (cli-build, rust ×2, python ×2, frontend). E2k-b closes the
+red run that `6085233` opened.
