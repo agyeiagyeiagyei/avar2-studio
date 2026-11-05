@@ -330,7 +330,41 @@ def _apply_transform_chain(vf_path):
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
         state.LAST_TRANSFORM_ERROR = "; ".join(errors)
-    return _stamp_control_instance_values(out)
+    return _repair_avar_axis_count(_stamp_control_instance_values(out))
+
+
+def _repair_avar_axis_count(vf_path):
+    """Keep avar's RAW axis count equal to fvar's (verifier, 17:40).
+
+    fontTools writes ``AxisCount = len(fvar.axes)`` when it compiles avar, and
+    copies the bytes verbatim when the table was never loaded. A stage that
+    adds or drops fvar axes therefore leaves the header naming the old count —
+    measured 29 against 12 on a headless ``avar2-studio build`` — and consumers
+    that check it reject the table outright, avar2 included (FreeType then
+    drops wght/wdth/opsz). React to the symptom after every stage rather than
+    trusting each writer: loading avar forces the recompile on save, and the
+    identity map per axis keeps fontTools' compile contract.
+    """
+    if vf_path is None:
+        return vf_path
+    from fontTools.ttLib import TTFont
+
+    path = Path(vf_path)
+    font = TTFont(str(path))
+    if "avar" not in font:
+        return vf_path
+    expected = len(font["fvar"].axes)
+    entry = font.reader.tables["avar"]
+    font.reader.file.seek(entry.offset)
+    raw = int.from_bytes(font.reader.file.read(8)[6:8], "big")
+    if raw == expected:
+        return vf_path
+    avar = font["avar"]                       # loading it forces the recompile
+    for axis in font["fvar"].axes:
+        avar.segments.setdefault(axis.axisTag, {})
+    font.save(str(path))
+    log.info("avar: raw axis count %d != fvar %d — recompiled", raw, expected)
+    return vf_path
 
 
 def _stamp_control_instance_values(vf_path):
