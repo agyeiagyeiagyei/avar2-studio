@@ -25,10 +25,9 @@ uppercase, lowercase and figures share one stroke contrast and counter
 proportion, so a single thick-stroke slider does the right thing everywhere.
 Eight masters at the corners of the box, eight authored rows in the CSV.
 
-**Roboto Delta Mini** derives from Roboto Delta: readable from 8 pt to display
-sizes, caps and lowercase reach their best contrast at different stroke values,
-so it ships three trios instead of one. Moving `XOUC` thickens caps without
-touching lowercase.
+**Roboto Delta Mini** derives from Roboto Delta: caps and lowercase reach their
+best contrast at different stroke values, so it ships three trios instead of one.
+Moving `XOUC` thickens caps without touching lowercase.
 
 avar2-studio treats both identically — core axes on Crispy Mini, control axes on
 Roboto Delta Mini, mappings authored in the same CSV shape once you give a row

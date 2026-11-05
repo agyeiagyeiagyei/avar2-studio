@@ -8,13 +8,17 @@ the two fonts in [`examples/`](../../examples/) as concrete demonstrations.
 
 Neither font exposes `wght`/`wdth`/`opsz` as gvar axes. In both, the masters
 describe elemental glyph components through parametric axes (`XOPQ` thick stroke,
-`YOPQ` thin stroke, `XTRA` counter width, …) and the **avar2 table translates the
-traditional axes into them** — the user moves familiar `wght`/`wdth`/`opsz` knobs,
-and the avar2 layer re-projects those values into the parametric designspace at
-render time. Authoring that routing is the studio's job: **the mappings CSV is
-where it lives**, one row per named stylistic instance, whose traditional-axis
-columns are the user-facing address (`wght=400 wdth=100`) and whose parametric
-columns are the coordinates that address maps to.
+`YOPQ` thin stroke, `XTRA` counter width, …). Crispy Mini then carries a mappings
+CSV, `CrispyMini-avar.csv`, and its **avar2 table translates the traditional axes
+into the parametric ones** — the user moves familiar `wght` knobs and the avar2
+layer re-projects those values into the parametric designspace at render time.
+Roboto Delta Mini ships no mappings CSV at all, so nothing translates there: it
+demonstrates the parametric designspace and its nine case-split axes, and the
+routing above is what you would author for it. Authoring that routing is the
+studio's job: **the mappings CSV is where it lives**, one row per named stylistic
+instance, whose traditional-axis columns are the user-facing address
+(`wght=400 wdth=100`) and whose parametric columns are the coordinates that
+address maps to.
 
 ![Instance rows in the studio — each row is one authored instance rendered live in the built font](../images/instance-rows.png)
 
@@ -23,14 +27,19 @@ out** — how many, and which glyphs each one deforms.
 
 ## The unified approach (Crispy)
 
-Crispy ships **three parametric axes** that together describe stroke thickness and
-counter width for the whole alphabet:
+Crispy Mini, the bundled example, ships **three parametric axes** that together
+describe stroke thickness and counter width for the whole alphabet:
 
 | Axis | What it does | Range |
 |---|---|---|
 | `XOPQ` | Vertical-stroke thickness (X opacity) | 2 – 1016 |
 | `YOPQ` | Horizontal-stroke thickness (Y opacity) | 2 – 462 |
 | `XTRA` | Counter width / horizontal proportions (X transparency) | 94 – 3330 |
+
+These are the example's ranges (`CrispyMini-axis-metadata.json`); the production
+Crispy spans wider at the top and narrower at the bottom — `XOPQ` 1–1462, `YOPQ`
+1–275, `XTRA` 47–1715, read from its shipped `fvar` on 2026-11-05. The workflow
+below is the same at either scale.
 
 One `XOPQ` slider thickens every cap stem, every lowercase stem, every digit
 stem — uniformly. Same for `YOPQ` on horizontals and `XTRA` on counters: the
@@ -87,17 +96,16 @@ clean at 14 pt closes up the counter of a Bold `e`, so it lets the designer push
 them at different rates.
 
 Cost: nine parametric values per instance instead of three — more authoring per
-row, in exchange for per-case control. The production Roboto Delta goes further,
-adding case-scoped height and internal-counter axes; the fixture keeps the demo on
-stroke contrast.
+row, in exchange for per-case control. The fixture stops at stroke contrast,
+which is the part its nine axes demonstrate.
 
 ![Roboto Delta Mini morphing from Regular to Bold via nine parametric axes](../../examples/roboto-delta-mini/docs/regular_to_bold.gif)
 
 ## Choosing between them
 
-| | Unified (Crispy) | Case-split (Roboto Delta) |
+| | Unified (Crispy Mini) | Case-split (Roboto Delta Mini) |
 |---|---|---|
-| Parametric axes | 3 | 9 (or more, with case-scoped heights/internal counters) |
+| Parametric axes | 3 | 9 |
 | Per-instance authoring | 3 values | 9 values |
 | Per-case independence | None — caps and lowercase share stroke weight | Full — each script case is tuned separately |
 | Best fit | Display / geometric designs with even tone | Text / system fonts that must read across a wide optical-size range |
@@ -111,8 +119,8 @@ you can name only one or two places where a Bold `a` should be thinner than a Bo
 
 Two points define a line, not a designspace. The Crispy production font's
 mapping CSV has **30 rows spanning three widths, five weights and two optical
-sizes** (`Crispy-avar.csv`, measured 2026-11-04: `wdth` 5/100/220, `wght`
-1/100/400/900/1000, `opsz` 14/144); Roboto Delta has more. Two rows already give
+sizes** (`Crispy-avar.csv`, measured 2026-11-05: its `WDTH` column holds
+5/100/220, `WGHT` 1/100/400/900/1000, `OPSZ` 14/144). Two rows already give
 a workable single-axis range;
 `Thin` and `Black` extend it, a condensed row puts `wdth` in play, and optical
 sizes that prefer thicker thin-strokes at 9 pt put `opsz` in play. Each row is a

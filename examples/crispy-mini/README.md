@@ -22,7 +22,7 @@ The masters are the eight corners: `(94, 2, 2)` through `(3330, 1016, 462)`.
 | File | What it holds |
 |---|---|
 | `CrispyMini-avar.csv` | **eight named rows** — `Narrow Thin 144` … `Ultra Wide Heavy 144` — with parametric coordinates plus `wght` (100–900), `wdth` (20–200) and `opsz` (12–144), so seven of them are avar2 mappings |
-| `CrispyMini-axis-metadata.json` | the declared axis defaults and display names (`opsz` defaults to 144, `wght` to 100) — the build exits 2 without it |
+| `CrispyMini-axis-metadata.json` | the declared axis defaults and display names (`opsz` defaults to 144, `wght` to 100) — the build exits 2 without it and without the legacy `.avar2-studio/axis-metadata.json` |
 | `CrispyMini-transforms.json` | a width-aware SPAC transform, `min -20 / max 40`, on by default |
 
 The `.glyphs` source declares **no instances**: the named styles live in the CSV,
