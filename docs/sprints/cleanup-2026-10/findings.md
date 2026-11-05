@@ -2294,3 +2294,13 @@ Script: `~/avar2-verifier/samples/make_sample.py`; the correction is the block m
 **E2i-c-d (approved fix, no rule change):** corners must be normalized against the font being injected. The transform can normalize design locations itself from the font's `fvar`/`avar`, or the pipeline can normalize with the relocated default; the agent chooses. Add a crispy-mini case with a **relocated default**, which fails today and passes after the fix. Then re-check the 8 floored moves and the 8.02 u fixture gap, since both were measured with these corners.
 
 Also: `e2ic-wip` commits binaries under `test-output/` (two ~9 MB TTFs in `9e8801f`). They must not reach the sprint branch; drop them when the branch is squashed or merged.
+
+### User decision (2026-11-05 16:03) — slanted and rounded styles take their upright master's spacing amounts → E2i-c
+
+The user judged the verifier's sample (`~/avar2-verifier/samples/Crispy-SpacingSample-proof.html`). It shows their 30 CSV instances, each Upright, Slanted, Rounded and Slanted Rounded at its own SPAC, with the corrected corners. Their verdict: "slants look good to me".
+
+**The rule:** the E2i-c amount varies over the **parametric** design space only, meaning the source's masters, normalized against the built font (E2i-c-d). Every transform-derived master takes its parent master's per-glyph amounts exactly: Slanted, Rounded and Slanted Rounded, and any later derived axis by the same principle. The injector already does this. **The export follows it:** its twins at derived masters carry the parent's amounts, not amounts from their own (sheared) ink.
+
+**Why (the user's model):** a shear moves every glyph by the same amount at each height, so the gaps between letters are unchanged, and a sheared bounding box is not a width. Per-instance spacing (the CSV's SPAC column) then means the same thing on a slanted instance as on an upright one, so a designer can tune a slanted instance with its own SPAC value.
+
+**Acceptance (added to E2i-c):** at every derived master, every glyph's per-side twin delta equals its parent's within 1 u. The all-glyph round trip includes slanted and rounded rows and holds at both SPAC ends. The 1 u floor stays as the user's safety net, and LOG lists anything it touches (expected: nothing, once E2i-c-d is in).
