@@ -3453,3 +3453,43 @@ count.
 
 Nothing is claimed as passing. Next: the `.notdef` ±78 (same two SPAC-only tuples,
 d = 39), then `IJ`'s constant 166 at the right side, then the −100 tight end.
+
+## ROUND 31 — pinned builds, the IJ composite fixed, and the sparse-layer attempt reverted
+
+**Pinned builds, as the verifier asked.** `~/avar2-agent/e2ic-wt` is a worktree
+on `e2ic-wip`; `~/avar2-agent/build_pinned.sh` runs the studio from it and
+**refuses** unless the branch is `e2ic-wip`, the tree has 0 modified tracked files
+and `avar2_studio.__file__` resolves inside that worktree. Its provenance header
+now stands at the head of every `build.log`, and every measurement below comes
+from a build that passed those asserts. (The worktree needs a `.venv` symlink to
+the sprint venv only so the tests can find `fontc`; the code is the worktree's,
+via `PYTHONPATH`.)
+
+**Signature check on the pinned build** (`rt-coincide2`, commit recorded in
+`build.log`): size **765,636 B**, avar raw **12 / fvar 12**, avar2 regions **28**
+(axis count 12 — the same as the current Crispy, so **no extra regions**),
+**`.notdef` 0 tuples and unmoved**, `H` 59→**75** tuples with **73** multi-axis.
+"IJ differs" and "`.notdef` ±78" from ROUND 30 were artifacts of the wrong-code
+build, exactly as the verifier said.
+
+**IJ — fixed and proven** (`8ec4175`). `IJ` is `I` + `J`: the base `I` is a
+hairline stem whose amount rounds to 0, so the composite's `dx` was 0 and the
+whole composite was skipped — its `J` component kept its own +64 shift while the
+advance stayed put, collapsing the right side by 63 u against the studio's 0.
+Composites are now corrected even when their own amount is zero. A test fails on
+the old loop (offset correction 0 instead of −150). **Composite class: 136 u →
+3.00 u; SPAC ends: 136 u → 3.0 u.**
+
+**`nine` / sparse layers — attempted three times, reverted** (`80e96e8`).
+1. Building the missing layers added none: bases were read after the flatten pass,
+   so the default glyph had no components left.
+2. Reading the bases from the pre-flatten scan added them, but inserted the
+   *already-flattened* default outlines, pinning the shape: **nine 13 u → 5,046 u**.
+3. Decomposing the pre-flatten glyph per layer added 29 layers with real geometry
+   and still gave **5,046 u** — the synthesized layer's advance is 127 against
+   `six`'s 1,365, so the geometry is wrong.
+
+The revert is a forward commit (no force-push), leaving `8ec4175` and the measured
+baseline: rows worst **13.0 u** (`nine` lsb, `Wide 900 MaxOpsz`), composites
+**3.00**, mixed/unencoded **2.00**, **`.notdef` 0.00**, SPAC ends worst **3.0 u**.
+The `nine` question goes back to the findings with these numbers.
