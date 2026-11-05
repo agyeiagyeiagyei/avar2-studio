@@ -2241,7 +2241,7 @@ The rule, implemented once and used by both renderers:
 3. No raw advance below 1 u for any glyph at any CSV row at SPAC `lo` or `hi`, in the studio's TTF and in the fontmake build of the export (fontTools, unclamped).
 4. The export round trip holds at BOTH ends: every glyph, every non-default row, within 1 u. The floor is the only departure from the rule. LOG lists every floored (glyph, corner) with the rule's amount, the floored amount and its sidebearings, on the fixture and on the real Crispy at −100.
 
-## Verifier spot check of `d3ba64c` (2026-11-05 16:00) — the 8 floored moves come from the slant, and the injector and the export disagree at slanted styles
+## Verifier spot check of `d3ba64c` (2026-11-05 15:50) — the 8 floored moves come from the slant, and the injector and the export disagree at slanted styles
 
 **Verified:** the classification log (`test-output/e2ic-diag/classify_transformed.log`). It shows 8 floored pairs, colon and exclam, all overhanging, and the export's UFOs agree.
 
@@ -2264,7 +2264,7 @@ Rounded masters match upright, apart from 1–2 u. In running text this is harml
 
 **Recommended fix (awaiting the user's decision; do NOT change the rule yet):** the spacing amount comes from the parametric masters only. Each transform-derived master (slanted, rounded, slanted-rounded) takes its parent master's amounts, which the injector already does, and the export follows. Expected effect: the floor has nothing left to do on Crispy (it stays as a safety net), and slanted rows agree. Meanwhile, step (2), the injector floor, goes ahead unchanged.
 
-## Verifier finding (2026-11-05 17:00) — E2i-c corners are normalized against the SOURCE default, so Crispy's narrow/hairline half gets the default's constant amount
+## Verifier finding (2026-11-05 15:57) — E2i-c corners are normalized against the SOURCE default, so Crispy's narrow/hairline half gets the default's constant amount
 
 **Reproduced** with the `e2ic-wip` injector (`9e8801f`, archived read-only to `~/avar2-verifier/samples/code`) on the agent's real-Crispy build without SPAC (`rt-e2ic`). The project's params are −100…100, bias 1, scale 1.25. Corners come from `pipeline._master_locations(Crispy.glyphs)`:
 
