@@ -2374,7 +2374,7 @@ The agent attributes the 56 failing SPAC-end checks to one point: the relocated 
 - The top-level `rt-crispy/Crispy[…].ttf` (sha ae3325b3) still has the **header-29 avar**, and FreeType drops wght/wdth/opsz there. `out/` and the studio-pipeline build in `work/` (identical, sha cf971a15) have 12/12, and FreeType equals HarfBuzz within 1 u. Say where the top-level file came from. The raw-header test from the 17:40 note is still needed.
 - Keep exactly one `STATE:` line in STATUS and put the detail in `NEXT:`. The verifier's scripts now read only the first `STATE:` line.
 
-## Verifier note (2026-11-05 18:25) — B, as the user chose it ("amounts live at the masters and are interpolated everywhere else"), holds between masters only with a full corner grid; the 10-corner plan still fails the rows
+## Verifier note (2026-11-05 18:16) — B, as the user chose it ("amounts live at the masters and are interpolated everywhere else"), holds between masters only with a full corner grid; the 10-corner plan still fails the rows
 
 **1. The interior-master gap does not reproduce on the committed code.** On rt-crispy `out/` (studio, bdcb670) against `fm/` (fontmake), HarfBuzz, H/O/n pinned at each of the 9 masters, the advances and the change at SPAC −100 agree within 2 u. That includes Black Narrow Max 47-350-255 (−212 / −212) and Max 900 1571-700-275 (−846 / −846). The LOG's 106.1 against 55.7 and 423.0 against 376.3 must come from the reverted attempt's build or from other points. State which. As written, "the interior masters disagree" is not a property of the committed injector.
 
