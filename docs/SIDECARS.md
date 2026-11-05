@@ -10,13 +10,18 @@ the writers emit, as of 2026-10-30.
 The sidecars below go through `sidecar_io`: `atomic_writer` for text and
 `write_json` for JSON (temporary file + replace, so a crash leaves the old file
 whole), and the whole load → mutate → save sequence under the one process-wide
-`sidecar_io.LOCK` (an `RLock`, so nesting is safe). The two exceptions are named
-in the table — `.avar2-studio/instance-renames.json` (`instance_aliases.save`
-writes it with a plain `write_text`) and `.avar2-studio/config.yaml`
+`sidecar_io.LOCK` (an `RLock`, so nesting is safe). `SIDECAR_LOCK` and
+`control_axes._INSTANCE_VALUES_LOCK` are that same object, not separate locks.
+The exceptions are named in the table — `.avar2-studio/instance-renames.json`
+(`instance_aliases.save` writes it with a plain `write_text`; the route holds
+the lock, the write is not atomic) and `.avar2-studio/config.yaml`
 (`config_generator.write_config` backs it up with `shutil.copy2` and writes it
 with `write_text`; only `_initialize_preview_config_from_glyphs` uses
-`atomic_writer`). Both are whole-file writes of small documents. The studio is
-the only writer; external edits are picked up on read.
+`atomic_writer`, and the write happens in the worker, where a process lock
+cannot help). The upload and zip staging copies in `routes/load.py`
+(`shutil.copy2`, `FileStorage.save`) are outside the lock too. All of them are
+whole-file writes of small documents. The studio is the only writer; external
+edits are picked up on read.
 
 | File | Commit? | Writer(s) | Backup | Atomic | Locked |
 |---|---|---|---|---|---|
@@ -26,7 +31,8 @@ the only writer; external edits are picked up on read.
 | `<stem>-transforms.json` | yes | Transforms menu, config import | yes | yes | yes |
 | `<stem>-kinetikern.json` | yes | Kinetikern tab, the family switch | no | yes | yes |
 | `<stem>-axis-metadata.json` | yes | `_load_axis_metadata` (auto-populate), avar2 axis routes | yes | yes | yes |
-| `.avar2-studio/instance-renames.json` | no | instance rename | no | no — plain `write_text` | no |
+| `<stem>-build.json` | optional | `avar2-studio build --write-config` (`build_config.write`); the studio only reads it | no | no — plain `write_text`, and the CLI is the only writer | no |
+| `.avar2-studio/instance-renames.json` | no | instance rename | no | no — plain `write_text` (the rename route itself runs under `SIDECAR_LOCK`) | no |
 | `.avar2-studio/config.yaml` | no | `_initialize_preview_config_from_glyphs`, every build (`config_generator.write_config` in the worker, promoted back) | optional (`shutil.copy2` to `.yaml.backup`) | no — `write_text` except the initializer's `atomic_writer` | no |
 
 Backups go to `.avar2-studio/backups/<filename>.<YYYYMMDD-HHMMSS>`, the last **20
@@ -38,8 +44,10 @@ recorded and refused rather than overwritten: `control_axes/schema.py` raises
 `SidecarCorruptError` and remembers it in `load_errors()`, `GET /api/health`
 reports the map as `sidecar_errors`, and the next control write fails with the
 file's name instead of replacing the designer's layers. `version` is
-re-emitted where the schema defines one (grade, transforms and Kinetikern always
-write their current schema version); **unknown keys are carried through** by the control sidecar
+re-emitted where the schema defines one — transforms and Kinetikern write their
+current schema version, while grade writes the version it read
+(`data.get("version") or _SCHEMA_VERSION`), so an older file is not silently
+upgraded; **unknown keys are carried through** by the control sidecar
 (`_KNOWN_TOP_KEYS` and friends exist precisely so a newer studio's file is not
 stripped by an older one) and dropped elsewhere. A control sidecar that does not
 parse is refused rather than overwritten (`SidecarCorruptError`).
@@ -84,7 +92,9 @@ Ultra Wide Thin 144,2895.4,12.0,10.0,144.0,,200.0
   missing, one column per source axis (uppercased, master-backed or not)
   and one row per source instance, missing cells filled with 0.
 - **Sync from the source** (`csv_io.update_csv_from_glyphs`, run by the
-  watcher and before every staged build): adds rows for new source
+  watcher and before a staged build whose job carries
+  `source_refresh` in (`original`, `source`) — a plain rebuild does not sync):
+  adds rows for new source
   instances and updates coordinates for existing ones; rows being edited
   (`EDITING_INSTANCES`) are shielded; a new source axis becomes a column
   backfilled with the axis **default** on every row (never blank); rows
@@ -254,8 +264,12 @@ names and ranges of the axes the studio knows about, keyed by
   transform's params, the GRAD extent or the CSV column's spread
   (`_repair_placeholder_ranges`); hand-edited ranges are never clobbered.
 - Travels in the workspace zip (`.avar2-studio/axis-metadata.json` or a
-  `*-axis-metadata.json` beside the source; an import lands in the workdir
-  and migrates to the sibling on first read) and, in the static demo, as an
+  `*-axis-metadata.json` beside the source) and, in the static demo, as an
+  imported file. An import always lands in the workdir
+  (`.avar2-studio/axis-metadata.json`) and is migrated to the sibling on the
+  next read — unless the sibling already exists: `_get_avar2_metadata_path`
+  returns it and the imported copy is never consulted, so a re-upload keeps the
+  committed declarations rather than the ones in the zip.
   optional `axis_metadata` section of the config bundle.
 
 ## `.avar2-studio/instance-renames.json`
@@ -308,6 +322,8 @@ section only.
   build/<Family>[tags].ttf             promoted builds (newest wins; the last two are kept,
                                        older ones reaped by reap_build_dir)
   build/<font>.woff2, <font>.woff2.json     the WOFF2 cache and its key {ttf_size, ttf_mtime, woff2_bytes, source_bytes}
+  build/.relocation-memo/              relocation memo (digest-keyed fonts + failure entries,
+                                       RELOCATION_MEMO_KEEP = 2)
   exports/<job-id>-<artifact>          finished exports, the last 5 (KEEP_EXPORTS)
   jobs/<job-id>/                       one per running job, removed when it finishes:
     src/                                 the snapshot (source, its -axis-metadata sibling and other sidecars, .avar2-studio/{instance-renames,config}.json/yaml, shadow/<name>, UFOs)
