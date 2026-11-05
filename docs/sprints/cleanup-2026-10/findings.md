@@ -2223,3 +2223,20 @@ LOG `972858b`: the parked v3 work leaves an 8.02 u residual, and the export logs
    If it is (b), park E2i-c at that point and set `STATE: blocked` with the numbers, so the verifier can bring the choice to the user. Do not add the injector cap.
 
 Also: the v3 WIP went into the shared stash again (`24e89bb`, after the 11:40 note). The verifier has a copy at `~/avar2-verifier/saved/e2ic_wip_v3_stash_24e89bb.patch`. Restore it by SHA. Next time, a commit on a local branch.
+
+### User decision (2026-11-05) — E2i-c gets a 1 u width floor, the same in the injector and the export → E2i-c acceptance amended
+
+The user chose option 1 ("option 1 it is"), after the verifier explained what it influences. **Where the scaling rule would take a glyph's advance below 1 u at a master corner at the SPAC tight end, the corner amount is floored so the advance is exactly 1 u.** Everything else follows the rule exactly. This replaces the 11:50 note's "do not add the injector cap": the cap is now the user's rule, with the conditions below.
+
+The rule, implemented once and used by both renderers:
+
+- **Where:** the per-corner amount at the SPAC `lo` end only. The `hi` (loosening) end, the default and SPAC 0 never floor. The floor is 1 u, the same value as the export's `_fit_dx`. The corner values interpolate as today. The user accepts that a floored glyph tightens more slowly over the whole tight half at that style, and that the reduction fades towards the neighbouring masters.
+- **Both sides identical:** the fontTools injector path and the export apply the same floor to the same corner values. The set of floored (glyph, corner) pairs is identical in both and is logged by both. The native engine keeps declining until it is ported.
+- **Composites:** a composite takes its base's floored amount (E2k), and its own floor as well if that still leaves it below 1 u. Both cases are listed.
+- **The condition (the user's, through the verifier's recommendation):** the floor is for overhanging glyphs. A floored (glyph, corner) where the glyph has a negative sidebearing, or ink wider than its advance, at that corner is expected. **If any floored glyph has no overhang at that corner** (both sidebearings ≥ 0), the range is too tight for that style: list those glyphs, set `STATE: blocked`, and the verifier brings it to the user (option 2: a shallower tight end). Do not ship the floor over them.
+- **First, the bookkeeping check from the 11:50 note still applies:** any of the seven fixture cases that come from a measurement error are fixed, not floored.
+
+**Amended E2i-c acceptance.** Items 1, 2, 5 and 6 are unchanged. Items 3 and 4 become:
+
+3. No raw advance below 1 u for any glyph at any CSV row at SPAC `lo` or `hi`, in the studio's TTF and in the fontmake build of the export (fontTools, unclamped).
+4. The export round trip holds at BOTH ends: every glyph, every non-default row, within 1 u. The floor is the only departure from the rule. LOG lists every floored (glyph, corner) with the rule's amount, the floored amount and its sidebearings, on the fixture and on the real Crispy at −100.
