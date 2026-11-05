@@ -615,6 +615,23 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # Only the masters get twins: a sparse brace source is an extra layer of its
     # master's UFO and rides along in the deep copy.
     tags_by_name = {axis.name: axis.tag for axis in doc.axes}
+
+    def _parent_name(style_name: str) -> str:
+        """The upright master a transform-derived one descends from.
+
+        E2i-c (user decision): slanted and rounded styles take their parent
+        master's spacing amounts. A sheared bounding box is not the glyph's
+        width — on Crispy the slanted `colon` measures 248 u of ink against 14
+        upright, which drove the amount into the 1 u floor — so the derived
+        masters reuse the amounts of the master they were derived from.
+        """
+        name = style_name or ""
+        for suffix in (" Slanted Rounded", " Slanted", " Rounded"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
+    measured_by_style = {}
     for source in [s for s in doc.sources if not s.layerName]:
         if _inks_from_build is not None:
             # (B) measure the build at THIS master; (A) the master's UFO is the
@@ -625,6 +642,10 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
             measured = _inks_from_build(location)
         else:
             measured = _ink_widths(source.font)
+        measured_by_style[source.styleName or source.name] = measured
+        parent = _parent_name(source.styleName or source.name)
+        if parent != (source.styleName or source.name) and parent in measured_by_style:
+            measured = measured_by_style[parent]
         master_inks = {n: w for n, w in measured.items() if n in names}
         mean_L = ((sum(master_inks.values()) / len(master_inks))
                   if master_inks else mean_D)
