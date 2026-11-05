@@ -27,16 +27,20 @@ blamed on glyphsLib conversion infidelity, was this same math; glyphsLib
 was innocent.) What *was* real: `export = 0` glyphs break every
 designspace compile ("interpolation-incompatible paths") because the
 export-flag lib key lands on only some masters' glifs — so
-`_build_export_source` strips non-exporting glyphs, their kerning and
-groups.
+`_build_export_source` stripped non-exporting glyphs, their kerning and
+groups. That symbol is retired (§ "Where it lives" carries the 2026-10-19
+status update); the built pipeline stages the resolved source instead.
 
 The current pipeline compounds this (audit §2 H3, path verified, size
-inferred): `_export_pipeline` rounds the export location
-(`round(mapped)`) while the ORIGIN row keeps the CSV's decimals
-(662.2 / 630.9 on Crispy); `_build_in_process` then sees a 0.2-unit
-mismatch and runs the step-3.5 instancer rebase **as well** — the
-densification the inserted-origin method exists to avoid. There is no
-per-call switch: relocation reads `AVAR2_RELOCATE_BUILD_DEFAULT` only.
+inferred): at the time of writing `_export_pipeline` rounded the export
+location (`round(mapped)`) while the ORIGIN row kept the CSV's decimals
+(662.2 / 630.9 on Crispy); `_build_in_process` then saw a 0.2-unit
+mismatch and ran the step-3.5 instancer rebase **as well** — the
+densification the inserted-origin method exists to avoid. The built
+export passes the evaluated `mapped` location through unrounded
+(`pipeline.py`, "`mapped`, exact"), so the mismatch and the extra rebase
+are gone; `_build_in_process` takes `relocate_default` and
+`relocate_target`, and an explicit argument wins over the environment.
 
 ## Decision
 
@@ -54,24 +58,30 @@ build uses (decision 0001), made an explicit per-build parameter:
   `relocate_default is None` (the preview build's path);
 - the `round()` vs decimal-row mismatch is reconciled (a tolerance, or
   the rounded location written back);
-- a plain build keeps the environment switch — the spec does not carry one;
+- a plain build keeps the environment switch — and the worker spec carries it:
+  `AVAR2_RELOCATE_BUILD_DEFAULT` is in `build_jobs.ENV_KEYS` and travels in the
+  spec's `env`, so a value set in the studio reaches the worker;
 - `_declared_axis_ranges` is computed once per build (done, T1.8);
 - the export tests assert that tuple counts stay natural
-  (`tests/test_export_relocation.py`, `test_export_active_source.py`,
-  `test_cli_export_options.py`, `test_gvar_header_fit.py` — `_export_pipeline`
-  had none when this was written).
+  (`tests/test_export_relocation.py::test_export_build_keeps_tuple_counts_natural`
+  is the one that does; `test_export_active_source.py`,
+  `test_cli_export_options.py` and `test_gvar_header_fit.py` cover the
+  surrounding behaviour, not the counts — `_export_pipeline` had none when this
+  was written).
 
 ## Consequences
 
-- Until T3.8 lands, preview and a "set default" export are **not
-  point-identical between masters**, and the export may be denser than
-  intended. Both are known and accepted for now.
+- At the time of writing, preview and a "set default" export were **not
+  point-identical between masters**, and the export could be denser than
+  intended. Both are resolved by the build described in the 2026-10-19 status
+  update below.
 - The baked-correction handling (decision 0011) — merging braces
   coincident with masters over the master glyph, and dropping brace
   sources coincident with the new origin — was part of the
   `_build_export_source` staging this decision retires; the built
   pipeline composes the corrections into the source instead
-  (`control_axes.shadow_designspace`).
+  (`shadow_glyphs.regenerate_shadow` — the `.glyphs` composition, not
+  `control_axes.shadow_designspace`).
 
 ## Where it lives
 

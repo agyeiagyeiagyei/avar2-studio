@@ -36,7 +36,9 @@ installs it into platlib where the lookup already looks.
 **The discovery order is fixed and identical in both modules:**
 
 1. the environment override (`AVAR2_SPAC_INJECT`, `AVAR2_KK2_DYLIB`), used when
-   the named file exists;
+   the named file exists — and a set override that names a **missing** file
+   stops the lookup there (the function returns None, it does not fall through
+   to the next candidate), which is what `doctor --strict` reports;
 2. the wheel-carried copy at `avar2_studio/bin/<binary>`;
 3. the repo build (`wasm/fontc-web/target/release/spac-inject`,
    `native/kinetikern2/target/release/libkinetikern2.{dylib,so}`), for a source
@@ -50,8 +52,10 @@ a clean checkout.
 
 ## Consequences
 
-- A release produces one wheel per platform instead of one universal wheel;
-  installs from git stay pure-Python until `cargo build` has run locally.
+- A release also produces one wheel per platform; the plain `py3-none-any`
+  wheel is still built and published alongside them (it just ships without the
+  accelerators), and installs from git stay pure-Python until `cargo build` has
+  run locally.
 - `avar2-studio doctor` gained `check_spac_injector` and
   `check_kinetikern_engine`, which report the path and how it was found (`via
   $AVAR2_…` when the override is in play) and name a broken override instead of

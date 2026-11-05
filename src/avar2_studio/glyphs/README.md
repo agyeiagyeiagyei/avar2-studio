@@ -103,7 +103,7 @@ in scripts.
 
 Draws a comparison glyph — from a master or an interpolated instance —
 behind the glyph being edited, and reports the advance-width difference.
-Enable via **View → Instance Delta**.
+Enable via **View → Show Instance Delta**.
 
 - **Compare** popup lists `Master: …` then `Instance: …` entries;
   entries that share a name are numbered in Font Info order
@@ -148,7 +148,7 @@ icon (`toolbarIconTemplate.pdf`); it is not used at runtime.
 ## Metrics Parity (`ParametricMasters.glyphsReporter`)
 
 Audits parametric-master consistency in real time. Enable via **View →
-Metrics Parity**; a floating panel opens alongside the Edit view.
+Show Metrics Parity**; a floating panel opens alongside the Edit view.
 Nothing is drawn into the Edit view.
 
 The rule: masters that share the axis values driving horizontal metrics
@@ -183,7 +183,7 @@ glyph whose advance width, LSB, or RSB differs within a group is flagged.
 Starts the italic masters: shears every glyph of each chosen source — a
 master, or an instance interpolated on the fly — by that source's own
 angle and appends each result as a **new master**, leaving the uprights
-untouched. Enable via **View → Slant Master**; a floating panel opens
+untouched. Enable via **View → Show Slant Master**; a floating panel opens
 alongside the Edit view and the result previews live over the glyph you
 are editing.
 
@@ -267,7 +267,7 @@ are editing.
 ## Width Matcher (`WidthMatcher.glyphsReporter`)
 
 Creates a new master whose advance widths match an existing reference
-master's. Enable via **View → Width Matcher**. It draws nothing into the
+master's. Enable via **View → Show Width Matcher**. It draws nothing into the
 Edit view; everything happens in the panel.
 
 - **Reference** popup picks the master to match. Masters that share a
