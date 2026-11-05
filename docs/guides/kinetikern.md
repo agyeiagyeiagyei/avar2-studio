@@ -21,9 +21,10 @@ cd native/kinetikern2 && MACOSX_DEPLOYMENT_TARGET=11.0 cargo build --release
 Discovery order is `$AVAR2_KK2_DYLIB`, then the wheel-carried
 `avar2_studio/bin/libkinetikern2.*`, then the repo build
 ([decision 0015](../decisions/0015-native-accelerators-ship-in-platform-wheels.md)).
-Rust 1.74+. `avar2-studio doctor` reports which one it found; without any of them
-the tab says the engine is not built and everything else keeps working. The tab
-is desktop-only — the browser demo hides it.
+Rust 1.74+. `avar2-studio doctor` reports which one it found. With none of them
+the server answers 503 — *"Kinetikern2 engine not available in this
+installation, so the Kinetikern tab is disabled."* — and everything else keeps
+working. The tab is desktop-only — the browser demo hides it.
 
 ## The tab
 

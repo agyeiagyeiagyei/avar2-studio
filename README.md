@@ -59,7 +59,8 @@ the platform wheels, and from a checkout you build them with `cargo build
 --release` in `wasm/fontc-web` and `native/kinetikern2` ([decision
 0015](docs/decisions/0015-native-accelerators-ship-in-platform-wheels.md)).
 Without them spacing falls back to a slower pure-Python path and Kinetikern
-reports the engine is not built. `avar2-studio doctor` says what is present;
+answers *"Kinetikern2 engine not available in this installation, so the
+Kinetikern tab is disabled."* `avar2-studio doctor` says what is present;
 `--strict` exits non-zero only for a missing **headless-build** prerequisite
 (`fontc`, `gftools-builder`, `glyphsLib` — the names `doctor` prints) or an
 environment override that names a file which does not exist — an absent
