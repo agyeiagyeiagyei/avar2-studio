@@ -397,14 +397,20 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     targets |= {name for name, seen in signatures.items() if len(seen) > 1}
 
     done = 0
+    originals: Dict[str, object] = {}
     for source in doc.sources:
         font = source.font
         if font is None:
             continue
         for layer in font.layers:
             for name in list(layer.keys()):
-                if name in targets and _flatten(layer[name], layer, name):
-                    done += 1
+                if name in targets:
+                    # Keep the glyph WITH its components: the sparse-layer pass
+                    # below has to decompose it per layer, not copy the already
+                    # flattened default outlines (which pins the shape there).
+                    originals.setdefault(name, copy.deepcopy(layer[name]))
+                    if _flatten(layer[name], layer, name):
+                        done += 1
     if done:
         log.info("sources_export: %d components decomposed (%d glyphs)",
                  done, len(targets))
@@ -429,13 +435,14 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
             for name in list(default.keys()):
                 if name not in targets or name in present:
                     continue
-                glyph = default[name]
                 # The bases come from the PRE-flatten scan: by now the default
                 # glyph has no components left.
                 bases = bases_by_glyph.get(name, set())
                 if not bases or not (bases & present):
                     continue
-                layer.insertGlyph(copy.deepcopy(glyph), name)
+                if name not in originals:
+                    continue
+                layer.insertGlyph(copy.deepcopy(originals[name]), name)
                 if _flatten(layer[name], _Layered(layer, default), name):
                     added += 1
     if added:
