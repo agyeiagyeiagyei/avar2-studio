@@ -2903,3 +2903,45 @@ With those in place, the next full pass will name the cause.
 - **Note:** commits `3568a02` and `8c40ee5` were made in the implementer's worktree by another session (19:55:19). The content is the implementer's; the verifier checked the tip.
 
 **W1 (the Rust port) is BLOCKED.** Two implementer agents stopped because their Read tool calls were declined in the user's name. The first had made a full code analysis and no edits; the second stopped within a minute. The verifier has asked the user how to proceed and will not restart W1 without the answer. The worktree `~/Documents/avar2-studio-w1` (branch `w1-spac-e2ic`) is clean at `dbe37c0`.
+
+## Verifier finding (2026-11-06 21:16) — W1 verified and merged (w1-spac-e2ic @ 342551a): the Rust injector equals the Python injector, on the real Crispy too
+
+**W1 came from an implementer agent** the verifier dispatched (branch `w1-spac-e2ic`, worktree `~/Documents/avar2-studio-w1`). The verifier re-ran the claims below itself.
+
+**CI.** Run 42228887761 on `342551a`: all six jobs green (rust ubuntu and macos, python × 2, frontend, cli-build).
+
+**The oracle was not loosened.** `spac_oracle.rs` has no removed lines. The reference side is pinned to the fontTools path, so it can never compare Rust with Rust.
+
+**The new oracle fails on the old Rust code.** The verifier ran it in a scratch worktree at `b8a5852`, with `wasm/fontc-web/src` untouched and only W1's test and spike files copied in:
+- `cargo test --test spac_oracle` exits 101. Log: `~/avar2-verifier/w1-oracle-on-old-src.log`.
+- Tuple count per glyph: 2 where the reference has 18.
+- `.notdef` is spaced (advance 72 where the reference keeps 600).
+- j goes to −203 where the floor gives 1.
+- "0 glyphs vary" between corners.
+
+**Coincide copy** (the agent's pinned builds in `~/avar2-agent/w1-c`: A = fontTools path, B3 = native at the tip). Checked with the verifier's own `~/avar2-verifier/scripts/tuple_identity.py`:
+- 11,443 gvar tuples (3,654 SPAC): identical sets in all 496 glyphs.
+- fvar, avar, HVAR, hmtx, glyf and STAT: byte-identical.
+- HarfBuzz advance, bearing and width at 57 locations (every axis end plus 40 random): 28,272 checks, 0 differ.
+- Signature: H has 18 SPAC tuples, 16 of them multi-axis; `.notdef` has 0.
+- Raw avar 12 = fvar 12; FreeType = HarfBuzz within 1 u.
+- Size: native 771,476 B, fontTools 765,776 B (+0.74%; fontTools also shares point numbers when it recompiles the table).
+
+**Real, off-master Crispy** (the case the implementer could not test). The verifier copied the sources read-only into `~/avar2-verifier/w1-real` and built twice from the pinned worktree at `342551a` (0 dirty): once on the fontTools path, once with a `spac-inject` built from that worktree (`--rule` answers `e2i-c`; a logging wrapper recorded the `--rule` call and the inject call, both exit 0).
+- 127,848 gvar tuples (4,060 SPAC): identical sets in all 496 glyphs.
+- fvar, avar, HVAR, hmtx, glyf and STAT: byte-identical.
+- HarfBuzz at 60 locations: 29,760 checks, 0 differ.
+- No pruning: the injector's stderr is only "10 master corner(s) from the designspace".
+- g's tuple-header block is 62,068 B of 65,535, the same as before.
+- Raw avar 12 = fvar 12; FreeType = HarfBuzz 0.0.
+- Size: native 10,563,616 B, fontTools 10,563,636 B.
+
+**The stale-binary guard works.** The verifier's first two attempts handed the build a binary that could not answer `--rule` (an old-source build, then a wrapper with a wrong path). Both times the studio ran the fontTools path and produced the reference font.
+
+**Decision (verifier):** the native injector stays re-enabled. It is exact on both fonts, and on the real Crispy it is not larger.
+
+**For B12.** The user's checkout still has the October `target/release/spac-inject`. The guard will skip it, so the studio runs the slower fontTools path until that binary is rebuilt (`cargo build --release --bin spac-inject` in `wasm/fontc-web`). The wheel (R1) carries a fresh one.
+
+**Not verified by the verifier (the agent's evidence only):**
+- the static app's browser check (43 checks, served on 5072);
+- the repo's `static-demo.spec.mjs`, which passes 57 checks and then times out at the export dialog's Cancel button. Whether that timeout predates W1 is unknown; the verifier will run it on the merged tip and on `b8a5852`.
