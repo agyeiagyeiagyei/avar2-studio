@@ -2697,3 +2697,24 @@ The copy is plain and names no internal file. It covers the larger file, the spa
 **Process:** the live check ran on port 5073, which is the verifier's. Use 5072/8002. Nothing is listening there now.
 
 **Copy nit (optional):** "616 units away" reads as font units; it is an axis distance (XTRA 663.1 vs 47). Either drop the number or say which axis.
+
+## Verifier finding (2026-11-06 15:49) — do NOT tell designers to make a mid-range master the default: it breaks the interpolation everywhere (E2l copy must change)
+
+**Measured** (advance widths of all 496 glyphs, real Crispy; masters read from the preview, which is exact there):
+- **Model A** is today's model: 9 masters, default 47-1-1. It reproduces today's design at the 29 rows within 1–28 u. The rest is the sparse layers it leaves out.
+- **Model B** is the same 9 masters plus a new master at the resting location (663.1/202.5/121.8, equal to today's design there), made the default. It is off by up to 3,205 u:
+  - H at Wide 400: today 3,489 → 2,428, which is the resting style's own width;
+  - Narrow 400 MaxOpsz: 626 → 1,651;
+  - Wide 900: 5,508 → 4,033.
+
+**Why.** Every Crispy master sits in a different corner box around an interior default. Each master's support is the product of three non-zero axis spans, so it contributes nothing on the three planes through the default: the design goes flat there. This is the same effect that flattens the SPAC preview off-master, now applied to the outlines. Corner masters (47-1-1, 1715-1-1) are safe defaults because there are masters along every axis line through them.
+
+**Consequences:**
+- **E2l's copy must change.** "make that master the default … or add a master there and make it the default" is harmful advice for an interior resting location. Say only what is true:
+  - the file is larger;
+  - the preview's spacing is approximate between masters;
+  - the exported fonts are exact.
+
+  Do not suggest adding a master or moving the default. If a fix is named at all, it must be conditional ("only a master with neighbours along every axis can be the default"). Add a test that pins the absence of the "add a master" advice.
+- **The plan "land Crispy's default on a master" is withdrawn.** It came from the verifier, 18:36 and 18:55 on 11-05. For Crispy the preview's spacing stays approximate between masters (option 1, the user's choice). The exported sources are exact. The coincide copy stays valid as a test of the on-master path, because it uses a corner (1715-1-1).
+- **For the user:** set the dangling Variable Font Origin explicitly to 47-1-1, the master the export already falls back to. Nothing changes visually.
