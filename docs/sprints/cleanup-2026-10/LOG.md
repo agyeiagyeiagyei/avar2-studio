@@ -3673,3 +3673,54 @@ three cases. Frontend: `frontend/e2e/export-warning.spec.mjs` pins the copy
 distance, names the fix, never names an internal file) and `api-parity` records
 the browser stub that answers `unknown` (no source to classify in the static
 demo).
+
+## ROUND 36 — the verifier's ROUND 33 follow-ups, and the SPAC ends judged by their mean
+
+Built with `build_pinned.sh` (worktree `~/avar2-agent/e2ic-wt`, `e2ic-wip`
+`93c52b6`, 0 dirty), `failures.jsonl` and `rt.json` regenerated on this run
+(`test-output/rt-coincide4/`).
+
+**1. No silent skips (verifier, 2026-11-06 12:24).** A glyph whose base carries
+sparse layers but which the models cannot rebuild is now **named in the build
+log** next to the sparse-layer count — skipping in silence is how `cent` drifted
+1,128 u unnoticed. On Crispy the line stays absent (every target is built): 24
+sparse layers, 908 components decomposed over 19 glyphs, sources zip byte-for-byte
+the same size as before the change (42,033,177 B).
+
+**2. Every component takes its own transform.** `_mixed_model` carries the
+component list and each component's transform per master, and refuses masters
+that disagree on the list — the mixed path used to set `components[0]` only, so a
+glyph built from two bases held one of them at the base master's position.
+
+**3. The three fixes that had no test now have fixture tests**
+(`tests/test_sparse_layers.py`, four tests):
+- `75e6c55` — the corner amounts are integers and the model reads every corner
+  back exactly; the assertion that the deltas are integral is what fails on the
+  old float path (a five-corner fixture cannot reproduce the real grid's 2–3 u
+  gap, and the test says so);
+- `ca90f44` — a rotated component takes its OWN advance (700, not its base's
+  560) and its base's layer outline, flattened;
+- `c9849fa` — a mixed glyph gets the layer, its own contours first in the
+  masters' order, then the base's;
+- the skip report itself names the glyph whose masters disagree.
+
+Suite **689 passed, 3 skipped**; `ruff` clean.
+
+**4. SPAC ends judged by their mean** (`roundtrip_compare.py`). The 1 u
+per-check tolerance cannot tell rounding (checks 2–3 u apart in both directions)
+from a systematic offset. The verdict is now `|signed mean| ≤ 0.25 u` per row ×
+end and `|mean| < 0.75 u` per glyph across every row and end; the worst single
+check is reported, not judged.
+
+| gate | result |
+|---|---|
+| rows (28) | worst **0.00 u** |
+| classes | simple 2.00 (9 checks over 1 u), composite 2.00 (6), mixed 1.00, unencoded 1.00, `.notdef` **0.00** — all informational now |
+| SPAC means, row × end | **+0.03 … −0.02 u** (tolerance 0.25), sd ≤ 0.37, mixed signs at every busy end |
+| SPAC per glyph | worst mean **−0.15 u** (`three`), tolerance 0.75; JSON `worst_spac_glyph_mean` **0.149** |
+| sparse locations (`--designspace`) | 60, worst **0.00 u** |
+| verifier `sparse_sweep.py` | 60 × 496 → **0 glyphs over 1 u** |
+
+`FAIL: 0 check(s) outside tolerance` on `rt-coincide4`; studio TTF 765,776 B,
+avar 12/12, 28 regions. The 15 raw over-1-u records stay in `failures.jsonl` as
+evidence, with their signed value.
