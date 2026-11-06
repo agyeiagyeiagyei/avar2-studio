@@ -83,6 +83,18 @@ def test_without_a_csv_and_without_a_location_the_status_is_unknown(tmp_path):
     assert report["status"] == "unknown"
 
 
+def test_a_source_with_no_master_at_the_default_falls_back_to_the_first(
+        monkeypatch, tmp_path):
+    """Crispy's Variable Font Origin names a master id that is not in the saved
+    file; glyphsLib falls back to the first master, and so does this."""
+    source = _font(tmp_path)
+    monkeypatch.setattr(csv_io.source_font, "get_axes",
+                        lambda _font: [{"tag": "wght", "default": 400.0},
+                                       {"tag": "wdth", "default": 100.0}])
+    assert csv_io.default_master_name(source) == "Thin", (
+        "no master sits at wght 400, so the first master is the default")
+
+
 @pytest.fixture
 def client():
     server.app.config["TESTING"] = True
@@ -119,3 +131,30 @@ def test_the_route_rejects_a_non_numeric_location(client, monkeypatch,
     monkeypatch.setattr(state, "VARIABLE_FONT_PATH", None)
     res = client.post("/api/resting-master", json={"location": {"wght": "wide"}})
     assert res.status_code == 400
+
+
+def test_the_route_maps_the_preview_location_through_avar2_first(
+        client, monkeypatch, tmp_path):
+    """The preview speaks wght/wdth/opsz; the master grid is parametric.
+
+    A preview location that the built font's avar2 maps onto a non-default
+    master must come back as THAT master. wght 400 maps to 1715 here, so a route
+    that classified the raw preview location would answer `no_master`.
+    """
+    source = _font(tmp_path)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", tmp_path / "built.ttf")
+    asked = {}
+
+    def fake_mapped(coords):
+        asked.update(coords)
+        return {"wght": 1715.0, "wdth": 100.0}
+
+    monkeypatch.setattr(server, "_evaluate_mapped_location", fake_mapped)
+    res = client.post("/api/resting-master",
+                      json={"location": {"wght": 400, "wdth": 100}})
+    assert asked == {"wght": 400, "wdth": 100}, (
+        "the mapping is asked with the preview's own axes")
+    body = res.get_json()
+    assert body["status"] == "other_master"
+    assert body["name"] == "Max", body

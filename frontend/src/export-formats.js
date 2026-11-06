@@ -28,24 +28,38 @@ export const SOURCES_DEFAULT_REASON =
  * master, because the studio then rebuilds the variations around a style that
  * isn't the default — and on a twin-heavy source the preview's spacing is
  * approximate between masters (measured on Crispy: up to ~397 u at some
- * styles). `null` means "say nothing": the default master, or a source we
- * could not read.
+ * styles). The exported fonts are exact, and that is the point of the note.
+ *
+ * It does NOT advise moving the default to the resting style: a mid-range
+ * default master has no neighbours along the axis lines through it, so the
+ * design goes flat there — measured at up to 3,205 u on Crispy (verifier,
+ * 2026-11-06 15:49). `null` means "say nothing": the default master, or a
+ * source we could not read.
  */
 export function sizeWarningCopy(report) {
   if (!report) return null;
   if (report.status !== 'other_master' && report.status !== 'no_master') return null;
   const where = report.status === 'other_master'
-    ? `It rests on the master “${report.name}”, not on the source's default master “${report.default_master}”.`
-    : 'It rests at a location that is not a master'
-      + (report.name
-        ? ` (the nearest is “${report.name}”${report.max_delta ? `, ${Math.round(report.max_delta)} units away` : ''}).`
-        : '.');
+    ? ` It rests on the master “${report.name}”, not on the source's default master “${report.default_master}”.`
+    : (report.name
+      ? ` It rests at a location that is not a master (the nearest is “${report.name}”).`
+      : ' It rests at a location that is not a master.');
   return 'This file is larger than one built at the default master: the studio ' +
-    'rebuilds the variations around the style the font rests at, and the ' +
+    'rebuilds the variations around the style the font rests at. The ' +
     "preview's spacing is approximate between masters, so it can differ a lot " +
-    `at some styles. ${where} To fix both, put the resting location on a ` +
-    'master and make that master the default (in Glyphs: Variable Font ' +
-    'Origin), or add a master there and make it the default.';
+    `at some styles; the exported fonts are exact.${where}`;
+}
+
+/**
+ * Which location the size warning is about, as the backend wants it.
+ *
+ * "Set default at" ON ⇒ the preview's own location (the export rebuilds so its
+ * resting state IS this style). OFF ⇒ `null`, i.e. the ORIGIN row, which the
+ * backend resolves from the mappings file. Kept here so the decision is
+ * testable without a browser.
+ */
+export function restingQuery(exportUseDefault, location) {
+  return exportUseDefault ? (location || null) : null;
 }
 
 /** The chips, in display order. `estimate` false ⇒ no size is shown. */

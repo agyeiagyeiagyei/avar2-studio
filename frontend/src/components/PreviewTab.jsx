@@ -8,7 +8,7 @@ import { useStudioData } from '../hooks/useStudioData';
 import { previewRenderCoords, variationSettings } from '../preview-coords';
 import {
   SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, sizeWarningCopy,
-  buttonLabel, exportFormats,
+  restingQuery, buttonLabel, exportFormats,
 } from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -316,7 +316,7 @@ function PreviewTab({
   useEffect(() => {
     if (!showExportModal) return undefined;
     let live = true;
-    api.restingMaster(exportUseDefault ? currentUserLocation : null)
+    api.restingMaster(restingQuery(exportUseDefault, currentUserLocation))
       .then(report => { if (live) setRestingReport(report); })
       .catch(() => { if (live) setRestingReport(null); });
     return () => { live = false; };
