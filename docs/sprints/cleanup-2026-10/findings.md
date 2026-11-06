@@ -2632,3 +2632,24 @@ If Q gets the same treatment, it must stay compatible. Q currently passes (≤ 1
 - Add the sparse-location sweep to the round trip, so non-row locations are covered.
 
 **For the user (design, not a code item):** cent's own advance does not follow LCWD in the studio, which follows Glyphs' behaviour. So at that corner, cent's right side shrinks from 1,594 to 423 u. The export fix will reproduce that faithfully. Whether cent should widen with `c` is the designer's call.
+
+## Verifier finding (2026-11-06 12:30) — ROUND 33 verified; before the checkpoint: tests for the three fixes, and no silent skips in the sparse-layer pass
+
+**Verified on `rt-coincide3`** (e2ic-wip `c9849fa`, pinned, 0 dirty; the unzipped designspace is byte-identical to the build's zip):
+- `sparse_sweep.py`: 60 locations × 496 glyphs, **0 glyphs over 1 u**.
+- Masters: 96 of 96 exact (twin = studio = fontmake), cent included.
+- Per-glyph SPAC means: worst 0.39 u.
+- Raw avar 12 = fvar 12; FreeType = HarfBuzz (≤ 1 u).
+- 24 sparse layers added.
+
+**Before the checkpoint** (not blocking the grid-cost or E2l work):
+
+1. **No tests for 75e6c55, ca90f44 or c9849fa.** Only 8ec4175 carries one. Each fix needs a fixture test that fails on the old code:
+   - the injector reproduces the export's integer per-master amount at every corner;
+   - a rotated-component glyph gets its base's sparse layer, with its OWN interpolated advance and offset;
+   - a mixed glyph gets the layer, with its own contours interpolated and in the right contour order.
+2. **Silent skips.** `_mixed_model` returns `None` when a glyph has more than one component, or when its masters are incompatible, and the pass `continue`s. A glyph like that whose base has sparse layers drifts again, exactly like cent did, with no trace.
+   - The mixed path also sets only `components[0]`'s transform.
+   - Report every decomposed or mixed glyph that has a base with sparse layers but got no layer, in `build.log` next to the "N sparse layers added" line. A designer-facing warning would do too.
+   - Better still, handle more than one component: every component takes its own interpolated transform.
+   - Crispy has none today (the sweep is clean), so this is about other fonts.
