@@ -3724,3 +3724,48 @@ check is reported, not judged.
 `FAIL: 0 check(s) outside tolerance` on `rt-coincide4`; studio TTF 765,776 B,
 avar 12/12, 28 regions. The 15 raw over-1-u records stay in `failures.jsonl` as
 evidence, with their signed value.
+
+## ROUND 37 — E2l's copy stops advising a new default; the wiring and the two missing paths get tests
+
+On `e2ic-wip` (`641e8d7`, `2541c4b`). Suite **691 passed, 3 skipped**; `ruff`
+clean; frontend lint clean; `export-warning` (15 checks) and `api-parity` pass.
+
+**1. The copy no longer advises a new default (verifier, 15:49).** A mid-range
+default master has no neighbours along the axis lines through it, so each
+master's support contributes nothing on the three planes through the default and
+the design goes flat — measured at up to **3,205 u** on Crispy (H at Wide 400:
+3,489 → 2,428). The note says only what is true:
+
+> This file is larger than one built at the default master: the studio rebuilds
+> the variations around the style the font rests at. The preview's spacing is
+> approximate between masters, so it can differ a lot at some styles; the
+> exported fonts are exact. It rests at a location that is not a master (the
+> nearest is “47-1-1”).
+
+No "add a master", no "make it the default", no Variable Font Origin. The axis
+distance left the copy too (the 15:03 nit: "616 units" reads as font units, but
+it is an axis coordinate). Three spec checks pin the absence — a future edit that
+re-adds the advice fails `export-warning`.
+
+**2. The checkbox wiring is tested (15:03 item 1).** The decision moved into a
+pure `restingQuery(exportUseDefault, location)`: OFF asks about the ORIGIN row
+(`null`), ON about the preview's own style. The spec pins both directions and
+that `PreviewTab` asks through it and renders the note only while the copy is
+non-empty. Live, on port 5072 with the endpoint intercepted: checkbox OFF →
+request `location: null` → `default_master` → **0 notes**; checkbox ON → request
+`{opsz 144, wdth 100, wght 400}` → `no_master` → **1 note**. (The verifier's 5073
+is theirs; 5072 from here on.)
+
+**3. The avar2 path is tested (item 2).** `test_the_route_maps_the_preview_
+location_through_avar2_first`: wght 400 maps to 1715, so a route that classified
+the raw preview location would answer `no_master`; it must answer `other_master`
+/ “Max”.
+
+**4. The dangling Variable Font Origin is tested (item 3).**
+`test_a_source_with_no_master_at_the_default_falls_back_to_the_first`: no master
+at wght 400 → the first master is the default, as glyphsLib does with Crispy's
+`A32E53B3-…` id that is not in the saved file.
+
+**Process note.** A commit message was run through zsh with backticks in it
+(`` `restingQuery` ``); zsh executed it and the word vanished from that message.
+The commit itself is sound; quotes from now on.
