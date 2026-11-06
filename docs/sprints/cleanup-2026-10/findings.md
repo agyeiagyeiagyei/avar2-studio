@@ -2776,3 +2776,29 @@ The copy is plain and names no internal file. It covers the larger file, the spa
 - The per-glyph SPAC mean pools both ends and cancels the ROUND 31 defect. It needs per END × METRIC, |mean| < 0.5 u, plus a negative control.
 - The amounts test never runs the injector.
 - The rotated-component test cannot fail (every candidate is 700).
+
+## Verifier finding (2026-11-06 17:14) — checkpoint 2b26f8a: the gates hold; two tests still cannot fail; merge and CI outstanding
+
+**Verified:**
+- **The origin.** `default_master_name` gives 47-1-1 for a dangling origin and 1715-1-1 for an origin set to 1715-1-1 (copies of Crispy.glyphs in `~/avar2-verifier/origin-check/`). The coincide copy gives 1715-1-1, so it no longer gets a false warning.
+- **The SPAC gate, on a real font.** `roundtrip_compare.py` (cleanup-2026-10) PASSES `rt-coincide4`: worst key −0.39 u, exit 0. It FAILS a copy of that TTF where g's SPAC-only tuples carry 1 u more per side at both ends (`~/avar2-verifier/negctl/perturbed-g.ttf`): g lsb/rsb at both ends, 4 checks, exit 1. That is the ROUND 31 shape at the smallest integer step.
+- Note: `--self-test` re-implements the verdict on synthetic samples and never runs `main`'s keying, so it is no control for the real gate. The font-level control above is; keep one like it.
+- **Automated pass so far:** pytest 699 passed, ruff, lint, typecheck, test:unit, build and a clean CLI build all OK. The UI probe is still running.
+
+**Still failing the "fails on the old code" bar:**
+
+1. **`test_spac_amounts_injector.py` passes on the OLD float-path injector.** I ran it in a worktree at 2b26f8a with `builtin_spac_widthaware.py` taken from 80e96e8: 2 passed.
+   - The fixture's wide corner has no ink change (its tuple is all `None`), so every corner amount is equal and every delta is 0.
+   - The docstring's "a two-corner font cannot reproduce the drift" is not so. Give the wide master real ink deltas so that the base amount is x.4 and the corner amount is (x+y).8. The float path then reads round(x.4) + round(y.4) = x + y, while the export writes x + y + 1.
+   - Show it fails on the 80e96e8 injector.
+2. **`test_a_rotated_component_takes_its_own_advance_not_its_bases` cannot catch the attempt-3 bug.**
+   - nine's width (700) and transform (127, 1600) are the same at both masters, and the layer sits AT the Max master (XTRA 100). Copying the parent master's values therefore gives the right answer.
+   - The outline's position is never asserted.
+   - Fix: give nine a different advance and offset at each master, put the layer strictly between, and assert both the advance and the outline's xMin. The docstring's "copying the base's advance left nine 13 u out" is also wrong: the 13 u was the MISSING layer.
+
+**Before APPROVED:**
+- the two tests above;
+- e2ic-wip merged into cleanup-2026-10 (no force-push), with CI green on the merged branch;
+- the size numbers (studio TTF, sources zip) on the merged branch;
+- no test-output binaries on the branch;
+- the automated report finished.
