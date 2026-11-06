@@ -1408,3 +1408,101 @@ pub fn set_hidden_axes(font_bytes: Vec<u8>, hidden_tags_json: &str) -> Result<Ve
         }
     })
 }
+
+// The sparse tuple encoding against fontTools 4.68's own bytes
+// (`TupleVariation.compilePoints`, `compileDeltaValues_`, and
+// `TupleVariation(axes, coords).compile(["XTRA", "XOPQ", "SPAC"])` with
+// only the two horizontal phantoms set — the width-aware SPAC's tuples).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn packed_points_are_fonttools_compile_points() {
+        let mut out = Vec::new();
+        pack_points(&mut out, &[3, 4, 300, 301, 302, 1000]);
+        assert_eq!(hex(&out), "060103018301280001000102ba");
+        // 150 points: a two-byte count, then runs of at most 128.
+        let mut out = Vec::new();
+        pack_points(&mut out, &(0..300).step_by(2).collect::<Vec<u16>>());
+        assert_eq!(out.len(), 154);
+        assert_eq!(hex(&out[..20]), "80967f0002020202020202020202020202020202");
+    }
+
+    #[test]
+    fn compact_deltas_are_fonttools_compile_delta_values() {
+        let ones = "01".repeat(64);
+        let thousands = "03e8".repeat(64);
+        for (deltas, expected) in [
+            (vec![0, 0, 0], "82".to_string()),
+            (vec![5, 0, -3], "020500fd".to_string()),
+            (vec![5, 0, 0, 7], "0005810007".to_string()),
+            (vec![300, 2, 400], "42012c00020190".to_string()),
+            (vec![300, 2, 3, 400], "40012c010203400190".to_string()),
+            (vec![300, 0, 400], "40012c80400190".to_string()),
+            (vec![-128, 127, 128], "01807f400080".to_string()),
+            (vec![0; 70], "bf85".to_string()),
+            (vec![1; 65], format!("3f{ones}0001")),
+            (vec![1000; 65], format!("7f{thousands}4003e8")),
+        ] {
+            let mut out = Vec::new();
+            pack_deltas_compact(&mut out, &deltas);
+            assert_eq!(hex(&out), expected, "{:?}…", &deltas[..deltas.len().min(6)]);
+        }
+    }
+
+    /// A SPAC tuple over (XTRA, XOPQ, SPAC): `delta` on the advance
+    /// phantom, its negative on the origin phantom, nothing else touched.
+    fn spac_tuple(region: [(f64, f64, f64); 3], points: usize, delta: i16) -> (String, String) {
+        let mut deltas = vec![(0, 0); points];
+        deltas[points - 4] = (-delta, 0);
+        deltas[points - 3] = (delta, 0);
+        let tuple = NewTuple {
+            peak: region.iter().map(|r| r.1).collect(),
+            start: region.iter().map(|r| r.0).collect(),
+            end: region.iter().map(|r| r.2).collect(),
+            deltas,
+            points: Some(vec![(points - 4) as u16, (points - 3) as u16]),
+        };
+        let (header, data) = tuple.serialize();
+        (hex(&header), hex(&data))
+    }
+
+    #[test]
+    fn sparse_tuples_are_fonttools_tuple_variation_compile() {
+        const OFF: (f64, f64, f64) = (0.0, 0.0, 0.0);
+        const SPAC_MIN: (f64, f64, f64) = (-1.0, -1.0, 0.0);
+        const SPAC_MAX: (f64, f64, f64) = (0.0, 1.0, 1.0);
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MIN], 12, -50),
+            ("0008a00000000000c000".into(), "020108010132ce81".into())
+        );
+        // An interior master: the intermediate region is written, and the
+        // point numbers no longer fit a byte.
+        assert_eq!(
+            spac_tuple([(0.0, 0.25, 1.0), OFF, SPAC_MAX], 300, 200),
+            (
+                "000ce000100000004000000000000000400000004000".into(),
+                "02810128000141ff3800c881".into()
+            )
+        );
+        // All-zero deltas are still a tuple (the reference keeps them).
+        assert_eq!(
+            spac_tuple([(-1.0, -1.0, 0.0), (0.0, 1.0, 1.0), SPAC_MAX], 6, 0),
+            ("0006a000c00040004000".into(), "020102018181".into())
+        );
+        // -128 fits a byte, +128 does not.
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MAX], 260, 128),
+            ("000ca000000000004000".into(), "028101000001008040008081".into())
+        );
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MAX], 4, -129),
+            ("000aa000000000004000".into(), "02010001410081ff7f81".into())
+        );
+    }
+}

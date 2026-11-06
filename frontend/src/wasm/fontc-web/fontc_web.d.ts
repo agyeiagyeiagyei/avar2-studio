@@ -83,6 +83,14 @@ export function compile_with_overlays(source: string, request_json: string): Uin
 export function glyph_model(source: string, glyph_name: string): string;
 
 /**
+ * A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+ * or `null` when no axis varies) — what the width-aware SPAC transform
+ * needs as `params.master_locations`, read the way the desktop pipeline
+ * reads it (editor.rs `master_locations`).
+ */
+export function master_locations(source: string): string;
+
+/**
  * Sum of filled outline area (font units² at the font's upm) across
  * `glyphs`, per location (user coords, fvar tags). One entry per
  * location, in order.
@@ -149,6 +157,7 @@ export interface InitOutput {
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
     readonly compile_with_overlays: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly glyph_model: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly master_locations: (a: number, b: number) => [number, number, number, number];
     readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
     readonly round_corners_source: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];

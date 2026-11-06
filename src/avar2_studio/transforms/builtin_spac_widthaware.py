@@ -83,14 +83,19 @@ def _native_injector():
 
 
 def _native_payload(lo: int, hi: int, bias: float, scale: float,
-                    instance_spac: dict) -> str:
+                    instance_spac: dict, master_locations=None) -> str:
     """The spac-inject transforms JSON. Per-instance SPAC coordinates ride
     the payload (``params.instance_spac``): the mappings CSV is parsed
     Python-side (csv_io.read_csv_spac_overrides, the one reader) — the
-    binary never opens it."""
+    binary never opens it. So do the master locations
+    (``params.master_locations``, E2i-c), as the build context holds them:
+    user-space values, each location's axes in the designspace's order. The
+    binary normalizes them against the built font like ``_normalize_corners``."""
     params = {"min": lo, "max": hi, "bias": bias, "scale": scale}
     if instance_spac:
         params["instance_spac"] = instance_spac
+    if master_locations:
+        params["master_locations"] = master_locations
     return json.dumps([{"type": "spac_widthaware", "enabled": True,
                         "params": params}])
 
@@ -274,7 +279,8 @@ class WidthAwareSpacTransform(Transform):
             import tempfile
             out = vf_path.parent / _spac_output_name(ctx.family, vf_path)
             payload = _native_payload(lo, hi, bias, scale,
-                                      _instance_spac_overrides(ctx.source_path))
+                                      _instance_spac_overrides(ctx.source_path),
+                                      getattr(ctx, "master_locations", None))
             tf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
             try:
                 tf.write(payload)

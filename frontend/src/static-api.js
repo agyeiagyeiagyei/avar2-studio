@@ -22,7 +22,7 @@
  */
 
 import { api } from './api';
-import { compileFont, compileWithOverlays, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade } from './fontc-compile';
+import { compileFont, compileWithOverlays, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade, masterLocations } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -675,6 +675,30 @@ const withSpacOverrides = (transforms, avar2Csv) => {
   ));
 };
 
+// The width-aware spacing amount follows each master's own width, so the
+// injector needs the master grid (params.master_locations) — read from the
+// source, as the desktop pipeline does. When the source cannot give it (no
+// in-browser source, or one the reader does not understand) the injector
+// infers the grid from the built font, which is also the desktop's fallback.
+const withSpacMasters = async (transforms, dataset) => {
+  if (dataset.sourceText == null
+      || !transforms.some(t => t.enabled && t.type === 'spac_widthaware')) {
+    return transforms;
+  }
+  let locations = null;
+  try {
+    locations = await masterLocations(dataset.sourceText);
+  } catch (e) {
+    console.warn(`master locations unavailable (${e.message}); the spacing transform infers them from the built font`);
+  }
+  if (!locations) return transforms;
+  return transforms.map(t => (
+    t.enabled && t.type === 'spac_widthaware'
+      ? { ...t, params: { ...(t.params || {}), master_locations: locations } }
+      : t
+  ));
+};
+
 const validateBundle = (bundle, dataset) => {
   const errors = [];
   const warnings = [];
@@ -889,7 +913,9 @@ const applyBundle = async (bundle, dataset) => {
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     if (!rebuildFromSource) {
       dataset.fontBytes = await applyTransforms(
-        dataset.fontBytes, JSON.stringify(withSpacOverrides(transforms, avar2Csv)), avar2Csv);
+        dataset.fontBytes,
+        JSON.stringify(await withSpacMasters(withSpacOverrides(transforms, avar2Csv), dataset)),
+        avar2Csv);
     }
     report.applied.push('transforms (SPAC)');
   }
@@ -1117,7 +1143,9 @@ const rebuildUploadFont = async (dataset) => {
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     dataset.fontBytes = await applyTransforms(
-      dataset.fontBytes, JSON.stringify(withSpacOverrides(transforms, dataset.mappingsCsv || '')),
+      dataset.fontBytes,
+      JSON.stringify(await withSpacMasters(
+        withSpacOverrides(transforms, dataset.mappingsCsv || ''), dataset)),
       dataset.mappingsCsv || ''
     );
   }

@@ -1639,3 +1639,257 @@ fn apply_spac(
     };
     build_grown_font(&font_bytes, &new_axes, extras, &options)
 }
+
+// --------------------------------------------------------------------------
+// Unit tests: the routines where a port can drift from the reference
+// without any fixture noticing. Every expected value was produced by the
+// reference itself (Python 3.11, fontTools 4.68 — `round`, `supportScalar`,
+// `VariationModel`, `calcQuadraticBounds`, `BoundsPen` — and
+// avar2_studio's `_avar_map` and `spac_amounts.per_side`); the oracle
+// tests (tests/spac_oracle.rs, tests/spac_internals_oracle.rs) run the
+// same comparisons live on whole fonts.
+// --------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round6_is_pythons_round() {
+        // Exact binary ties (k/128) go to the even digit; the rest to the
+        // nearest decimal of the double's exact value.
+        for (value, expected) in [
+            (0.0078125, 0.007812),
+            (0.0234375, 0.023438),
+            (0.0390625, 0.039062),
+            (-0.0078125, -0.007812),
+            (0.1666665, 0.166666),
+            (0.16666650000000002, 0.166667),
+            (0.6666666666666666, 0.666667),
+            (5e-07, 0.0),
+            (0.9999995, 1.0),
+            (0.25, 0.25),
+            (-0.3333335, -0.333334),
+            (1e-07, 0.0),
+            (123.4567895, 123.456789),
+        ] {
+            assert_eq!(round6(value), expected, "round({value}, 6)");
+        }
+    }
+
+    #[test]
+    fn support_scalar_is_fonttools() {
+        let cases: [(&[f64], &[(usize, f64, f64, f64)], f64); 11] = [
+            (&[0.5], &[(0, 0.0, 1.0, 1.0)], 0.5),
+            (&[0.5, 0.25], &[(0, 0.0, 1.0, 1.0), (1, 0.0, 0.5, 1.0)], 0.25),
+            (&[0.75], &[(0, 0.25, 0.5, 1.0)], 0.5),
+            // A region that crosses zero does not constrain the axis…
+            (&[0.0], &[(0, -1.0, 0.5, 1.0)], 1.0),
+            (&[0.3], &[(0, -1.0, 0.5, 1.0)], 1.0),
+            // …nor does a malformed one.
+            (&[0.5], &[(0, 0.6, 0.5, 1.0)], 1.0),
+            (&[1.0], &[(0, 0.0, 0.5, 1.0)], 0.0),
+            (&[0.0], &[(0, 0.0, 0.5, 1.0)], 0.0),
+            (&[0.5, 0.0], &[(0, 0.0, 0.5, 1.0), (1, 0.0, 1.0, 1.0)], 0.0),
+            (&[-0.2], &[(0, -1.0, -0.6, 0.0)], 0.33333333333333337),
+            (
+                &[0.1, 0.3, 0.7],
+                &[(0, 0.0, 0.3, 1.0), (1, 0.0, 0.9, 1.0), (2, 0.0, 0.9, 1.0)],
+                0.08641975308641975,
+            ),
+        ];
+        for (coords, support, expected) in cases {
+            assert_eq!(support_scalar(coords, support), expected, "{coords:?} in {support:?}");
+        }
+    }
+
+    #[test]
+    fn avar_map_is_the_references() {
+        let map = [(-1.0, -1.0), (0.0, 0.0), (0.5, 0.25), (1.0, 1.0)];
+        for (value, expected) in [
+            (-1.5, -1.0),
+            (-1.0, -1.0),
+            (-0.5, -0.5),
+            (0.0, 0.0),
+            (0.3333333333333333, 0.16666666666666666),
+            (0.5, 0.25),
+            (0.75, 0.625),
+            (1.0, 1.0),
+            (1.2, 1.0),
+        ] {
+            assert_eq!(avar_map(value, &map), expected, "avar({value})");
+        }
+        assert_eq!(avar_map(0.4, &[]), 0.4, "an empty map is the identity");
+        assert_eq!(avar_map(0.4, &[(0.0, 0.1)]), 0.1);
+    }
+
+    fn model(corners: &[&[(usize, f64)]], tags: &[&[u8; 4]]) -> Result<Model, String> {
+        let corners: Vec<Corner> = corners.iter().map(|c| c.to_vec()).collect();
+        let tags: Vec<Tag> = tags.iter().map(|t| Tag::new(*t)).collect();
+        Model::new(&corners, &tags)
+    }
+
+    #[test]
+    fn model_is_fonttools_variation_model() {
+        // Two axes, a negative side, an interior master and a location
+        // between masters (the oracle's synthetic fixture). XOPQ sorts
+        // before XTRA, whatever the axes' order in the font.
+        const X: usize = 0; // XTRA
+        const O: usize = 1; // XOPQ
+        let m = model(
+            &[
+                &[],
+                &[(X, -1.0)],
+                &[(X, 0.25)],
+                &[(X, 1.0)],
+                &[(O, 1.0)],
+                &[(X, -1.0), (O, 1.0)],
+                &[(X, 0.25), (O, 1.0)],
+                &[(X, 1.0), (O, 1.0)],
+                &[(X, 0.166667)],
+            ],
+            &[b"XTRA", b"XOPQ"],
+        )
+        .unwrap();
+        let expected: Vec<Support> = vec![
+            vec![],
+            vec![(O, 0.0, 1.0, 1.0)],
+            vec![(X, -1.0, -1.0, 0.0)],
+            vec![(X, 0.0, 0.166667, 1.0)],
+            vec![(X, 0.166667, 0.25, 1.0)],
+            vec![(X, 0.25, 1.0, 1.0)],
+            vec![(X, -1.0, -1.0, 0.0), (O, 0.0, 1.0, 1.0)],
+            vec![(X, 0.0, 0.25, 1.0), (O, 0.0, 1.0, 1.0)],
+            vec![(X, 0.25, 1.0, 1.0), (O, 0.0, 1.0, 1.0)],
+        ];
+        assert_eq!(m.supports, expected);
+        assert_eq!(m.reverse_mapping, [0, 4, 1, 8, 2, 3, 5, 6, 7]);
+        assert_eq!(m.delta_weights[4], [(0, 1.0), (3, 0.900000360000144)]);
+        assert_eq!(
+            m.delta_weights[7],
+            [(0, 1.0), (1, 1.0), (3, 0.900000360000144), (4, 1.0)]
+        );
+        assert_eq!(
+            m.deltas(&[-158, -98, -203, -305, -279, -219, -324, -409, -184]),
+            [-158, -121, 60, -26, -22, -147, 0, 0, 17]
+        );
+        assert_eq!(
+            m.deltas(&[3, 7, 11, 13, 17, 19, 23, 29, 31]),
+            [3, 14, 4, 28, -17, 10, -2, -2, 2]
+        );
+
+        // The default is not first, a location lists its axes out of tag
+        // order (the support keeps that order), and a box is split.
+        const A: usize = 0;
+        const B: usize = 1;
+        let m = model(
+            &[
+                &[(B, 0.5), (A, 0.5)],
+                &[(A, 1.0)],
+                &[],
+                &[(B, 1.0)],
+                &[(A, 1.0), (B, 1.0)],
+                &[(A, 0.5)],
+            ],
+            &[b"AAAA", b"BBBB"],
+        )
+        .unwrap();
+        let expected: Vec<Support> = vec![
+            vec![],
+            vec![(A, 0.0, 0.5, 1.0)],
+            vec![(A, 0.5, 1.0, 1.0)],
+            vec![(B, 0.0, 1.0, 1.0)],
+            vec![(A, 0.0, 1.0, 1.0), (B, 0.0, 1.0, 1.0)],
+            vec![(B, 0.0, 0.5, 1.0), (A, 0.0, 0.5, 1.0)],
+        ];
+        assert_eq!(m.supports, expected);
+        assert_eq!(m.reverse_mapping, [2, 5, 1, 3, 4, 0]);
+        assert_eq!(m.delta_weights[5], [(0, 1.0), (1, 1.0), (3, 0.5), (4, 0.25)]);
+        assert_eq!(m.deltas(&[10, 21, 5, 8, 40, 13]), [5, 8, 16, 3, 16, -8]);
+
+        // One axis, both sides, interior masters on each.
+        let m = model(
+            &[&[], &[(A, 0.3)], &[(A, 0.7)], &[(A, 1.0)], &[(A, -0.5)], &[(A, -1.0)]],
+            &[b"AAAA"],
+        )
+        .unwrap();
+        let expected: Vec<Support> = vec![
+            vec![],
+            vec![(A, -1.0, -0.5, 0.0)],
+            vec![(A, -1.0, -1.0, -0.5)],
+            vec![(A, 0.0, 0.3, 1.0)],
+            vec![(A, 0.3, 0.7, 1.0)],
+            vec![(A, 0.7, 1.0, 1.0)],
+        ];
+        assert_eq!(m.supports, expected);
+        assert_eq!(m.delta_weights[4], [(0, 1.0), (3, 0.42857142857142866)]);
+        assert_eq!(m.deltas(&[1, 2, 4, 8, 16, 33]), [1, 15, 32, 1, 3, 7]);
+    }
+
+    #[test]
+    fn model_refuses_what_fonttools_refuses() {
+        let no_base = model(&[&[(0, 1.0)]], &[b"AAAA"]);
+        assert_eq!(no_base.err().as_deref(), Some("Base master not found."));
+        let twice = model(&[&[], &[(0, 1.0)], &[(0, 1.0)]], &[b"AAAA"]);
+        assert_eq!(twice.err().as_deref(), Some("Locations must be unique."));
+        // A zero coordinate is the default: two of those are duplicates too.
+        let zeros = model(&[&[], &[(0, 0.0)]], &[b"AAAA"]);
+        assert_eq!(zeros.err().as_deref(), Some("Locations must be unique."));
+    }
+
+    #[test]
+    fn per_side_is_spac_amounts() {
+        // (value, ink, mean_here, mean_default, bias, scale, advance, composite)
+        for (args, expected) in [
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 600.0, false), -156),
+            // The floor: a simple glyph's advance moves by 2·dx…
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 41.0, false), -20),
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 42.0, false), -20),
+            // …a composite's by dx, and the advance is truncated first.
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 41.9, true), -40),
+            // A zero advance: the "lowest" move is +1, and it wins.
+            ((-100.0, 60.0, 250.0, 240.0, 1.0, 1.25, 0.0, false), 1),
+            ((-100.0, 60.0, 250.0, 240.0, 1.0, 1.25, 0.0, true), 1),
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 2.0, false), 0),
+            ((-100.0, 300.0, 250.0, 240.0, 1.0, 1.25, 1.0, false), 0),
+            // The loose end is never floored, and bias is a power.
+            ((100.0, 300.0, 250.0, 240.0, 1.5, 0.8, 5.0, false), 110),
+            ((-100.0, 0.0, 250.0, 240.0, 1.0, 1.25, 500.0, false), 0),
+            ((-100.0, 300.0, 0.0, 240.0, 1.0, 1.25, 500.0, false), 0),
+            // Halves round to even: -25.0 exactly, then -22.5 → -22.
+            ((-40.0, 100.0, 200.0, 200.0, 1.0, 1.25, 500.0, false), -25),
+            ((-20.0, 150.0, 200.0, 200.0, 1.0, 1.5, 500.0, false), -22),
+        ] {
+            let (value, ink, here, default, bias, scale, advance, composite) = args;
+            assert_eq!(
+                per_side(value, ink, here, default, bias, scale, advance, composite),
+                expected,
+                "per_side{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bounds_are_fonttools_bounds_pen() {
+        assert_eq!(
+            quadratic_bounds((10.5, 3.25), (200.75, -40.5), (60.125, 80.0)),
+            [10.5, -8.403348554033485, 119.89195315451454, 80.0]
+        );
+        assert_eq!(
+            quadratic_bounds((0.0, 0.0), (-30.0, 10.0), (20.0, 5.0)),
+            [-11.25, 0.0, 20.0, 6.666666666666666]
+        );
+        // A contour with no on-curve point: the outline stays inside the
+        // control points' box (0..300 wide).
+        let mut pen = BoundsPen::default();
+        pen.contour(&[(0.0, 0.0), (300.0, 0.0), (150.0, 500.0)], &[false; 3]);
+        assert_eq!(pen.bounds, Some([50.0, 0.0, 250.0, 375.0]));
+        // On-curve points with a run of off-curves between them.
+        let mut pen = BoundsPen::default();
+        pen.contour(
+            &[(10.0, 10.0), (200.0, 30.0), (150.0, 200.0), (40.0, 260.0), (10.0, 100.0)],
+            &[true, false, false, false, true],
+        );
+        assert_eq!(pen.bounds, Some([10.0, 10.0, 177.90697674418604, 234.73684210526315]));
+    }
+}

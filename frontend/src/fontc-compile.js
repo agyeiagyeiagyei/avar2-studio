@@ -62,6 +62,13 @@ export async function glyphModel(source, glyph) {
   return JSON.parse(await send({ kind: 'glyph-model', source, glyph }));
 }
 
+/** .glyphs source → its master locations (`[{}, {tag: value}, …]`, or
+ *  null when no axis varies): the grid the width-aware spacing transform
+ *  computes its amounts on, read as the desktop pipeline reads it. */
+export async function masterLocations(source) {
+  return JSON.parse(await send({ kind: 'master-locations', source }));
+}
+
 /** .glyphs source + an overlay request ({axes, overlays}) → TTF bytes with
  *  the axes declared and the drawn brace layers spliced in at the Plist
  *  level (the desktop shadow-build path, source-side). */
@@ -134,7 +141,9 @@ export function applyGrade(fontBytes, gradeJson, coordsJson) {
  * enabled SPAC transform applied (SPAC fvar axis + gvar phantom tuples
  * + rebuilt HVAR — the axis stays a live slider). Per-instance SPAC
  * coordinates ride the JSON (`params.instance_spac`, filled by
- * withSpacOverrides in static-api.js); the CSV argument is retained for
+ * withSpacOverrides in static-api.js), and so do the master locations
+ * the width-aware amounts are computed at (`params.master_locations`,
+ * filled by withSpacMasters); the CSV argument is retained for
  * pre-JSON wasm builds and ignored by the current one. */
 export function applyTransforms(fontBytes, transformsJson, avar2Csv) {
   return send({ kind: 'transforms', fontBytes, json: transformsJson, csv: avar2Csv });

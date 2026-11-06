@@ -9,9 +9,14 @@
 //! transforms.json is the studio's transform list shape, e.g.
 //!   [{"type": "spac_widthaware", "enabled": true,
 //!     "params": {"min": -100, "max": 100, "bias": 1.0, "scale": 1.25,
-//!                "instance_spac": {"Narrow Thin 144": 10.0}}}]
+//!                "instance_spac": {"Narrow Thin 144": 10.0},
+//!                "master_locations": [{}, {"XTRA": 1715.0, "XOPQ": 1.0}]}}]
 //! Per-instance SPAC coordinates ride the JSON (`params.instance_spac`),
-//! parsed from the avar2 CSV by the caller (csv_io). The optional 4th
+//! parsed from the avar2 CSV by the caller (csv_io). So do the master
+//! locations the width-aware amounts are computed at
+//! (`params.master_locations`: the designspace's masters in user units,
+//! the default as `{}`); without them the corners are inferred from the
+//! font's gvar, as the Python transform falls back. The optional 4th
 //! argument — the avar.csv path — is RETAINED for positional-argument
 //! compatibility with older callers but IGNORED (never read).
 

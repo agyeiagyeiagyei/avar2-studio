@@ -219,6 +219,35 @@ export function glyph_model(source, glyph_name) {
 }
 
 /**
+ * A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+ * or `null` when no axis varies) — what the width-aware SPAC transform
+ * needs as `params.master_locations`, read the way the desktop pipeline
+ * reads it (editor.rs `master_locations`).
+ * @param {string} source
+ * @returns {string}
+ */
+export function master_locations(source) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.master_locations(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Sum of filled outline area (font units² at the font's upm) across
  * `glyphs`, per location (user coords, fvar tags). One entry per
  * location, in order.
