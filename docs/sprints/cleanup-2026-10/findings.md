@@ -2718,3 +2718,36 @@ The copy is plain and names no internal file. It covers the larger file, the spa
   Do not suggest adding a master or moving the default. If a fix is named at all, it must be conditional ("only a master with neighbours along every axis can be the default"). Add a test that pins the absence of the "add a master" advice.
 - **The plan "land Crispy's default on a master" is withdrawn.** It came from the verifier, 18:36 and 18:55 on 11-05. For Crispy the preview's spacing stays approximate between masters (option 1, the user's choice). The exported sources are exact. The coincide copy stays valid as a test of the on-master path, because it uses a corner (1715-1-1).
 - **For the user:** set the dangling Variable Font Origin explicitly to 47-1-1, the master the export already falls back to. Nothing changes visually.
+
+## Verifier finding (2026-11-06 16:15) — ROUND 36: the build holds, but the new SPAC gate and two of the four tests cannot see the defects they guard
+
+**Holds** on `rt-coincide4` (93c52b6, pinned):
+- `sparse_sweep.py`: 0 glyphs over 1 u at 60 locations. The designspace is byte-identical to the zip.
+- `test_sparse_layers.py`: 4 passed.
+- Run against 457e107, the mixed-glyph test and the skip-report test FAIL as they should.
+
+**1. The per-glyph SPAC mean is blind to the ROUND 31 defect.** `glyph_signed` pools advance, lsb and rsb over BOTH ends, so an error that flips sign between −100 and +100 cancels.
+- ROUND 31's g was +1.71 u at −100 and −1.61 u at +100. Pooled, that is about +0.05, a pass.
+- Its row × end means were ≤ 0.15, also a pass.
+- So the new gate would have passed the build the verifier rejected.
+
+**Fix:** a per-glyph mean per END and per METRIC (advance, lsb), with |mean| < 0.5 u, as in `spac_perglyph.py`.
+
+**Negative control:** copy the studio TTF, shift one glyph's SPAC deltas by 1 u per side at its corners, and show the gate FAILS on that copy and passes on the original. The same goes for the row-mean check.
+
+**2. `test_the_amounts_reconstruct_exactly_at_every_corner` never runs the injector.** It calls `spac_amounts.per_side` and fontTools' `getDeltas(round=round)` directly. Putting the injector back on float amounts, or dropping `round=`, would still pass it.
+
+**Fix:** drive `builtin_spac_widthaware` (or a delta function it actually calls) on a small fixture. Assert that the font's SPAC change at each master corner equals the export's integer amount.
+
+**3. `test_a_rotated_component_takes_its_own_advance_not_its_bases` cannot fail.** Every candidate is 700: nine's width is 700 at both masters, and six's layer advance is 700 too. The parent-master copy (the attempt-3 bug) and the base's advance both give 700.
+
+**Fix:**
+- Make nine's advance AND offset differ between the masters and from six's.
+- Put the sparse layer strictly between the masters.
+- Assert the interpolated advance and the outline's position (lsb).
+- Show it fails with the parent master's values.
+
+**Still open from earlier** (not in NEXT; the worktree has uncommitted edits to the E2l frontend, so maybe in progress):
+- **E2l tests (15:03):** checkbox wiring, the avar2 path on a built fixture, and the dangling-origin fallback.
+- **E2l copy (15:49):** no "add a master / make it the default" advice, pinned by a test.
+- Crispy's own origin is no longer dangling. At the user's request the verifier set it to 47-1-1 in sources/Crispy.glyphs. The fallback test still needs a fixture of its own.
