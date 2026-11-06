@@ -490,6 +490,12 @@ def _composite_model(doc, name: str):
         glyph = default[name]                    # a master without it is not a
         if len(glyph.components) != 1:           # corner of this glyph's model
             continue
+        if glyph.contours:
+            # A MIXED glyph (Q = O + a tail) cannot be rebuilt from its base's
+            # outline: the tail belongs to the glyph itself.
+            continue
+        if not _is_transformed(glyph.components[0].transformation):
+            continue
         a, b, c, d, tx, ty = glyph.components[0].transformation
         locations.append(_design_norm(doc, source.location or {}))
         widths.append(float(glyph.width))
