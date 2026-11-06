@@ -2837,3 +2837,29 @@ So this is transient, almost certainly the launcher's ~5 s bind wait under load.
 They stay in the branch history. A normal merge into main would carry them there for good. History rewrite is ruled out, so the main merge should be a SQUASH merge. That is the user's call at merge time. Recorded here so it is not missed.
 
 **Automated pass for e012db3:** stopped by the verifier at 18:0x. It was premature (four items open in NEXT) and the disk had filled up (473 MB free). The verifier removed its own old clones and builds (now 5.9 GB free). The pass reruns on the next checkpoint HEAD.
+
+## Verifier finding (2026-11-06 18:12) — the day-long cli-build red was the avar repair (932de1b) crashing when it fires; the verifier's own verification missed it
+
+**Evidence (CI history, cleanup-2026-10).**
+- Last green: b707ec0 (11-05 18:55). First red: 9b9ff99 (21:35).
+- The only `src/` commit between them is **932de1b** ("avar: keep the RAW axis count equal to fvar after every stage").
+- Every run after it failed `cli-build` with `build failed: (('RegionAxisCount', 7, 6), 0, 'Region[]', 'VarRegionList', 'VarStore')`, until the merge.
+
+**Mechanism** (from the code; confirm with a fixture):
+- `_repair_avar_axis_count` adds a segment map per missing fvar axis and recompiles avar.
+- On an avar2 font, the VarStore's regions still carry the OLD axis count (6). fontTools' `VarRegionList.preWrite` sets `RegionAxisCount` to the fvar count (7), and compile raises.
+- On the old constant injector, SPAC was appended to fvar without touching avar, so the repair fired and crashed. On E2i-c the injector keeps avar in step, so the repair never fires (ROUND 38). That is why the merged tip passes `cli-build`.
+
+So the backstop is latent but broken: the one time it is needed, it turns a degraded font into a failed build.
+
+**Own miss:** the verifier verified 932de1b (21:42 on 11-05) on real Crispy fonts only, and never looked at CI on the commit.
+
+**Fix:**
+- When the repair fires on a font with an avar2 VarStore, it must also extend every region with a zero (0, 0, 0) entry for each new axis, so `RegionAxisCount` stays consistent. Alternatively, have it rebuild the table properly.
+- Add a test: compile an avar2 font, append an fvar axis without touching avar, run the repair, then assert:
+  - the font compiles;
+  - raw axisCount = fvar;
+  - FreeType = HarfBuzz off the default.
+
+  The test must fail on 932de1b.
+- From now on the verifier checks CI on every commit it approves.
