@@ -467,6 +467,10 @@ pub(crate) struct GrowOptions<'a> {
     /// patched gvar's phantom deltas; padding alone wouldn't carry the
     /// new advance deltas).
     pub hvar_bytes: Option<Vec<u8>>,
+    /// Injected peaks used by more than one tuple go into gvar's shared
+    /// tuples (see `patch_gvar`). The width-aware SPAC writes the same
+    /// eighteen-odd peaks on every glyph.
+    pub share_peaks: bool,
 }
 
 /// Append `new_axes` to fvar (+ name records, instance coordinate
@@ -548,6 +552,13 @@ pub(crate) fn build_grown_font(
     let avar_bytes = match font.avar() {
         Ok(avar) => {
             let mut avar: w_avar::Avar = avar.to_owned_table();
+            // read-fonts walks the segment maps to the END of the table, so
+            // on an avar 2 font the offsets and the VarStore that follow the
+            // maps come back as extra maps (CrispyMini: 20 for 6 axes), and
+            // the table was written with that count — which FreeType
+            // rejects, dropping avar and avar2 with it. One map per fvar
+            // axis, the rest is not a map.
+            avar.axis_segment_maps.truncate(old_axis_count);
             for _ in 0..new_axes.len() {
                 avar.axis_segment_maps.push(w_avar::SegmentMaps::default());
             }
@@ -561,7 +572,7 @@ pub(crate) fn build_grown_font(
 
     // ---- gvar + VarStore tables -----------------------------------------
     let gvar_bytes = match font.data_for_tag(TAG_GVAR) {
-        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &extras)?),
+        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &extras, options.share_peaks)?),
         None => {
             if !extras.is_empty() {
                 return Err(err("font has no gvar table (not a variable font?)"));
@@ -629,6 +640,7 @@ pub(crate) fn brace_coords(total_axes: usize, control_idx: usize, control_norm: 
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -644,6 +656,7 @@ pub(crate) fn peaked_tuple(peak: Vec<f64>) -> NewTuple {
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -992,6 +1005,7 @@ fn grade_tuple_coords(
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -1250,7 +1264,7 @@ pub(crate) fn pin_corner(
             extras
                 .entry(gid)
                 .or_default()
-                .push(NewTuple { peak, start, end, deltas });
+                .push(NewTuple { peak, start, end, deltas, points: None });
         }
     }
     if extras.is_empty() {
