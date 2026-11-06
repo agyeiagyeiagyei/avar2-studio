@@ -104,16 +104,25 @@ As specified in `findings.md`, "B11 pushes approved for the agent" and "B11c ame
   - The wheel must contain `avar2_studio/bin/spac-inject` (the W1 build) and `libkinetikern2`, and `avar2-studio doctor` must find both at the wheel path with no `AVAR2_*` set.
   - **Never push a version tag.**
 - **R2 — B11b, fontra-embed.** Push `~/Documents/fontra-embed` branch `shared-studio-shim` (`3de37a6`) to origin as a branch. A PR is fine; merging it is the user's call.
-- **R3 — B11a, Pages: HELD.** The branch history carries ~113 MB of committed artifacts (04cc018, 431524e, aec81b9, c606e25). Do not merge into `github-pages` until the VERIFIER line records the user's merge-strategy decision. The verifier's recommendation: squash `cleanup-2026-10` into `main`, then merge `main` into `github-pages`.
-- Then STATE: `awaiting user (ship gates)`.
+- **R3 — main, SQUASH merge.** The user approved this on 2026-11-06, together with the strategy. The branch history carries ~113 MB of committed artifacts (04cc018, 431524e, aec81b9, c606e25), and a squash keeps them out of `main` for good.
+  - Squash `cleanup-2026-10` into `main` as one commit. The message summarises the sprint and points to `docs/sprints/cleanup-2026-10/`.
+  - Push `main` normally: no force, no tag.
+  - Proof: `git diff <cleanup tip> main` is empty for the tree (or lists only what you explain), and every CI job is green on `main`.
+  - Push a STATUS change, and wait for the verifier's check before R4.
+- **R4 — B11a, Pages, from `main`.** Merge `main` into `github-pages` with a regular merge commit, keeping `github-pages`-only site content. Do NOT merge `cleanup-2026-10` directly: that would bring the artifact history along.
+  - Push, then read the Pages workflow run.
+  - Proof: the run id is green, and the site serves the new bundle (give the asset hash). The static app's SPAC works on the live site (W1 e).
+- Then STATE: `awaiting user (ship gates)`. B12 is the user's next step.
 
 ## 6. User gates (the only things that wait for the user)
 
-1. **Merge strategy** for `main` and Pages (the R3 hold).
-2. **Approving the merge into `main`.** No push to `main` without it.
-3. **B12:** the real studio on 5070 on the real Crispy, plus a short re-run of the affected Part B items (spacing, export).
-4. **The version tag** (a PyPI publish).
-5. **Rebuilding and committing Crispy's production font** in `~/Documents/Crispy`.
+1. ~~Merge strategy~~: DECIDED 2026-11-06. Squash into `main`, then `main` → `github-pages` (R3, R4).
+2. ~~Approving the merge into `main`~~: APPROVED 2026-11-06. It runs as R3, after `APPROVED: B11a–c` and R1–R2.
+3. **B12:** the user runs it, after R4, on `main`: the real studio on 5070 on the real Crispy, plus a short re-run of the affected Part B items (spacing, export). Anything it finds is fixed forward on a new branch from `main`, under the same loop.
+4. **The version tag** (a PyPI publish). Handled separately by the user, outside this loop.
+5. **Rebuilding and committing Crispy's production font.** Handled separately by the user, outside this loop.
+
+**Why the user needs this:** they need the tool ready to finish Crispy's design and planning. Order the work so the desktop studio on `main` is solid first. Nothing in W1–W5 may regress the desktop studio's behaviour that has already been verified.
 
 A new decision that is genuinely the user's, such as a scope change, a design choice or anything irreversible: set `awaiting user decision` with the options and a recommendation, and keep working on everything that does not depend on it.
 
