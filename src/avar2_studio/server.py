@@ -822,7 +822,14 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
             pass
         time.sleep(0.25)
     else:
-        _stop_fontra()
+        # Stop THIS launch: `_stop_fontra()` only stops state.FONTRA_PROCESS,
+        # which is not set yet, so it left the process holding the port.
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         raise RuntimeError(f"fontra didn't bind 127.0.0.1:{state.FONTRA_PORT} "
                            f"within ~5s{_log_tail()}")
 

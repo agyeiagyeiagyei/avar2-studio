@@ -137,6 +137,29 @@ def test_a_fontra_that_exits_immediately_names_its_stderr(stand_in_fontra):
     assert "fontra: starting" in logged and "Address already in use" in logged
 
 
+def test_a_fontra_that_never_binds_is_stopped_and_named(stand_in_fontra,
+                                                         monkeypatch):
+    """The timeout must stop the process it launched, or that orphan holds the
+    port and the next open fails on it."""
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda _s: None)   # the 5 s wait, at once
+    stand_in_fontra.run(
+        "import sys, time; print('fontra: still importing'); "
+        "sys.stdout.flush(); time.sleep(60)")
+    served = stand_in_fontra.log.parent / "shadow"
+    served.mkdir()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        server._ensure_fontra_running(served)
+
+    message = str(excinfo.value)
+    assert "didn't bind" in message
+    assert str(stand_in_fontra.log) in message, message
+    [proc] = stand_in_fontra.spawned
+    assert proc.poll() is not None, "the Fontra that never bound is still running"
+
+
 def test_the_open_editor_500_carries_fontras_own_words(tmp_path, monkeypatch,
                                                        client, stand_in_fontra,
                                                        caplog):
