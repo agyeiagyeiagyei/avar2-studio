@@ -2676,3 +2676,24 @@ Consequences:
 - **The grid-overflow path must not appear as an error to the designer.** The off-master build keeps building, as today.
 
 Also for the user (source file, not touched): Crispy's "Variable Font Origin" points at a master id (`A32E53B3-…`) that is not in the saved file, so the export falls back to the first master, 47-1-1.
+
+## Verifier finding (2026-11-06 15:03) — E2l reviewed: the copy and classification are right; three tests are missing
+
+**Checked.** In the pinned worktree at e2ic-wip `28b05e8`:
+- `tests/test_resting_master.py`: 9 passed.
+- `frontend/e2e/export-warning.spec.mjs`: 8 of 8 passed.
+
+The copy is plain and names no internal file. It covers the larger file, the spacing approximation ("can differ a lot at some styles") and the fix. It is silent at the default master and when the source can't be read. The size note follows the checkbox: on means the preview location, off means the ORIGIN row. The sources note is gated on the ORIGIN row. The default master follows the Variable Font Origin; a dangling id falls back to the first master, as glyphsLib does.
+
+**Missing before E2l counts as verified:**
+
+1. **Checkbox on and off.** The spec tests `sizeWarningCopy()` text only. Nothing exercises PreviewTab's wiring. Add a test (component, or e2e on the static demo with a stubbed `restingMaster`) showing that:
+   - checkbox on sends the preview location;
+   - checkbox off sends none;
+   - the note appears and disappears accordingly.
+2. **The avar2 path.** The route tests run "no built font", so the location is taken as it stands. Mapping a `wght/wdth/opsz` preview location through the built font's avar2 to the parametric master grid is the real path and is untested. Add a fixture with a built font: a preview location that maps onto a non-default master must come back `other_master` with that master's name.
+3. **The dangling Variable Font Origin.** It falls back to the first master, and Crispy's own source has one (`A32E53B3-…` is not a master). Add a test. Optionally, the note could tell the designer the origin names a master that doesn't exist.
+
+**Process:** the live check ran on port 5073, which is the verifier's. Use 5072/8002. Nothing is listening there now.
+
+**Copy nit (optional):** "616 units away" reads as font units; it is an axis distance (XTRA 663.1 vs 47). Either drop the number or say which axis.
