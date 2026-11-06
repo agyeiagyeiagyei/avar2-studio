@@ -135,14 +135,17 @@ function PreviewTab({
   // textarea is gone on this tab). Uncontrolled contentEditable —
   // React must never render its children or the caret resets on
   // every keystroke; this effect pushes only EXTERNAL changes (edits
-  // made on the Instances tab, initial load) into the DOM.
+  // made on the Instances tab, initial load) into the DOM. It also runs
+  // when fontLoaded flips: the "Nothing to preview yet" return below
+  // unmounts the canvas, so every rebuild the health poll picks up
+  // re-creates the specimen element, empty until it is filled here.
   const specimenRef = useRef(null);
   useEffect(() => {
     const el = specimenRef.current;
     if (el && el.textContent !== (sampleText || '')) {
       el.textContent = sampleText || DEFAULT_SAMPLE;
     }
-  }, [sampleText]);
+  }, [sampleText, fontLoaded]);
   // Post-mapping axis values from /api/mapped-location: the effective
   // location after the built font's avar table is applied to the
   // current inputs. Non-overridden parametric sliders DISPLAY these,

@@ -172,7 +172,7 @@ oracle), `avar2-lint.spec.mjs`, and the likewise node-only `export-poll`,
 
 | Spec | Needs |
 |---|---|
-| `static-demo.spec.mjs` (31 sections) | `python scripts/snapshot_static_demo.py`, then `npx vite build --base=./ --outDir dist-pages` in `frontend/`, `python3 -m http.server 8123 -d frontend/dist-pages`, `STATIC_URL=http://localhost:8123`; the venv's Python (fontTools, Pillow) to verify downloads |
+| `static-demo.spec.mjs` (32 sections) | `python scripts/snapshot_static_demo.py`, then `npx vite build --base=./ --outDir dist-pages` in `frontend/`, `python3 -m http.server 8123 -d frontend/dist-pages`, `STATIC_URL=http://localhost:8123`; a Python with fontTools and Pillow to verify downloads (`AVAR2_PYTHON`, else the repo's `.venv`) |
 | `editor-bridge.spec.mjs` (57 checks) | the same dist-pages plus a built fontra-embed served on 8099 |
 | `grade-live.spec.mjs`, `reflection-live.spec.mjs` | the designer's own font + its config; the live site or `STATIC_URL` |
 | `prod-smoke.mjs` | the live Pages demo and the live fontra-embed deploy; run after deploys |
