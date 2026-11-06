@@ -33,6 +33,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const BASE = process.env.STATIC_URL || 'http://localhost:8123';
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest.glyphs');
 const FIXTURE_CSV = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'WasmTest-avar.csv');
+// Python with fontTools and Pillow, to verify the downloaded fonts:
+// AVAR2_PYTHON (the Rust oracles' variable), else the repo's own venv.
+const PYTHON = process.env.AVAR2_PYTHON
+  || join(dirname(fileURLToPath(import.meta.url)), '../../.venv/bin/python');
 
 let failures = 0;
 const ok = (cond, label) => {
@@ -787,7 +791,7 @@ const [pinFontDl] = await Promise.all([
 ]);
 const pinFontPath = await pinFontDl.path();
 const pinDarkness = Number(execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from PIL import Image, ImageDraw, ImageFont
@@ -885,7 +889,7 @@ const [clampFontDl] = await Promise.all([
 ]);
 const clampFontPath = await clampFontDl.path();
 const clampMetrics = execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -929,7 +933,7 @@ const [spacFontDl] = await Promise.all([
 ]);
 const spacFontPath = await spacFontDl.path();
 const fontAxes = (p) => execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -1341,7 +1345,7 @@ const downloadFont = async () => {
   return p;
 };
 const fontReport = (p) => execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -1371,7 +1375,7 @@ console.log('27. round corners on an upload (wasm engine)');
 // instance coordinates — the oracle test (cargo) proves the engine
 // node-identical to the desktop; here we prove the demo wires it.
 const glyphReport = (p) => execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -1401,7 +1405,7 @@ ok(rondReport.split(' ')[1].includes('ROND'),
 // legitimately collapse (no room on a 2-unit stroke), so pure ROND
 // does nothing there.
 const rondMoved = execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -1446,7 +1450,7 @@ console.log('28. slant on an upload (wasm engine)');
 // LSB and advance preserved — the oracle test (cargo) proves the engine
 // node-identical to the desktop; here we prove the demo wires it.
 const slantReport = (p) => execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
@@ -1558,7 +1562,7 @@ await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 240000 });
 const doubled = execFileSync(
-  '/Users/agyei/Documents/avar2-studio/.venv/bin/python',
+  PYTHON,
   ['-c', `
 import sys
 from fontTools.ttLib import TTFont
