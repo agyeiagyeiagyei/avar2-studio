@@ -59,7 +59,8 @@ SPARSE_TOLERANCE = 1.0
 # per-tuple rounding leaves individual checks 2–3 u apart in both directions,
 # which a 1 u check cannot tell from a systematic offset (verifier, 2026-11-06).
 SPAC_MEAN_TOLERANCE = 0.25    # |signed mean| per row × end, in font units
-SPAC_GLYPH_TOLERANCE = 0.75   # |mean| per glyph across every row and end
+SPAC_GLYPH_TOLERANCE = 0.5    # |mean| per glyph × END × METRIC (verifier 16:15:
+                              # pooling the ends cancels a one-end defect)
 CLASSES = ("simple", "composite", "mixed", "unencoded", ".notdef")
 
 
@@ -201,6 +202,50 @@ def _axes(path: Path) -> dict:
         font.close()
 
 
+def self_test() -> int:
+    """The SPAC gates must fail on a defect and pass on balanced noise.
+
+    A negative control for the gate itself (verifier, 2026-11-06 16:15): the
+    per-glyph mean is keyed by glyph x END x METRIC, so a one-end drift cannot
+    cancel against the other end. Synthetic samples only — this checks the
+    verdict, not a font.
+    """
+    import statistics as _st
+
+    def verdicts(samples):
+        means = {key: _st.fmean(values) for key, values in samples.items()}
+        return [key for key, value in means.items()
+                if abs(value) > SPAC_GLYPH_TOLERANCE]
+
+    # Balanced rounding noise: the same glyph drifts +2 at one end and -2 at the
+    # other, which a pooled mean would call perfect.
+    noise = {
+        ("m", -100.0, "advance"): [2.0, -1.0, 1.0, 0.0],
+        ("m", 100.0, "advance"): [-2.0, 1.0, -1.0, 0.0],
+    }
+    if verdicts(noise):
+        print("self-test FAILED: balanced noise was flagged")
+        return 1
+
+    # The ROUND 31 shape: a 3 u shift at ONE end and metric, masked by the same
+    # shift the other way at another -- pooling the two says "perfect" (0.0),
+    # which is why the gate must key on glyph x end x metric.
+    pooled_case = {("m", -100.0, "lsb"): [3.0, 3.0, 3.0, 3.0],
+                   ("m", 100.0, "advance"): [-3.0, -3.0, -3.0, -3.0]}
+    pooled = _st.fmean([v for values in pooled_case.values() for v in values])
+    if abs(pooled) > SPAC_GLYPH_TOLERANCE:
+        print(f"self-test FAILED: the control is not one pooling would hide "
+              f"(pooled {pooled:+.2f})")
+        return 1
+    caught = verdicts(pooled_case)
+    if len(caught) != 2:
+        print(f"self-test FAILED: a one-end 3 u shift was not caught ({caught})")
+        return 1
+    print("self-test ok: balanced noise passes, a one-end 3 u shift fails, "
+          "and pooling the two ends hid it (mean 0.00)")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--studio", type=Path, required=True)
@@ -217,10 +262,14 @@ def main(argv=None) -> int:
                     help="the exported designspace, whose sparse layers the "
                          "sweep visits a second time with the traditional axes "
                          "at their defaults")
+    ap.add_argument("--self-test", action="store_true",
+                    help="check the SPAC gates against synthetic noise and a one-end defect, then exit")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--failures", type=Path,
                     help="write every over-tolerance record here (JSON lines)")
     args = ap.parse_args(argv)
+    if args.self_test:
+        return self_test()
 
     studio = hb_font(args.studio)
     built = hb_font(args.fm)
@@ -355,7 +404,7 @@ def main(argv=None) -> int:
                 for label, (x, y) in checks.items():
                     delta = abs(x - y)
                     signed.append(x - y)
-                    glyph_signed.setdefault(name, []).append(x - y)
+                    glyph_signed.setdefault((name, end, label), []).append(x - y)
                     if delta > entry["worst"]:
                         entry["worst"] = delta
                         entry["where"] = f"{name} {label} {end:+g}"
@@ -452,18 +501,21 @@ def main(argv=None) -> int:
                             f"{worst_loc:.2f} u ({over_here} check(s) over "
                             f"{SPARSE_TOLERANCE:g} u)")
 
-    # Per-glyph means across every row and end: one glyph drifting
-    # systematically is a real defect even when each row's mean cancels.
-    glyph_means = {name: statistics.fmean(values)
-                   for name, values in glyph_signed.items() if values}
-    report["spac_glyph_means"] = {name: round(value, 3)
-                                  for name, value in sorted(glyph_means.items())}
+    # Per glyph, per SPAC end and per metric across the rows: pooling the ends
+    # cancels a defect that only shows at one of them (verifier, 2026-11-06
+    # 16:15 — the ROUND 31 drift did exactly that).
+    glyph_means = {key: statistics.fmean(values)
+                   for key, values in glyph_signed.items() if values}
+    report["spac_glyph_means"] = {
+        f"{name} {end:+g} {label}": round(value, 3)
+        for (name, end, label), value in sorted(glyph_means.items())}
     report["worst_spac_glyph_mean"] = (
         round(max((abs(v) for v in glyph_means.values()), default=0.0), 3))
-    for name, value in sorted(glyph_means.items(), key=lambda kv: -abs(kv[1])):
+    for (name, end, label), value in sorted(glyph_means.items(),
+                                            key=lambda kv: -abs(kv[1])):
         if abs(value) > SPAC_GLYPH_TOLERANCE:
-            failures.append(f"glyph {name!r}: mean SPAC error {value:+.2f} u "
-                            f"over every row and end")
+            failures.append(f"glyph {name!r} {label} at SPAC {end:+g}: mean "
+                            f"{value:+.2f} u across the rows")
 
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")
@@ -492,7 +544,7 @@ def main(argv=None) -> int:
                   f"over {entry['signed']} checks "
                   f"({entry['signs'][0]}+ / {entry['signs'][1]}-)")
         worst_glyph = max(glyph_means.items(), key=lambda kv: abs(kv[1]))
-        print(f"SPAC per glyph: worst mean {worst_glyph[1]:+.2f} u "
+        print(f"SPAC per glyph x end x metric: worst mean {worst_glyph[1]:+.2f} u "
               f"({worst_glyph[0]}), tolerance |mean| < "
               f"{SPAC_GLYPH_TOLERANCE:g} u")
     if report["sparse"]:
