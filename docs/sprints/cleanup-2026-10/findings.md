@@ -2653,3 +2653,26 @@ If Q gets the same treatment, it must stay compatible. Q currently passes (≤ 1
    - Report every decomposed or mixed glyph that has a base with sparse layers but got no layer, in `build.log` next to the "N sparse layers added" line. A designer-facing warning would do too.
    - Better still, handle more than one component: every component takes its own interpolated transform.
    - Crispy has none today (the sweep is clean), so this is about other fonts.
+
+## Verifier finding (2026-11-06 14:06) — the off-master preview's spacing gap, measured on the real font; user decision on the grid
+
+**Measured.** I compared the real off-master preview (`test-output/grid-cost/today/`, the shipped 9-master model) against the export's rule at all 29 CSV rows, every glyph, SPAC ±100 (`~/avar2-verifier/scripts/offmaster_gap.py`). The export's rule is the sources' masters-only model, with the default at 47-1-1, the master Crispy falls back to.
+- The method was first validated on `rt-coincide3`, where the preview equals the export: gap ≤ 1.6 u everywhere.
+- On the real font: median 0, p90 97 u, p99 187 u, max 397 u (trademark, Wide 900).
+
+| row | H preview / export | n | e |
+|---|---|---|---|
+| Narrow 400 MaxOpsz | −204 / −74 | −172 / −67 | −166 / −64 |
+| Wide 400 | −304 / −432 | −256 / −342 | −248 / −331 |
+| Wide 900 MaxOpsz | −538 / −730 | −459 / −613 | −444 / −598 |
+
+The preview stays near the resting style's amount: the flat-through-the-default effect of 17:55. My earlier "about 43 u at the styles" to the user came from the model test and understated it; I have corrected it with the user.
+
+**USER DECISION (2026-11-06, to the verifier): option 1.** Keep the 9-master model when the resting location is off a master: exact at the masters and at the resting location, approximate between them. No grid, and no axis dropped from the preview. The exported sources are exact either way.
+
+Consequences:
+- **No injector change.**
+- **E2l's warning must say plainly** that the preview's spacing is approximate between masters and can differ a lot at some styles, and how to fix it: put the resting location on a master and make that master the default (Variable Font Origin).
+- **The grid-overflow path must not appear as an error to the designer.** The off-master build keeps building, as today.
+
+Also for the user (source file, not touched): Crispy's "Variable Font Origin" points at a master id (`A32E53B3-…`) that is not in the saved file, so the export falls back to the first master, 47-1-1.
