@@ -629,6 +629,7 @@ pub(crate) fn brace_coords(total_axes: usize, control_idx: usize, control_norm: 
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -644,6 +645,7 @@ pub(crate) fn peaked_tuple(peak: Vec<f64>) -> NewTuple {
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -992,6 +994,7 @@ fn grade_tuple_coords(
         start,
         end,
         deltas: Vec::new(),
+        points: None,
     }
 }
 
@@ -1250,7 +1253,7 @@ pub(crate) fn pin_corner(
             extras
                 .entry(gid)
                 .or_default()
-                .push(NewTuple { peak, start, end, deltas });
+                .push(NewTuple { peak, start, end, deltas, points: None });
         }
     }
     if extras.is_empty() {

@@ -143,6 +143,14 @@ pub fn apply_transforms(
     spac::apply_transforms(font_bytes, transforms_json)
 }
 
+/// Test instrumentation for the SPAC oracle (not part of the wasm ABI):
+/// what the width-aware injector measures, as JSON — see
+/// `spac::widthaware_trace`.
+#[doc(hidden)]
+pub fn spac_widthaware_trace(font_bytes: &[u8], transforms_json: &str) -> Result<String, JsError> {
+    spac::widthaware_trace(font_bytes, transforms_json)
+}
+
 /// Add control (secondary parametric) axes from a config bundle to a
 /// compiled variable font: one fvar axis per entry, and a computed gvar
 /// brace tuple per layer (see braces.rs).
@@ -730,6 +738,7 @@ const GVAR_PRIVATE_POINT_NUMBERS: u16 = 0x2000;
 // tupleVariationCount flag (glyph variation data level).
 const GVAR_TUPLES_SHARE_POINT_NUMBERS: u16 = 0x8000;
 // Packed-delta run header flags.
+const DELTAS_ARE_ZERO: u8 = 0x80;
 const DELTAS_ARE_WORDS: u8 = 0x40;
 const DELTA_RUN_COUNT_MASK: u8 = 0x3F;
 // Packed point-number run flags.
@@ -784,16 +793,34 @@ pub(crate) struct NewTuple {
     pub end: Vec<f64>,
     /// (x, y) per point, including the 4 phantom points.
     pub deltas: Vec<(i16, i16)>,
+    /// Ascending point numbers this tuple touches; the rest are untouched
+    /// (fontTools' `None` coordinates). `None` writes every point. The
+    /// width-aware SPAC lists only its two phantoms, which is what
+    /// fontTools compiles for the reference transform's tuples.
+    pub points: Option<Vec<u16>>,
 }
 
 impl NewTuple {
     /// Serialize as (tuple header, serialized delta data), mirroring
     /// fontTools `TupleVariation.compile`: embedded peak, private point
-    /// numbers (a single 0 byte = all points), deltas as int16 runs.
+    /// numbers (a single 0 byte = all points, deltas as int16 runs; or
+    /// the packed point list with fontTools' size-optimized delta runs).
     fn serialize(&self) -> (Vec<u8>, Vec<u8>) {
-        let mut aux = vec![0u8]; // all points in the glyph
-        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.0));
-        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.1));
+        let mut aux = Vec::new();
+        match &self.points {
+            None => {
+                aux.push(0u8); // all points in the glyph
+                pack_deltas(&mut aux, self.deltas.iter().map(|d| d.0));
+                pack_deltas(&mut aux, self.deltas.iter().map(|d| d.1));
+            }
+            Some(points) => {
+                pack_points(&mut aux, points);
+                let xs: Vec<i16> = points.iter().map(|&p| self.deltas[p as usize].0).collect();
+                let ys: Vec<i16> = points.iter().map(|&p| self.deltas[p as usize].1).collect();
+                pack_deltas_compact(&mut aux, &xs);
+                pack_deltas_compact(&mut aux, &ys);
+            }
+        }
 
         let intermediate = self.peak.iter().enumerate().any(|(i, &p)| {
             let (s, e) = (self.start[i], self.end[i]);
@@ -818,6 +845,94 @@ impl NewTuple {
         header.extend_from_slice(&flags.to_be_bytes());
         header.extend_from_slice(&coords);
         (header, aux)
+    }
+}
+
+/// fontTools `TupleVariation.compilePoints` for a non-empty ascending
+/// point set: the count (one or two bytes), then runs of increments from
+/// the previous point number. A run is byte-encoded when its FIRST
+/// increment fits a byte and ends at the first one that does not; a
+/// word-encoded run never switches back.
+fn pack_points(out: &mut Vec<u8>, points: &[u16]) {
+    let n = points.len();
+    if n < 0x80 {
+        out.push(n as u8);
+    } else {
+        out.push((n >> 8) as u8 | 0x80);
+        out.push(n as u8);
+    }
+    let (mut pos, mut last) = (0usize, 0u16);
+    while pos < n {
+        let header = out.len();
+        out.push(0);
+        let mut run = 0usize;
+        let mut bytes: Option<bool> = None;
+        while pos < n && run <= POINT_RUN_COUNT_MASK as usize {
+            let delta = points[pos] - last;
+            let use_bytes = *bytes.get_or_insert(delta <= 0xFF);
+            if use_bytes && delta > 0xFF {
+                break; // the next run starts here, word-encoded
+            }
+            if use_bytes {
+                out.push(delta as u8);
+            } else {
+                out.extend_from_slice(&delta.to_be_bytes());
+            }
+            last = points[pos];
+            pos += 1;
+            run += 1;
+        }
+        out[header] = (run as u8 - 1) | if bytes == Some(true) { 0 } else { POINTS_ARE_WORDS };
+    }
+}
+
+/// fontTools `TupleVariation.compileDeltaValues_` (optimizeSize=True)
+/// for int16 values: zero runs carry no data, small values pack as
+/// bytes, the rest as words, with fontTools' run-splitting rules.
+fn pack_deltas_compact(out: &mut Vec<u8>, deltas: &[i16]) {
+    let is_byte = |v: i16| (-128..=127).contains(&v);
+    let n = deltas.len();
+    let mut pos = 0usize;
+    while pos < n {
+        let start = pos;
+        if deltas[pos] == 0 {
+            // encodeDeltaRunAsZeroes_
+            while pos < n && deltas[pos] == 0 {
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(DELTAS_ARE_ZERO | (chunk.len() as u8 - 1));
+            }
+        } else if is_byte(deltas[pos]) {
+            // encodeDeltaRunAsBytes_: a lone zero stays in the run, two or
+            // more start a zero run.
+            while pos < n && is_byte(deltas[pos]) {
+                if deltas[pos] == 0 && pos + 1 < n && deltas[pos + 1] == 0 {
+                    break;
+                }
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(chunk.len() as u8 - 1);
+                out.extend(chunk.iter().map(|&d| d as i8 as u8));
+            }
+        } else {
+            // encodeDeltaRunAsWords_: a zero, or two byte-sized values in
+            // a row, end the run; a lone byte-sized value stays in it.
+            while pos < n {
+                let v = deltas[pos];
+                if v == 0 || (is_byte(v) && pos + 1 < n && is_byte(deltas[pos + 1])) {
+                    break;
+                }
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(DELTAS_ARE_WORDS | (chunk.len() as u8 - 1));
+                for d in chunk {
+                    out.extend_from_slice(&d.to_be_bytes());
+                }
+            }
+        }
     }
 }
 
