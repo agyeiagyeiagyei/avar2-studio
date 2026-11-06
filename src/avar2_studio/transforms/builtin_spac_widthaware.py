@@ -53,6 +53,7 @@ from fontTools.ttLib.tables._g_l_y_f import USE_MY_METRICS
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 
+from .. import spac_amounts
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
 from .builtin_spac import _instance_spac_overrides, _spac_output_name
 
@@ -415,33 +416,39 @@ class WidthAwareSpacTransform(Transform):
                 # A composite reads its BASE's ink at every corner, not its
                 # own — the same rule as the constant path and the export.
                 ink_name = base_name or name
-                per_corner = [amount_at(i, corner_inks[i].get(ink_name, 0.0))
-                              for i in range(len(corners))]
-                amounts_lo = [lo * scale * f for f in per_corner]
-                amounts_hi = [hi * scale * f for f in per_corner]
-                # The user's 1 u floor (findings.md, "E2i-c gets a 1 u width
-                # floor"): TIGHT END ONLY, the same bound the export's _fit_dx
-                # applies, so both renderers floor the same corner values.
-                # `d` is the per-side amount; a simple glyph's advance moves by
-                # 2d, a composite's by d (E2k), so the bounds differ.
-                if lo < 0:
-                    for i, amount in enumerate(amounts_lo):
-                        corner_adv = corner_advances[i].get(name, 0.0)
-                        if not corner_adv:
-                            continue
-                        limit = ((1.0 - corner_adv) / 2.0 if not composite
-                                 else 1.0 - corner_adv)
-                        floored = max(amount, limit)
-                        if floored != amount:
-                            ctx.log(
-                                f"spac_widthaware floor: {name} at corner "
-                                f"{sorted(corners[i].items())} rule "
-                                f"{amount:.1f} -> {floored:.1f} (advance "
-                                f"{corner_adv:.1f} -> "
-                                f"{corner_adv + (2 if not composite else 1) * floored:.1f})")
-                            amounts_lo[i] = floored
-                lo_deltas = model.getDeltas(amounts_lo)
-                hi_deltas = model.getDeltas(amounts_hi)
+
+                def _corner_amounts(value, ink_name=ink_name, name=name,
+                                    composite=composite):
+                    """Per-corner per-side INTEGERS, plus the floored ones.
+
+                    Computed by the same function the export uses — round() in
+                    the same place, the same tight-end floor — so
+                    `getDeltas(..., round=round)` reconstructs each corner
+                    exactly. Float inputs used to leave the font a unit off the
+                    twin at every master (verifier, 2026-11-06).
+                    """
+                    out, floored = [], []
+                    for i in range(len(corners)):
+                        ink_i = corner_inks[i].get(ink_name, 0.0)
+                        mean_i = corner_means[i]
+                        raw = (value * ((ink_i / mean_i) ** bias)
+                               * (mean_i / mean_ink) * scale
+                               if mean_i > 0 and mean_ink > 0 else 0.0)
+                        dx = spac_amounts.per_side(
+                            value, ink_i, mean_i, mean_ink, bias, scale,
+                            corner_advances[i].get(name, 0.0), composite)
+                        out.append(dx)
+                        if dx != round(raw):
+                            floored.append((i, raw, dx))
+                    return out, floored
+
+                amounts_lo, floored_lo = _corner_amounts(lo)
+                amounts_hi, _floored_hi = _corner_amounts(hi)
+                for i, raw, dx in floored_lo:
+                    ctx.log(f"spac_widthaware floor: {name} at corner "
+                            f"{sorted(corners[i].items())} rule {raw:.1f} -> {dx}")
+                lo_deltas = model.getDeltas(amounts_lo, round=round)
+                hi_deltas = model.getDeltas(amounts_hi, round=round)
                 # Both phantoms, simple or composite: ±dx gives left +dx and
                 # advance +2dx, i.e. each side +dx — the base's amount for a
                 # composite, its own for a simple glyph (E2k).

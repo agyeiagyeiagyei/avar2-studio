@@ -37,6 +37,7 @@ import glyphsLib
 from fontTools.designspaceLib import DesignSpaceDocument, InstanceDescriptor
 from glyphsLib.classes import GSLayer
 
+from . import spac_amounts
 from .build import config_generator
 from .studio_log import get_logger
 
@@ -259,21 +260,10 @@ def _shift_metrics(glyph, dx: int) -> None:
 def _fit_dx(dx: int, width: float, composite: bool) -> int:
     """Cap a NEGATIVE move so the twin's advance cannot go below 1 u.
 
-    A UFO/designspace source cannot carry a negative advance width, and
-    fontTools refuses to compile one. Crispy's hairline masters are narrower
-    than the amount the injector applies at SPAC −100 (hairline `n` advance
-    166 u against a 258 u tightening), so the exact amount is not representable
-    there and the export caps it instead of writing a font fontmake rejects.
-    Everywhere the design can carry the amount the twin is exact; the default
-    design (where the injector's amounts come from) always can.
+    Shared with the injector through :mod:`avar2_studio.spac_amounts`, so both
+    renderers floor the same corner value to the same integer.
     """
-    if dx >= 0:
-        return dx
-    if composite:                       # advance moves by dx
-        lowest = 1 - int(width)
-    else:                               # advance moves by 2·dx
-        lowest = -((int(width) - 1) // 2)
-    return max(dx, lowest)
+    return spac_amounts.fit_dx(dx, width, composite)
 
 
 def _use_my_metrics(glyph) -> bool:
@@ -453,13 +443,18 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         if composite:
             pending[name] = True
             continue
-        amount = (value if kind == "spac"
-                  else value * ((ink / mean_ink) ** bias) * (mean_ink / mean_D)
-                  * scale)
-        dx = round(amount)
+        # The rule's own integer, before the tight-end floor, so the capped-move
+        # record can name both. The floor itself lives in spac_amounts, shared
+        # with the injector so the two renderers cannot round apart.
+        rule = (round(value) if kind == "spac"
+                else round(value * ((ink / mean_ink) ** bias)
+                           * (mean_ink / mean_D) * scale))
+        dx = (spac_amounts.fit_dx(rule, glyph.width, composite)
+              if kind == "spac"
+              else spac_amounts.per_side(value, ink, mean_ink, mean_D, bias,
+                                         scale, glyph.width, composite))
         if dx < 0:
-            before = dx
-            dx = _fit_dx(dx, glyph.width, composite)
+            before = rule
             if dx != before:
                 capped += 1
                 ink_w = _ink_of(glyph)
