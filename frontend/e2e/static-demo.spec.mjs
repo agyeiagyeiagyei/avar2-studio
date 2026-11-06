@@ -21,7 +21,8 @@
  *
  * Requires: dist-pages built (npx vite build --base=./ --outDir
  * dist-pages) and served statically, plus system Chrome (channel:
- * 'chrome' — same as the repo's screenshot harness).
+ * 'chrome' — same as the repo's screenshot harness) and a Python with
+ * fontTools and Pillow (AVAR2_PYTHON, else the repo's .venv).
  */
 
 import { chromium } from 'playwright-core';
@@ -773,7 +774,8 @@ const pinCornerByText = async (...needles) => {
 // A provider-side build reaches the app on its 2 s health poll (the
 // removed tab's handlers reloaded the app themselves); a download
 // started before that would fetch the previous, revoked font URL.
-const appPicksUpBuild = () => sleep(3000);
+// Two poll periods.
+const appPicksUpBuild = () => sleep(4000);
 const ghostPin = await pinCornerByText('XOPQ▲', 'YOPQ▲');
 ok(ghostPin?.ok === true && !!ghostPin.scaffold && !ghostPin.synthesized,
   `ghost corner pinned (scaffold from the healthy edge: ${JSON.stringify(ghostPin?.scaffold)})`);
