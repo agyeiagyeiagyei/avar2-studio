@@ -3493,3 +3493,50 @@ The revert is a forward commit (no force-push), leaving `8ec4175` and the measur
 baseline: rows worst **13.0 u** (`nine` lsb, `Wide 900 MaxOpsz`), composites
 **3.00**, mixed/unencoded **2.00**, **`.notdef` 0.00**, SPAC ends worst **3.0 u**.
 The `nine` question goes back to the findings with these numbers.
+
+## ROUND 32 — both items closed: the SPAC ends are rounding, and nine interpolates nine
+
+Built with `build_pinned.sh` (worktree `~/avar2-agent/e2ic-wt`, `e2ic-wip`
+`457e107`, 0 dirty, `avar2_studio` from the worktree), `failures.jsonl`
+regenerated on this run.
+
+**1. The 2–3 u residual was per-tuple rounding — fixed at the root.**
+The injector handed FLOAT corner amounts to `model.getDeltas()` and rounded each
+tuple delta on its own, so at a master the font gave Σ round(Δᵢ) while the export
+wrote `round(amount)`. Amounts are now **integers computed by one shared
+function**, `spac_amounts.per_side` — the same `round()` and the same tight-end
+floor (`spac_amounts.fit_dx`, which the export's `_fit_dx` now delegates to) —
+and `getDeltas(..., round=round)` reconstructs every corner exactly.
+
+Gates, on the verifier's own scripts:
+
+| gate | result |
+|---|---|
+| `spac_at_masters.py` | **ufo = studio = fontmake to the unit at every master, both ends** (period −6/−6/−6, g −254 ×3, slash −82 ×3, yen −280 ×3, H −330 ×3, n −242 ×3) |
+| `spac_signed.py` | int −100 mean **−0.004** sd 0.194, +100 mean **+0.003** sd 0.217, worst \|advance\| **2.0**, mixed signs |
+| `spac_perglyph.py` | no glyph with \|mean\| ≥ 0.75; worst **j / m 0.36** at −100, **H −0.39** at +100 |
+
+**2. nine — fixed properly.** The synthesized sparse layer takes **nine's own
+advance and component transform**, interpolated from nine's own masters at that
+location, with `six`'s layer outline under that transform. Two things had to be
+right: the models are read **before** the flatten pass (which removes the
+components), and the loop iterates the **targets**, not the default layer's keys
+(a master need not carry every glyph). Only pure transformed components qualify —
+`Q` (`O` + a tail) cannot be rebuilt from its base, and fontmake rejected the
+designspace until that guard was added. The four added `nine` layers come out at
+**2779 / 5173 / 1149 / 2196**, the values the verifier measured; 16 sparse layers
+are added across the decomposed glyphs.
+
+**Acceptance, both SPAC ends, every class:**
+
+| | worst | over 1 u |
+|---|---|---|
+| rows (28) | **0.00 u** | — |
+| simple | 2.00 u | 9 |
+| composite | 2.00 u | 6 |
+| mixed | 1.00 u | 0 |
+| unencoded | 1.00 u | 0 |
+| `.notdef` | **0.00 u** | 0 |
+
+Studio TTF **765,776 B**, avar raw 12 = fvar 12, avar2 28 regions (axis 12),
+`.notdef` 0 tuples. The `nine` 13 u row gap is gone: rows are exact.
