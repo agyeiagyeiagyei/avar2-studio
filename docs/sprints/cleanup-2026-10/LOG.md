@@ -3807,3 +3807,39 @@ workspace's `AGENTS.md` is stale (the user's file, not touched here). README's
 export paragraph now states what E2l's dialog says: a resting style that is not
 the default master makes the export larger, the preview's spacing is approximate
 between masters, and the exported fonts are exact.
+
+## ROUND 40 — e2ic-wip merged into cleanup-2026-10
+
+Merge commit `f13fb11` (no force), then `e012db3` untracks what the checkpoint
+forbids. Working tree clean; branch level with its remote.
+
+| | |
+|---|---|
+| merge | `f13fb11` (`--no-ff`, no conflicts) |
+| branch tip | `e012db3` |
+| suite on the merged branch | **701 passed**, 0 skipped (`fontc` present here) |
+| `ruff check src tests` | clean |
+| studio TTF (merged, detached worktree, 0 dirty) | **765,776 B** |
+| sources zip | **42,033,176 B** |
+
+Provenance in `test-output/rt-merged.log`: worktree `~/avar2-agent/merged-wt`,
+commit `e012db3`, `avar2_studio` imported from that worktree, 24 sparse layers,
+908 components over 19 glyphs — the same build as `rt-coincide4`, as expected
+since the merge brought no new code beyond it.
+
+**Untracked (`e012db3`).** `test-output/` held ~60 MB of TTFs and sources zips
+committed before `.gitignore` line 77 existed, and `scratch-e2ic/` was a work
+file that rode along from `e2ic-wip`. Both stay on disk, neither is in the tree
+now; `git ls-files test-output scratch-e2ic` is empty.
+
+**Still open (verifier's 17:14, not part of the merge):**
+1. `test_spac_amounts_injector.py` still passes on the 80e96e8 injector — the
+wide master needs real ink deltas so the base amount is x.4 and the corner
+(x+y).8.
+2. `test_a_rotated_component…` still cannot catch the attempt-3 bug — nine needs
+different advances/offsets per master, the layer strictly between the masters,
+and an assertion on the outline's xMin.
+3. `--self-test` is not a control for the real gate; the verifier's font-level
+perturbation is, and one like it should live in the sprint.
+4. Control-axis: log the `open_control_axis_in_editor` exception server-side,
+and lengthen or make configurable the ~5 s Fontra bind wait.

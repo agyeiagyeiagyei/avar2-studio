@@ -1,14 +1,15 @@
 STATE: checkpoint
-ROUND: 39
-HEAD: 2b26f8a
-VERIFIED_HEAD: c9849fa
-NEXT: ROUND 39 answers the verifier's ROUND 37 review and the 16:15 items. (a) default_master_name resolves through glyphsLib (Variable Font Origin by id, Variation Font Origin by name, glyphsLib fallback) instead of the axis minima, so the coincide copy reports default_master instead of a FALSE larger-file warning; five tests, none patching get_axes. (b) The SPAC gate keys per glyph x end x metric at 0.5 u (pooling the ends cancelled the ROUND 31 drift) with a --self-test negative control: rt-coincide4 reruns PASS, worst key -0.39 u (H advance +100), rows 0.00 u, 60 sparse locations 0.00 u. (c) The rotated-component test now has differing candidates (base 760 vs own 700) and the amounts test runs the injector end to end. Suite 698 passed, 3 skipped; ruff clean. NEXT TASKS: none outstanding from the verifier. The sprint is a checkpoint candidate: ROUND 33/36 gates + ROUND 37/39 copy and coverage, on e2ic-wip 2b26f8a.
+ROUND: 40
+HEAD: e012db3
+VERIFIED_HEAD: 2b26f8a
+NEXT: the merge the verifier asked for is done: e2ic-wip into cleanup-2026-10 as f13fb11 (--no-ff, no conflicts), tip e012db3 which untracks the ~60 MB of test-output artifacts and the scratch script that predated .gitignore line 77 (both stay on disk, neither is in the tree). Merged branch: suite 701 passed 0 skipped, ruff clean, studio TTF 765,776 B and sources zip 42,033,176 B built from a detached worktree at e012db3 with asserted provenance (test-output/rt-merged.log, 24 sparse layers, 908 components). REMAINING from the verifier's 17:14 review: (1) test_spac_amounts_injector.py must fail on the 80e96e8 injector — give the wide master real ink deltas so the base amount is x.4 and the corner (x+y).8; (2) test_a_rotated_component must catch the attempt-3 bug — nine needs per-master advances/offsets, the layer strictly between the masters, and an outline xMin assertion; (3) --self-test is not a control for the real gate — add one like the verifier's perturbed-g font; (4) control-axis: log open_control_axis_in_editor's exception in the server log and lengthen or make configurable the ~5 s Fontra bind wait.
 - (7) DONE — ROUND 34's grid cost measured and decided with the user: no grid, today's 9-master model stays; numbers in LOG.md.
 - (8) DONE — E2l end to end (backend report, dialog warning, sources-note gating, DB tests, e2e copy spec, live check).
 - (9) DONE — verifier ROUND 33 follow-ups (skip report, multi-component transforms, 4 fixture tests) and the mean-based SPAC gates; evidence in ROUND 36.
 - (10) DONE — E2l copy corrected (no default-master advice), wiring + avar2 + dangling-origin tests, live toggle evidence.
 - (11) DONE — avar writer named and measured (ROUND 38); README updated; HANDOVER pointer flagged as the user's file.
 - (12) DONE — origin-based default master (defect fixed), per-end x metric SPAC gate with self-test, two weak tests strengthened, amounts test runs the injector.
+- (13) DONE — merge of e2ic-wip into cleanup-2026-10 with the artifacts untracked; sizes and suite on the merged branch.
 APPROVED: E2k-b, E2i-b, E2j-b, O1b, E2k, E2i-c, D1a2, the round-trip script change (verifier findings on approved items E1/E2/O1/D1 — defects and acceptance misses; E2k is the user's decision of 2026-11-05). E2i-c is approved with the user's target (2026-11-05: the spacing amount scales with each instance's own width). B11a–c are approved in principle (user decision 2026-10-29) but gated: start them only when this line says APPROVED: B11a–c after a checkpoint is verified. Verified items so far: P1–P3, K1–K4, K1b, CI0a–d at aa6b87f; O1, O2, E1a, E2a–d, A1, A2 at 5e28b47; E2e, E1b, E1d, E2h, E1c (dialog half), E2f, E2g, D1b, D1c, K5 at c1c8aca.
 
 AGENT LOG OF DONE ITEMS (appended after resolving this rebase; the NEXT above is the verifier's):
