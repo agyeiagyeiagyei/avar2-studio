@@ -94,6 +94,9 @@ def test_the_route_classifies_the_location_it_is_given(client, monkeypatch,
                                                        tmp_path):
     source = _font(tmp_path)
     monkeypatch.setattr(state, "ORIGINAL_PATH", source)
+    # No built font: the route takes the location as it stands instead of
+    # mapping it through avar2 (another test may leave one behind).
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", None)
     res = client.post("/api/resting-master", json={"location": {"wght": 1715}})
     assert res.status_code == 200
     assert res.get_json()["status"] == "other_master"
@@ -104,6 +107,7 @@ def test_the_route_falls_back_to_the_origin_row(client, monkeypatch, tmp_path):
     source = _font(tmp_path)
     _csv(tmp_path, 47)
     monkeypatch.setattr(state, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", None)
     res = client.post("/api/resting-master", json={})
     assert res.status_code == 200
     assert res.get_json()["status"] == "default_master"
@@ -112,5 +116,6 @@ def test_the_route_falls_back_to_the_origin_row(client, monkeypatch, tmp_path):
 def test_the_route_rejects_a_non_numeric_location(client, monkeypatch,
                                                   tmp_path):
     monkeypatch.setattr(state, "ORIGINAL_PATH", _font(tmp_path))
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", None)
     res = client.post("/api/resting-master", json={"location": {"wght": "wide"}})
     assert res.status_code == 400
