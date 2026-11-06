@@ -3619,3 +3619,11 @@ preview keeps today's 9-master model and is approximate between masters (the
 verifier's model test: up to 128 u at random points). The exported sources are
 exact either way; this is a preview-fidelity choice, and E2l's warning is the
 user-facing half of it.
+
+**User decision (2026-11-06 12:5x) — keep today's 9-master preview; no grid.**
+Asked with the ROUND 34 numbers and the three readings, the user chose the
+approximate preview: the studio keeps the 9-master corner model, no weight is
+taken from the twins, and the preview may be off between masters (model test: up
+to 128 u at random points). The exported sources stay exact. E2l's export
+warning is unaffected: the file is larger because the studio rebuilds the
+variations around a style that is not the default master.
