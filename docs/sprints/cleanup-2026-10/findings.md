@@ -2884,3 +2884,22 @@ So the backstop is latent but broken: the one time it is needed, it turns a degr
 3. Capture Fontra's own stderr to a log file instead of DEVNULL, so "fontra exited immediately (exit code N)" says why.
 
 With those in place, the next full pass will name the cause.
+
+## Verifier finding (2026-11-06 20:15) — W2, W3, W4 verified and merged (w24-gates @ 10df080); W1 blocked on a permission question for the user
+
+**W2–W4 came from an implementer agent** the verifier dispatched (branch `w24-gates`). Every claim below was re-run by the verifier in its own worktree at `10df080`, swapping one file at a time.
+
+- **W2(1) `test_spac_amounts_injector.py`.** New code: passes. With `builtin_spac_widthaware.py` from `80e96e8`: FAILS. H at the wide corner moves the advance by −360 where the export writes −362; n by −304 where the export writes −302.
+- **W2(2) the rotated-component test.** New code: passes.
+  - With `sources_export.py` from `2c7d067`: FAILS (`assert 700 == 800`).
+  - With only the offset copied from the first master (the verifier's one-line mutation): FAILS (`assert 180.0 == 280`).
+- **W3 Fontra.**
+  - Fontra's stdout and stderr go to `fontra.log` in the studio's workdir, and both launch errors quote its tail.
+  - The probe prints the error body on HTTPError.
+  - With `server.py` from `abcfe7d`, the new tests FAIL (the error carries no stderr).
+  - A real defect was fixed on the way: on a bind timeout the launcher called `_stop_fontra()`, which only stops the *registered* process. The slow Fontra was left holding the port, so the next launch would exit with "Address already in use". That is a credible cause of the intermittent 500 under load, but it is NOT yet confirmed: the next full pass will show the log.
+- **W4 `roundtrip_compare.py --negative-control`.** On the rt-coincide4 fonts: original 0, re-saved 0, shifted 1 (six checks, all on g). The control itself exits 0. It runs the real `main()`.
+- **CI on `10df080`** (run 42222777708): python × 2, frontend and cli-build green. The rust jobs are still red on the SPAC oracle, which is W1.
+- **Note:** commits `3568a02` and `8c40ee5` were made in the implementer's worktree by another session (19:55:19). The content is the implementer's; the verifier checked the tip.
+
+**W1 (the Rust port) is BLOCKED.** Two implementer agents stopped because their Read tool calls were declined in the user's name. The first had made a full code analysis and no edits; the second stopped within a minute. The verifier has asked the user how to proceed and will not restart W1 without the answer. The worktree `~/Documents/avar2-studio-w1` (branch `w1-spac-e2ic`) is clean at `dbe37c0`.
