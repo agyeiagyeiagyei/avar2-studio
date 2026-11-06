@@ -2816,3 +2816,24 @@ So this is transient, almost certainly the launcher's ~5 s bind wait under load.
 **Two small asks** (no swallowed errors):
 - `open_control_axis_in_editor` returns the exception only in the JSON. Log it in the server log too: the 500 left no trace there.
 - Lengthen the ~5 s bind wait, or make it configurable, so a loaded machine does not turn into a 500.
+
+## Verifier finding (2026-11-06 18:06) — the merged branch is RED in CI: the Rust SPAC oracle fails since the merge; ~113 MB of artifacts sit in the branch history
+
+**CI on the merged tip is red.** e012db3 and 9bc3068: `rust (ubuntu-latest)` and `rust (macos-latest)` FAIL in `wasm/fontc-web/tests/spac_oracle.rs::spac_matches_studio_oracle`, at line 113, "oracle comparison failed". The jobs python × 2, frontend and cli-build pass.
+- The "only one SPAC transform" line and the wasm-bindgen panic come from the deliberate `TRANSFORMS_BOTH` case (`let _ = …`) and are noise. The failing assert is the comparator (`spike/compare_spac.py`). It checks the Rust/wasm injector against the studio's REAL `WidthAwareSpacTransform`.
+- Before the merge the rust jobs PASSED (4b24971, 2251e70).
+- **Hypothesis, to confirm with the comparator's own output:** E2i-c changed the Python transform (per-master amounts, integer rounding, the native injector declined), but the Rust injector in `wasm/fontc-web/src/spac.rs` still applies the old constant amount. The static (GitHub Pages) app's in-browser SPAC then no longer matches the studio.
+- **Fix at the root:** port E2i-c's amounts to `spac.rs` (fontc's own variation model is in that tree) until the oracle passes. Do NOT loosen or skip the oracle. If the port is out of scope for this sprint, set STATE: awaiting user decision, with the choice: the static app keeps the old rule and shows a note, or it drops SPAC until ported.
+- "Suite 701 passed" in ROUND 40 is the Python suite only. CI green means every job.
+
+**The pre-merge red, for the record.** From 11-05 ~18:30 to the merge, every cleanup-2026-10 run failed `cli-build` with `build failed: (('RegionAxisCount', 7, 6), 0, 'Region[]', 'VarRegionList', 'VarStore')`. That is the avar/VarStore axis-count defect class, red in CI for about a day without anyone noticing. The merged tip passes `cli-build`. Name the commit that fixed it, so it is not luck.
+
+**The history.** e012db3 untracks ~113 MB that the branch COMMITTED on 11-05 (04cc018, 431524e, aec81b9, c606e25):
+- two 42 MB sources zips;
+- three ~10 MB TTFs;
+- an 8.9 MB TTF;
+- logs.
+
+They stay in the branch history. A normal merge into main would carry them there for good. History rewrite is ruled out, so the main merge should be a SQUASH merge. That is the user's call at merge time. Recorded here so it is not missed.
+
+**Automated pass for e012db3:** stopped by the verifier at 18:0x. It was premature (four items open in NEXT) and the disk had filled up (473 MB free). The verifier removed its own old clones and builds (now 5.9 GB free). The pass reruns on the next checkpoint HEAD.
