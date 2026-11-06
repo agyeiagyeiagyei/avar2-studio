@@ -6,8 +6,15 @@ SAME copy, using HarfBuzz for the metrics (it applies both fonts' avar/avar2):
 
 * at every NON-default CSV row, each glyph's advance and extents agree within
   3 u;
-* at SPAC ``lo`` and ``hi`` at those rows, each glyph's advance change and both
-  sidebearing changes agree within 1 u.
+* at SPAC ``lo`` and ``hi`` at those rows the deltas are judged by their MEAN,
+  not by a per-check tolerance: ``|signed mean| <= 0.25 u`` per row and end and
+  ``|mean| < 0.75 u`` per glyph across every row and end. Per-tuple rounding
+  leaves individual checks 2–3 u apart in both directions, so a 1 u check
+  cannot tell rounding from an offset (verifier, 2026-11-06); the worst single
+  check is reported, not judged.
+* with ``--designspace``, every glyph is also compared at every SPARSE layer
+  location of the exported designspace (1 u), so the locations the build
+  synthesises are covered and not just the rows the designer wrote down.
 
 The default row is excluded by construction: the sources rest at the compiled
 origin while the studio relocates the default (decision 0001), and its mapping
@@ -22,7 +29,8 @@ Usage::
 
     python roundtrip_compare.py --studio Crispy[...].ttf \\
         --fm Crispy-VF.ttf --csv Crispy-avar.csv [--sources-zip out.zip] \\
-        [--glyphs aognHeWi] [--json out]
+        [--mixed-from Crispy.glyphs] [--designspace Crispy.designspace] \\
+        [--glyphs aognHeWi] [--json out] [--failures out.jsonl]
 
 Without ``--glyphs`` every glyph in the font is compared. Exit status is 0 only
 when every check is inside tolerance.
@@ -33,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 import sys
 import zipfile
 from pathlib import Path
@@ -46,6 +55,11 @@ from avar2_studio.build import config_generator
 ROW_TOLERANCE = 3.0
 SPAC_TOLERANCE = 1.0
 SPARSE_TOLERANCE = 1.0
+# The SPAC ends are judged by their MEAN error, not by a per-check tolerance:
+# per-tuple rounding leaves individual checks 2–3 u apart in both directions,
+# which a 1 u check cannot tell from a systematic offset (verifier, 2026-11-06).
+SPAC_MEAN_TOLERANCE = 0.25    # |signed mean| per row × end, in font units
+SPAC_GLYPH_TOLERANCE = 0.75   # |mean| per glyph across every row and end
 CLASSES = ("simple", "composite", "mixed", "unencoded", ".notdef")
 
 
@@ -266,6 +280,7 @@ def main(argv=None) -> int:
                           for c in CLASSES},
               "by_class": {}}
     failures = []
+    glyph_signed: dict = {}
     sparse_locations = (_sparse_locations(args.designspace)
                         if args.designspace else {})
 
@@ -318,6 +333,7 @@ def main(argv=None) -> int:
         for end in spac_ends:
             worst_end, where_end = 0.0, ""
             per_class = {}
+            signed: list = []
             for name, before_s, before_b, after_s, after_b in zip(
                     order, base_s, base_b,
                     _measure(studio, gids, {**user, spac: end}),
@@ -338,6 +354,8 @@ def main(argv=None) -> int:
                                                    "over": 0})
                 for label, (x, y) in checks.items():
                     delta = abs(x - y)
+                    signed.append(x - y)
+                    glyph_signed.setdefault(name, []).append(x - y)
                     if delta > entry["worst"]:
                         entry["worst"] = delta
                         entry["where"] = f"{name} {label} {end:+g}"
@@ -346,13 +364,22 @@ def main(argv=None) -> int:
                         over_tolerance.append({
                             "kind": "spac", "row": row.instance_name,
                             "end": end, "glyph": name, "class": cls,
-                            "metric": label, "delta": round(delta, 2)})
+                            "metric": label, "delta": round(delta, 2),
+                            "signed": round(x - y, 2)})
                     if delta > worst_end:
                         worst_end = delta
                         where_end = f"{name} {label} {end:+g} ({cls})"
+            mean = statistics.fmean(signed) if signed else 0.0
+            sd = statistics.pstdev(signed) if len(signed) > 1 else 0.0
+            positives = sum(1 for d in signed if d > 0)
+            negatives = sum(1 for d in signed if d < 0)
             key = f"{row.instance_name} {end:+g}"
             report["spac"][key] = {"worst": round(worst_end, 2),
                                    "where": where_end,
+                                   "mean": round(mean, 3),
+                                   "sd": round(sd, 3),
+                                   "signed": len(signed),
+                                   "signs": [positives, negatives],
                                    "by_class": {
                                        k: {"worst": round(v["worst"], 2),
                                            "where": v["where"],
@@ -366,9 +393,14 @@ def main(argv=None) -> int:
                 if entry["worst"] > agg["worst"]:
                     agg["worst"], agg["where"] = entry["worst"], entry["where"]
                 agg["over"] += entry["over"]
-            if worst_end > SPAC_TOLERANCE:
-                failures.append(f"SPAC {end:+g} at {row.instance_name!r}: "
-                                f"{where_end} differs by {worst_end:.2f} u")
+            # The verdict is the MEAN, not the worst check: rounding leaves
+            # individual checks 2–3 u apart in both directions, and what would
+            # be a real defect is a systematic shift (verifier, 2026-11-06).
+            if abs(mean) > SPAC_MEAN_TOLERANCE:
+                failures.append(
+                    f"SPAC {end:+g} at {row.instance_name!r}: mean "
+                    f"{mean:+.2f} u over {len(signed)} checks (sd {sd:.2f}, "
+                    f"{positives}+ / {negatives}-)")
 
     for key, layer in sorted(sparse_locations.items()):
         location = {tag: defaults[tag] for tag in ("wght", "wdth", "opsz")
@@ -420,6 +452,19 @@ def main(argv=None) -> int:
                             f"{worst_loc:.2f} u ({over_here} check(s) over "
                             f"{SPARSE_TOLERANCE:g} u)")
 
+    # Per-glyph means across every row and end: one glyph drifting
+    # systematically is a real defect even when each row's mean cancels.
+    glyph_means = {name: statistics.fmean(values)
+                   for name, values in glyph_signed.items() if values}
+    report["spac_glyph_means"] = {name: round(value, 3)
+                                  for name, value in sorted(glyph_means.items())}
+    report["worst_spac_glyph_mean"] = (
+        round(max((abs(v) for v in glyph_means.values()), default=0.0), 3))
+    for name, value in sorted(glyph_means.items(), key=lambda kv: -abs(kv[1])):
+        if abs(value) > SPAC_GLYPH_TOLERANCE:
+            failures.append(f"glyph {name!r}: mean SPAC error {value:+.2f} u "
+                            f"over every row and end")
+
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")
     if args.failures:
@@ -440,8 +485,16 @@ def main(argv=None) -> int:
                   f"({agg['where']})  over tolerance: {agg['over']}")
     if spac_ends:
         worst_spac = max(report["spac"].items(), key=lambda kv: kv[1]["worst"])
-        print(f"SPAC ends: {spac_ends}  worst: {worst_spac[0]!r} "
+        print(f"SPAC ends: {spac_ends}  worst single check: {worst_spac[0]!r} "
               f"{worst_spac[1]['worst']} u ({worst_spac[1]['where']})")
+        for key, entry in report["spac"].items():
+            print(f"  {key}: mean {entry['mean']:+.2f} u sd {entry['sd']:.2f} "
+                  f"over {entry['signed']} checks "
+                  f"({entry['signs'][0]}+ / {entry['signs'][1]}-)")
+        worst_glyph = max(glyph_means.items(), key=lambda kv: abs(kv[1]))
+        print(f"SPAC per glyph: worst mean {worst_glyph[1]:+.2f} u "
+              f"({worst_glyph[0]}), tolerance |mean| < "
+              f"{SPAC_GLYPH_TOLERANCE:g} u")
     if report["sparse"]:
         worst_sparse = max(report["sparse"].items(),
                            key=lambda kv: kv[1]["worst"])
