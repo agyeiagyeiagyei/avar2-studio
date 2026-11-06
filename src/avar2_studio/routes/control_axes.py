@@ -235,6 +235,10 @@ def open_control_axis_in_editor(tag: str):
         # nothing is broken, an optional extra is missing).
         return jsonify({"error": str(exc), "optional_dependency": "fontra"}), 503
     except Exception as exc:
+        # The 500 used to leave no trace in the server log, so an intermittent
+        # failure (2 of 2 full verifier passes, never on replay) was invisible
+        # (verifier, 2026-11-06 19:01). Log it with the traceback.
+        log.exception("control-axis: could not start Fontra for %s", target_path)
         return jsonify({"error": f"Failed to start Fontra: {exc}"}), 500
 
     project = target_path.name  # e.g. "CrispyMini.glyphs"

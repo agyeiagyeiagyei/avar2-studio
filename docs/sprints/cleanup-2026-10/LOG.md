@@ -3843,3 +3843,45 @@ and an assertion on the outline's xMin.
 perturbation is, and one like it should live in the sprint.
 4. Control-axis: log the `open_control_axis_in_editor` exception server-side,
 and lengthen or make configurable the ~5 s Fontra bind wait.
+
+## ROUND 41 — the avar backstop can no longer crash; the control-axis 500 is logged
+
+Checkpoint `e012db3` was NOT approved. Two of the four items are done; both are
+on `cleanup-2026-10`.
+
+**1. The avar repair survives an avar2 font (verifier, 18:12).** The backstop
+added segment maps and recompiled; on an avar 2 font the table's VarStore regions
+still carried the old axis count, `VarRegionList.preWrite` wrote the new one, and
+compile raised `(('RegionAxisCount', 7, 6), …, 'VarRegionList', 'VarStore')`.
+cli-build was red on that from 11-05 21:35 until the merge. The repair now
+**extends every region with a neutral (0, 0, 0) entry** per new axis and sets
+`RegionAxisCount` to the fvar count, so the one time the backstop is needed it
+saves the build instead of failing it.
+
+New test `tests/test_avar_repair_avar2.py`: an avar 2 font, an fvar axis appended
+without touching avar, then the repair — asserting the font compiles, the raw
+axisCount equals fvar, and every region has one entry per axis. **Proved to fail
+on the old behaviour**: with the region block disabled the test dies in
+`otBase` on the same VarStore assertion, and passes with it.
+
+**2. The control-axis 500 is logged (verifier, 19:01).** `open_control_axis_in_
+editor` returned `"Failed to start Fontra: {exc}"` and left the server log empty,
+so an intermittent failure (2 of 2 full passes, never on replay) was invisible.
+It now calls `log.exception` with the traceback before the 500.
+
+`ruff` clean; `tests/test_avar_repair_avar2.py` + `tests/test_transforms.py` 9
+passed.
+
+**Not done, with the reason:**
+- **The Rust SPAC oracle (18:06).** Porting E2i-c's per-master amounts to
+  `wasm/fontc-web/src/spac.rs` is a fontc-tree job the oracle must keep judging;
+  it is out of scope for what is left of this pass. STATE stays `working`, and
+  the choice the verifier framed is with the user: the static app keeps the old
+  constant rule and says so, or it drops SPAC until the port lands.
+- **The two tests that still pass on the old code (17:14).** The amounts fixture
+  needs H to widen without moving its bbox's left edge — the hand-built
+  `GlyphCoordinates` in the fixture moved `xMin` with the right-hand points, so
+  the measured ink never changed and the injector wrote the base amount. The
+  rotated-component fixture needs nine's advance and offset to differ per master,
+  the layer strictly between the masters, and an `xMin` assertion. Both are
+  fixture rebuilds, not logic.

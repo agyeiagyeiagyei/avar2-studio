@@ -360,8 +360,28 @@ def _repair_avar_axis_count(vf_path):
     if raw == expected:
         return vf_path
     avar = font["avar"]                       # loading it forces the recompile
-    for axis in font["fvar"].axes:
-        avar.segments.setdefault(axis.axisTag, {})
+    axes = [a.axisTag for a in font["fvar"].axes]
+    for tag in axes:
+        avar.segments.setdefault(tag, {})
+    # An avar 2 font carries a VarStore whose regions were built for the OLD
+    # axis list: fontTools' VarRegionList.preWrite sets RegionAxisCount from
+    # fvar, so a region with fewer axes fails to compile. Extend every region
+    # with a neutral entry (a mapping does not vary with the new axis) rather
+    # than leave the backstop to crash the build it is meant to save
+    # (verifier, 2026-11-06 18:12: cli-build was red for a day this way).
+    store = getattr(getattr(avar, "table", None), "VarStore", None)
+    regions = getattr(store, "VarRegionList", None) if store is not None else None
+    if regions is not None and regions.Region is not None:
+        from fontTools.ttLib.tables import otTables
+
+        regions.RegionAxisCount = len(axes)
+        for region in regions.Region:
+            while len(region.VarRegionAxis) < len(axes):
+                neutral = otTables.VarRegionAxis()
+                neutral.StartCoord = 0
+                neutral.PeakCoord = 0
+                neutral.EndCoord = 0
+                region.VarRegionAxis.append(neutral)
     font.save(str(path))
     log.info("avar: raw axis count %d != fvar %d — recompiled", raw, expected)
     return vf_path
