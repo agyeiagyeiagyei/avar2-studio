@@ -6,6 +6,14 @@
 //!
 //! Fixtures come from tests/common (generated from examples/crispy-mini;
 //! $AVAR2_SPIKE_FONT / $AVAR2_CSV / $AVAR2_PYTHON override).
+//!
+//! The width-aware amount is computed per MASTER (E2i-c), so the two
+//! `…_at_the_masters` tests give both injectors the same explicit master
+//! locations and compare at every master corner
+//! (spike/compare_spac_masters.py): on CrispyMini with the locations the
+//! studio's pipeline reads from its source, and on a synthetic font
+//! (spike/make_spac_masters_fixture.py) built to take every branch of the
+//! rule. A constant amount per glyph fails both.
 
 use std::path::Path;
 use std::process::Command;
@@ -111,4 +119,73 @@ fn spac_matches_studio_oracle() {
         .status()
         .expect("run comparator");
     assert!(status.success(), "oracle comparison failed");
+}
+
+/// Width-aware with the caller's master locations, as the studio's
+/// pipeline (and the static app) sends it.
+fn transforms_with_masters(params: &str, locations_json: &str) -> String {
+    format!(
+        r#"[{{"type":"spac_widthaware","enabled":true,"params":{{{params},"master_locations":{locations_json}}}}}]"#
+    )
+}
+
+/// Inject with the Rust engine and hold the result against the real
+/// transform at every master corner.
+fn compare_at_the_masters(label: &str, input: &Path, transforms: &str) {
+    let tmp = common::tmp_dir();
+    let out = fontc_web::apply_transforms(std::fs::read(input).expect("read input font"), transforms, "")
+        .expect("width-aware SPAC with master locations");
+    let out_path = tmp.join(format!("spac-masters-{label}.ttf"));
+    let transforms_path = tmp.join(format!("spac-masters-{label}.json"));
+    std::fs::write(&out_path, &out).expect("write injector output");
+    std::fs::write(&transforms_path, transforms).expect("write transforms json");
+    let comparator = Path::new(env!("CARGO_MANIFEST_DIR")).join("spike/compare_spac_masters.py");
+    let status = Command::new(common::python())
+        .arg(comparator)
+        .arg(input)
+        .arg(&out_path)
+        .arg(&transforms_path)
+        .status()
+        .expect("run comparator");
+    assert!(status.success(), "oracle comparison at the masters failed ({label})");
+}
+
+/// CrispyMini with the master locations the studio's own pipeline reads
+/// from the source — the real path, end to end.
+#[test]
+fn spac_matches_studio_oracle_at_the_masters() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(common::python())
+        .arg(manifest.join("spike/master_locations.py"))
+        .arg(manifest.join("../../examples/crispy-mini/sources/CrispyMini.glyphs"))
+        .output()
+        .expect("run spike/master_locations.py");
+    assert!(
+        output.status.success(),
+        "spike/master_locations.py failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let locations = String::from_utf8(output.stdout).expect("master locations JSON");
+    assert!(locations.trim().starts_with("[{}"), "the pipeline found no masters: {locations}");
+    let transforms = transforms_with_masters(
+        r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#,
+        locations.trim(),
+    );
+    compare_at_the_masters("crispymini", &common::spike_font(), &transforms);
+}
+
+/// The synthetic multi-master font: a negative side, an interior master
+/// behind avar, a location between masters, the floor, a zero advance,
+/// curve extremes, composites — with HVAR and without, and off the
+/// default bias.
+#[test]
+fn spac_matches_studio_oracle_on_the_masters_fixture() {
+    for (label, hvar, params) in [
+        ("fixture", true, r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#),
+        ("fixture-nohvar", false, r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#),
+        ("fixture-bias", true, r#""min":-60,"max":40,"bias":1.5,"scale":0.8"#),
+    ] {
+        let (font, locations) = common::spac_masters_fixture(label, hvar);
+        compare_at_the_masters(label, &font, &transforms_with_masters(params, &locations));
+    }
 }

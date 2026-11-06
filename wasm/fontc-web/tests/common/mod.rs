@@ -75,3 +75,24 @@ pub fn oracle_font(spike: &Path, csv: &Path) -> PathBuf {
     assert!(status.success(), "spike/build_oracle.py failed");
     out
 }
+
+/// The synthetic multi-master SPAC fixture
+/// (spike/make_spac_masters_fixture.py), as
+/// target/tmp/spac-masters-<label>-input.ttf, and its master locations
+/// (user space) as a JSON string. `hvar: false` drops HVAR.
+pub fn spac_masters_fixture(label: &str, hvar: bool) -> (PathBuf, String) {
+    let font = tmp_dir().join(format!("spac-masters-{label}-input.ttf"));
+    let locations = tmp_dir().join(format!("spac-masters-{label}-locations.json"));
+    let mut command = Command::new(python());
+    command
+        .arg(manifest().join("spike/make_spac_masters_fixture.py"))
+        .arg(&font)
+        .arg(&locations);
+    if !hvar {
+        command.arg("--no-hvar");
+    }
+    let status = command.status().expect("run spike/make_spac_masters_fixture.py");
+    assert!(status.success(), "spike/make_spac_masters_fixture.py failed");
+    let locations = std::fs::read_to_string(&locations).expect("read master locations");
+    (font, locations)
+}

@@ -292,6 +292,52 @@ fn default_master_idx(root: &Dict, masters: &[MasterInfo]) -> usize {
     0
 }
 
+/// The master grid the width-aware SPAC transform scales against, as the
+/// desktop pipeline reads it from the source (pipeline.py
+/// `_master_locations`): `[{}, {tag: value, …}, …]` — the default as `{}`,
+/// then each master's own axis values on the axes some master moves off
+/// the default master's — or `null` when no axis varies. The static app
+/// hands it to `apply_transforms` as `params.master_locations`.
+pub(crate) fn master_locations(source: &str) -> Result<String, JsError> {
+    let plist = Plist::parse(source).map_err(|e| err(format!("could not parse .glyphs: {e}")))?;
+    let root = plist
+        .as_dict()
+        .ok_or_else(|| err(".glyphs root is not a dictionary"))?;
+    let axes = font_axes(root)?;
+    let masters = font_masters(root)?;
+    if masters.is_empty() {
+        return Err(err("no fontMaster entries"));
+    }
+    let value = |m: &MasterInfo, i: usize| m.values.get(i).copied().unwrap_or(0.0);
+    let default = &masters[default_master_idx(root, &masters)];
+    let varying: Vec<usize> = (0..axes.len())
+        .filter(|&i| masters.iter().any(|m| (value(m, i) - value(default, i)).abs() > 1e-9))
+        .collect();
+    let mut corners: Vec<Vec<f64>> = Vec::new();
+    for m in &masters {
+        let location: Vec<f64> = varying.iter().map(|&i| value(m, i)).collect();
+        if !location.is_empty() && !corners.contains(&location) {
+            corners.push(location);
+        }
+    }
+    if corners.is_empty() {
+        return Ok("null".to_string());
+    }
+    // Written by hand: the keys stay in axis order (serde_json sorts maps),
+    // which is the order the reference multiplies the axes' scalars in.
+    let mut out = String::from("[{}");
+    for location in &corners {
+        let items: Vec<String> = varying
+            .iter()
+            .zip(location)
+            .map(|(&i, v)| format!("{}:{}", serde_json::json!(axes[i].tag), serde_json::json!(v)))
+            .collect();
+        out.push_str(&format!(",{{{}}}", items.join(",")));
+    }
+    out.push(']');
+    Ok(out)
+}
+
 /// (axis name, location) pairs from "Virtual Master" custom parameters —
 /// they extend the axis ranges fontc derives (glyphs2fontir ir_axes).
 fn virtual_master_locations(root: &Dict) -> Vec<(String, f64)> {

@@ -143,6 +143,15 @@ pub fn apply_transforms(
     spac::apply_transforms(font_bytes, transforms_json)
 }
 
+/// A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+/// or `null` when no axis varies) — what the width-aware SPAC transform
+/// needs as `params.master_locations`, read the way the desktop pipeline
+/// reads it (editor.rs `master_locations`).
+#[wasm_bindgen]
+pub fn master_locations(source: String) -> Result<String, JsError> {
+    editor::master_locations(&source)
+}
+
 /// Test instrumentation for the SPAC oracle (not part of the wasm ABI):
 /// what the width-aware injector measures, as JSON — see
 /// `spac::widthaware_trace`.
