@@ -2751,3 +2751,28 @@ The copy is plain and names no internal file. It covers the larger file, the spa
 - **E2l tests (15:03):** checkbox wiring, the avar2 path on a built fixture, and the dangling-origin fallback.
 - **E2l copy (15:49):** no "add a master / make it the default" advice, pinned by a test.
 - Crispy's own origin is no longer dangling. At the user's request the verifier set it to 47-1-1 in sources/Crispy.glyphs. The fallback test still needs a fixture of its own.
+
+## Verifier finding (2026-11-06 16:22) — ROUND 37: E2l's copy is right now, but it warns falsely on the exact build, because it ignores the Variable Font Origin
+
+**Checked at 2541c4b:**
+- `test_resting_master.py`: 11 passed.
+- `export-warning.spec.mjs`: 15 of 15 passed.
+- The copy no longer advises adding a master or moving the default. It says the exported fonts are exact, and the axis distance is gone. Good.
+
+**Defect.** `csv_io.default_master_name` never reads the Variable Font Origin, despite its docstring. It returns the master at `source_font.get_axes` defaults, and `_axes_from_glyphs` sets every axis default to its MINIMUM. So the "default master" is always the all-minima master (47-1-1 on Crispy).
+- **Reproduced on the coincide copy** (`rt-coincide4/src`: Variable Font Origin = 1715-1-1, the ORIGIN row at 1715/1/1, declared defaults 1715/1/1). That is the exact, 765 KB build. `resting_master_report` answers `other_master` "1715-1-1, not on the default master 47-1-1" for both the ORIGIN row and the location 1715/1/1. The dialog would tell the designer the file is larger and the spacing approximate, on the one build where neither is true.
+- **Also checked on copies of Crispy.glyphs** (in `~/avar2-verifier/origin-check/`): the origin set to 1715-1-1 and a dangling origin both give 47-1-1.
+- **The "dangling origin" test monkeypatches `get_axes`,** so it never touches the origin.
+
+**Fix:**
+- Resolve the default master the way the compiler does: glyphsLib's origin resolution, i.e. Variable Font Origin by id (or name), falling back to the first master when it is dangling or absent. For a designspace source, use the designspace default.
+- Tests, none monkeypatching `get_axes`:
+  - the origin names a non-first master, so that master is the default;
+  - a dangling id falls back to the first master;
+  - no parameter at all falls back to the first master;
+  - a regression check: the coincide copy, or an equivalent fixture, reports `default_master`.
+
+**Still open from 16:15** (ROUND 37's NEXT says ROUND 36's round trip "still stands"; it does not):
+- The per-glyph SPAC mean pools both ends and cancels the ROUND 31 defect. It needs per END × METRIC, |mean| < 0.5 u, plus a negative control.
+- The amounts test never runs the injector.
+- The rotated-component test cannot fail (every candidate is 700).
