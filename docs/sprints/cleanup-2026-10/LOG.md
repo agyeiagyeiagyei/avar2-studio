@@ -3578,3 +3578,44 @@ Round-trip acceptance is unchanged: rows **0.00 u**, simple 2.0, composite 2.0,
 mixed 1.0, unencoded 1.0, `.notdef` **0.00**. Studio TTF **765,776 B** (the
 sparse layers only affect the exported sources), avar 12/12, 28 regions. Suite
 **674 passed, 5 skipped**; `ruff` clean.
+
+## ROUND 34 (measurement) — the off-master corner grid does not fit: the build fails
+
+The verifier's 18:16 note asked for the cost before shipping the grid: 79 corners
+besides the base, 158 SPAC tuples per glyph against 18 then / 20 now. Measured on
+the real (off-master) Crispy preview font, injector run through the pinned
+worktree, `~/avar2-agent/grid_cost_probe.py`, artifacts in
+`test-output/grid-cost/`.
+
+The grid is the product of every master coordinate **plus the relocated default**
+per parametric axis — XTRA {47, 663.1, 1571, 1715} × XOPQ {1, 202.5, 350, 700,
+1462} × YOPQ {1, 121.8, 255, 275} — exactly the sets in the verifier's model
+test, 80 corners with the base.
+
+| corners | SPAC tuples on `g` | `g` tuple headers | over 65,535 | build |
+|---|---|---|---|---|
+| 9 (the designspace masters, shipped) | 20 | **62,068 B** | 0 | ok, 10,563,072 B |
+| 37 (the transformed twins' masters) | 74 | 63,148 B | 0 | ok, 10,862,140 B, 25 s, RSS 782 MB |
+| **80 (the grid + base)** | **160** | **69,252 B** | **4 glyphs** | **FAILS** |
+
+`font.save()` raises `OverflowError: int too big to convert` in
+`_g_v_a_r.compileGlyph_`: gvar addresses a glyph's **tuple headers** with
+`gid_size` bytes (2 below 65,536 glyphs), so `2 + gid_size + len(tuple headers)`
+must stay under 65,536. Under the grid four glyphs exceed it — `g` 69,252 B,
+`e` 67,204, `Z` 67,080, `z` 65,624 — and the injector's own guard turns that into
+"this font's per-glyph variation data is at gvar's 64KB ceiling". The ceiling is
+**tuple headers, not outlines**: each SPAC tuple costs ~45–54 B of header here
+because its support carries the parametric axes as well.
+
+Headroom today is **3,467 B** on `g` — about 70 SPAC tuples, i.e. ~35 corners,
+so a *partial* grid buys almost nothing: the 36 master corners already spend it.
+The relocation and the slant/rounding twins own the rest (decision 0004: 1,494
+tuples on `g` before SPAC).
+
+**State: awaiting user decision.** Exact off-master preview (the grid) needs room
+made elsewhere — the injector's own message suggests dropping the slant or
+rounding twins from the preview, which changes what the preview shows — or the
+preview keeps today's 9-master model and is approximate between masters (the
+verifier's model test: up to 128 u at random points). The exported sources are
+exact either way; this is a preview-fidelity choice, and E2l's warning is the
+user-facing half of it.
