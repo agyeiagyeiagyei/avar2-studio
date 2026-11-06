@@ -58,14 +58,16 @@ def post_resting_master():
                     if raw else None)
     except (AttributeError, TypeError, ValueError):
         return jsonify({"error": "location must map axis tags to numbers"}), 400
-    if location:
+    if location and state.VARIABLE_FONT_PATH is not None:
         # The preview speaks USER axes (wght/wdth/opsz); the master grid is
         # parametric, so map through the built font's avar2 first — the same
-        # evaluation the sliders use.
+        # evaluation the sliders use. Without a built font the caller's
+        # location is taken as it stands (unit tests, early startup).
         try:
-            location = {str(tag): float(value)
-                        for tag, value in
-                        server._evaluate_mapped_location(location).items()}
+            mapped = server._evaluate_mapped_location(location)
+            if mapped:
+                location = {str(tag): float(value)
+                            for tag, value in mapped.items()}
         except Exception as e:
             log.info(f"resting master: mapping skipped ({e})")
     source = state.ORIGINAL_PATH
