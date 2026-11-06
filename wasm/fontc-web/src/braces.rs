@@ -467,6 +467,10 @@ pub(crate) struct GrowOptions<'a> {
     /// patched gvar's phantom deltas; padding alone wouldn't carry the
     /// new advance deltas).
     pub hvar_bytes: Option<Vec<u8>>,
+    /// Injected peaks used by more than one tuple go into gvar's shared
+    /// tuples (see `patch_gvar`). The width-aware SPAC writes the same
+    /// eighteen-odd peaks on every glyph.
+    pub share_peaks: bool,
 }
 
 /// Append `new_axes` to fvar (+ name records, instance coordinate
@@ -561,7 +565,7 @@ pub(crate) fn build_grown_font(
 
     // ---- gvar + VarStore tables -----------------------------------------
     let gvar_bytes = match font.data_for_tag(TAG_GVAR) {
-        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &extras)?),
+        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &extras, options.share_peaks)?),
         None => {
             if !extras.is_empty() {
                 return Err(err("font has no gvar table (not a variable font?)"));

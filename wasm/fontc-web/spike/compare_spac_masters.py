@@ -14,7 +14,8 @@ the Rust injector got — `params.master_locations` of TRANSFORMS, which is
      regions, the same deltas on the same points (every other point
      untouched), and the font's own tuples left as they were;
   3. each SPAC tuple's BYTES against fontTools' `TupleVariation.compile`
-     of the reference's tuple (embedded peak, private point numbers);
+     of the reference's tuple (private point numbers; the peak by its index
+     in gvar's shared tuples, which must hold the reference's peak);
   4. advances at EVERY master corner x SPAC {min, 0, max}, read both ways
      a renderer can: from the gvar phantom points and from HVAR;
   5. that the fixture can tell the rules apart: some glyph's SPAC change
@@ -132,6 +133,13 @@ def packed_points_len(data, pos):
     return pos - start
 
 
+def raw_shared_tuples(gvar):
+    """gvar's shared tuples, each as its raw coordinate bytes."""
+    axis_count, count, offset = struct.unpack(">HHL", gvar[4:12])
+    size = 2 * axis_count
+    return [gvar[offset + i * size: offset + (i + 1) * size] for i in range(count)]
+
+
 def raw_glyph_tuples(gvar, gid):
     """[(header bytes, data bytes)] of one glyph's tuples, from the raw table."""
     axis_count, = struct.unpack(">H", gvar[4:6])
@@ -165,8 +173,9 @@ def check_tuples(input_path, rust_path, oracle_path):
     order = oracle.getGlyphOrder()
     axis_tags = [a.axisTag for a in oracle["fvar"].axes]
     rust_gvar, oracle_gvar = raw_table(rust_path, "gvar"), raw_table(oracle_path, "gvar")
+    shared_tuples = raw_shared_tuples(rust_gvar)
     count_diffs, tuple_diffs, byte_diffs, disturbed = [], [], [], []
-    total = rust_bytes = oracle_bytes = 0
+    total = shared = rust_bytes = oracle_bytes = 0
     for gid, glyph in enumerate(order):
         mine, theirs = spac_tuples(rust, glyph), spac_tuples(oracle, glyph)
         total += len(theirs)
@@ -183,7 +192,19 @@ def check_tuples(input_path, rust_path, oracle_path):
         rust_bytes += size
         oracle_bytes += raw_glyph_tuples(oracle_gvar, gid)[1]
         for index, (reference, written) in enumerate(zip(theirs, raw[len(raw) - len(theirs):])):
-            if tuple(bytes(b) for b in reference.compile(axis_tags)) != written:
+            # A header without the embedded-peak flag names a shared tuple:
+            # hand fontTools that index for this peak, and it must be the
+            # peak stored there.
+            (flags,) = struct.unpack(">H", written[0][2:4])
+            sharing = {}
+            if not flags & 0x8000:
+                peak = reference.compileCoord(axis_tags)
+                if shared_tuples[flags & 0x0FFF] != peak:
+                    byte_diffs.append((glyph, index, "shared peak"))
+                    continue
+                sharing = {peak: flags & 0x0FFF}
+                shared += 1
+            if tuple(bytes(b) for b in reference.compile(axis_tags, sharing)) != written:
                 byte_diffs.append((glyph, index))
     ok(not count_diffs, f"SPAC tuple count per glyph matches the reference "
                         f"({len(count_diffs)} differ: {count_diffs[:5]})")
@@ -193,8 +214,9 @@ def check_tuples(input_path, rust_path, oracle_path):
     ok(not byte_diffs, f"each SPAC tuple's bytes = fontTools' compile of the reference's "
                        f"({len(byte_diffs)} differ: {byte_diffs[:5]})")
     ok(total > 0, f"the reference wrote SPAC tuples ({total} over {len(order)} glyphs)")
-    print(f"     gvar glyph data: Rust {rust_bytes} B (tuples spliced in), "
-          f"reference {oracle_bytes} B (fontTools recompiles the table)")
+    print(f"     {shared} of {total} SPAC tuples name a shared peak; gvar glyph data: "
+          f"Rust {rust_bytes} B (tuples spliced in), reference {oracle_bytes} B "
+          f"(fontTools recompiles the whole table)")
 
 
 # -- 4./5. advances at the masters ------------------------------------------

@@ -629,7 +629,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
     // equivalent byte-level rewrite (a 0.0 coordinate means the axis does
     // not participate in the tuple).
     let gvar_bytes = match font.data_for_tag(TAG_GVAR) {
-        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &HashMap::new())?),
+        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &HashMap::new(), false)?),
         None => None,
     };
 
@@ -741,6 +741,7 @@ fn repack(font: &FontRef, mut replacements: HashMap<Tag, Vec<u8>>) -> Vec<u8> {
 
 // Tuple variation header flags (gvar / OT TupleVariation).
 const GVAR_TUPLE_COUNT_MASK: u16 = 0x0FFF;
+const GVAR_TUPLE_INDEX_MASK: u16 = 0x0FFF;
 const GVAR_EMBEDDED_PEAK_TUPLE: u16 = 0x8000;
 const GVAR_INTERMEDIATE_REGION: u16 = 0x4000;
 const GVAR_PRIVATE_POINT_NUMBERS: u16 = 0x2000;
@@ -810,11 +811,18 @@ pub(crate) struct NewTuple {
 }
 
 impl NewTuple {
+    /// The peak as gvar stores it: one F2Dot14 per axis (fontTools
+    /// `compileCoord`).
+    fn peak_bytes(&self) -> Vec<u8> {
+        self.peak.iter().flat_map(|&p| (fl2fi(p) as i16).to_be_bytes()).collect()
+    }
+
     /// Serialize as (tuple header, serialized delta data), mirroring
-    /// fontTools `TupleVariation.compile`: embedded peak, private point
-    /// numbers (a single 0 byte = all points, deltas as int16 runs; or
-    /// the packed point list with fontTools' size-optimized delta runs).
-    fn serialize(&self) -> (Vec<u8>, Vec<u8>) {
+    /// fontTools `TupleVariation.compile`: the peak embedded, or named by
+    /// its index among gvar's shared tuples; private point numbers (a
+    /// single 0 byte = all points, deltas as int16 runs; or the packed
+    /// point list with fontTools' size-optimized delta runs).
+    fn serialize(&self, shared_peak: Option<u16>) -> (Vec<u8>, Vec<u8>) {
         let mut aux = Vec::new();
         match &self.points {
             None => {
@@ -835,10 +843,14 @@ impl NewTuple {
             let (s, e) = (self.start[i], self.end[i]);
             (s, e) != (p.min(0.0), p.max(0.0))
         });
-        let mut flags = GVAR_EMBEDDED_PEAK_TUPLE | GVAR_PRIVATE_POINT_NUMBERS;
+        let mut flags = GVAR_PRIVATE_POINT_NUMBERS;
         let mut coords = Vec::with_capacity(self.peak.len() * 2);
-        for &p in &self.peak {
-            coords.extend_from_slice(&(fl2fi(p) as i16).to_be_bytes());
+        match shared_peak {
+            Some(index) => flags |= index,
+            None => {
+                flags |= GVAR_EMBEDDED_PEAK_TUPLE;
+                coords = self.peak_bytes();
+            }
         }
         if intermediate {
             flags |= GVAR_INTERMEDIATE_REGION;
@@ -1030,10 +1042,16 @@ fn be_u32(bytes: &[u8], off: usize, context: &str) -> Result<u32, JsError> {
 /// coordinates for the full (grown) axis list with missing axes at 0.0.
 /// A zero coordinate means the tuple does not participate in that axis,
 /// so glyph variation behavior along the new axes is unchanged.
+///
+/// With `share_peaks`, an injected peak that more than one injected tuple
+/// uses joins gvar's shared tuples (fontTools `compileSharedTuples`: every
+/// coordinate used more than once, most used first), and those tuples'
+/// headers name it by index instead of embedding one coordinate per axis.
 fn patch_gvar(
     bytes: &[u8],
     total_axes: u16,
     extras: &HashMap<u16, Vec<NewTuple>>,
+    share_peaks: bool,
 ) -> Result<Vec<u8>, JsError> {
     if bytes.len() < 20 {
         return Err(gvar_err("header truncated"));
@@ -1068,6 +1086,25 @@ fn patch_gvar(
         };
         glyph_offsets.push(off);
     }
+
+    // The injected peaks to share, after the font's own shared tuples and
+    // within the format's 12-bit tuple index.
+    let mut new_shared: Vec<Vec<u8>> = Vec::new();
+    if share_peaks {
+        let mut uses: HashMap<Vec<u8>, usize> = HashMap::new();
+        for tuple in extras.values().flatten() {
+            *uses.entry(tuple.peak_bytes()).or_default() += 1;
+        }
+        let mut shared: Vec<(Vec<u8>, usize)> = uses.into_iter().filter(|(_, n)| *n > 1).collect();
+        shared.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let room = (GVAR_TUPLE_INDEX_MASK as usize + 1).saturating_sub(shared_count);
+        new_shared = shared.into_iter().take(room).map(|(peak, _)| peak).collect();
+    }
+    let shared_index: HashMap<&[u8], u16> = new_shared
+        .iter()
+        .enumerate()
+        .map(|(i, peak)| (peak.as_slice(), (shared_count + i) as u16))
+        .collect();
 
     // Rebuild each glyph's variation data, padding tuple headers and
     // appending any injected tuples.
@@ -1186,7 +1223,8 @@ fn patch_gvar(
         let mut added_data: Vec<u8> = Vec::new();
         if let Some(tuples) = gid_extras {
             for tuple in tuples {
-                let (header, aux) = tuple.serialize();
+                let shared = shared_index.get(tuple.peak_bytes().as_slice()).copied();
+                let (header, aux) = tuple.serialize(shared);
                 extra_headers.extend_from_slice(&header);
                 added_data.extend_from_slice(&aux);
                 added += 1;
@@ -1293,7 +1331,7 @@ fn patch_gvar(
     // the shared region and the glyph data is preserved. The offsets
     // array may itself grow (short→long), shifting everything after it.
     let old_shared_len = shared_count * old_axes * 2;
-    let new_shared_len = shared_count * new_axes * 2;
+    let new_shared_len = (shared_count + new_shared.len()) * new_axes * 2;
     let shared_end = off_shared
         .checked_add(old_shared_len)
         .ok_or_else(|| gvar_err("shared tuples overflow"))?;
@@ -1321,10 +1359,14 @@ fn patch_gvar(
             out.extend_from_slice(&zero_coord);
         }
     }
+    for peak in &new_shared {
+        out.extend_from_slice(peak);
+    }
     out.extend_from_slice(&bytes[shared_end..off_glyph_data]); // inter-region padding
     out.extend_from_slice(&new_glyph_data);
 
     out[4..6].copy_from_slice(&total_axes.to_be_bytes());
+    out[6..8].copy_from_slice(&((shared_count + new_shared.len()) as u16).to_be_bytes());
     out[8..12].copy_from_slice(&(new_off_shared as u32).to_be_bytes());
     out[14..16].copy_from_slice(&new_flags.to_be_bytes());
     out[16..20].copy_from_slice(&(new_off_glyph_data as u32).to_be_bytes());
@@ -1457,7 +1499,12 @@ mod tests {
 
     /// A SPAC tuple over (XTRA, XOPQ, SPAC): `delta` on the advance
     /// phantom, its negative on the origin phantom, nothing else touched.
-    fn spac_tuple(region: [(f64, f64, f64); 3], points: usize, delta: i16) -> (String, String) {
+    fn spac_tuple_at(
+        region: [(f64, f64, f64); 3],
+        points: usize,
+        delta: i16,
+        shared_peak: Option<u16>,
+    ) -> (String, String) {
         let mut deltas = vec![(0, 0); points];
         deltas[points - 4] = (-delta, 0);
         deltas[points - 3] = (delta, 0);
@@ -1468,8 +1515,12 @@ mod tests {
             deltas,
             points: Some(vec![(points - 4) as u16, (points - 3) as u16]),
         };
-        let (header, data) = tuple.serialize();
+        let (header, data) = tuple.serialize(shared_peak);
         (hex(&header), hex(&data))
+    }
+
+    fn spac_tuple(region: [(f64, f64, f64); 3], points: usize, delta: i16) -> (String, String) {
+        spac_tuple_at(region, points, delta, None)
     }
 
     #[test]
@@ -1503,6 +1554,16 @@ mod tests {
         assert_eq!(
             spac_tuple([OFF, OFF, SPAC_MAX], 4, -129),
             ("000aa000000000004000".into(), "02010001410081ff7f81".into())
+        );
+        // A shared peak: the header names it by index and embeds nothing —
+        // except the intermediate region, which is never shared.
+        assert_eq!(
+            spac_tuple_at([OFF, OFF, SPAC_MIN], 12, -50, Some(5)),
+            ("00082005".into(), "020108010132ce81".into())
+        );
+        assert_eq!(
+            spac_tuple_at([(0.0, 0.25, 1.0), OFF, SPAC_MAX], 300, 200, Some(4095)),
+            ("000c6fff000000000000400000004000".into(), "02810128000141ff3800c881".into())
         );
     }
 }

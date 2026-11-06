@@ -1636,6 +1636,8 @@ fn apply_spac(
     let options = GrowOptions {
         instance_overrides: Some(&overrides),
         hvar_bytes: Some(hvar_bytes),
+        // Every glyph carries the same per-master peaks: stored once.
+        share_peaks: entry.kind == "spac_widthaware",
     };
     build_grown_font(&font_bytes, &new_axes, extras, &options)
 }
