@@ -92,6 +92,12 @@ decisions recorded in STATUS (VERIFIER / APPROVED lines) and in `findings.md` st
 - All GitHub CI jobs green on the tip: python × 2, rust × 2, frontend, cli-build.
 - If a job is flaky, show it, fix it, or quarantine it with a reason the verifier accepts. Never quietly re-run until it passes.
 
+**W6 — the static app's end-to-end spec** (added by the verifier, 2026-11-06, while verifying W1).
+- `frontend/e2e/static-demo.spec.mjs` is not run in CI and has drifted. On the merged tip it passes 57 checks and then stops at a stale step (the export dialog now closes itself after a download). With that step corrected it passes 83 and stops at section 17 (the Coverage button never appears).
+- Each failure is either a stale expectation (fix the spec without weakening it) or a product defect in the static app (fix at the root, with a test that fails first).
+- Acceptance: the spec runs to the end with 0 failures on the tip, and all CI jobs stay green.
+- W6 gates R4 (Pages) only. The checkpoint and R1–R3 do not wait for it; if it lands after R3 it is fixed forward on a branch from `main`.
+
 Then set STATE `checkpoint`.
 
 ## 5. Release steps (only after the STATUS line says `APPROVED: B11a–c`)
