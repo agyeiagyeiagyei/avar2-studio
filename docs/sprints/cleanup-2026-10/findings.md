@@ -2945,3 +2945,31 @@ With those in place, the next full pass will name the cause.
 **Not verified by the verifier (the agent's evidence only):**
 - the static app's browser check (43 checks, served on 5072);
 - the repo's `static-demo.spec.mjs`, which passes 57 checks and then times out at the export dialog's Cancel button. Whether that timeout predates W1 is unknown; the verifier will run it on the merged tip and on `b8a5852`.
+
+## Verifier finding (2026-11-06 22:13) — W6 verified and merged (w6-static-spec @ 7966ead): the static app's spec runs to the end; one real defect fixed (blank Preview specimen after a rebuild)
+
+**W6 came from an implementer agent** (branch `w6-static-spec`). The diff is three files: the spec, `PreviewTab.jsx` (one dependency added to an effect) and one row in `docs/DEVELOPMENT.md`.
+
+**Re-run by the verifier:**
+- **The spec on the branch's bundle** (served on 5073): 160 checks, 0 failures, `ALL PASS`. Log: `~/avar2-verifier/static-demo-w6.log`.
+- **The product defect is real and the new section catches it.** The verifier rebuilt the bundle with the one-line fix reverted and ran the same spec: 159 pass, 1 fails — `the specimen keeps the typed text across a rebuild ("")`. Log: `~/avar2-verifier/static-demo-w6-prefix.log`.
+- **CI** on `7966ead` (run 42239212768): all six jobs green.
+
+**What changed in the spec** (the agent's classification, checked against the history):
+- **Stale:** eight "Cancel" clicks after a download. The export closes its own dialog (`setShowExportModal(false)` on the plain download path since `66ce7ca`). They became a wait for the dialog to detach, plus one check that names the behaviour.
+- **Stale:** sections 17–21 and part of 22 drove the Coverage tab, which was removed on purpose (T1.17, `3693c19` and `0ddaea5`; the user confirmed it "was meant to go entirely"). The font-level facts are still checked, now through the provider (`getCoverage`, `pinCorner`, `clampOutOfRange`). Eight checks of the removed tab's own UI are gone (chips, diamonds, drag, labels).
+- **Product defect:** with the Preview tab open, every rebuild left the specimen blank until the designer switched tabs or typed. The effect that fills the uncontrolled specimen ran only on `[sampleText]`, while the health poll re-creates the element on every new build. Fix: `[sampleText, fontLoaded]`. It is the same component in the desktop studio, so the desktop Preview gets the fix too. The agent's read-only probe shows the deployed Pages demo has the same blank, so it predates the sprint.
+
+**Verifier decisions:**
+- **The specimen fix stays.** It restores the obviously intended behaviour (the text the designer typed stays visible) and changes nothing else.
+- **Sections 17–21 stay** while the coverage engine ships. It still applies pins from sessions, project zips, config bundles and rebuilds.
+
+**Backlog (not blocking):**
+- The coverage engine has no UI entry point.
+- The spec is not in CI. `pages.yml`'s build job has everything it needs; start it non-blocking.
+- Many `waitForFunction(fn, { timeout })` calls in the spec pass the options as the page argument, so the 30 s default applies.
+- `npm run lint` reports the built bundle once `dist-pages/` exists; the config ignores only `build/`.
+
+**Not verified:** the specimen fix in the desktop (Flask) studio. It is the same component; the automated pass's probe exercises the Preview tab.
+
+**W5.** CI run 42233010190 on `385fdea` (the sprint tip with W1–W4 merged) is green on every job. CI on this merge follows.
