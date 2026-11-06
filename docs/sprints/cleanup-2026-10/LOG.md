@@ -3885,3 +3885,28 @@ passed.
   rotated-component fixture needs nine's advance and offset to differ per master,
   the layer strictly between the masters, and an `xMin` assertion. Both are
   fixture rebuilds, not logic.
+
+## ROUND 42 — protocol adopted; W1 scoped (no code yet)
+
+`COMPLETION_PROTOCOL.md` is the contract from here. Read it in full; the standing
+rules in §7 and the STATE vocabulary in §3 apply.
+
+**W1 scoped, not started.** The Rust injector is `wasm/fontc-web/src/spac.rs`
+(608 lines). The constant-amount site is `uniform_extras()` at ~241 — it writes
+the two tuples' phantom deltas as `(-amount, 0)` / `(amount, 0)` — and the
+per-glyph scaled amount sits at ~272, scaled by `(ink / mean_ink) ** bias *
+scale` with a note about Python's `round()`. What E2i-c adds and the port must
+mirror from `spac_amounts.per_side` / `builtin_spac_widthaware.py`:
+
+- one amount per CORNER (the designspace master locations, normalised against the
+  BUILT font's fvar/avar), not one per glyph;
+- the integer amount with the same rounding, and the 1 u tight-end floor
+  (`fit_dx`) for overhanging glyphs only;
+- sequential-rounding deltas as `getDeltas(ints, round=round)`;
+- E2k: a composite takes its base's amount, `USE_MY_METRICS` composites skipped.
+
+I stopped before writing Rust: this pass ran out of room, and a half-ported
+injector that compiles is worse than none — the oracle would then judge a
+partially-ported rule. Next round starts at `uniform_extras()`, with
+`spike/compare_spac.py` as the judge and no loosening of
+`wasm/fontc-web/tests/spac_oracle.rs`.
