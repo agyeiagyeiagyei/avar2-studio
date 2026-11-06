@@ -34,6 +34,13 @@ Usage::
 
 Without ``--glyphs`` every glyph in the font is compared. Exit status is 0 only
 when every check is inside tolerance.
+
+``--negative-control DIR`` runs the gate against itself on the real fonts: it
+writes a copy of ``--studio`` whose glyph ``--control-glyph`` (default ``g``)
+moves 1 u more per side at both SPAC ends, plus a copy re-saved the same way
+with no shift, and runs this comparison on the original, the re-saved copy and
+the shifted copy. Exit status 0 only when the first two PASS and the shifted
+copy FAILS on that glyph alone.
 """
 
 from __future__ import annotations
@@ -246,6 +253,116 @@ def self_test() -> int:
     return 0
 
 
+def _shift_spac(src: Path, dst: Path, glyph: str, by: int) -> None:
+    """Write ``src`` to ``dst`` with ``glyph`` moved ``by`` u more per side at
+    both SPAC ends: tighter at the low end, looser at the high end.
+
+    Only the glyph's SPAC-only gvar tuples (the default corner's, which apply at
+    every row) change, on the origin and advance phantoms. HVAR is rebuilt from
+    gvar as the injector builds it, so HarfBuzz's advance moves with them —
+    shifting the phantoms alone moves the outline, not the spacing. ``by`` 0
+    makes the same rebuild with nothing shifted.
+    """
+    from fontTools.varLib.hvar import add_HVAR
+
+    font = TTFont(str(src))
+    try:
+        tuples = [v for v in font["gvar"].variations.get(glyph, [])
+                  if set(v.axes) == {"SPAC"}]
+        if len(tuples) != 2:
+            raise ValueError(f"{glyph!r} has {len(tuples)} SPAC-only gvar "
+                             "tuple(s), not one per end")
+        for variation in tuples:
+            outward = by if variation.axes["SPAC"][1] > 0 else -by
+            (ox, oy), (ax, ay) = variation.coordinates[-4:-2]
+            variation.coordinates[-4] = (ox - outward, oy)
+            variation.coordinates[-3] = (ax + outward, ay)
+        add_HVAR(font)
+        font.save(str(dst))
+    finally:
+        font.close()
+
+
+def _metric_changes(original: Path, copy: Path, locations) -> dict:
+    """``{(location, glyph): (Δadvance, Δlsb, Δink)}`` wherever ``copy``
+    renders differently from ``original`` (HarfBuzz)."""
+    ttf = TTFont(str(original), lazy=True)
+    try:
+        names = ttf.getGlyphOrder()
+    finally:
+        ttf.close()
+    a, b = hb_font(original), hb_font(copy)
+    gids = list(range(len(names)))
+    out = {}
+    for location in locations:
+        for name, ma, mb in zip(names, _measure(a, gids, location),
+                                _measure(b, gids, location)):
+            change = tuple(y - x for x, y in zip(ma, mb))
+            if any(change):
+                out[(tuple(sorted(location.items())), name)] = change
+    return out
+
+
+def negative_control(args) -> int:
+    """The SPAC gate on real fonts: a 1 u per side defect in one glyph must
+    FAIL the real comparison, and the unshifted fonts must PASS it."""
+    out, glyph = args.negative_control, args.control_glyph
+    out.mkdir(parents=True, exist_ok=True)
+    resaved = out / f"resaved-{args.studio.name}"
+    shifted = out / f"shifted-{glyph}-{args.studio.name}"
+    _shift_spac(args.studio, resaved, glyph, 0)
+    _shift_spac(args.studio, shifted, glyph, 1)
+
+    # The copies are what they claim: the re-save renders identically, and the
+    # shift is exactly 1 u per side on that glyph, at every row and SPAC end.
+    lo, _default, hi = _axes(args.studio)["SPAC"]
+    locations = []
+    for row in config_generator.read_csv_mappings(args.csv):
+        user = {str(t).lower(): float(v) for t, v in row.in_axes.items()}
+        locations += [user, {**user, "SPAC": lo}, {**user, "SPAC": hi}]
+    resave_changes = _metric_changes(args.studio, resaved, locations)
+    expected = {(tuple(sorted(loc.items())), glyph):
+                ((2, 1, 0) if loc.get("SPAC") == hi else (-2, -1, 0))
+                for loc in locations if loc.get("SPAC")}
+    shift_changes = _metric_changes(args.studio, shifted, locations)
+    print(f"re-saved copy: {len(resave_changes)} metric change(s) against the "
+          f"original over {len(locations)} locations")
+    print(f"shifted copy: {glyph!r} moves (advance, lsb, ink) by (-2, -1, 0) at "
+          f"SPAC {lo:g} and (+2, +1, 0) at {hi:g} at every row: "
+          f"{shift_changes == expected}")
+
+    argv = ["--fm", str(args.fm), "--csv", str(args.csv)]
+    for flag, value in (("--glyphs", args.glyphs),
+                        ("--sources-zip", args.sources_zip),
+                        ("--mixed-from", args.mixed_from),
+                        ("--designspace", args.designspace)):
+        if value is not None:
+            argv += [flag, str(value)]
+    codes = {}
+    for label, font in (("original", args.studio), ("re-saved", resaved),
+                        ("shifted", shifted)):
+        print(f"\n=== the real comparison on the {label} font: {font}")
+        codes[label] = main(["--studio", str(font), *argv,
+                             "--json", str(out / f"{label}.json")])
+        print(f"=== exit status ({label}): {codes[label]}")
+
+    report = json.loads((out / "shifted.json").read_text())
+    over = sorted(key for key, value in report["spac_glyph_means"].items()
+                  if abs(value) > SPAC_GLYPH_TOLERANCE)
+    before = json.loads((out / "original.json").read_text())["spac_glyph_means"]
+    print(f"\nshifted copy, over the per-glyph tolerance: {over}")
+    for key in over:
+        print(f"  {key}: mean {before[key]:+.3f} u (original) -> "
+              f"{report['spac_glyph_means'][key]:+.3f} u (shifted)")
+    ok = (codes == {"original": 0, "re-saved": 0, "shifted": 1}
+          and not resave_changes and shift_changes == expected
+          and over and all(key.split(" ")[0] == glyph for key in over))
+    print(f"negative control {'OK' if ok else 'FAILED'}: exit status original "
+          f"{codes['original']}, re-saved {codes['re-saved']}, shifted "
+          f"{codes['shifted']} (want 0, 0, 1, the shifted one on {glyph!r} only)")
+    return 0 if ok else 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--studio", type=Path, required=True)
@@ -264,12 +381,20 @@ def main(argv=None) -> int:
                          "at their defaults")
     ap.add_argument("--self-test", action="store_true",
                     help="check the SPAC gates against synthetic noise and a one-end defect, then exit")
+    ap.add_argument("--negative-control", type=Path, metavar="DIR",
+                    help="write a re-saved and a 1 u per side shifted copy of "
+                         "--studio into DIR and run the comparison on the "
+                         "original and both copies (see the module docstring)")
+    ap.add_argument("--control-glyph", default="g",
+                    help="the glyph --negative-control shifts (default g)")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--failures", type=Path,
                     help="write every over-tolerance record here (JSON lines)")
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.negative_control:
+        return negative_control(args)
 
     studio = hb_font(args.studio)
     built = hb_font(args.fm)
