@@ -65,6 +65,7 @@ _EXPECTED = [
     '/api/load-source OPTIONS,POST',
     '/api/mapped-location GET,HEAD,OPTIONS',
     '/api/masters GET,HEAD,OPTIONS',
+    '/api/resting-master OPTIONS,POST',
     '/api/text-width GET,HEAD,OPTIONS',
     '/api/transforms GET,HEAD,OPTIONS',
     '/api/transforms OPTIONS,PUT',

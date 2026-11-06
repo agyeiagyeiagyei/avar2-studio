@@ -2009,6 +2009,10 @@ const staticOverrides = {
     bytes = await regenStat(bytes);
     return new Blob([bytes], { type: 'font/ttf' });
   },
+  // E2l's warning is a live-studio note: the browser has no source file to
+  // classify the resting location against, so the dialog stays silent there
+  // instead of asking a server that does not exist.
+  restingMaster: async () => ({ status: 'unknown', name: null, default_master: null }),
   importConfig: async (bundle, dryRun) => {
     requireProject();
     const report = validateBundle(bundle, uploadDataset);

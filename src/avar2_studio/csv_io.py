@@ -28,6 +28,7 @@ Public surface:
 from __future__ import annotations
 
 import csv
+import json
 import shutil
 import time
 from decimal import Decimal, InvalidOperation
@@ -486,14 +487,20 @@ def origin_master_report(source_path: Path, out: Dict[str, float]) -> Optional[D
     """
     if not out:
         return None
+    # Tags come upper-case from a CSV column ("XTRA") and lower-case from the
+    # internal convention ("xtra"); the masters carry whatever the source
+    # writes. Compare case-insensitively or a real font silently reports "no
+    # master" (E2l: Crispy's ORIGIN row matched nothing this way).
+    wanted = {str(tag).lower(): float(value) for tag, value in out.items()}
     font, _fmt = source_font.load_source_cached(source_path)
     best = None
     for master in source_font.get_masters(font):
         shared = {tag: float(value) for tag, value in master["coordinates"].items()
-                  if tag in out}
+                  if str(tag).lower() in wanted}
         if not shared:
             continue
-        delta = {tag: round(float(out[tag]) - value, 2) for tag, value in shared.items()}
+        delta = {tag: round(wanted[str(tag).lower()] - value, 2)
+                 for tag, value in shared.items()}
         worst = max((abs(d) for d in delta.values()), default=0.0)
         if best is None or worst < best[0]:
             best = (worst, master["name"], delta)
@@ -502,6 +509,149 @@ def origin_master_report(source_path: Path, out: Dict[str, float]) -> Optional[D
     worst, name, delta = best
     return {"nearest": name, "on_master": worst <= MASTER_TOLERANCE,
             "max_delta": worst, "delta": delta}
+
+
+def default_master_name(source_path: Path) -> Optional[str]:
+    """The source's DEFAULT master — the master the font rests at unrelocated.
+
+    Resolved the way the compiler resolves it, not from the axis defaults: a
+    Glyphs source's ``Variable Font Origin`` names the master by id (and the old
+    ``Variation Font Origin`` by name), with glyphsLib's own fallback — the
+    shared base style, else the first master — when the parameter is absent or
+    names a master that is not in the saved file. Using the declared defaults
+    instead pinned every source to its all-minima master, so a copy whose origin
+    sits on 1715-1-1 was reported as resting on 47-1-1: a FALSE "the file is
+    larger" note on the one build that is exact (verifier, 2026-11-06).
+    """
+    font, _fmt = source_font.load_source_cached(source_path)
+    masters = source_font.get_masters(font) or []
+    if not masters:
+        return None
+    if hasattr(font, "customParameters"):        # GSFont
+        from glyphsLib.builder.axes import get_regular_master
+
+        master = get_regular_master(font)
+        if master is not None:
+            return master.name or "Master"
+        return masters[0]["name"]
+    # A designspace knows its own default: the source whose location is every
+    # axis default.
+    defaults = {ax["tag"]: float(ax["default"])
+                for ax in (source_font.get_axes(font) or [])
+                if ax.get("tag") and ax.get("default") is not None}
+    if defaults:
+        for master in masters:
+            coords = master["coordinates"]
+            if all(tag in coords
+                   and abs(coords[tag] - value) <= MASTER_TOLERANCE
+                   for tag, value in defaults.items()):
+                return master["name"]
+    return masters[0]["name"]
+
+
+def declared_axis_defaults(source_path: Path) -> Dict[str, float]:
+    """The DECLARED axis defaults beside the source, keyed by lower-case tag.
+
+    ``<stem>-axis-metadata.json`` (or the legacy ``.avar2-studio/`` copy) is
+    where the user axes' resting values live — opsz 144, wght 400. The master
+    grid's minima are NOT those: on Crispy the weight axis bottoms out at 1 and
+    the font rests at 400, so resolving the ORIGIN row against the minima finds
+    no row at all.
+    """
+    for candidate in (source_path.with_name(f"{source_path.stem}-axis-metadata.json"),
+                      source_path.parent / ".avar2-studio" / "axis-metadata.json"):
+        if not candidate.exists():
+            continue
+        try:
+            meta = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(col).lower(): float(entry["default"])
+                for col, entry in meta.items()
+                if isinstance(entry, dict) and entry.get("default") is not None}
+    return {}
+
+
+def origin_row_out(source_path: Path,
+                   csv_path: Optional[Path],
+                   axis_defaults: Optional[Dict[str, float]] = None,
+                   ) -> Optional[Dict[str, float]]:
+    """The parametric ``out`` of the CSV's ORIGIN row.
+
+    The ORIGIN row is the one whose traditional ``in`` coordinates are all at
+    their declared defaults — the style the font rests at when the export's
+    "Set default at" checkbox is off. E2l's dialog asks about that location, so
+    it does not have to re-derive it from the instance list.
+    """
+    if csv_path is None or not Path(csv_path).exists():
+        return None
+    font, _fmt = source_font.load_source_cached(source_path)
+    defaults = dict(axis_defaults or declared_axis_defaults(source_path))
+    if not defaults:
+        defaults = {str(ax["tag"]).lower(): float(ax["default"])
+                    for ax in (source_font.get_axes(font) or [])
+                    if ax.get("tag") and ax.get("default") is not None}
+    rows, _cols, in_cols, out_cols, _rest = read_csv_mappings_with_axes(
+        Path(csv_path), source_path)
+    for row in rows:
+        ins: Dict[str, float] = {}
+        for col in in_cols:
+            value = parse_decimal(str(row.get(col, "")).strip())
+            if value is not None:
+                ins[normalize_in_axis_name(col)] = float(value)
+        if not ins or any(tag not in defaults
+                          or abs(value - defaults[tag]) > 1e-6
+                          for tag, value in ins.items()):
+            continue
+        out: Dict[str, float] = {}
+        for col in out_cols:
+            value = parse_decimal(str(row.get(col, "")).strip())
+            if value is not None:
+                # CSV columns are upper-case tags; the master coordinates and
+                # the location the dialog sends are lower-case tags.
+                out[str(col).lower()] = float(value)
+        return out or None
+    return None
+
+
+def resting_master_report(source_path: Path,
+                          location: Optional[Dict[str, float]] = None,
+                          csv_path: Optional[Path] = None,
+                          axis_defaults: Optional[Dict[str, float]] = None,
+                          ) -> Dict:
+    """E2l: is the font's resting location the source's DEFAULT master?
+
+    The export dialog warns that the file is larger when it is not — the studio
+    rebuilds the variations around the resting style — and the sources note is
+    false when it is. The dialog must not guess this from a master list, so it
+    asks here with the location the preview actually rests at: the ORIGIN row's
+    parametric ``out``, or the "Set default at" location when that is on.
+
+    ``status`` is ``default_master``, ``other_master`` (the file grows but the
+    default master is a master the designer can move to) or ``no_master``
+    (nothing interpolates there, so a master has to be added). ``unknown`` when
+    the ORIGIN row cannot be resolved and no location was passed.
+    """
+    if not location:
+        location = origin_row_out(source_path, csv_path, axis_defaults)
+    if not location:
+        return {"status": "unknown", "name": None, "default_master": None,
+                "max_delta": None, "delta": {}}
+    report = origin_master_report(source_path, location)
+    default = default_master_name(source_path)
+    if report is None or not report["on_master"]:
+        status = "no_master"
+    elif default is not None and report["nearest"] == default:
+        status = "default_master"
+    else:
+        status = "other_master"
+    return {
+        "status": status,
+        "name": (report or {}).get("nearest"),
+        "default_master": default,
+        "max_delta": (report or {}).get("max_delta"),
+        "delta": (report or {}).get("delta") or {},
+    }
 
 
 def match_instances(

@@ -37,6 +37,7 @@ import glyphsLib
 from fontTools.designspaceLib import DesignSpaceDocument, InstanceDescriptor
 from glyphsLib.classes import GSLayer
 
+from . import spac_amounts
 from .build import config_generator
 from .studio_log import get_logger
 
@@ -214,7 +215,7 @@ def _ink_widths(font) -> Dict[str, float]:
     return out
 
 
-def _ink_widths_from_build(font_path: Path) -> Dict[str, float]:
+def _ink_widths_from_build(font_path: Path, location=None) -> Dict[str, float]:
     """``{glyph: ink width}`` measured on the BUILT font at its default.
 
     E2i: the injector normalises against the built font's own average ink, at
@@ -231,7 +232,11 @@ def _ink_widths_from_build(font_path: Path) -> Dict[str, float]:
 
     font = TTFont(str(font_path))
     try:
-        glyph_set = font.getGlyphSet()
+        # E2i-c (B): instancing the build at a master's own location is the only
+        # way the export and the studio's injector read the same ink — the
+        # injector can only ever see the built font, never the UFO masters.
+        glyph_set = (font.getGlyphSet(location=location) if location
+                     else font.getGlyphSet())
         out = {}
         for name in font.getGlyphOrder():
             ink = _ink_width(glyph_set, name)
@@ -255,21 +260,10 @@ def _shift_metrics(glyph, dx: int) -> None:
 def _fit_dx(dx: int, width: float, composite: bool) -> int:
     """Cap a NEGATIVE move so the twin's advance cannot go below 1 u.
 
-    A UFO/designspace source cannot carry a negative advance width, and
-    fontTools refuses to compile one. Crispy's hairline masters are narrower
-    than the amount the injector applies at SPAC −100 (hairline `n` advance
-    166 u against a 258 u tightening), so the exact amount is not representable
-    there and the export caps it instead of writing a font fontmake rejects.
-    Everywhere the design can carry the amount the twin is exact; the default
-    design (where the injector's amounts come from) always can.
+    Shared with the injector through :mod:`avar2_studio.spac_amounts`, so both
+    renderers floor the same corner value to the same integer.
     """
-    if dx >= 0:
-        return dx
-    if composite:                       # advance moves by dx
-        lowest = 1 - int(width)
-    else:                               # advance moves by 2·dx
-        lowest = -((int(width) - 1) // 2)
-    return max(dx, lowest)
+    return spac_amounts.fit_dx(dx, width, composite)
 
 
 def _use_my_metrics(glyph) -> bool:
@@ -293,6 +287,23 @@ def _is_transformed(transformation) -> bool:
     a, b, c, d, _ox, _oy = transformation
     return (abs(a - 1) > 1e-9 or abs(b) > 1e-9
             or abs(c) > 1e-9 or abs(d - 1) > 1e-9)
+
+
+class _Layered:
+    """Glyph lookup across layers: the sparse one first, then the default.
+
+    `_flatten` and the sparse-layer pass draw through a provider; inside a
+    sparse layer a base may live in the default layer, so the provider has to
+    see both."""
+
+    def __init__(self, *layers):
+        self.layers = layers
+
+    def __getitem__(self, name):
+        for layer in self.layers:
+            if name in layer:
+                return layer[name]
+        raise KeyError(name)
 
 
 def _flatten(glyph, provider, name: str) -> bool:
@@ -356,6 +367,7 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     them.
     """
     signatures: Dict[str, set] = {}
+    bases_by_glyph: Dict[str, set] = {}
     targets = set()
     for source in doc.sources:
         font = source.font
@@ -366,6 +378,8 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 glyph = layer[name]
                 signatures.setdefault(name, set()).add(
                     (len(glyph.contours), len(glyph.components)))
+                bases_by_glyph.setdefault(name, set()).update(
+                    c.baseGlyph for c in glyph.components)
                 if any(_is_transformed(c.transformation)
                        for c in glyph.components):
                     targets.add(name)
@@ -373,23 +387,277 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                     targets.add(name)
     targets |= {name for name, seen in signatures.items() if len(seen) > 1}
 
+    # nine's model has to be read BEFORE the flatten pass, which removes the
+    # components it interpolates (advance and transform, per master).
+    composite_models = {name: _composite_model(doc, name) for name in targets}
+    mixed_models = {name: _mixed_model(doc, name) for name in targets}
+
     done = 0
+    originals: Dict[str, object] = {}
     for source in doc.sources:
         font = source.font
         if font is None:
             continue
         for layer in font.layers:
             for name in list(layer.keys()):
+                if name in targets:
+                    # Keep the glyph WITH its components/own contours: the
+                    # sparse-layer pass rebuilds from this, not from the
+                    # already flattened copy.
+                    originals.setdefault(name, copy.deepcopy(layer[name]))
                 if name in targets and _flatten(layer[name], layer, name):
                     done += 1
     if done:
         log.info("sources_export: %d components decomposed (%d glyphs)",
                  done, len(targets))
+
+    # A decomposed glyph must exist wherever one of its bases has a sparse
+    # layer, or fontmake interpolates it from the masters alone and drops that
+    # correction: `nine` is a 180°-rotated `six`, `six` carries the grade
+    # braces, and `nine` had none, so its lsb drifted 13 u at the 900 rows.
+    #
+    # The layer takes NINE's own advance and component transform, interpolated
+    # from nine's OWN masters at that location, with the base's layer outline
+    # under that transform (verifier, 2026-11-06 03:15 — copying nine's value
+    # from its parent master, 127, was the earlier attempt's error).
+    added = 0
+    unbuilt: Dict[str, str] = {}
+    for source in doc.sources:
+        if source.font is None or not source.layerName:
+            continue
+        layer = source.font.layers[source.layerName]
+        default = source.font.layers.defaultLayer
+        if layer is None or layer is default:
+            continue
+        present = set(layer.keys())
+        loc = _design_norm(doc, source.location or {})
+        # Iterate the TARGETS, not the default layer's keys: a master need not
+        # carry every glyph (nine is missing from some masters outright).
+        for name in sorted(targets):
+            if name in present:
+                continue
+            bases = bases_by_glyph.get(name, set()) & present
+            if not bases:
+                continue
+            composed = composite_models.get(name)
+            if composed is not None:
+                model, series = composed
+                dx_width = model.interpolateFromMasters(
+                    loc, list(series["width"]))
+                dx_tx = model.interpolateFromMasters(loc, list(series["tx"]))
+                dx_ty = model.interpolateFromMasters(loc, list(series["ty"]))
+                glyph = layer.newGlyph(name)
+                provider = _Layered(layer, default)
+                from fontTools.pens.pointPen import SegmentToPointPen
+                from fontTools.pens.recordingPen import DecomposingRecordingPen
+                from fontTools.pens.transformPen import TransformPen
+
+                recording = DecomposingRecordingPen(provider)
+                provider[sorted(bases)[0]].draw(recording)
+                recording.replay(TransformPen(
+                    SegmentToPointPen(glyph.getPointPen()),
+                    (series["matrix"][0], series["matrix"][1],
+                     series["matrix"][2], series["matrix"][3], dx_tx, dx_ty)))
+                glyph.width = round(dx_width)
+                added += 1
+                continue
+
+            # MIXED glyphs (`cent` = `c` + its own bar, `Q` = `O` + a tail): the
+            # layer is the glyph's OWN contours interpolated from its own
+            # masters, its component under the transform interpolated at L, and
+            # its own interpolated advance. Built from the pre-flatten glyph so
+            # the contour order matches the masters (verifier, 2026-11-06).
+            mixed = mixed_models.get(name)
+            if mixed is None:
+                # A glyph whose base carries a layer but which the models could
+                # not rebuild drifts exactly like `cent` did — say so instead of
+                # skipping in silence (verifier, 2026-11-06 12:24).
+                unbuilt.setdefault(name, _unbuilt_reason(originals.get(name)))
+                continue
+            model, point_sets, xforms, widths = mixed
+            own = []
+            for ci, contour in enumerate(point_sets[0]):
+                rebuilt = []
+                for pi in range(len(contour)):
+                    x = model.interpolateFromMasters(
+                        loc, [sets[ci][pi][0] for sets in point_sets])
+                    y = model.interpolateFromMasters(
+                        loc, [sets[ci][pi][1] for sets in point_sets])
+                    rebuilt.append((x, y, contour[pi][2], contour[pi][3]))
+                own.append(rebuilt)
+            parts = [[model.interpolateFromMasters(
+                loc, [xf[ci][i] for xf in xforms]) for i in range(6)]
+                for ci in range(len(xforms[0]))]
+            pieces = copy.deepcopy(originals[name])
+            pieces.clearContours()
+            pen = pieces.getPointPen()
+            for rebuilt in own:
+                pen.beginPath()
+                for x, y, segment, smooth in rebuilt:
+                    pen.addPoint((x, y), segmentType=segment, smooth=smooth)
+                pen.endPath()
+            for component, transform in zip(pieces.components, parts):
+                component.transformation = tuple(transform)
+            pieces.width = round(model.interpolateFromMasters(loc, widths))
+            layer.insertGlyph(pieces, name)
+            _flatten(layer[name], _Layered(layer, default), name)
+            added += 1
+    if unbuilt:
+        listed = ", ".join(f"{name} ({reason})"
+                           for name, reason in sorted(unbuilt.items())[:12])
+        more = (f" and {len(unbuilt) - 12} more" if len(unbuilt) > 12 else "")
+        log.warning("sources_export: %d glyph(s) have a base with sparse layers "
+                    "but got no layer of their own, so they drift at those "
+                    "locations: %s%s", len(unbuilt), listed, more)
+    if added:
+        log.info("sources_export: %d sparse layers added for decomposed glyphs",
+                 added)
     return done
 
 
+def _unbuilt_reason(glyph) -> str:
+    """Why the sparse pass could not build a layer for this glyph.
+
+    A glyph whose base carries sparse layers must get its own layer at those
+    locations; when the models decline, the glyph drifts there (that is how
+    `cent` missed 1,128 u). The reason goes into the build log so a designer can
+    act on it instead of discovering the drift in the font.
+    """
+    if glyph is None:
+        return "not in the masters"
+    components = len(getattr(glyph, "components", []) or [])
+    if components and not glyph.contours:
+        return f"{components} component(s), not one transformed component"
+    if components:
+        return "own contours + components, masters incompatible"
+    return "neither own contours nor a component"
+
+
+def _mixed_model(doc, name: str):
+    """Own contour points, component transforms and advance across the masters.
+
+    A MIXED glyph keeps contours of its own (`cent` = `c` + a bar, `Q` = `O` + a
+    tail); when one of its bases has a sparse layer, that layer must still carry
+    the glyph's OWN shape, interpolated from its own masters, or the layer pins
+    the whole glyph (verifier, 2026-11-06 10:02: cent missed `c`'s LCWD layers
+    by up to 1,128 u).
+
+    Every component takes its OWN interpolated transform — a glyph built from two
+    different bases would otherwise hold one of them at the base master's
+    position. All masters must agree on the component list, or the glyph cannot
+    be interpolated at all and the caller reports it.
+    """
+    from fontTools.varLib.models import VariationModel
+
+    locations, point_sets, xforms, widths = [], [], [], []
+    bases = None
+    for source in doc.sources:
+        if source.layerName or source.font is None:
+            continue
+        default = source.font.layers.defaultLayer
+        if name not in default:
+            continue
+        glyph = default[name]
+        if not glyph.contours or not glyph.components:
+            continue
+        points = [[(p.x, p.y, p.type, p.smooth) for p in contour.points]
+                  for contour in glyph.contours]
+        if point_sets and [len(c) for c in points] != [len(c) for c in point_sets[0]]:
+            return None                        # incompatible masters
+        names = [c.baseGlyph for c in glyph.components]
+        if bases is None:
+            bases = names
+        elif names != bases:
+            return None                        # components differ between masters
+        locations.append(_design_norm(doc, source.location or {}))
+        point_sets.append(points)
+        xforms.append(tuple(tuple(c.transformation) for c in glyph.components))
+        widths.append(float(glyph.width))
+    if len(locations) < 2 or not point_sets:
+        return None
+    if not any(all(abs(v) < 1e-9 for v in loc.values()) for loc in locations):
+        return None                            # the model needs a base
+    model = VariationModel(locations, axisOrder=sorted(
+        {tag for loc in locations for tag in loc}))
+    return model, point_sets, xforms, widths
+
+
+def _design_norm(doc, location: Dict[str, float]) -> Dict[str, float]:
+    """A source location in the designspace's own normalised space."""
+    out = {}
+    for axis in doc.axes:
+        value = location.get(axis.name)
+        if value is None or axis.default is None:
+            continue
+        lo, df, hi = axis.minimum, axis.default, axis.maximum
+        span = (hi - df) if value > df else (df - lo)
+        out[axis.tag] = ((value - df) / span) if span else 0.0
+    return out
+
+
+def _composite_model(doc, name: str):
+    """Interpolate one glyph's own advance and single-component transform.
+
+    Returns ``(model, series)`` or None when the glyph is not a plain
+    transformed component in every master. ``series`` carries the per-master
+    values and the constant rotation matrix."""
+    from fontTools.varLib.models import VariationModel
+
+    locations, widths, xs, ys, matrices = [], [], [], [], []
+    for source in doc.sources:
+        if source.layerName or source.font is None:
+            continue
+        default = source.font.layers.defaultLayer
+        if name not in default:
+            continue
+        glyph = default[name]                    # a master without it is not a
+        if len(glyph.components) != 1:           # corner of this glyph's model
+            continue
+        if glyph.contours:
+            # A MIXED glyph (Q = O + a tail) cannot be rebuilt from its base's
+            # outline: the tail belongs to the glyph itself.
+            continue
+        if not _is_transformed(glyph.components[0].transformation):
+            continue
+        a, b, c, d, tx, ty = glyph.components[0].transformation
+        locations.append(_design_norm(doc, source.location or {}))
+        widths.append(float(glyph.width))
+        xs.append(float(tx))
+        ys.append(float(ty))
+        matrices.append((a, b, c, d))
+    if not locations or len(set(matrices)) != 1:
+        return None
+    if not any(all(abs(v) < 1e-9 for v in loc.values()) for loc in locations):
+        return None                              # the model needs a base
+    model = VariationModel(locations, axisOrder=sorted(
+        {tag for loc in locations for tag in loc}))
+    return model, {"width": widths, "tx": xs, "ty": ys,
+                   "matrix": matrices[0]}
+
+
+#: Diagnostics from the last `_shift_spacing` calls: one dict per (glyph,
+#: master) the 1 u floor had to move. Read by test-output/e2ic_classify_export.
+CAPPED_MOVES: list = []
+
+
+def _ink_of(glyph) -> float:
+    """Outline bbox width of one UFO glyph (no composites to resolve here)."""
+    if not glyph.contours:
+        return 0.0
+    xs = [point.x for contour in glyph.contours for point in contour.points]
+    return float(max(xs) - min(xs)) if xs else 0.0
+
+
+def _lsb_of(glyph) -> float:
+    if not glyph.contours:
+        return 0.0
+    xs = [point.x for contour in glyph.contours for point in contour.points]
+    return float(min(xs)) if xs else 0.0
+
+
 def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
-                   kind: str, value: float, bias: float, scale: float) -> None:
+                   kind: str, value: float, bias: float, scale: float,
+                   mean_default: Optional[float] = None) -> int:
     """Move one twin's metrics as the injector moves its phantom points.
 
     Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
@@ -404,6 +672,8 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     E2i-c will make ``amount`` depend on the master's own ink; the base rule is
     written against ``shifts`` so it follows that change.
     """
+    mean_D = mean_default if mean_default else mean_ink
+    capped = 0
     shifts: Dict[str, int] = {}
     pending: Dict[str, bool] = {}
     for name, ink in inks.items():
@@ -426,11 +696,38 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         if composite:
             pending[name] = True
             continue
-        amount = (value if kind == "spac"
-                  else value * ((ink / mean_ink) ** bias) * scale)
-        dx = round(amount)
+        # The rule's own integer, before the tight-end floor, so the capped-move
+        # record can name both. The floor itself lives in spac_amounts, shared
+        # with the injector so the two renderers cannot round apart.
+        rule = (round(value) if kind == "spac"
+                else round(value * ((ink / mean_ink) ** bias)
+                           * (mean_ink / mean_D) * scale))
+        dx = (spac_amounts.fit_dx(rule, glyph.width, composite)
+              if kind == "spac"
+              else spac_amounts.per_side(value, ink, mean_ink, mean_D, bias,
+                                         scale, glyph.width, composite))
         if dx < 0:
-            dx = _fit_dx(dx, glyph.width, composite)
+            before = rule
+            if dx != before:
+                capped += 1
+                ink_w = _ink_of(glyph)
+                lsb = _lsb_of(glyph)
+                CAPPED_MOVES.append({
+                    "glyph": name,
+                    "kind": kind,
+                    "value": value,
+                    "advance": glyph.width,
+                    "ink": ink_w,
+                    "lsb": lsb,
+                    "rsb": glyph.width - lsb - ink_w,
+                    "rule_dx": before,
+                    "floored_dx": dx,
+                    "rule_advance": glyph.width + 2 * before,
+                    "floored_advance": glyph.width + 2 * dx,
+                    "mean_L": mean_ink,
+                    "mean_D": mean_D,
+                    "ink_used": ink,
+                })
         if dx:
             shifts[name] = dx
 
@@ -459,9 +756,17 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         if not progressed:      # a component cycle; leave the rest unspaced
             break
 
-    for name, dx in shifts.items():
+    for name in set(shifts) | set(pending):
+        dx = shifts.get(name, 0)
         glyph = twin[name]
         if glyph.components:
+            # Every component is corrected by the difference between THIS
+            # composite's amount and the shift its own base already carries —
+            # including when the composite's amount is zero. `IJ` is the case:
+            # its base `I` is a hairline stem whose amount rounds to 0, while
+            # its `J` component moved by J's full amount, so the right side
+            # collapsed by 63 u against the studio's 0 (E2k: a composite's ink
+            # tracks its base).
             for component in glyph.components:
                 base_shift = shifts.get(component.baseGlyph, 0)
                 a, b, c, d, ox, oy = component.transformation
@@ -470,6 +775,76 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         else:
             _shift_metrics(glyph, dx)
             glyph.width += 2 * dx
+    return capped
+
+
+def _injected_axis_tags(source_path: Path) -> set:
+    """The fvar tags the enabled transforms add (``slnt``, ``ROND``, ``SPAC``…).
+
+    E2i-c resolves a derived master's parent by LOCATION, which needs to know
+    which axes the transforms created: those are the axes a derived master
+    moves off its default, and they are excluded from the location match."""
+    from .transforms import config as _tx_config
+    from .transforms import registry as _tx_registry
+
+    tags = set()
+    for entry in _tx_config.entries(Path(source_path)):
+        if not entry.get("enabled"):
+            continue
+        transform = _tx_registry.REGISTRY.get(str(entry.get("type", "")))
+        tag = getattr(getattr(transform, "spec", None), "injected_axis_tag", None)
+        if tag:
+            tags.add(tag)
+    return tags
+
+
+def _parent_master(index: int, location: Dict[str, float],
+                   measured: List[Tuple[object, Dict[str, float], Dict[str, float]]],
+                   injected: set, defaults: Dict[str, float],
+                   style_name: str) -> Optional[int]:
+    """The master ``index`` descends from, or None when it is not derived.
+
+    E2i-c (user decision): slanted and rounded styles take their parent
+    master's spacing amounts — a sheared bounding box is not the glyph's width
+    (on Crispy the slanted `colon` measures 248 u of ink against 14 upright,
+    which drove its amount into the 1 u floor). The injector already overrides
+    the masters it derives; the export must agree.
+
+    The parent resolves by LOCATION — the master at the defaults of every
+    transform-injected axis that agrees on all the others — so neither the
+    style names nor the order of ``doc.sources`` can change the answer, and a
+    designer's own master called "… Rounded" is left alone. A derived master
+    with no parent raises: keeping its own sheared measurement is exactly the
+    behaviour this rule replaced.
+    """
+    def at(where: Dict[str, float], tag: str) -> float:
+        return float(where.get(tag, defaults.get(tag, 0.0)))
+
+    derived_on = {t for t in injected if at(location, t) != defaults.get(t, 0.0)}
+    if not derived_on:
+        return None                       # the designer made this master
+    matches = [
+        other for other, (_, other_location, _) in enumerate(measured)
+        if other != index
+        # the parent sits at the injected axes' defaults ...
+        and not [t for t in injected if at(other_location, t) != defaults.get(t, 0.0)]
+        # ... and agrees on every axis the transforms did not inject.
+        and all(at(other_location, t) == at(location, t)
+                for t in (set(location) | set(other_location)) - injected)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise SourcesError(
+            f"the derived master {style_name!r} has no parent: no master sits "
+            f"at the default of {', '.join(sorted(derived_on))} at the same "
+            f"location on the other axes, so its spacing amounts are unknown "
+            f"(the export does not guess from style names)")
+    names = [repr(measured[other][0].styleName or measured[other][0].name)
+             for other in matches]
+    raise SourcesError(
+        f"the derived master {style_name!r} matches {len(matches)} candidate "
+        f"parents ({', '.join(names)}) — the source locations are ambiguous")
 
 
 def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
@@ -509,6 +884,7 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # no build, e.g. a test).
     default_source = next(
         (s for s in doc.sources if not s.layerName), doc.sources[0])
+    renames: Dict[str, str] = {}
     if ink_font is not None and Path(ink_font).exists():
         inks = _ink_widths_from_build(Path(ink_font))
         # E2i-b: the built font speaks PRODUCTION names (`Euro`, `uni0162`), the
@@ -523,10 +899,20 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
                     f"the built font's {name!r} and another glyph both map to "
                     f"the source glyph {source_name!r}")
             remapped[source_name] = ink
-        inks = remapped
+        basis = remapped
+        build_font = Path(ink_font)
+
+        def _inks_from_build(location):
+            """This master's ink, read from the BUILD at that master's
+            location — the injector's own measurement (E2i-c, option B)."""
+            out: Dict[str, float] = {}
+            for name, ink in _ink_widths_from_build(build_font,
+                                                    location).items():
+                out.setdefault(renames.get(name, name), ink)
+            return out
     else:
-        inks = _ink_widths(default_source.font)
-    mean_ink = (sum(inks.values()) / len(inks)) if inks else 0.0
+        basis = _ink_widths(default_source.font)
+        _inks_from_build = None
 
     import copy as _copy
 
@@ -543,14 +929,52 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # One twin per non-zero end. A symmetric range is NOT an exception: an
     # axis with no master below the default has no negative side at all.
     ends = [hi] if lo == hi else [hi, lo]
+    # E2i-c: the amount scales with EACH MASTER's own ink, so both means are
+    # taken over the same glyph set — the sources' names, minus `.notdef` (the
+    # sources carry none; the compiler synthesises the box). `mean_D` is the
+    # default design's, from the built font when there is one.
+    names = [n for n in basis if n in default_source.font and n != ".notdef"]
+    mean_D = (sum(basis[n] for n in names) / len(names)) if names else 0.0
+    capped_total = 0
     twins = []
     # Only the masters get twins: a sparse brace source is an extra layer of its
     # master's UFO and rides along in the deep copy.
+    tags_by_name = {axis.name: axis.tag for axis in doc.axes}
+
+    # (source, location by tag, ink widths) for every master, measured before
+    # any parent is resolved so the order of doc.sources cannot change the
+    # answer (E2i-c).
+    measured: List[Tuple[object, Dict[str, float], Dict[str, float]]] = []
     for source in [s for s in doc.sources if not s.layerName]:
+        location = {tags_by_name[name]: float(value)
+                    for name, value in (source.location or {}).items()
+                    if tags_by_name.get(name)}
+        if _inks_from_build is not None:
+            # (B) measure the build at THIS master; (A) the master's UFO is the
+            # fallback only when there is no build to instance.
+            inks = _inks_from_build(location)
+        else:
+            inks = _ink_widths(source.font)
+        measured.append((source, location, inks))
+
+    injected = _injected_axis_tags(source_path)
+    defaults = {a.tag: float(a.default or 0.0) for a in doc.axes}
+    derived, parents = 0, set()
+    for index, (source, location, inks) in enumerate(measured):
+        parent = _parent_master(index, location, measured, injected, defaults,
+                                source.styleName or source.name)
+        if parent is not None:
+            derived += 1
+            parents.add(parent)
+            inks = measured[parent][2]
+        master_inks = {n: w for n, w in inks.items() if n in names}
+        mean_L = ((sum(master_inks.values()) / len(master_inks))
+                  if master_inks else mean_D)
         for value in ends:
             twin_font = _copy.deepcopy(source.font)
-            _shift_spacing(twin_font, source.font, inks, mean_ink, kind=kind,
-                           value=value, bias=bias, scale=scale)
+            capped_total += _shift_spacing(
+                twin_font, source.font, master_inks, mean_L, kind=kind,
+                value=value, bias=bias, scale=scale, mean_default=mean_D)
             twin = SourceDescriptor()
             twin.font = twin_font
             twin.familyName = source.familyName
@@ -564,6 +988,16 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
         doc.addSource(twin)
     log.info("sources_export: SPAC as %d metrics-only twin sources (%s, %g..%g)",
              len(twins), kind, lo, hi)
+    if derived:
+        log.info("sources_export: %d derived masters take their parents' "
+                 "spacing amounts (%d parents, by location)", derived, len(parents))
+    if capped_total:
+        # E2i-c made the amount proportional to each master's own ink, so a
+        # tightening that outruns a glyph's advance should no longer happen.
+        # Say so loudly if it ever does: the cap distorts every location.
+        log.warning("sources_export: %d per-glyph moves still hit the "
+                    "negative-advance cap (E2i-c should have removed them)",
+                    capped_total)
     return SPAC_TAG
 
 
