@@ -2863,3 +2863,24 @@ So the backstop is latent but broken: the one time it is needed, it turns a degr
 
   The test must fail on 932de1b.
 - From now on the verifier checks CI on every commit it approves.
+
+## Verifier finding (2026-11-06 19:01) — control-axis "open in Fontra" fails intermittently in the full pass; the cause is hidden because the route swallows it
+
+**Measured:**
+- Full verifier passes: 2b26f8a FAIL (17:10), e012db3 FAIL (18:30). Both are HTTP 500 from `POST /api/control-axes/TST2/open-editor`, the "Failed to start Fontra: {exc}" branch.
+- PASS in every narrower replay:
+  - the scenario alone (17:2x);
+  - a direct call (18:4x);
+  - grade then control-axis;
+  - the full probe replayed at 18:42–19:00, 18 of 18.
+- Fontra cold start is 0.3 s on an idle machine, against the launcher's ~5 s bind wait. The pytest suite mocks Fontra, so it does not occupy 8003.
+- What only the failing runs share: the pytest suite and a CLI build ran just before, with more swap and memory pressure, and the call lands seconds after a build, with a compress job still running.
+
+**Cause: unknown.** `open_control_axis_in_editor` puts the exception text only in the JSON response, so neither server.log nor the probe kept it.
+
+**Asks, before the next checkpoint:**
+1. Log the exception, with the traceback, in the server log.
+2. The probe prints the error body on HTTPError. The verifier's diagnostic copy, `~/avar2-verifier/probe-diag/ui_probe.py`, shows the five-line change.
+3. Capture Fontra's own stderr to a log file instead of DEVNULL, so "fontra exited immediately (exit code N)" says why.
+
+With those in place, the next full pass will name the cause.
