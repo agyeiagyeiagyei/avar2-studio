@@ -514,15 +514,28 @@ def origin_master_report(source_path: Path, out: Dict[str, float]) -> Optional[D
 def default_master_name(source_path: Path) -> Optional[str]:
     """The source's DEFAULT master — the master the font rests at unrelocated.
 
-    The master at every axis default. Glyphs' "Variable Font Origin" wins when
-    it names a master that exists; a dangling id falls back to the first master,
-    which is what the compiler does (Crispy's points at a master id that is not
-    in the saved file, so its default master is 47-1-1).
+    Resolved the way the compiler resolves it, not from the axis defaults: a
+    Glyphs source's ``Variable Font Origin`` names the master by id (and the old
+    ``Variation Font Origin`` by name), with glyphsLib's own fallback — the
+    shared base style, else the first master — when the parameter is absent or
+    names a master that is not in the saved file. Using the declared defaults
+    instead pinned every source to its all-minima master, so a copy whose origin
+    sits on 1715-1-1 was reported as resting on 47-1-1: a FALSE "the file is
+    larger" note on the one build that is exact (verifier, 2026-11-06).
     """
     font, _fmt = source_font.load_source_cached(source_path)
     masters = source_font.get_masters(font) or []
     if not masters:
         return None
+    if hasattr(font, "customParameters"):        # GSFont
+        from glyphsLib.builder.axes import get_regular_master
+
+        master = get_regular_master(font)
+        if master is not None:
+            return master.name or "Master"
+        return masters[0]["name"]
+    # A designspace knows its own default: the source whose location is every
+    # axis default.
     defaults = {ax["tag"]: float(ax["default"])
                 for ax in (source_font.get_axes(font) or [])
                 if ax.get("tag") and ax.get("default") is not None}

@@ -141,7 +141,10 @@ def test_a_rotated_component_takes_its_own_advance_not_its_bases():
     thin = _master(doc, "Thin", 0, base)
 
     def wider(font, layer, _cache):
-        _rect(layer, "six", 420, 500, advance=700)
+        # six's layer advance is 760, NINE's own is 700: a pass that copies the
+        # base's advance lands on 760 and fails, which is the defect that left
+        # nine 13 u out at the 900 rows.
+        _rect(layer, "six", 420, 500, advance=760)
 
     _sparse(doc, thin, LAYER, 100, wider)
     # A second master so the models have something to interpolate.
@@ -152,8 +155,10 @@ def test_a_rotated_component_takes_its_own_advance_not_its_bases():
     layer = thin.font.layers[LAYER]
     assert "nine" in layer, "the rotated component needs a layer of its own"
     nine = layer["nine"]
+    base_advance = thin.font.layers[LAYER]["six"].width
+    assert base_advance == 760, "the base's layer has its own advance"
     assert nine.width == pytest.approx(700, abs=1), (
-        f"nine's own advance at XTRA 100 is 700, not its base's "
+        f"nine's own advance at XTRA 100 is 700, not its base's {base_advance} "
         f"({nine.width})")
     assert nine.contours and not nine.components, (
         "the layer holds six's layer outline, flattened")
