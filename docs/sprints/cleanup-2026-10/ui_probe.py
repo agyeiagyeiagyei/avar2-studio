@@ -37,6 +37,7 @@ import argparse
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -624,8 +625,15 @@ def scenario_control_axis(s):
     req = urllib.request.Request(
         f"{s.url}/api/control-axes/{tag}/open-editor", method="POST",
         data=b"{}", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        editor = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            editor = json.load(r)
+    except urllib.error.HTTPError as e:
+        # The intermittent 500's cause is in the body (Fontra's log tail);
+        # printed before /api/health is asked, in case that fails too.
+        print("    OPEN-EDITOR ERROR BODY:", e.read().decode(errors="replace"))
+        print("    health:", json.dumps(health(s.url))[:300])
+        raise
     print("    editor:", {k: editor.get(k) for k in
                           ("project", "editing_original", "port")})
     assert editor.get("editing_original") is False, editor

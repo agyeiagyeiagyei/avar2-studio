@@ -783,20 +783,34 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
         "--http-port", str(state.FONTRA_PORT),
         "filesystem", str(content_root),
     ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        # New session so killing the studio doesn't take Fontra with
-        # it via signal propagation; we manage shutdown explicitly.
-        start_new_session=True,
-    )
+    # Fontra's stdout and stderr go to a log in the studio's workdir, outside
+    # the folder it serves. With DEVNULL an intermittent open-editor 500 left
+    # nothing to read (verifier, 2026-11-06 19:00). Rewritten at each launch,
+    # so the tail quoted in an error is this launch's. Unbuffered, or the
+    # launch banner (stdout) is lost when a slow start is terminated.
+    fontra_log = _get_preview_dir() / "fontra.log"
+    with open(fontra_log, "wb") as log_file:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            # New session so killing the studio doesn't take Fontra with
+            # it via signal propagation; we manage shutdown explicitly.
+            start_new_session=True,
+        )
+
+    def _log_tail() -> str:
+        lines = fontra_log.read_text(errors="replace").splitlines()[-15:]
+        return (f"; its log {fontra_log} ends:\n" + "\n".join(lines)
+                if lines else f"; its log {fontra_log} is empty")
 
     # Give Fontra a moment to bind the port.
     for _ in range(20):
         if proc.poll() is not None:
             raise RuntimeError(
                 f"fontra exited immediately (exit code {proc.returncode})"
+                f"{_log_tail()}"
             )
         try:
             import socket
@@ -809,7 +823,8 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
         time.sleep(0.25)
     else:
         _stop_fontra()
-        raise RuntimeError(f"fontra didn't bind 127.0.0.1:{state.FONTRA_PORT} within ~5s")
+        raise RuntimeError(f"fontra didn't bind 127.0.0.1:{state.FONTRA_PORT} "
+                           f"within ~5s{_log_tail()}")
 
     state.FONTRA_PROCESS = proc
     state.FONTRA_CONTENT_ROOT = content_root
