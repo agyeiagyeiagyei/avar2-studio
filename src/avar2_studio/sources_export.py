@@ -289,6 +289,23 @@ def _is_transformed(transformation) -> bool:
             or abs(c) > 1e-9 or abs(d - 1) > 1e-9)
 
 
+class _Layered:
+    """Glyph lookup across layers: the sparse one first, then the default.
+
+    `_flatten` and the sparse-layer pass draw through a provider; inside a
+    sparse layer a base may live in the default layer, so the provider has to
+    see both."""
+
+    def __init__(self, *layers):
+        self.layers = layers
+
+    def __getitem__(self, name):
+        for layer in self.layers:
+            if name in layer:
+                return layer[name]
+        raise KeyError(name)
+
+
 def _flatten(glyph, provider, name: str) -> bool:
     """Replace ``glyph``'s components with their outlines, in place."""
     if not glyph.components:
@@ -350,6 +367,7 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     them.
     """
     signatures: Dict[str, set] = {}
+    bases_by_glyph: Dict[str, set] = {}
     targets = set()
     for source in doc.sources:
         font = source.font
@@ -360,12 +378,18 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 glyph = layer[name]
                 signatures.setdefault(name, set()).add(
                     (len(glyph.contours), len(glyph.components)))
+                bases_by_glyph.setdefault(name, set()).update(
+                    c.baseGlyph for c in glyph.components)
                 if any(_is_transformed(c.transformation)
                        for c in glyph.components):
                     targets.add(name)
                 if glyph.components and glyph.contours:
                     targets.add(name)
     targets |= {name for name, seen in signatures.items() if len(seen) > 1}
+
+    # nine's model has to be read BEFORE the flatten pass, which removes the
+    # components it interpolates (advance and transform, per master).
+    composite_models = {name: _composite_model(doc, name) for name in targets}
 
     done = 0
     for source in doc.sources:
@@ -379,7 +403,107 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     if done:
         log.info("sources_export: %d components decomposed (%d glyphs)",
                  done, len(targets))
+
+    # A decomposed glyph must exist wherever one of its bases has a sparse
+    # layer, or fontmake interpolates it from the masters alone and drops that
+    # correction: `nine` is a 180°-rotated `six`, `six` carries the grade
+    # braces, and `nine` had none, so its lsb drifted 13 u at the 900 rows.
+    #
+    # The layer takes NINE's own advance and component transform, interpolated
+    # from nine's OWN masters at that location, with the base's layer outline
+    # under that transform (verifier, 2026-11-06 03:15 — copying nine's value
+    # from its parent master, 127, was the earlier attempt's error).
+    added = 0
+    for source in doc.sources:
+        if source.font is None or not source.layerName:
+            continue
+        layer = source.font.layers[source.layerName]
+        default = source.font.layers.defaultLayer
+        if layer is None or layer is default:
+            continue
+        present = set(layer.keys())
+        loc = _design_norm(doc, source.location or {})
+        # Iterate the TARGETS, not the default layer's keys: a master need not
+        # carry every glyph (nine is missing from some masters outright).
+        for name in sorted(targets):
+            if name in present:
+                continue
+            bases = bases_by_glyph.get(name, set()) & present
+            if not bases:
+                continue
+            composed = composite_models.get(name)
+            if composed is None:
+                continue
+            model, series = composed
+            dx_width = model.interpolateFromMasters(
+                loc, list(series["width"]))
+            dx_tx = model.interpolateFromMasters(loc, list(series["tx"]))
+            dx_ty = model.interpolateFromMasters(loc, list(series["ty"]))
+            glyph = layer.newGlyph(name)
+            provider = _Layered(layer, default)
+            from fontTools.pens.pointPen import SegmentToPointPen
+            from fontTools.pens.recordingPen import DecomposingRecordingPen
+            from fontTools.pens.transformPen import TransformPen
+
+            recording = DecomposingRecordingPen(provider)
+            provider[sorted(bases)[0]].draw(recording)
+            recording.replay(TransformPen(
+                SegmentToPointPen(glyph.getPointPen()),
+                (series["matrix"][0], series["matrix"][1],
+                 series["matrix"][2], series["matrix"][3], dx_tx, dx_ty)))
+            glyph.width = round(dx_width)
+            added += 1
+    if added:
+        log.info("sources_export: %d sparse layers added for decomposed glyphs",
+                 added)
     return done
+
+
+def _design_norm(doc, location: Dict[str, float]) -> Dict[str, float]:
+    """A source location in the designspace's own normalised space."""
+    out = {}
+    for axis in doc.axes:
+        value = location.get(axis.name)
+        if value is None or axis.default is None:
+            continue
+        lo, df, hi = axis.minimum, axis.default, axis.maximum
+        span = (hi - df) if value > df else (df - lo)
+        out[axis.tag] = ((value - df) / span) if span else 0.0
+    return out
+
+
+def _composite_model(doc, name: str):
+    """Interpolate one glyph's own advance and single-component transform.
+
+    Returns ``(model, series)`` or None when the glyph is not a plain
+    transformed component in every master. ``series`` carries the per-master
+    values and the constant rotation matrix."""
+    from fontTools.varLib.models import VariationModel
+
+    locations, widths, xs, ys, matrices = [], [], [], [], []
+    for source in doc.sources:
+        if source.layerName or source.font is None:
+            continue
+        default = source.font.layers.defaultLayer
+        if name not in default:
+            continue
+        glyph = default[name]                    # a master without it is not a
+        if len(glyph.components) != 1:           # corner of this glyph's model
+            continue
+        a, b, c, d, tx, ty = glyph.components[0].transformation
+        locations.append(_design_norm(doc, source.location or {}))
+        widths.append(float(glyph.width))
+        xs.append(float(tx))
+        ys.append(float(ty))
+        matrices.append((a, b, c, d))
+    if not locations or len(set(matrices)) != 1:
+        return None
+    if not any(all(abs(v) < 1e-9 for v in loc.values()) for loc in locations):
+        return None                              # the model needs a base
+    model = VariationModel(locations, axisOrder=sorted(
+        {tag for loc in locations for tag in loc}))
+    return model, {"width": widths, "tx": xs, "ty": ys,
+                   "matrix": matrices[0]}
 
 
 #: Diagnostics from the last `_shift_spacing` calls: one dict per (glyph,
