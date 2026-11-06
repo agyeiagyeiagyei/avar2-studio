@@ -421,6 +421,7 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     # under that transform (verifier, 2026-11-06 03:15 — copying nine's value
     # from its parent master, 127, was the earlier attempt's error).
     added = 0
+    unbuilt: Dict[str, str] = {}
     for source in doc.sources:
         if source.font is None or not source.layerName:
             continue
@@ -468,6 +469,10 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
             # the contour order matches the masters (verifier, 2026-11-06).
             mixed = mixed_models.get(name)
             if mixed is None:
+                # A glyph whose base carries a layer but which the models could
+                # not rebuild drifts exactly like `cent` did — say so instead of
+                # skipping in silence (verifier, 2026-11-06 12:24).
+                unbuilt.setdefault(name, _unbuilt_reason(originals.get(name)))
                 continue
             model, point_sets, xforms, widths = mixed
             own = []
@@ -480,8 +485,9 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                         loc, [sets[ci][pi][1] for sets in point_sets])
                     rebuilt.append((x, y, contour[pi][2], contour[pi][3]))
                 own.append(rebuilt)
-            parts = [model.interpolateFromMasters(
-                loc, [xf[i] for xf in xforms]) for i in range(6)]
+            parts = [[model.interpolateFromMasters(
+                loc, [xf[ci][i] for xf in xforms]) for i in range(6)]
+                for ci in range(len(xforms[0]))]
             pieces = copy.deepcopy(originals[name])
             pieces.clearContours()
             pen = pieces.getPointPen()
@@ -490,30 +496,61 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
                 for x, y, segment, smooth in rebuilt:
                     pen.addPoint((x, y), segmentType=segment, smooth=smooth)
                 pen.endPath()
-            first = pieces.components[0]
-            first.transformation = tuple(parts)
+            for component, transform in zip(pieces.components, parts):
+                component.transformation = tuple(transform)
             pieces.width = round(model.interpolateFromMasters(loc, widths))
             layer.insertGlyph(pieces, name)
             _flatten(layer[name], _Layered(layer, default), name)
             added += 1
+    if unbuilt:
+        listed = ", ".join(f"{name} ({reason})"
+                           for name, reason in sorted(unbuilt.items())[:12])
+        more = (f" and {len(unbuilt) - 12} more" if len(unbuilt) > 12 else "")
+        log.warning("sources_export: %d glyph(s) have a base with sparse layers "
+                    "but got no layer of their own, so they drift at those "
+                    "locations: %s%s", len(unbuilt), listed, more)
     if added:
         log.info("sources_export: %d sparse layers added for decomposed glyphs",
                  added)
     return done
 
 
+def _unbuilt_reason(glyph) -> str:
+    """Why the sparse pass could not build a layer for this glyph.
+
+    A glyph whose base carries sparse layers must get its own layer at those
+    locations; when the models decline, the glyph drifts there (that is how
+    `cent` missed 1,128 u). The reason goes into the build log so a designer can
+    act on it instead of discovering the drift in the font.
+    """
+    if glyph is None:
+        return "not in the masters"
+    components = len(getattr(glyph, "components", []) or [])
+    if components and not glyph.contours:
+        return f"{components} component(s), not one transformed component"
+    if components:
+        return "own contours + components, masters incompatible"
+    return "neither own contours nor a component"
+
+
 def _mixed_model(doc, name: str):
-    """Own contour points, component transform and advance across the masters.
+    """Own contour points, component transforms and advance across the masters.
 
     A MIXED glyph keeps contours of its own (`cent` = `c` + a bar, `Q` = `O` + a
     tail); when one of its bases has a sparse layer, that layer must still carry
     the glyph's OWN shape, interpolated from its own masters, or the layer pins
     the whole glyph (verifier, 2026-11-06 10:02: cent missed `c`'s LCWD layers
     by up to 1,128 u).
+
+    Every component takes its OWN interpolated transform — a glyph built from two
+    different bases would otherwise hold one of them at the base master's
+    position. All masters must agree on the component list, or the glyph cannot
+    be interpolated at all and the caller reports it.
     """
     from fontTools.varLib.models import VariationModel
 
     locations, point_sets, xforms, widths = [], [], [], []
+    bases = None
     for source in doc.sources:
         if source.layerName or source.font is None:
             continue
@@ -521,15 +558,20 @@ def _mixed_model(doc, name: str):
         if name not in default:
             continue
         glyph = default[name]
-        if not glyph.contours or len(glyph.components) != 1:
+        if not glyph.contours or not glyph.components:
             continue
         points = [[(p.x, p.y, p.type, p.smooth) for p in contour.points]
                   for contour in glyph.contours]
         if point_sets and [len(c) for c in points] != [len(c) for c in point_sets[0]]:
             return None                        # incompatible masters
+        names = [c.baseGlyph for c in glyph.components]
+        if bases is None:
+            bases = names
+        elif names != bases:
+            return None                        # components differ between masters
         locations.append(_design_norm(doc, source.location or {}))
         point_sets.append(points)
-        xforms.append(tuple(glyph.components[0].transformation))
+        xforms.append(tuple(tuple(c.transformation) for c in glyph.components))
         widths.append(float(glyph.width))
     if len(locations) < 2 or not point_sets:
         return None
