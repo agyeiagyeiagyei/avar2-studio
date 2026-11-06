@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 from fontTools.designspaceLib import AxisDescriptor, DesignSpaceDocument, SourceDescriptor
 from fontTools.varLib.models import VariationModel
 
@@ -125,43 +124,51 @@ def test_a_rotated_component_takes_its_own_advance_not_its_bases():
     The synthesized layer must hold nine's OWN advance and offset at that
     location (interpolated from nine's masters), with six's layer outline under
     that transform. Copying the base's advance left nine 13 u out at the 900
-    rows; the studio's own numbers are 2779 / 5173 / 1149 / 2196.
+    rows; copying nine's PARENT master's values (attempt 3, 2c7d067) was the
+    other way to get it wrong. So nine differs at each master and the layer sits
+    strictly between them, where only interpolation gives the right numbers.
     """
     from ufoLib2.objects import Component
 
     doc = _two_axis_doc()
-    transform = (-1, 0, 0, -1, 127, 1600)
+    layer_name = "XTRA 50"
 
-    def base(font):
-        _rect(font, "six", 300, 500, advance=500)
-        nine = font.newGlyph("nine")
-        nine.width = 700
-        nine.components.append(Component("six", transform))
+    def master(six_width, six_advance, nine_advance, nine_tx):
+        def build(font):
+            _rect(font, "six", six_width, 500, advance=six_advance)
+            nine = font.newGlyph("nine")
+            nine.width = nine_advance
+            nine.components.append(Component("six", (-1, 0, 0, -1, nine_tx, 500)))
+        return build
 
-    thin = _master(doc, "Thin", 0, base)
+    thin = _master(doc, "Thin", 0, master(300, 500, 700, 600))
 
     def wider(font, layer, _cache):
-        # six's layer advance is 760, NINE's own is 700: a pass that copies the
-        # base's advance lands on 760 and fails, which is the defect that left
-        # nine 13 u out at the 900 rows.
+        # six's own correction at XTRA 50: a 420 u bowl, advance 760.
         _rect(layer, "six", 420, 500, advance=760)
 
-    _sparse(doc, thin, LAYER, 100, wider)
-    # A second master so the models have something to interpolate.
-    _master(doc, "Max", 100, base)
+    _sparse(doc, thin, layer_name, 50, wider)
+    _master(doc, "Max", 100, master(380, 580, 900, 800))
 
     sources_export._decompose_transformed_sources(doc)
 
-    layer = thin.font.layers[LAYER]
+    layer = thin.font.layers[layer_name]
     assert "nine" in layer, "the rotated component needs a layer of its own"
     nine = layer["nine"]
-    base_advance = thin.font.layers[LAYER]["six"].width
-    assert base_advance == 760, "the base's layer has its own advance"
-    assert nine.width == pytest.approx(700, abs=1), (
-        f"nine's own advance at XTRA 100 is 700, not its base's {base_advance} "
-        f"({nine.width})")
     assert nine.contours and not nine.components, (
         "the layer holds six's layer outline, flattened")
+    # Halfway between nine's masters: advance (700 + 900) / 2, offset
+    # (600 + 800) / 2. The parent master (Thin) would give 700 and 600, six's
+    # layer 760.
+    assert nine.width == 800, (
+        f"nine's advance at XTRA 50 is 800, interpolated from its masters "
+        f"(700 at Thin, 900 at Max), not {nine.width}")
+    # six's layer outline spans x 0..420; rotated 180° about tx 700 it spans
+    # 280..700. Thin's offset (600) would put it at 180.
+    x_min = min(point.x for contour in nine.contours for point in contour.points)
+    assert x_min == 280, (
+        f"nine's outline must start at x 280 (six's layer under nine's own "
+        f"offset 700 at XTRA 50), not {x_min}")
 
 
 # --------------------------------------------------------------------------
