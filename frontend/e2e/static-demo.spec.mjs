@@ -1719,6 +1719,35 @@ ok(await page.evaluate(() => {
     && getComputedStyle(prev).fontWeight === '700';
 }), 'document + formatting restored after reload');
 
+// ---- 31. Preview specimen survives a rebuild --------------------------------
+console.log('31. Preview specimen survives a rebuild');
+// Still on the bundled Crispy Mini (a live project — it rebuilds). The
+// app swaps the Preview canvas out for a moment whenever its 2 s health
+// poll picks up a new build, which re-creates the specimen element; the
+// new element must be filled again. Real keystrokes, then Rebuild
+// without leaving the tab.
+await page.click('button:text-is("Preview")');
+await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
+await sleep(2500); // one poll period: no earlier build is still on its way to the app
+await page.click('.preview-tab-sample');
+await page.keyboard.press('ControlOrMeta+A');
+await page.keyboard.type('Hamburgefonts');
+await page.evaluate(() => { document.querySelector('.preview-tab-sample').__typedInto = true; });
+const stamp31 = await buildStamp();
+await page.click('header .btn-3d');
+for (const deadline = Date.now() + 300000; (await buildStamp()) === stamp31;) {
+  if (Date.now() > deadline) throw new Error('timed out waiting for the rebuild');
+  await sleep(250);
+}
+// The marked element goes away with the old canvas; its replacement
+// has to carry the text.
+const specimenRefilled = await page.waitForFunction(() => {
+  const el = document.querySelector('.preview-tab-sample');
+  return !!el && !el.__typedInto && el.textContent === 'Hamburgefonts';
+}, null, { timeout: 15000 }).then(() => true).catch(() => false);
+ok(specimenRefilled,
+  `the specimen keeps the typed text across a rebuild ("${await page.textContent('.preview-tab-sample').catch(() => null)}")`);
+
 await browser.close();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
