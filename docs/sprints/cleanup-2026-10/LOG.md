@@ -3910,3 +3910,24 @@ injector that compiles is worse than none — the oracle would then judge a
 partially-ported rule. Next round starts at `uniform_extras()`, with
 `spike/compare_spac.py` as the judge and no loosening of
 `wasm/fontc-web/tests/spac_oracle.rs`.
+
+## ROUND 43 — W1–W6 merged; checkpoint at 4d12e14 (written by the verifier as coordinator)
+
+The sprint agent's session ended at ROUND 42. The remaining work items of
+`COMPLETION_PROTOCOL.md` §4 were done by implementer agents the verifier
+dispatched, each on its own branch, and merged after the verifier re-ran their
+claims. The evidence for each is in `findings.md`:
+
+| Item | Branch → merge | findings.md section |
+|---|---|---|
+| W1 — E2i-c in the Rust SPAC injector | `w1-spac-e2ic` → `f68cee5` | "W1 verified and merged" |
+| W2 — two tests that fail on the old code | `w24-gates` → `b97db02` | "W2, W3, W4 verified and merged" |
+| W3 — Fontra's output logged; a Fontra that never binds is stopped | `w24-gates` → `b97db02` | same |
+| W4 — font-level negative control for the SPAC gate | `w24-gates` → `b97db02` | same |
+| W5 — every CI job green | run 42241059674 on `4d12e14` | STATUS, VERIFIER line |
+| W6 — the static app's e2e spec runs to the end | `w6-static-spec` → `d259908` | "W6 verified and merged" |
+
+Numbers at the tip: Python suite 700 passed, 5 skipped; static-demo spec 160
+checks, 0 failures; coincide copy studio TTF 765,776 B (fontTools path) /
+771,476 B (native); real off-master Crispy 10,563,636 B / 10,563,616 B, the
+two paths identical tuple for tuple.
