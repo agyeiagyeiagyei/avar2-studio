@@ -3540,3 +3540,41 @@ are added across the decomposed glyphs.
 
 Studio TTF **765,776 B**, avar raw 12 = fvar 12, avar2 28 regions (axis 12),
 `.notdef` 0 tuples. The `nine` 13 u row gap is gone: rows are exact.
+
+## ROUND 33 — mixed glyphs get their base's layers, and the sweep joins the round trip
+
+Built with `build_pinned.sh` (worktree `~/avar2-agent/e2ic-wt`, `e2ic-wip`
+`c9849fa`, 0 dirty, `avar2_studio` from the worktree), `failures.jsonl`
+regenerated on this run (`test-output/rt-coincide3/`).
+
+**1. `cent` — a mixed glyph's sparse layer keeps its own shape.**
+`457e107` synthesised layers for pure transformed components only, so `cent`
+(`c` plus its own bar) missed `c`'s Lowercase-width layers and the GRAD ±10
+layers by up to **1,128 u**. A mixed glyph's layer at L is now built from
+
+* its **own contours**, interpolated point-wise from its own masters;
+* its **component**, under the transform interpolated at L (so the base's layer
+  at L supplies the outline);
+* its **own interpolated advance**;
+
+all from the **pre-flatten** glyph (`originals`, captured before the flatten
+pass), so the contour order matches the masters and fontmake sees one topology.
+`_mixed_model` requires own contours **and** exactly one component, identical
+contour/point structure across masters and an all-zero base — `Q` (`O` + a tail)
+qualifies, glyphs whose structure differs do not.
+
+**2. The sweep is now part of the round trip.** `roundtrip_compare.py
+--designspace` visits every sparse-layer location of the exported designspace
+(traditional axes at their defaults), compares advance / lsb / ink for **every**
+glyph at **1 u**, and writes its records to `failures.jsonl` as `kind: sparse`.
+
+| gate | result |
+|---|---|
+| verifier `sparse_sweep.py` | 60 locations × 496 glyphs → **0 glyphs over 1 u** (was `cent` at 1,128 u) |
+| round trip `--designspace` | 60 sparse locations, worst **0.00 u**, 0 records |
+| negative control, same sweep on `rt-coincide2` (`457e107`) | **FAIL, `cent` ink 1,128 u** — the sweep is live, not vacuous |
+
+Round-trip acceptance is unchanged: rows **0.00 u**, simple 2.0, composite 2.0,
+mixed 1.0, unencoded 1.0, `.notdef` **0.00**. Studio TTF **765,776 B** (the
+sparse layers only affect the exported sources), avar 12/12, 28 regions. Suite
+**674 passed, 5 skipped**; `ruff` clean.

@@ -38,12 +38,14 @@ import zipfile
 from pathlib import Path
 
 import uharfbuzz as hb
+from fontTools.designspaceLib import DesignSpaceDocument
 from fontTools.ttLib import TTFont
 
 from avar2_studio.build import config_generator
 
 ROW_TOLERANCE = 3.0
 SPAC_TOLERANCE = 1.0
+SPARSE_TOLERANCE = 1.0
 CLASSES = ("simple", "composite", "mixed", "unencoded", ".notdef")
 
 
@@ -154,6 +156,27 @@ def _mixed_from_zip(path: Path):
         return mixed
 
 
+def _sparse_locations(path: Path) -> dict:
+    """``{(tag, value), …: layerName}`` for every sparse layer source.
+
+    The CSV rows only reach the locations the designer wrote down; the sparse
+    layers reach the ones the build SYNTHESISES (a base's Lowercase-width layer
+    forces its mixed glyphs' layers too). A glyph that misses one of those is a
+    real disagreement, so the sweep runs at every layer location with the
+    traditional axes at their defaults — the resting row of a coincide copy maps
+    there, so both fonts are asked the same question.
+    """
+    doc = DesignSpaceDocument.fromfile(str(path))
+    tags = {axis.name: axis.tag for axis in doc.axes}
+    out = {}
+    for source in doc.sources:
+        if source.layerName:
+            key = tuple(sorted((tags[name], value)
+                               for name, value in source.location.items()))
+            out.setdefault(key, source.layerName)
+    return out
+
+
 def _axes(path: Path) -> dict:
     """``{tag: (min, default, max)}`` from the built fvar."""
     font = TTFont(str(path))
@@ -176,6 +199,10 @@ def main(argv=None) -> int:
     ap.add_argument("--mixed-from", type=Path,
                     help="the ORIGINAL .glyphs, whose mixed glyphs the export "
                          "flattens (they compare as simple)")
+    ap.add_argument("--designspace", type=Path,
+                    help="the exported designspace, whose sparse layers the "
+                         "sweep visits a second time with the traditional axes "
+                         "at their defaults")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--failures", type=Path,
                     help="write every over-tolerance record here (JSON lines)")
@@ -232,12 +259,15 @@ def main(argv=None) -> int:
         fm_gids = [fm_gids[i] for _, i in keep]
 
     over_tolerance = []
-    report = {"rows": {}, "spac": {}, "worst_row": 0.0, "worst_spac": 0.0,
+    report = {"rows": {}, "spac": {}, "sparse": {}, "worst_row": 0.0,
+              "worst_spac": 0.0, "worst_sparse": 0.0,
               "glyphs": len(order),
               "classes": {c: sum(1 for n in order if classes[n] == c)
                           for c in CLASSES},
               "by_class": {}}
     failures = []
+    sparse_locations = (_sparse_locations(args.designspace)
+                        if args.designspace else {})
 
     for row in rows:
         user = {str(t).lower(): float(v) for t, v in row.in_axes.items()}
@@ -340,6 +370,56 @@ def main(argv=None) -> int:
                 failures.append(f"SPAC {end:+g} at {row.instance_name!r}: "
                                 f"{where_end} differs by {worst_end:.2f} u")
 
+    for key, layer in sorted(sparse_locations.items()):
+        location = {tag: defaults[tag] for tag in ("wght", "wdth", "opsz")
+                    if tag in defaults}
+        location.update(dict(key))
+        worst_loc, where_loc = 0.0, ""
+        per_class = {}
+        over_here = 0
+        for name, ms, mb in zip(order,
+                                _measure(studio, gids, location),
+                                _measure(built, fm_gids, location)):
+            cls = classes[name]
+            entry = per_class.setdefault(cls, {"worst": 0.0, "where": "",
+                                               "over": 0})
+            for label, x, y in (("advance", ms[0], mb[0]),
+                                ("lsb", ms[1], mb[1]),
+                                ("ink", ms[2], mb[2])):
+                delta = abs(x - y)
+                if delta > entry["worst"]:
+                    entry["worst"], entry["where"] = delta, f"{name} {label}"
+                if delta > SPARSE_TOLERANCE:
+                    entry["over"] += 1
+                    over_here += 1
+                    over_tolerance.append({
+                        "kind": "sparse", "row": None, "end": None,
+                        "layer": layer, "glyph": name, "class": cls,
+                        "metric": label, "delta": round(delta, 2)})
+                if delta > worst_loc:
+                    worst_loc = delta
+                    where_loc = f"{name} {label} ({cls})"
+        report["sparse"][layer] = {"location": dict(key),
+                                   "worst": round(worst_loc, 2),
+                                   "where": where_loc,
+                                   "by_class": {
+                                       k: {"worst": round(v["worst"], 2),
+                                           "where": v["where"],
+                                           "over": v["over"]}
+                                       for k, v in per_class.items()}}
+        report["worst_sparse"] = max(report["worst_sparse"],
+                                     round(worst_loc, 2))
+        for cls, entry in per_class.items():
+            agg = report["by_class"].setdefault(
+                cls, {"worst": 0.0, "where": "", "over": 0})
+            if entry["worst"] > agg["worst"]:
+                agg["worst"], agg["where"] = entry["worst"], entry["where"]
+            agg["over"] += entry["over"]
+        if over_here:
+            failures.append(f"sparse layer {layer!r}: {where_loc} differs by "
+                            f"{worst_loc:.2f} u ({over_here} check(s) over "
+                            f"{SPARSE_TOLERANCE:g} u)")
+
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n")
     if args.failures:
@@ -362,6 +442,12 @@ def main(argv=None) -> int:
         worst_spac = max(report["spac"].items(), key=lambda kv: kv[1]["worst"])
         print(f"SPAC ends: {spac_ends}  worst: {worst_spac[0]!r} "
               f"{worst_spac[1]['worst']} u ({worst_spac[1]['where']})")
+    if report["sparse"]:
+        worst_sparse = max(report["sparse"].items(),
+                           key=lambda kv: kv[1]["worst"])
+        print(f"sparse locations: {len(report['sparse'])}  worst: "
+              f"{worst_sparse[0]!r} {worst_sparse[1]['worst']} u "
+              f"({worst_sparse[1]['where']})")
     for failure in failures[:20]:
         print(f"  FAIL {failure}")
     print(f"{'PASS' if not failures else 'FAIL'}: {len(failures)} check(s) "
