@@ -390,14 +390,21 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
     # nine's model has to be read BEFORE the flatten pass, which removes the
     # components it interpolates (advance and transform, per master).
     composite_models = {name: _composite_model(doc, name) for name in targets}
+    mixed_models = {name: _mixed_model(doc, name) for name in targets}
 
     done = 0
+    originals: Dict[str, object] = {}
     for source in doc.sources:
         font = source.font
         if font is None:
             continue
         for layer in font.layers:
             for name in list(layer.keys()):
+                if name in targets:
+                    # Keep the glyph WITH its components/own contours: the
+                    # sparse-layer pass rebuilds from this, not from the
+                    # already flattened copy.
+                    originals.setdefault(name, copy.deepcopy(layer[name]))
                 if name in targets and _flatten(layer[name], layer, name):
                     done += 1
     if done:
@@ -432,31 +439,105 @@ def _decompose_transformed_sources(doc: DesignSpaceDocument) -> int:
             if not bases:
                 continue
             composed = composite_models.get(name)
-            if composed is None:
-                continue
-            model, series = composed
-            dx_width = model.interpolateFromMasters(
-                loc, list(series["width"]))
-            dx_tx = model.interpolateFromMasters(loc, list(series["tx"]))
-            dx_ty = model.interpolateFromMasters(loc, list(series["ty"]))
-            glyph = layer.newGlyph(name)
-            provider = _Layered(layer, default)
-            from fontTools.pens.pointPen import SegmentToPointPen
-            from fontTools.pens.recordingPen import DecomposingRecordingPen
-            from fontTools.pens.transformPen import TransformPen
+            if composed is not None:
+                model, series = composed
+                dx_width = model.interpolateFromMasters(
+                    loc, list(series["width"]))
+                dx_tx = model.interpolateFromMasters(loc, list(series["tx"]))
+                dx_ty = model.interpolateFromMasters(loc, list(series["ty"]))
+                glyph = layer.newGlyph(name)
+                provider = _Layered(layer, default)
+                from fontTools.pens.pointPen import SegmentToPointPen
+                from fontTools.pens.recordingPen import DecomposingRecordingPen
+                from fontTools.pens.transformPen import TransformPen
 
-            recording = DecomposingRecordingPen(provider)
-            provider[sorted(bases)[0]].draw(recording)
-            recording.replay(TransformPen(
-                SegmentToPointPen(glyph.getPointPen()),
-                (series["matrix"][0], series["matrix"][1],
-                 series["matrix"][2], series["matrix"][3], dx_tx, dx_ty)))
-            glyph.width = round(dx_width)
+                recording = DecomposingRecordingPen(provider)
+                provider[sorted(bases)[0]].draw(recording)
+                recording.replay(TransformPen(
+                    SegmentToPointPen(glyph.getPointPen()),
+                    (series["matrix"][0], series["matrix"][1],
+                     series["matrix"][2], series["matrix"][3], dx_tx, dx_ty)))
+                glyph.width = round(dx_width)
+                added += 1
+                continue
+
+            # MIXED glyphs (`cent` = `c` + its own bar, `Q` = `O` + a tail): the
+            # layer is the glyph's OWN contours interpolated from its own
+            # masters, its component under the transform interpolated at L, and
+            # its own interpolated advance. Built from the pre-flatten glyph so
+            # the contour order matches the masters (verifier, 2026-11-06).
+            mixed = mixed_models.get(name)
+            if mixed is None:
+                continue
+            model, point_sets, xforms, widths = mixed
+            own = []
+            for ci, contour in enumerate(point_sets[0]):
+                rebuilt = []
+                for pi in range(len(contour)):
+                    x = model.interpolateFromMasters(
+                        loc, [sets[ci][pi][0] for sets in point_sets])
+                    y = model.interpolateFromMasters(
+                        loc, [sets[ci][pi][1] for sets in point_sets])
+                    rebuilt.append((x, y, contour[pi][2], contour[pi][3]))
+                own.append(rebuilt)
+            parts = [model.interpolateFromMasters(
+                loc, [xf[i] for xf in xforms]) for i in range(6)]
+            pieces = copy.deepcopy(originals[name])
+            pieces.clearContours()
+            pen = pieces.getPointPen()
+            for rebuilt in own:
+                pen.beginPath()
+                for x, y, segment, smooth in rebuilt:
+                    pen.addPoint((x, y), segmentType=segment, smooth=smooth)
+                pen.endPath()
+            first = pieces.components[0]
+            first.transformation = tuple(parts)
+            pieces.width = round(model.interpolateFromMasters(loc, widths))
+            layer.insertGlyph(pieces, name)
+            _flatten(layer[name], _Layered(layer, default), name)
             added += 1
     if added:
         log.info("sources_export: %d sparse layers added for decomposed glyphs",
                  added)
     return done
+
+
+def _mixed_model(doc, name: str):
+    """Own contour points, component transform and advance across the masters.
+
+    A MIXED glyph keeps contours of its own (`cent` = `c` + a bar, `Q` = `O` + a
+    tail); when one of its bases has a sparse layer, that layer must still carry
+    the glyph's OWN shape, interpolated from its own masters, or the layer pins
+    the whole glyph (verifier, 2026-11-06 10:02: cent missed `c`'s LCWD layers
+    by up to 1,128 u).
+    """
+    from fontTools.varLib.models import VariationModel
+
+    locations, point_sets, xforms, widths = [], [], [], []
+    for source in doc.sources:
+        if source.layerName or source.font is None:
+            continue
+        default = source.font.layers.defaultLayer
+        if name not in default:
+            continue
+        glyph = default[name]
+        if not glyph.contours or len(glyph.components) != 1:
+            continue
+        points = [[(p.x, p.y, p.type, p.smooth) for p in contour.points]
+                  for contour in glyph.contours]
+        if point_sets and [len(c) for c in points] != [len(c) for c in point_sets[0]]:
+            return None                        # incompatible masters
+        locations.append(_design_norm(doc, source.location or {}))
+        point_sets.append(points)
+        xforms.append(tuple(glyph.components[0].transformation))
+        widths.append(float(glyph.width))
+    if len(locations) < 2 or not point_sets:
+        return None
+    if not any(all(abs(v) < 1e-9 for v in loc.values()) for loc in locations):
+        return None                            # the model needs a base
+    model = VariationModel(locations, axisOrder=sorted(
+        {tag for loc in locations for tag in loc}))
+    return model, point_sets, xforms, widths
 
 
 def _design_norm(doc, location: Dict[str, float]) -> Dict[str, float]:
