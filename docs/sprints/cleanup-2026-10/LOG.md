@@ -3769,3 +3769,41 @@ at wght 400 → the first master is the default, as glyphsLib does with Crispy's
 **Process note.** A commit message was run through zsh with backticks in it
 (`` `restingQuery` ``); zsh executed it and the word vanished from that message.
 The commit itself is sound; quotes from now on.
+
+## ROUND 38 — who writes avar's header: named, measured, and not reproducible today
+
+The verifier (17:40) asked to name the stage that writes `axisCount 29` in
+avar's raw header against fvar's 12.
+
+**The writer is step 4**, the pipeline's only avar writer:
+`gftools.scripts.gen_avar2.gen_avar2_mapping` (pipeline.py, the `if avar2_cfg:`
+block, run under `_install_gen_fvar_axes_shim`). It emits avar **2.0**.
+
+**The mechanism that can over-count, demonstrated.**
+`gen_avar2.gen_fvar_axes` (gftools) computes
+`axis_count = len(font["fvar"].axes) + <distinct mapping in: tags>` and writes it
+to `font["gvar"].axisCount`, then appends an fvar axis for every mapping tag the
+font lacks. Its upstream bug — an axis per tag **even when the font already has
+it** — reproduces in a probe (`~/avar2-agent/gen_avar2_probe.py`): a one-axis
+font plus a mapping naming `wght` and `wdth` comes out with
+`fvar ['wght', 'wght', 'wdth']` and an avar of 3. The build's shim is what
+prevents that. Any stage that then removes such an axis without recompiling avar
+leaves the count above fvar's.
+
+**Measured on today's code.** Raw header of the pinned builds: **major 2,
+axisCount 12 = fvar 12** on the coincide copy (`rt-coincide4`) and on the real
+Crispy (`rt-crispy`), and **the repair never fires** — no `avar: raw axis count`
+line in any build log. `_repair_avar_axis_count` is a backstop, not a fix-up that
+runs every time.
+
+**Not reproduced.** The exact 29 (rt-cli-check, 11-05 21:29, pre-shim) is not
+reproducible with the current code, so the specific count stays unexplained; the
+mechanism above is what a 29-shaped drift looks like, and the shim plus the
+repair close it from both sides.
+
+**Docs.** `docs/HANDOVER.md` no longer exists — it was archived as
+`docs/archive/HANDOVER-2026-10.md` (D1, `e6d0d17`), so the pointer in the
+workspace's `AGENTS.md` is stale (the user's file, not touched here). README's
+export paragraph now states what E2l's dialog says: a resting style that is not
+the default master makes the export larger, the preview's spacing is approximate
+between masters, and the exported fonts are exact.

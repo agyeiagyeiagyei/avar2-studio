@@ -119,6 +119,11 @@ so the export rests at a picked style — the source is never touched. **UFO +
 designspace (zip)** hands fontmake users the masters plus a designspace 5 with the
 mappings and the spacing.
 
+When the resting style is not the source's default master the export is larger —
+the studio rebuilds the variations around it — and the preview's spacing is
+approximate between masters, while the exported fonts are exact. The dialog says
+so, naming the master the font actually rests on.
+
 ![Export dialog: mark axes hidden, set the default location](docs/images/export-modal.png)
 
 **Grade.** Darken or lighten a style **without changing advance widths**: turn
