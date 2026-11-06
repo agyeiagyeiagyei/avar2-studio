@@ -203,7 +203,19 @@ fn spac_matches_studio_oracle_at_the_masters() {
         r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#,
         locations.trim(),
     );
-    compare_at_the_masters("crispymini", &common::spike_font(), &transforms);
+    let spike = common::spike_font();
+    compare_at_the_masters("crispymini", &spike, &transforms);
+
+    // The static app's order: the avar2 mappings first, SPAC after. The
+    // font then carries an avar 2 table, whose axis count must still be
+    // fvar's once the SPAC axis is in (FreeType drops avar otherwise, and
+    // wght/wdth/opsz with it).
+    let csv = std::fs::read_to_string(common::mappings_csv()).expect("read mappings csv");
+    let mapped = fontc_web::add_avar2(std::fs::read(&spike).expect("read spike font"), &csv, None, None)
+        .expect("add_avar2");
+    let mapped_path = common::tmp_dir().join("spac-masters-avar2-input.ttf");
+    std::fs::write(&mapped_path, &mapped).expect("write avar2 input");
+    compare_at_the_masters("crispymini-avar2", &mapped_path, &transforms);
 }
 
 /// The synthetic multi-master font: a negative side, an interior master

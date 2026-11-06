@@ -552,6 +552,13 @@ pub(crate) fn build_grown_font(
     let avar_bytes = match font.avar() {
         Ok(avar) => {
             let mut avar: w_avar::Avar = avar.to_owned_table();
+            // read-fonts walks the segment maps to the END of the table, so
+            // on an avar 2 font the offsets and the VarStore that follow the
+            // maps come back as extra maps (CrispyMini: 20 for 6 axes), and
+            // the table was written with that count — which FreeType
+            // rejects, dropping avar and avar2 with it. One map per fvar
+            // axis, the rest is not a map.
+            avar.axis_segment_maps.truncate(old_axis_count);
             for _ in 0..new_axes.len() {
                 avar.axis_segment_maps.push(w_avar::SegmentMaps::default());
             }
