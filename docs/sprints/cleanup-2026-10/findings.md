@@ -2602,3 +2602,33 @@ So the layer at L is:
 Attempt 3's advance of 127 is nine's advance and offset at its parent master 47-1-1 (pos.x 127), copied instead of interpolated. six's advance (1,365) is not the target either.
 
 The studio's nine is a simple glyph (fontc flattens it), so the studio is the reference here.
+
+## Verifier finding (2026-11-06 10:02) — ROUND 32 verified; the sparse-layer sweep finds one more: `cent` (mixed) misses `c`'s Lowercase-width layers
+
+**Verified on `rt-coincide2`** (build.log: e2ic-wt, e2ic-wip `457e107`, 0 dirty, worktree import; `failures.jsonl` and `rt.json` are both from this run):
+- 765,776 B; raw avar 12 = fvar 12; FreeType = HarfBuzz (≤ 1 u, integer rounding).
+- `spac_at_masters.py`: twin UFO = studio = fontmake at every master and both ends — 112 of 112 checks (g, slash, period, H, yen, nine, Q, gbreve × 7 masters × 2 ends).
+- `spac_signed.py`: mean −0.004 / +0.003 u, sd ≈ 0.2, mixed signs, 6 reads at 2 u.
+- `spac_perglyph.py`: worst glyph mean 0.39 u (H at +100); none ≥ 0.5.
+- Rows worst 0.00 u. nine is fixed.
+
+**The sweep (gate from 00:10).** I compared every glyph, studio vs sources, at all 60 sparse-layer locations of the exported designspace: grade, Lowercase width (LCWD), slanted and rounded twins (`~/avar2-verifier/scripts/sparse_sweep.py`).
+- 495 of 496 glyphs agree within 1 u everywhere, including nine at GRAD ±10. That closes the earlier GRAD ±10 question.
+- One glyph fails: **`cent`**. It is a *mixed* glyph (`c` plus its own contours), flattened by both renderers. It fails at all 12 LCWD 100 layers and at the GRAD ±10 layers, up to 1,128 u.
+  - At XTRA 1715 / XOPQ 1462 / YOPQ 275, LCWD 100: the studio's cent has ink 7,904 and lsb 718 (it follows `c`'s LCWD layer: `c` ink 6,788 → 7,904 in both fonts). The sources' cent stays at ink 6,788, lsb 663.
+  - Advance is 9,045 in both.
+- The guard "only pure transformed components get a synthesized layer" (457e107) leaves mixed glyphs out. The 28-row round trip cannot see it, because every row is at LCWD 0, upright, sharp.
+
+**Fix direction.** Same principle as nine: a flattened mixed glyph gets a layer wherever a component's base has one. At L:
+- its OWN contours are interpolated from its own masters (masters-only);
+- the component part is the base's layer at L, under the component transform interpolated at L;
+- advance is interpolated from its own masters;
+- contours come in the same order the flatten pass uses at the masters, so fontmake sees compatible sources.
+
+If Q gets the same treatment, it must stay compatible. Q currently passes (≤ 1 u) because O has no layers there.
+
+**Gate:**
+- `sparse_sweep.py` shows 0 glyphs over 1 u.
+- Add the sparse-location sweep to the round trip, so non-row locations are covered.
+
+**For the user (design, not a code item):** cent's own advance does not follow LCWD in the studio, which follows Glyphs' behaviour. So at that corner, cent's right side shrinks from 1,594 to 423 u. The export fix will reproduce that faithfully. Whether cent should widen with `c` is the designer's call.
