@@ -56,6 +56,10 @@ const waitForAsync = async (fn, { timeout = 120000, every = 250 } = {}) => {
     await sleep(every);
   }
 };
+// A finished download closes the export dialog itself (plain and options
+// paths alike, since 66ce7ca) — wait for that instead of clicking Cancel.
+const exportDialogClosed = () =>
+  page.waitForSelector('.preview-export-modal', { state: 'detached', timeout: 10000 });
 
 // ---- 1. static boot -------------------------------------------------------
 console.log('1. static boot');
@@ -544,9 +548,8 @@ const fontBytes = readFileSync(await fontDownload.path());
 ok(fontBytes.length > 10000
   && fontBytes[0] === 0 && fontBytes[1] === 1 && fontBytes[2] === 0 && fontBytes[3] === 0,
   `avar2-ready font downloads as valid TTF (${fontBytes.length} bytes)`);
-// The plain download path leaves the export modal open — close it.
-await page.click('.preview-export-modal button:has-text("Cancel")');
-await page.waitForTimeout(500);
+await exportDialogClosed();
+ok(true, 'the export dialog closes itself after the plain download');
 
 // ---- 13. export options (default location + hidden axes) -------------------
 console.log('13. export options (default location + hidden axes)');
@@ -609,8 +612,8 @@ ok(stat && stat.values.every(v =>
   'all STAT value records are well-formed with valid axis indexes');
 ok(stat && stat.values.some(v => (v.flags & 0x0002) === 0x0002),
   'at least one elidable (0x0002) STAT value record');
-// (No modal close needed here — the options path closes the export
-// modal itself on success, unlike section 12's plain download.)
+// (No modal close needed here — the export modal closes itself on
+// success, as in section 12's plain download.)
 
 // ---- 15. zip workspace (project zips in and out) ---------------------------
 console.log('15. zip workspace (project zips in and out)');
@@ -804,7 +807,7 @@ print(sum(1 for p in img.get_flattened_data() if p < 128))
 `, pinFontPath]
 ).toString().trim());
 ok(pinDarkness > 1000, `pinned ghost corner renders with weight (darkness ${pinDarkness} at (47,700,300))`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 // Pin the rest, targeted by corner. (47,700,1) is unreachable by the
 // tent model (every XOPQ-heavy master also lifts XTRA or YOPQ), so it
 // synthesizes by free extrapolation — 'a' is YOPQ-invariant, so the
@@ -947,7 +950,7 @@ print(f['hmtx'].metrics['a'], (g.xMin, g.yMin, g.xMax, g.yMax))
 ).toString().trim();
 ok(clampMetrics === '(166, 34) (34, 0, 129, 1200)',
   `default instance intact after the drop (${clampMetrics})`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 
 // ---- 22. SPAC transform toggles on an upload --------------------------------
 console.log('22. SPAC transform toggles on an upload');
@@ -995,7 +998,7 @@ print(','.join(a.axisTag for a in TTFont(sys.argv[1])['fvar'].axes))
 `, p]
 ).toString().trim();
 ok(fontAxes(spacFontPath).includes('SPAC'), `exported font carries the SPAC fvar axis (${fontAxes(spacFontPath)})`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 // Toggle off → rebuild without SPAC → the fvar axis is gone again.
 await page.click('button:has-text("Transforms")');
 await page.waitForSelector('.transform-row', { timeout: 15000 });
@@ -1017,7 +1020,7 @@ const [spacOffFontDl] = await Promise.all([
 ]);
 const spacOffFontPath = await spacOffFontDl.path();
 ok(!fontAxes(spacOffFontPath).includes('SPAC'), `SPAC fvar axis removed after toggling off (${fontAxes(spacOffFontPath)})`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 
 // ---- 23. rebuild re-applies bundle state (control axes + grade + SPAC) ------
 console.log('23. rebuild re-applies bundle state (control axes + grade + SPAC)');
@@ -1055,7 +1058,7 @@ const rebuiltAxes = fontAxes(await rebuiltFontDl.path());
 ok(rebuiltAxes.includes('crbr'), `control axis crbr survives REBUILD (${rebuiltAxes})`);
 ok(rebuiltAxes.includes('GRAD'), `GRAD axis survives REBUILD (${rebuiltAxes})`);
 ok(rebuiltAxes.includes('SPAC'), `SPAC axis survives REBUILD (${rebuiltAxes})`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 
 // ---- 24. control axes on an upload (secondary parametric axes) --------------
 console.log('24. control axes on an upload');
@@ -1301,7 +1304,7 @@ const [crnrFontDl] = await Promise.all([
 ]);
 const crnrAxes = fontAxes(await crnrFontDl.path());
 ok(crnrAxes.includes('crnr'), `exported font carries the new control axis (${crnrAxes})`);
-await page.click('.preview-export-modal button:has-text("Cancel")');
+await exportDialogClosed();
 
 // ---- 25. mapping-axis rename / delete --------------------------------------
 console.log('25. mapping-axis rename / delete');
@@ -1395,7 +1398,7 @@ const downloadFont = async () => {
     page.click('.preview-export-modal button:has-text("Download")'),
   ]);
   const p = await dl.path();
-  await page.click('.preview-export-modal button:has-text("Cancel")');
+  await exportDialogClosed();
   return p;
 };
 const fontReport = (p) => execFileSync(
