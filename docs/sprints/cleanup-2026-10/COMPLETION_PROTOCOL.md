@@ -137,7 +137,7 @@ A new decision that is genuinely the user's, such as a scope change, a design ch
 **Git**
 - No history rewrite, no force-push, no tag, no PyPI publish.
 - Never run a bare `git stash`.
-- Commit trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commit trailer: the `Co-Authored-By:` line your own session's attribution instructions give (the model that wrote the commit).
 
 **Builds**
 - Acceptance builds come from a PINNED worktree, with provenance at the head of `build.log`: branch, commit, dirty count, `avar2_studio.__file__`. Check the build signature before measuring.
