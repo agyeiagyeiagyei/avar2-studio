@@ -727,63 +727,56 @@ ok(true, 'forget survives reload (stored session cleared)');
 
 // ---- 17. coverage audit (missing corners on upload) -------------------------
 console.log('17. coverage audit (missing corners on upload)');
+// The Space tab and the header's Coverage badge were the only UI for the
+// audit, the corner pins and the out-of-range drop; both were removed on
+// 2026-10-16 (0ddaea5, sprint T1.17). The engine stays in the static
+// provider — pins and the drop still ride sessions, workspace zips,
+// config bundles and every rebuild — so sections 17–21 drive it through
+// the provider (window.__avar2api) and keep every check that was about
+// the font rather than about the tab.
 const CRISPY_TEST = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'Crispy-test.glyphs');
 await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
 await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy', null, { timeout: 120000 });
-const coverageBtn = await page.waitForSelector('button:has-text("Coverage")', { timeout: 20000 });
-const badgeText = await coverageBtn.textContent();
-ok(/\d+/.test(badgeText) && parseInt(badgeText.match(/\d+/)[0], 10) >= 3,
-  `Coverage badge shows findings (${badgeText.trim()})`);
-// The badge is now just a count that lands on the Space tab — the
-// findings list and its actions live there.
-await coverageBtn.click();
-await page.waitForSelector('.space-findings', { timeout: 20000 });
-const missingCorners = await page.$$eval('.space-findings .load-font-item-name',
-  els => els.filter(e => e.textContent.includes('Missing corner')).length);
-ok(missingCorners === 3, `findings list shows 3 Missing corner entries (${missingCorners})`);
-const collapseItems = await page.$$eval('.space-findings .coverage-finding-row',
-  els => els.filter(e => e.textContent.includes('collapses')).length);
+const coverage = () => page.evaluate(() => window.__avar2api.getCoverage());
+const findingsOf = async (type) => (await coverage()).findings.filter(f => f.type === type);
+const audit17 = (await coverage()).findings;
+ok(audit17.length >= 3, `the audit reports findings on upload (${audit17.length})`);
+const missingCorners = audit17.filter(f => f.type === 'uncovered-corner').length;
+ok(missingCorners === 3, `the audit lists 3 missing corners (${missingCorners})`);
+const collapseItems = audit17.filter(f => f.detail.includes('collapses')).length;
 ok(collapseItems > 0, `findings include sweep collapse(s) from the probe (${collapseItems})`);
-// First finding: (XTRA 47, XOPQ 700, YOPQ 1) — clicking sets the in-tab probe.
-await page.click('.space-findings .coverage-finding-row .coverage-finding-jump');
-await page.waitForTimeout(600);
-ok((await page.textContent('.space-side-label')).includes('XOPQ 700'),
-  'clicking a finding sets the in-tab probe to the corner');
+// First finding: (XTRA 47, XOPQ 700, YOPQ 1).
+const firstCorner = audit17[0]?.location;
+ok(firstCorner?.XTRA === 47 && firstCorner?.XOPQ === 700 && firstCorner?.YOPQ === 1,
+  `the first finding carries its corner's location (${JSON.stringify(firstCorner)})`);
 
 // ---- 18. corner pinning ------------------------------------------------------
 console.log('18. corner pinning');
-// Continues on section 17's crispy-test upload (the Space tab's findings
-// rail holds the Pin buttons now). The real ghost is the (XOPQ▲, YOPQ▲)
-// corner (47,700,300) — the one with a collapse finding.
-const cornerFindings = async () => {
-  await page.click('button:has-text("Coverage")'); // badge → Space tab
-  await page.waitForSelector('.space-tab', { timeout: 15000 });
-  return page.$$eval('.space-findings .load-font-item-name',
-    els => els.filter(e => e.textContent.includes('Missing corner')).length)
-    .catch(() => 0);
+// Continues on section 17's crispy-test upload. The real ghost is the
+// (XOPQ▲, YOPQ▲) corner (47,700,300) — the one with a collapse finding.
+const cornerFindings = async () => (await findingsOf('uncovered-corner')).length;
+// Pin the missing corner whose finding names every needle (the audit
+// words a corner as "XTRA▼ XOPQ▲ YOPQ▲"); null when no such finding is
+// left.
+const pinCornerByText = async (...needles) => {
+  const finding = (await findingsOf('uncovered-corner'))
+    .find(f => needles.every(n => f.detail.includes(n)));
+  if (!finding) return null;
+  return page.evaluate((corner) => window.__avar2api.pinCorner(corner), finding.location);
 };
-const pinGhost = async () => {
-  await page.click('button:has-text("Coverage")');
-  await page.waitForSelector('.space-findings .coverage-pin-btn', { timeout: 15000 });
-  await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
-    const row = rows.find(r => r.textContent.includes('XOPQ▲') && r.textContent.includes('YOPQ▲'));
-    if (!row) throw new Error('ghost corner finding not found');
-    row.querySelector('.coverage-pin-btn').click();
-  });
-  await page.waitForFunction(() =>
-    document.querySelectorAll('.space-chip.pinned').length > 0,
-    { timeout: 90000 }
-  );
-  await page.waitForTimeout(1500);
-};
-await pinGhost();
-ok(true, 'ghost corner pinned (scaffold from the healthy edge)');
+// A provider-side build reaches the app on its 2 s health poll (the
+// removed tab's handlers reloaded the app themselves); a download
+// started before that would fetch the previous, revoked font URL.
+const appPicksUpBuild = () => sleep(3000);
+const ghostPin = await pinCornerByText('XOPQ▲', 'YOPQ▲');
+ok(ghostPin?.ok === true && !!ghostPin.scaffold && !ghostPin.synthesized,
+  `ghost corner pinned (scaffold from the healthy edge: ${JSON.stringify(ghostPin?.scaffold)})`);
 ok(await cornerFindings() < 3, 'pin cleared the corners it covers');
 // Shape-level verification: the exported font renders real stem
 // darkness at the pinned corner (it was 0 before — the ghost).
+await appPicksUpBuild();
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
 await page.click('.preview-tab-download button');
@@ -811,123 +804,77 @@ await exportDialogClosed();
 // Pin the rest, targeted by corner. (47,700,1) is unreachable by the
 // tent model (every XOPQ-heavy master also lifts XTRA or YOPQ), so it
 // synthesizes by free extrapolation — 'a' is YOPQ-invariant, so the
-// peel-off attributes the heavy master's whole delta to XOPQ. The
-// synthesis notice must show. (47,1,300) pins via its sweep scaffold.
-const pinCornerByText = async (needle) => {
-  await page.click('button:has-text("Coverage")');
-  await page.waitForSelector('.space-findings', { timeout: 15000 });
-  const chipsBefore = (await page.$$('.space-chip.pinned')).length;
-  const clicked = await page.evaluate((n) => {
-    const rows = [...document.querySelectorAll('.space-findings .coverage-finding-row')];
-    const row = rows.find(r => r.textContent.includes(n));
-    const btn = row?.querySelector('.coverage-pin-btn');
-    if (btn) btn.click();
-    return !!btn;
-  }, needle);
-  if (!clicked) return 'no-finding';
-  await page.waitForFunction((b) => document.querySelectorAll('.space-chip.pinned').length > b, chipsBefore, { timeout: 120000 });
-  await page.waitForTimeout(1200);
-  return 'pinned';
-};
-ok((await pinCornerByText('XOPQ▲ YOPQ▼')) === 'pinned', 'second corner pinned');
-ok((await pinCornerByText('XOPQ▼ YOPQ▲')) === 'pinned', 'trended corner pinned (sweep scaffold)');
+// peel-off attributes the heavy master's whole delta to XOPQ — and the
+// pin says so. (47,1,300) pins via its sweep scaffold.
+const secondPin = await pinCornerByText('XOPQ▲ YOPQ▼');
+ok(secondPin?.ok === true, 'second corner pinned');
+ok(secondPin?.synthesized === true && secondPin.scaffold === null,
+  'the unreachable corner is reported as synthesized by extrapolation');
+const trendPin = await pinCornerByText('XOPQ▼ YOPQ▲');
+ok(trendPin?.ok === true && !!trendPin.scaffold && !trendPin.synthesized,
+  `trended corner pinned (sweep scaffold: ${JSON.stringify(trendPin?.scaffold)})`);
 ok((await cornerFindings()) === 0, 'all corner findings cleared');
 
 // ---- 19. rebuild keeps pins ---------------------------------------------------
 console.log('19. rebuild keeps pins');
+// The provider is read directly here, so wait on the build stamp: it
+// advances only once the recompiled font (pins re-applied) is in.
+const stamp19 = await buildStamp();
 await page.click('header .btn-3d');
+for (const deadline = Date.now() + 90000; (await buildStamp()) === stamp19;) {
+  if (Date.now() > deadline) throw new Error('timed out waiting for the rebuild');
+  await sleep(250);
+}
 await page.waitForFunction(() =>
   !document.querySelector('header .btn-3d')?.textContent.includes('Building'),
   { timeout: 90000 }
 );
-// The only notice allowed is section 18's known refusal (inline in the
-// Space tab); a rebuild error would show as the global error banner.
+// A rebuild error would show as the global error banner.
 const banner19 = await page.$eval('.error-banner', el => el.textContent).catch(() => null);
 ok(!banner19, `rebuild produced no global error banner (${banner19 || 'none'})`);
-await page.click('button:has-text("Coverage")');
 ok(await cornerFindings() === 0, 'pins re-applied on rebuild (no corner findings remain)');
 
-// ---- 20. Space tab (Noordzij cube) ------------------------------------------
-console.log('20. Space tab (Noordzij cube)');
-// Fresh upload so ghost corners are present again.
+// ---- 20. corner synthesis on a fresh font -------------------------------------
+console.log('20. corner synthesis on a fresh font');
+// Was the Space tab's section; the cube went with the tab, the pin its
+// chip made did not. Fresh upload so the missing corners are back — the
+// family name does not change, so wait on the audit itself.
 await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
 await page.click('button:text-is("Instances")');
-await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'Crispy', null, { timeout: 120000 });
-await page.click('button:text-is("Space")');
-await page.waitForSelector('.space-chip', { timeout: 30000 });
-ok((await page.$$('.space-chip')).length === 8, '8 corner chips render');
-// ghost styling needs the coverage findings — they land a beat after the chips
-await page.waitForFunction(() => document.querySelectorAll('.space-chip.ghost').length === 3, { timeout: 20000 });
-ok(true, '3 ghost chips (the missing corners)');
-// instance diamonds need the font bytes parsed (they read fvar) — wait for them
-await page.waitForFunction(() => document.querySelectorAll('.space-instance').length === 2, { timeout: 20000 });
-ok(true, 'named instances render as diamonds');
-ok((await page.$$('.space-brace-dot')).length === 0, 'no brace dots on a brace-less font (correct classification)');
-// Orbit by drag: chips move with the cube (before any chip click).
-const chipLeftBefore = await page.evaluate(() => document.querySelector('.space-chip').style.left);
-await page.evaluate(() => {
-  const cv = document.querySelector('.space-cube');
-  const r = cv.getBoundingClientRect();
-  cv.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + 200, clientY: r.y + 200, buttons: 1, bubbles: true }));
-  cv.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + 260, clientY: r.y + 220, buttons: 1, bubbles: true }));
-});
-const chipLeftAfter = await page.evaluate(() => document.querySelector('.space-chip').style.left);
-ok(chipLeftBefore !== chipLeftAfter, 'drag orbits the cube (chips move)');
-// Chip click applies the location to the in-tab probe (no navigation).
-await page.evaluate(() => {
-  const chips = [...document.querySelectorAll('.space-chip:not(.ghost)')];
-  chips[chips.length - 1].click();
-});
-await page.waitForTimeout(600);
-ok(await page.$('.space-cube') !== null, 'chip click stays in the Space tab');
-ok((await page.textContent('.space-side-label')).includes('XTRA'), 'probe shows the clicked location');
-// Pin a ghost from its chip → the chip turns into a red "pinned" chip.
-// The first ghost in DOM order is (47,700,1): its sweep collapses on a
-// fresh font, so this pin takes the extrapolated-synthesis path.
-// Arm the notice watcher BEFORE the pin: the notice is transient (the
-// post-pin refresh can wipe it), so waiting after the pinned chip
-// appears races it.
-const noticeSeen = page.waitForFunction(() =>
-  document.querySelector('.space-pin-notice')?.textContent.includes('synthesized'),
-  { timeout: 90000 }).then(() => true).catch(() => false);
-await page.evaluate(() => {
-  const chips = [...document.querySelectorAll('.space-chip.ghost')];
-  chips[0].querySelector('.space-chip-pin').click();
-});
-await page.waitForFunction(() => document.querySelectorAll('.space-chip.pinned').length > 0, { timeout: 90000 });
-ok(true, 'pin from a ghost chip completes');
-ok((await page.textContent('.space-chip.pinned')).includes('pinned'), 'pinned chip shows the red pinned label');
-ok(await noticeSeen, 'synthesis notice shows for the extrapolated corner');
+await waitForAsync(async () => (await cornerFindings()) === 3);
+ok(true, '3 missing corners again on the fresh upload');
+// (47,700,1) pinned FIRST: its sweep collapses on a fresh font, so this
+// pin takes the extrapolated-synthesis path.
+const synthPin = await pinCornerByText('XOPQ▲ YOPQ▼');
+ok(synthPin?.ok === true, 'pin of the collapsed corner completes');
+ok(synthPin?.synthesized === true && synthPin.scaffold === null,
+  'the pin is reported as synthesized by extrapolation');
+const pins20 = (await coverage()).pins;
+ok(pins20.length === 1 && pins20[0].corner.XOPQ === 700 && pins20[0].corner.YOPQ === 1,
+  `the project records the pin (${JSON.stringify(pins20.map(p => p.corner))})`);
 
 // ---- 21. drop out-of-range sources ----------------------------------------
 console.log('21. drop out-of-range sources');
 // The full braced Crispy has brace sources OUTSIDE the axis box
 // (XTRA +2.00 etc.) — fontc extrapolates them, Glyphs.app/fontmake drop
-// them. The Coverage action applies the drop semantics in-browser.
+// them. The provider's drop applies those semantics in-browser.
 const CRISPY_BRACED = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'Crispy-braced.glyphs');
 await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_BRACED);
 await page.click('button:text-is("Instances")');
 await page.waitForFunction(() => document.querySelector('.sidebar h2')?.textContent === 'CrispyBraced', null, { timeout: 240000 });
-await page.click('button:has-text("Coverage")'); // badge → Space tab
-await page.waitForSelector('.space-findings', { timeout: 20000 });
-const oorBefore = await page.$$eval('.space-findings .load-font-item-name',
-  els => els.filter(e => e.textContent.includes('Out-of-range source')).length);
+const oorBefore = (await findingsOf('out-of-range-source')).length;
 ok(oorBefore > 0, `out-of-range findings present after upload (${oorBefore})`);
-await page.click('button:has-text("Drop out-of-range sources")');
-await page.waitForFunction(() =>
-  [...document.querySelectorAll('.space-findings .load-font-item-name')]
-    .filter(e => e.textContent.includes('Out-of-range source')).length === 0,
-  { timeout: 120000 }
-);
-await page.waitForTimeout(1500);
-ok(true, 'drop cleared the out-of-range findings');
+const dropped = await page.evaluate(() => window.__avar2api.clampOutOfRange());
+const oorAfter = (await findingsOf('out-of-range-source')).length;
+ok(dropped?.ok === true && oorAfter === 0, `drop cleared the out-of-range findings (${oorAfter} left)`);
 // The default instance must be intact: download the font and check the
 // default 'a' metrics/outline — the peak-zeroing failure mode gave a
 // default advance of 2154 (vs 166). (A Pillow render can't be used
 // here: Crispy's default is a 1-unit hairline — zero dark pixels at
 // any size.)
+await appPicksUpBuild();
 await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
 await page.click('.preview-tab-download button');
@@ -972,14 +919,6 @@ await page.waitForFunction(() => {
   return groups.some(g => [...g.querySelectorAll('.axis-tag')].some(x => x.textContent.trim() === 'SPAC'));
 }, { timeout: 240000 });
 ok(true, 'SPAC slider appears after toggling width-aware on');
-// With SPAC the font has 4 master-covered axes — the cube becomes a tesseract.
-await page.click('button:text-is("Space")');
-await page.waitForSelector('.space-chip', { timeout: 30000 });
-await page.waitForFunction(() => document.querySelectorAll('.space-chip').length === 16, { timeout: 20000 });
-ok(true, '16 corner chips with a 4th axis (tesseract)');
-ok((await page.$$('.space-axis-label')).length === 4, '4 axis labels (one per axis)');
-await page.click('button:text-is("Preview")');
-await page.waitForSelector('.preview-tab-sample', { timeout: 20000 });
 // The exported font carries the SPAC fvar axis.
 await page.waitForSelector('.preview-tab-download button', { timeout: 20000 });
 await page.click('.preview-tab-download button');
