@@ -21,6 +21,33 @@ export const SOURCES_DEFAULT_REASON =
   'A designspace default must be a master location; the sources rest at the ' +
   'compiled origin.';
 
+/**
+ * E2l: why a TTF/WOFF2 export is larger, in the words the designer needs.
+ *
+ * Shown whenever the font's resting location is not the source's DEFAULT
+ * master, because the studio then rebuilds the variations around a style that
+ * isn't the default — and on a twin-heavy source the preview's spacing is
+ * approximate between masters (measured on Crispy: up to ~397 u at some
+ * styles). `null` means "say nothing": the default master, or a source we
+ * could not read.
+ */
+export function sizeWarningCopy(report) {
+  if (!report) return null;
+  if (report.status !== 'other_master' && report.status !== 'no_master') return null;
+  const where = report.status === 'other_master'
+    ? `It rests on the master “${report.name}”, not on the source's default master “${report.default_master}”.`
+    : 'It rests at a location that is not a master'
+      + (report.name
+        ? ` (the nearest is “${report.name}”${report.max_delta ? `, ${Math.round(report.max_delta)} units away` : ''}).`
+        : '.');
+  return 'This file is larger than one built at the default master: the studio ' +
+    'rebuilds the variations around the style the font rests at, and the ' +
+    "preview's spacing is approximate between masters, so it can differ a lot " +
+    `at some styles. ${where} To fix both, put the resting location on a ` +
+    'master and make that master the default (in Glyphs: Variable Font ' +
+    'Origin), or add a master there and make it the default.';
+}
+
 /** The chips, in display order. `estimate` false ⇒ no size is shown. */
 export function exportFormats({ woff2 = true } = {}) {
   return [

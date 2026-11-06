@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from .. import control_axes as _control_axes
 from .. import csv_io as _csv_io
@@ -35,6 +35,49 @@ def get_masters():
     except Exception as e:
         log.error(f"Error reading masters: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/resting-master', methods=['POST'])
+def post_resting_master():
+    """E2l: classify the font's resting location against the source's default
+    master.
+
+    The export dialog warns that the file is larger when the resting location
+    is not the default master (the studio rebuilds the variations around it),
+    and keeps the sources note silent when it is. It asks here instead of
+    guessing from the master list, passing the location the preview actually
+    rests at: the ORIGIN row's parametric ``out``, or the "Set default at"
+    location when that checkbox is on.
+    """
+    if state.ORIGINAL_PATH is None:
+        return jsonify({"status": "unknown"})
+    body = request.get_json(silent=True) or {}
+    raw = body.get("location") or None
+    try:
+        location = ({str(tag): float(value) for tag, value in raw.items()}
+                    if raw else None)
+    except (AttributeError, TypeError, ValueError):
+        return jsonify({"error": "location must map axis tags to numbers"}), 400
+    if location:
+        # The preview speaks USER axes (wght/wdth/opsz); the master grid is
+        # parametric, so map through the built font's avar2 first — the same
+        # evaluation the sliders use.
+        try:
+            location = {str(tag): float(value)
+                        for tag, value in
+                        server._evaluate_mapped_location(location).items()}
+        except Exception as e:
+            log.info(f"resting master: mapping skipped ({e})")
+    source = state.ORIGINAL_PATH
+    csv_path = source.with_name(f"{source.stem}-avar.csv")
+    try:
+        return jsonify(_csv_io.resting_master_report(source, location,
+                                                     csv_path))
+    except Exception as e:
+        # The dialog's warning is advisory: report the failure as "unknown"
+        # rather than a 500 the UI would have to guess around.
+        log.error(f"resting master report failed: {e}")
+        return jsonify({"status": "unknown", "error": str(e)}), 500
 
 
 @bp.route('/api/axes', methods=['GET'])

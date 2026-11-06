@@ -56,6 +56,7 @@ const SIGNATURE_EXCEPTIONS = {
   updateInstance: 'live takes {csvOnly}: the browser has no source writeback, every save is studio-only',
   deleteInstance: 'live takes {csvOnly|sourceOnly}: same reason',
   exportFont: 'live takes {signal}: the browser export is synchronous wasm work, nothing to cancel',
+  restingMaster: 'browser: no source file to classify, answers {status: "unknown"}; the dialog then stays silent',
   registerEditingInstance: 'no-op in the browser',
   unregisterEditingInstance: 'no-op in the browser',
   addInstanceToSource: 'browser: unavailable(…) thrower with guidance, takes no arguments',

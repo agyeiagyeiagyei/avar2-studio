@@ -590,6 +590,22 @@ export const api = {
     return parseJSON(response);
   },
 
+  async restingMaster(location) {
+    // E2l: which master the font rests on. The export dialog's size warning
+    // asks the backend instead of guessing from the master list; `null` means
+    // "the ORIGIN row", which the backend resolves from the mappings CSV.
+    const response = await fetch(`${API_BASE}/resting-master`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: location || null }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({}));
+      throw new Error(err.error || `Resting master failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
   async exportFont(options, { signal } = {}) {
     // POST /api/export-font — the export runs as a QUEUED JOB (build worker,
     // see docs/archive/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll

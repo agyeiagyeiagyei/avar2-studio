@@ -7,7 +7,8 @@ import { useBuildStatus } from '../hooks/useBuildStatus';
 import { useStudioData } from '../hooks/useStudioData';
 import { previewRenderCoords, variationSettings } from '../preview-coords';
 import {
-  SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, buttonLabel, exportFormats,
+  SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, sizeWarningCopy,
+  buttonLabel, exportFormats,
 } from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -260,6 +261,12 @@ function PreviewTab({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  // E2l: which master the font rests on. Two reports: the ORIGIN row (the
+  // resting style when "Set default at" is off) gates the sources note, and
+  // the live resting location (checkbox on ⇒ the preview location) drives the
+  // size warning. Both come from the backend, so the dialog never guesses.
+  const [originReport, setOriginReport] = useState(null);
+  const [restingReport, setRestingReport] = useState(null);
   // The in-flight export's AbortController: Cancel aborts it (the poll
   // stops and the queued job is dropped server-side).
   const exportAbortRef = useRef(null);
@@ -291,6 +298,31 @@ function PreviewTab({
     () => Object.fromEntries(userAxes.map(a => [a.tag, coords[a.tag] ?? a.default])),
     [userAxes, coords]
   );
+
+  // E2l: ask the backend which master each resting location is. The ORIGIN row
+  // (no location ⇒ the backend reads the mappings row at the axis defaults)
+  // decides the sources note; the live resting location — the preview's own
+  // when "Set default at" is on — decides the size warning. A failure is
+  // silent: the warning is advisory, never a reason to block an export.
+  useEffect(() => {
+    if (!showExportModal) return undefined;
+    let live = true;
+    api.restingMaster(null)
+      .then(report => { if (live) setOriginReport(report); })
+      .catch(() => { if (live) setOriginReport(null); });
+    return () => { live = false; };
+  }, [showExportModal]);
+
+  useEffect(() => {
+    if (!showExportModal) return undefined;
+    let live = true;
+    api.restingMaster(exportUseDefault ? currentUserLocation : null)
+      .then(report => { if (live) setRestingReport(report); })
+      .catch(() => { if (live) setRestingReport(null); });
+    return () => { live = false; };
+  }, [showExportModal, exportUseDefault, currentUserLocation]);
+
+  const sizeWarning = sizeWarningCopy(restingReport);
 
   const handleDownload = async () => {
     if (!fontUrl) {
@@ -611,7 +643,12 @@ function PreviewTab({
                     })}
                     {exportFormat === 'sources' && (
                       <p className="preview-export-note preview-export-note--spacing">
-                        {SOURCES_COPY} {RESTING_NOTE}
+                        {SOURCES_COPY}{originReport?.status === 'default_master' ? '' : ` ${RESTING_NOTE}`}
+                      </p>
+                    )}
+                    {exportFormat !== 'sources' && sizeWarning && (
+                      <p className="preview-export-note preview-export-note--size">
+                        {sizeWarning}
                       </p>
                     )}
                   </div>
