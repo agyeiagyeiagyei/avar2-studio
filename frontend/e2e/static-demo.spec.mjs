@@ -735,10 +735,10 @@ console.log('17. coverage audit (missing corners on upload)');
 // The Space tab and the header's Coverage badge were the only UI for the
 // audit, the corner pins and the out-of-range drop; both were removed on
 // 2026-10-16 (0ddaea5, sprint T1.17). The engine stays in the static
-// provider — pins and the drop still ride sessions, workspace zips,
-// config bundles and every rebuild — so sections 17–21 drive it through
-// the provider (window.__avar2api) and keep every check that was about
-// the font rather than about the tab.
+// provider — pins still ride sessions, workspace zips, config bundles
+// and every rebuild; the drop rides sessions and rebuilds — so sections
+// 17–21 drive it through the provider (window.__avar2api) and keep
+// every check that was about the font rather than about the tab.
 const CRISPY_TEST = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'Crispy-test.glyphs');
 await page.click('button:has-text("Load Font")');
 await page.setInputFiles('.load-font-dropdown input[type=file]', CRISPY_TEST);
