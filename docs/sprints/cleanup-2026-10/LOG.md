@@ -3627,3 +3627,49 @@ taken from the twins, and the preview may be off between masters (model test: up
 to 128 u at random points). The exported sources stay exact. E2l's export
 warning is unaffected: the file is larger because the studio rebuilds the
 variations around a style that is not the default master.
+
+## ROUND 35 — E2l: the export dialog says why the file is larger
+
+On `e2ic-wip` (`1dc35f7`, `e844f0b`, `28b05e8`). Suite **685 passed, 3 skipped**;
+`ruff` clean; frontend lint clean; `api-parity` and a new `export-warning` spec
+pass.
+
+**What it says.** A TTF/WOFF2 export shows an always-visible note when the
+font's resting location is not the source's **default master**: the file is
+larger because the studio rebuilds the variations around the resting style, the
+preview's spacing is approximate between masters (the verifier's measurement:
+median 0, p90 97 u, p99 187 u, max 397 u on the real font) and the fix — put the
+resting location on a master and make that master the default (Glyphs: Variable
+Font Origin), or add a master there. It names the location it found: another
+master by name, or "not a master, the nearest is X, N units away". It stays
+silent at the default master, and names no sidecar, CSV or JSON file.
+
+**Backend, not a guess.** `POST /api/resting-master` answers
+`default_master` / `other_master` (its name) / `no_master` / `unknown`:
+
+- with a location (the "Set default at" preview style) it maps through the built
+  font's avar2 first — the preview speaks `wght/wdth/opsz`, the master grid is
+  parametric;
+- without one it resolves the ORIGIN row from the mappings CSV using the
+  **declared** axis defaults (`Crispy-axis-metadata.json`): the master grid's
+  minima find no row, since Crispy's weight axis bottoms out at 1 and the font
+  rests at 400;
+- `origin_master_report` now matches tags case-insensitively — CSV columns are
+  upper-case, real source tags are too but the internal convention is lower, and
+  the old exact match returned `None` on a real font (a pre-existing S1(d) bug,
+  same cause, not fixed here beyond the matching).
+
+On the real Crispy (staged copy, port 5073, isolated HOME): the ORIGIN row
+resolves to `XTRA 663.1 / XOPQ 202.5 / YOPQ 121.8`, classified
+**`no_master`, nearest `47-1-1`, 616.1 u away**; `47-1-1` itself is
+**`default_master`**; the dialog renders the note for TTF and the sources note
+still appears for the sources format (the ORIGIN row really is off the default
+master). Screenshot read, not assumed.
+
+**Tests.** Backend: `tests/test_resting_master.py` — default / other (named) /
+none, the ORIGIN-row resolution from a CSV, the no-CSV `unknown`, the route's
+three cases. Frontend: `frontend/e2e/export-warning.spec.mjs` pins the copy
+(silent at the default master, silent when unknown, names the master, states the
+distance, names the fix, never names an internal file) and `api-parity` records
+the browser stub that answers `unknown` (no source to classify in the static
+demo).
