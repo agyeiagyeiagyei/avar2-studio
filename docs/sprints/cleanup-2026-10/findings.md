@@ -2802,3 +2802,17 @@ The copy is plain and names no internal file. It covers the larger file, the spa
 - the size numbers (studio TTF, sources zip) on the merged branch;
 - no test-output binaries on the branch;
 - the automated report finished.
+
+## Verifier finding (2026-11-06 17:21) — automated pass for 2b26f8a: 17 of 18 probes on the first run; control-axis passes on a rerun
+
+**Report:** `~/avar2-verifier/reports/2b26f8a.md`.
+- pytest 699 passed; ruff, lint, typecheck, test:unit, build and a git-clean CLI build all OK; the checkout was clean after the build.
+- UI probe: 17 of 18 PASS.
+- `control-axis` FAILED at 17:10 with HTTP 500 from `POST /api/control-axes/TST2/open-editor`. That is the route's "Failed to start Fontra" path, and a heavy export had finished seconds earlier.
+- Reproduced: Fontra launched by itself with the clone's venv binds 8003 at once. The scenario rerun on the same copy at 17:2x PASSES (editor on 8003, `editing_original: False`).
+
+So this is transient, almost certainly the launcher's ~5 s bind wait under load. It does not block the checkpoint.
+
+**Two small asks** (no swallowed errors):
+- `open_control_axis_in_editor` returns the exception only in the JSON. Log it in the server log too: the 500 left no trace there.
+- Lengthen the ~5 s bind wait, or make it configurable, so a loaded machine does not turn into a 500.
