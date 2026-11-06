@@ -38,6 +38,21 @@ def _isolated_user_transforms_dir(tmp_path_factory):
     registry.user_transforms_dir = original
 
 
+@pytest.fixture(autouse=True)
+def _python_spac_injector(monkeypatch, tmp_path):
+    """Keep this suite on the Python SPAC injector, whatever this machine has.
+
+    The width-aware transform hands the font to a native ``spac-inject`` when
+    it finds one (``$AVAR2_SPAC_INJECT``, the wheel's copy, a repo build), and
+    these tests would then measure the Rust engine instead of the
+    implementation they name. Naming a binary that is not there is the
+    documented way to get the fontTools path; a test that wants discovery
+    sets or deletes the variable itself. The Rust engine is held to this
+    implementation by the cargo oracle (wasm/fontc-web/tests/spac_oracle.rs).
+    """
+    monkeypatch.setenv("AVAR2_SPAC_INJECT", str(tmp_path / "no-native-injector"))
+
+
 @pytest.fixture
 def crispy_source(tmp_path):
     """A writable copy of the CrispyMini .glyphs source."""

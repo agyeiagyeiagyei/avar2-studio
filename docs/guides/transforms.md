@@ -67,7 +67,12 @@ transform when it pins instance coordinates; blank = 0).
   which path ran. Per-style SPAC values never cross as CSV: the studio parses
   the CSV once and hands the values to the injector in the transforms JSON
   (`params.instance_spac`), so style names containing commas survive on
-  the native path too. The injector is found via
+  the native path too. The master locations the per-master amounts are
+  computed at ride the same JSON (`params.master_locations`). Before it
+  trusts a binary the studio asks it which amount rule it implements
+  (`spac-inject --rule`): a build from before the per-master amounts is
+  left alone, with a log line, and the fontTools path runs. The injector is
+  found via
   `$AVAR2_SPAC_INJECT`, the wheel-carried `avar2_studio/bin/spac-inject`
   ([decision 0015](../decisions/0015-native-accelerators-ship-in-platform-wheels.md))
   or the repo build; `ENV_KEYS` forwards the override into the build worker

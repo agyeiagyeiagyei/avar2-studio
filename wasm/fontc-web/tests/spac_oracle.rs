@@ -132,22 +132,54 @@ fn transforms_with_masters(params: &str, locations_json: &str) -> String {
 /// Inject with the Rust engine and hold the result against the real
 /// transform at every master corner.
 fn compare_at_the_masters(label: &str, input: &Path, transforms: &str) {
-    let tmp = common::tmp_dir();
     let out = fontc_web::apply_transforms(std::fs::read(input).expect("read input font"), transforms, "")
         .expect("width-aware SPAC with master locations");
-    let out_path = tmp.join(format!("spac-masters-{label}.ttf"));
-    let transforms_path = tmp.join(format!("spac-masters-{label}.json"));
+    let out_path = common::tmp_dir().join(format!("spac-masters-{label}.ttf"));
     std::fs::write(&out_path, &out).expect("write injector output");
+    compare_output_at_the_masters(label, input, &out_path, transforms);
+}
+
+/// Hold an injected font against the real transform (its fontTools path)
+/// at every master corner.
+fn compare_output_at_the_masters(label: &str, input: &Path, out_path: &Path, transforms: &str) {
+    let transforms_path = common::tmp_dir().join(format!("spac-masters-{label}.json"));
     std::fs::write(&transforms_path, transforms).expect("write transforms json");
     let comparator = Path::new(env!("CARGO_MANIFEST_DIR")).join("spike/compare_spac_masters.py");
     let status = Command::new(common::python())
         .arg(comparator)
         .arg(input)
-        .arg(&out_path)
+        .arg(out_path)
         .arg(&transforms_path)
         .status()
         .expect("run comparator");
     assert!(status.success(), "oracle comparison at the masters failed ({label})");
+}
+
+/// The desktop path: the studio's transform hands the font to the native
+/// `spac-inject` (this crate's binary), master locations in the payload,
+/// and the result must be the one its own fontTools path produces.
+#[test]
+fn native_injector_matches_studio_oracle_at_the_masters() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (font, locations) = common::spac_masters_fixture("native", true);
+    let transforms = transforms_with_masters(
+        r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#,
+        &locations,
+    );
+    let tmp = common::tmp_dir();
+    let transforms_path = tmp.join("spac-native-transforms.json");
+    let out_path = tmp.join("spac-native-out.ttf");
+    std::fs::write(&transforms_path, &transforms).expect("write transforms json");
+    let status = Command::new(common::python())
+        .arg(manifest.join("spike/native_spac.py"))
+        .arg(&font)
+        .arg(&out_path)
+        .arg(&transforms_path)
+        .env("AVAR2_SPAC_INJECT", env!("CARGO_BIN_EXE_spac-inject"))
+        .status()
+        .expect("run spike/native_spac.py");
+    assert!(status.success(), "the studio did not use the native injector");
+    compare_output_at_the_masters("native", &font, &out_path, &transforms);
 }
 
 /// CrispyMini with the master locations the studio's own pipeline reads

@@ -37,9 +37,15 @@ from fontTools.varLib import instancer
 # venv's python.
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]
 
+from avar2_studio.transforms import builtin_spac_widthaware
 from avar2_studio.transforms.base import BuildContext
 from avar2_studio.transforms.builtin_spac import SpacTransform
 from avar2_studio.transforms.builtin_spac_widthaware import WidthAwareSpacTransform
+
+# The oracle is the transform's own fontTools path. Left alone, apply() hands
+# the font to any spac-inject binary it finds — the engine under test — and
+# the comparison would be Rust against Rust.
+builtin_spac_widthaware._native_injector = lambda: None
 
 CRISPY_GLYPHS = Path(__file__).resolve().parents[3] / "examples/crispy-mini/sources/CrispyMini.glyphs"
 WA_PARAMS = {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}

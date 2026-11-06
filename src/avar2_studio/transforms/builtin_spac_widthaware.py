@@ -82,6 +82,25 @@ def _native_injector():
     return path if path.exists() else None
 
 
+#: The amount rule this module implements. ``spac-inject --rule`` must answer
+#: the same: a binary built before the per-master amounts (E2i-c) reads the
+#: same payload, ignores the master locations and writes one constant amount
+#: per glyph — a font that no longer matches the exported sources.
+NATIVE_RULE = "e2i-c"
+
+
+def _native_rule(native: Path):
+    """What ``spac-inject --rule`` answers, or None when the binary cannot say
+    (a build from before the flag prints its usage and exits 2)."""
+    import subprocess
+    try:
+        res = subprocess.run([str(native), "--rule"], capture_output=True,
+                             text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
 def _native_payload(lo: int, hi: int, bias: float, scale: float,
                     instance_spac: dict, master_locations=None) -> str:
     """The spac-inject transforms JSON. Per-instance SPAC coordinates ride
@@ -262,17 +281,26 @@ class WidthAwareSpacTransform(Transform):
             scale = 1.25
         scale = max(0.1, scale)
 
-        # E2i-c: the amount now varies per master corner, and `spac-inject`
-        # still emits the old one-constant-per-glyph tuples. Decline it until
-        # the Rust port carries the per-corner decomposition, or the studio and
-        # the exported sources would disagree at every SPAC end (the parity
-        # tests and the all-glyph round trip both measure exactly that).
-        native = None
-        _native = _native_injector()
-        if _native is not None:
-            ctx.log("spac_widthaware: the native injector does not carry the "
-                    "per-master amounts yet (E2i-c) — the fontTools path runs "
-                    "(slower; watch gvar's 64KB tuple-header ceiling)")
+        # E2i-c: the native injector computes the same per-master amounts
+        # (wasm/fontc-web spac.rs, held to this module's fontTools path by
+        # tests/spac_oracle.rs) — but only a build that says so. An older
+        # binary would still write one constant amount per glyph, and the
+        # studio and the exported sources would disagree at every SPAC end.
+        native = _native_injector()
+        if native is None:
+            # Absence used to be silent: the fallback is slower and its gvar
+            # re-encode can overflow the 64KB per-glyph tuple-header ceiling
+            # on twin-heavy fonts — say which path is running and why.
+            ctx.log("spac_widthaware: native injector not found — the fontTools "
+                    "path runs (slower; can overflow gvar's 64KB tuple-header "
+                    "ceiling on twin-heavy fonts). `avar2-studio doctor` lists it.")
+        elif _native_rule(native) != NATIVE_RULE:
+            ctx.log(f"spac_widthaware: the native injector at {native} was "
+                    "built before the per-master amounts (E2i-c) — the "
+                    "fontTools path runs (slower; can overflow gvar's 64KB "
+                    "tuple-header ceiling on twin-heavy fonts). Rebuild it: "
+                    "docs/guides/transforms.md")
+            native = None
         if native is not None:
             import os
             import subprocess
@@ -290,18 +318,16 @@ class WidthAwareSpacTransform(Transform):
             finally:
                 os.unlink(tf.name)
             if res.returncode == 0 and out.exists():
+                # What the fontTools path logs itself: the corner count and
+                # every floored amount.
+                for line in (res.stderr or "").splitlines():
+                    if line.strip():
+                        ctx.log(line.strip())
                 ctx.log(f"spac_widthaware: native injector ({lo}\u2026{hi}, "
                         f"bias {bias:g}, scale {scale:g})")
                 return out
             ctx.log("spac_widthaware: native injector failed; falling back to "
                     "fontTools (%s)" % ((res.stderr or "").strip()[-300:] or "no stderr"))
-        else:
-            # Absence used to be silent: the fallback is slower and its gvar
-            # re-encode can overflow the 64KB per-glyph tuple-header ceiling
-            # on twin-heavy fonts — say which path is running and why.
-            ctx.log("spac_widthaware: native injector not found — the fontTools "
-                    "path runs (slower; can overflow gvar's 64KB tuple-header "
-                    "ceiling on twin-heavy fonts). `avar2-studio doctor` lists it.")
 
         font = TTFont(str(vf_path))
         try:

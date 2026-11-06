@@ -26,6 +26,7 @@ Usage: make_spac_masters_fixture.py OUT.ttf LOCATIONS.json [--no-hvar]
 import json
 import sys
 
+from fontTools import varLib
 from fontTools.designspaceLib import (
     AxisDescriptor,
     DesignSpaceDocument,
@@ -34,7 +35,6 @@ from fontTools.designspaceLib import (
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib.tables._g_l_y_f import USE_MY_METRICS
-from fontTools import varLib
 
 GLYPHS = [".notdef", "space", "H", "o", "j", "mark", "thin", "grow",
           "Hacute", "Hmetrics", "Hsmall", "nested"]

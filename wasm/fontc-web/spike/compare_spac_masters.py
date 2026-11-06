@@ -42,6 +42,11 @@ from fontTools.varLib.models import VariationModel
 from avar2_studio.transforms import builtin_spac_widthaware as wa
 from avar2_studio.transforms.base import BuildContext
 
+# The oracle is the transform's own fontTools path. Left alone, apply() hands
+# the font to any spac-inject binary it finds — the engine under test — and
+# the comparison would be Rust against Rust.
+wa._native_injector = lambda: None
+
 FAILURES = []
 
 

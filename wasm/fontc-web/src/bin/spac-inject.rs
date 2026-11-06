@@ -5,6 +5,12 @@
 //! twin-heavy fonts (slant x rounding x grade x relocation).
 //!
 //! usage: spac-inject <in.ttf> <out.ttf> <transforms.json> [avar.csv]
+//!        spac-inject --rule
+//!
+//! `--rule` prints the width-aware amount rule this build implements. The
+//! studio asks before it trusts the binary (builtin_spac_widthaware.py
+//! `NATIVE_RULE`): a build from before the per-master amounts would read
+//! the same JSON and still write one constant amount per glyph.
 //!
 //! transforms.json is the studio's transform list shape, e.g.
 //!   [{"type": "spac_widthaware", "enabled": true,
@@ -22,8 +28,15 @@
 
 use std::{env, fs, process::exit};
 
+/// The width-aware amount rule: per-master corner amounts (E2i-c).
+const RULE: &str = "e2i-c";
+
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() == 2 && args[1] == "--rule" {
+        println!("{RULE}");
+        return;
+    }
     if args.len() < 4 {
         eprintln!("usage: spac-inject <in.ttf> <out.ttf> <transforms.json> [avar.csv]");
         eprintln!("note: the optional avar.csv argument is retained for compatibility and ignored;");
