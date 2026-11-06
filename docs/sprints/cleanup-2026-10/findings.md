@@ -2973,3 +2973,44 @@ With those in place, the next full pass will name the cause.
 **Not verified:** the specimen fix in the desktop (Flask) studio. It is the same component; the automated pass's probe exercises the Preview tab.
 
 **W5.** CI run 42233010190 on `385fdea` (the sprint tip with W1–W4 merged) is green on every job. CI on this merge follows.
+
+## Verifier finding (2026-11-06 23:16) — checkpoint 4d12e14 NOT approved: the export DIALOG's sources zip gives slanted masters their own sheared spacing (the CLI's zip is right)
+
+**The automated pass is clean** (`~/avar2-verifier/reports/4d12e14.md`):
+- pytest 703 passed; ruff, lint, typecheck, test:unit and build OK;
+- a git-clean CLI build of the real Crispy, exit 0;
+- UI probe 18 of 18, `control-axis` included.
+
+**The verifier's manual checks that hold:**
+- The real-Crispy CLI build has no advance below 1 u at SPAC −100, at 29 rows and 9 masters.
+- `.notdef` has 0 tuples and does not move.
+- Raw avar 12 = fvar 12 and FreeType = HarfBuzz 0.0, on both the CLI build and the dialog's TTF export.
+- No file under `test-output/` is tracked; the largest tracked file is 1.4 MB.
+
+**The defect (E1c, and the user's rule "slanted and rounded styles take their parent's amounts").** On a clean copy of the real Crispy (the same six files for both paths, tip `4d12e14`):
+- CLI, `avar2-studio build … --format sources`: `~/avar2-verifier/e1c-cli/out/Crispy-sources.zip`. Its log says "27 derived masters take their parents' spacing amounts (9 parents, by location)".
+- Dialog, the probe's `export-sources` on a studio on 5073: `~/avar2-verifier/e1c-dialog/exports/sources.zip`.
+- Both have 92,192 members. **7,224 differ**, all `.glif` files in SPAC twins: 6,962 in the Slanted and Slanted-Rounded twins, 262 in the others.
+- H at SPAC −100:
+
+| twin | CLI | dialog |
+|---|---|---|
+| 1715-1-1 (upright) | 3,524 | 3,524 |
+| 1715-1-1 Slanted | 3,524 | 3,484 |
+| 1715-1-1 Slanted Rounded | 3,524 | 3,484 |
+| 47-1462-1 Slanted | 5,296 | 5,258 |
+
+- The studio font has no slnt dimension on its SPAC tuples, so the CLI zip matches the font and the dialog zip does not: 40 u on H at that master, more on glyphs whose sheared box is much wider than their ink.
+
+**Root cause (reproduced).** `sources_export._injected_axis_tags` reads `transforms.registry.REGISTRY` without calling `registry.discover()`.
+- The CLI process has run a build, which calls `discover()`, so the registry is full.
+- The dialog's export runs in a build worker that never builds, so the registry is EMPTY there. `injected` is then empty, no master counts as derived, and every slanted or rounded twin keeps its own measurement.
+- In a fresh interpreter, `_injected_axis_tags(<Crispy.glyphs>)` returns `[]`, and `REGISTRY` is `[]` even after `import avar2_studio.pipeline`.
+
+**Fix (W7):**
+- Call `discover()` (idempotent) where the registry is read.
+- Look for any other read of `REGISTRY` that relies on an earlier import or build.
+- Tests that fail first:
+  - `_injected_axis_tags` with an undiscovered registry returns the slant and rounding tags;
+  - an export-worker-shaped call (no build in the process) logs the derived masters and writes twins equal to the build-then-export path.
+- Gate: the dialog zip and the CLI zip of the same folder are equal member for member (README stamp aside), on the real Crispy copy.
