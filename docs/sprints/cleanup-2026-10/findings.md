@@ -2633,7 +2633,7 @@ If Q gets the same treatment, it must stay compatible. Q currently passes (≤ 1
 
 **For the user (design, not a code item):** cent's own advance does not follow LCWD in the studio, which follows Glyphs' behaviour. So at that corner, cent's right side shrinks from 1,594 to 423 u. The export fix will reproduce that faithfully. Whether cent should widen with `c` is the designer's call.
 
-## Verifier finding (2026-11-06 12:30) — ROUND 33 verified; before the checkpoint: tests for the three fixes, and no silent skips in the sparse-layer pass
+## Verifier finding (2026-11-06 12:24) — ROUND 33 verified; before the checkpoint: tests for the three fixes, and no silent skips in the sparse-layer pass
 
 **Verified on `rt-coincide3`** (e2ic-wip `c9849fa`, pinned, 0 dirty; the unzipped designspace is byte-identical to the build's zip):
 - `sparse_sweep.py`: 60 locations × 496 glyphs, **0 glyphs over 1 u**.
