@@ -1,8 +1,8 @@
 STATE: working
-ROUND: 45
-HEAD: d9a777a
+ROUND: 46
+HEAD: 3d3469f
 VERIFIED_HEAD: 2b26f8a
-NEXT: (set by the verifier as coordinator.) Checkpoint d9a777a is APPROVED. Now running: R1 (B11c wheel dry run, no tag), R2 (B11b fontra-embed push), R3 (squash into main, approved by the user), R4 (Pages from main), then STATE: awaiting user (ship gates) with B12.
+NEXT: (set by the verifier as coordinator.) Checkpoint d9a777a is APPROVED. R2 done (fontra-embed shared-studio-shim pushed at 3de37a6, no PR, no merge). R1 found a defect: the release matrix named the retired macos-13 runner; fixed in 3d3469f (workflow only), dry run being re-run. Then R3 (squash into main, approved by the user), R4 (Pages from main), then STATE: awaiting user (ship gates) with B12.
 - (7) DONE — ROUND 34's grid cost measured and decided with the user: no grid, today's 9-master model stays; numbers in LOG.md.
 - (8) DONE — E2l end to end (backend report, dialog warning, sources-note gating, DB tests, e2e copy spec, live check).
 - (9) DONE — verifier ROUND 33 follow-ups (skip report, multi-component transforms, 4 fixture tests) and the mean-based SPAC gates; evidence in ROUND 36.

@@ -3931,3 +3931,19 @@ Numbers at the tip: Python suite 700 passed, 5 skipped; static-demo spec 160
 checks, 0 failures; coincide copy studio TTF 765,776 B (fontTools path) /
 771,476 B (native); real off-master Crispy 10,563,636 B / 10,563,616 B, the
 two paths identical tuple for tuple.
+
+## ROUND 46 — R1 found a retired runner in the release matrix (written by the verifier as coordinator)
+
+Dry run 42342822427 on `5eed48a` (`publish_to=none`, no tag): `build` and the
+ubuntu and macos-latest wheels finished in under 9 minutes, but
+`build-platform-wheels (macos-13)` stayed queued for 2.5 hours. The
+`actions/runner-images` README no longer lists `macos-13`; its x64 labels
+include `macos-15-intel`. The run was cancelled.
+
+The matrix came in with T3.9 on 2026-10-18, and the last earlier `release.yml`
+run was in June, so this was its first live run. The publish jobs need every
+platform wheel, so a tag pushed with this matrix would have hung as well.
+
+Fix: `3d3469f`, one line in `release.yml`, `macos-13` → `macos-15-intel`. No
+product code changed, so the d9a777a checkpoint evidence still applies. R1 is
+re-run on the new tip, and its proof is recorded when it finishes.
