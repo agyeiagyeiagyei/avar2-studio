@@ -787,6 +787,11 @@ def _injected_axis_tags(source_path: Path) -> set:
     from .transforms import config as _tx_config
     from .transforms import registry as _tx_registry
 
+    # The export worker loads no source and runs no build, so nothing else has
+    # filled the registry there. Empty, it reports no injected axis, so no master
+    # counts as derived and each slanted twin keeps its sheared amounts
+    # (test_the_export_worker_gives_slanted_twins_their_parents_amounts).
+    _tx_registry.discover()
     tags = set()
     for entry in _tx_config.entries(Path(source_path)):
         if not entry.get("enabled"):

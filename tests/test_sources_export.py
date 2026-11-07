@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from xml.etree import ElementTree
 
 import pytest
 from fontTools.designspaceLib import DesignSpaceDocument
@@ -910,6 +913,30 @@ def test_a_derived_master_with_no_parent_raises(tmp_path):
                                           "params": {}}))
 
 
+def test_the_injected_axes_are_found_in_a_process_that_discovered_nothing(tmp_path):
+    """W7: the export reads the transform registry, so it has to fill it.
+
+    A fresh process starts with an empty registry (this suite's conftest
+    discovers it once, which is what hid the defect). The dialog's export
+    worker is such a process: no axis counted as injected there, so no master
+    counted as derived and each slanted twin kept its own sheared amounts."""
+    from avar2_studio import sources_export
+    from avar2_studio.transforms import registry
+
+    source = _spac_sidecar(
+        tmp_path, {"type": "slant", "enabled": True, "params": {}},
+        {"type": "round_corners", "enabled": True, "params": {}})
+    saved, was_discovered = dict(registry.REGISTRY), registry._discovered
+    registry.REGISTRY.clear()
+    registry._discovered = False
+    try:
+        assert sources_export._injected_axis_tags(source) == {"slnt", "ROND", "SPAC"}
+    finally:
+        registry.REGISTRY.clear()
+        registry.REGISTRY.update(saved)
+        registry._discovered = was_discovered
+
+
 def test_a_composite_whose_base_has_no_amount_still_holds_its_ink():
     """E2k, the `IJ` case: the base takes no amount, a component takes a lot.
 
@@ -1031,6 +1058,97 @@ def test_the_cli_zip_and_the_dialog_zip_have_the_same_content(project, tmp_path)
     assert dialog[0] == cli_side[0], "same files in the zip"
     assert dialog[1] == cli_side[1], "same README"
     assert dialog[2] == cli_side[2], "same designspace"
+
+
+def test_the_export_worker_gives_slanted_twins_their_parents_amounts(
+        project, tmp_path, monkeypatch):
+    """W7: the dialog's zip carries the same spacing as the CLI's.
+
+    The dialog's export runs in a worker process that never loads a source or
+    builds, so nothing had discovered the transform registry there: no master
+    counted as derived and every slanted twin kept its own sheared amounts,
+    while the CLI (whose process loads the source first) wrote the parents'.
+    The worker here is the real one, in its own interpreter — the test above
+    runs both paths inside this process, where conftest has discovered the
+    registry, which is how it missed this.
+    """
+    import glyphsLib
+
+    from avar2_studio import cli, server
+    from avar2_studio.transforms import slanting
+
+    source = project["source"]
+    (source.parent / "CrispyMini-transforms.json").write_text(json.dumps({
+        "version": 1, "transforms": [
+            {"type": "slant", "enabled": True, "params": {}},
+            {"type": "spac_widthaware", "enabled": True,
+             "params": {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}}]}))
+    # The active source both paths read: the build copy with the slanted masters.
+    font = glyphsLib.GSFont(str(source))
+    slanting.slant_font(font, {})
+    active = tmp_path / "transformed" / source.name
+    active.parent.mkdir()
+    font.save(str(active))
+
+    job = tmp_path / "job"
+    job.mkdir()
+    (job / "spec.json").write_text(json.dumps({
+        "job_id": "export-1", "kind": "export", "format": "sources",
+        "job_dir": str(job), "out_dir": str(job / "out"),
+        "original_path": str(source), "glyphs_path": str(active),
+        "family_name": "CrispyMini",
+        # No built font: both paths then measure the masters themselves.
+        "current_font": str(job / "no-build.ttf"),
+        "progress_path": str(job / "progress.jsonl"),
+        "result_path": str(job / "result.json")}))
+    worker = subprocess.run(
+        [sys.executable, "-m", "avar2_studio.build_worker", str(job / "spec.json")],
+        # Its own HOME: discovery reads (and creates) ~/.avar2-studio/transforms.
+        env={**os.environ, "HOME": str(tmp_path / "home")},
+        capture_output=True, text=True, timeout=600)
+    assert (job / "result.json").exists(), worker.stderr
+    result = json.loads((job / "result.json").read_text())
+    assert result["success"], result
+
+    with zipfile.ZipFile(result["artifact"]) as zf:
+        members = {name: zf.read(name) for name in zf.namelist()}
+    advances = {}                           # {twin UFO: {glif: advance}}
+    for name, data in members.items():
+        ufo, _, glif = name.partition("/glyphs/")
+        if "SPAC" in ufo and glif.endswith(".glif"):
+            advance = ElementTree.fromstring(data).find("advance")
+            advances.setdefault(ufo, {})[glif] = (
+                advance.get("width") if advance is not None else None)
+    slanted = sorted(ufo for ufo in advances if "-Slanted-" in ufo)
+    assert len(slanted) == 16, f"8 slanted masters x 2 SPAC ends, got {slanted}"
+    own = [(ufo, glif) for ufo in slanted for glif, advance in advances[ufo].items()
+           if advance != advances[ufo.replace("-Slanted-", "-")][glif]]
+    assert not own, (
+        f"{len(own)} of {sum(len(advances[ufo]) for ufo in slanted)} advances in "
+        f"the slanted twins differ from the upright parent's twin (first: "
+        f"{own[0]}) — the slanted masters kept their own sheared amounts")
+
+    log = [json.loads(line).get("log", "")
+           for line in (job / "progress.jsonl").read_text().splitlines()]
+    assert ("sources_export: 8 derived masters take their parents' spacing "
+            "amounts (8 parents, by location)") in log, log
+
+    # The CLI's order: its process loads the source, which discovers the
+    # registry, before it writes the sources (conftest did that for this one).
+    monkeypatch.setattr(state, "GLYPHS_PATH", active)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", None)
+    monkeypatch.setattr(state, "PREVIEW_CSV_PATH", None)   # an earlier test's memo
+    cli_zip = cli._write_sources(
+        SimpleNamespace(out=tmp_path / "cli", source=source), state, server, [])
+    assert cli_zip is not None
+    with zipfile.ZipFile(cli_zip) as zf:
+        cli_members = {name: zf.read(name) for name in zf.namelist()}
+    assert sorted(members) == sorted(cli_members), "same files in the zip"
+    differing = sorted(name for name in members
+                       if members[name] != cli_members[name])
+    assert not differing, (
+        f"{len(differing)} of {len(members)} members differ between the worker's "
+        f"zip and the CLI's (first: {differing[0]})")
 
 
 @needs_fontc
