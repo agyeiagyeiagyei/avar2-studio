@@ -3947,3 +3947,45 @@ platform wheel, so a tag pushed with this matrix would have hung as well.
 Fix: `3d3469f`, one line in `release.yml`, `macos-13` → `macos-15-intel`. No
 product code changed, so the d9a777a checkpoint evidence still applies. R1 is
 re-run on the new tip, and its proof is recorded when it finishes.
+
+### R1 result (B11c) — passes, no tag pushed
+
+Run 42353643922 on `a5161db`, `publish_to=none`: `build` and all three
+`build-platform-wheels` jobs green; the release and publish jobs skipped. CI on
+the same commit: run 42353642951, six jobs green.
+
+| Wheel | Tag | `spac-inject` | `libkinetikern2` | Check |
+|---|---|---|---|---|
+| macOS arm64 | `macosx_11_0_arm64` | 1,209,424 B | 1,376,192 B | installed and run, below |
+| macOS Intel | `macosx_10_13_x86_64` | 1,234,256 B | 1,442,496 B | x86_64, min OS 10.13; `--rule` = `e2i-c` under Rosetta; not installed |
+| Linux | `manylinux_2_34_x86_64` | 1,366,576 B | 1,601,088 B | members listed only; not run |
+
+The arm64 wheel, in a clean venv (`~/avar2-verifier/wheel-a5161db`, `env -i`, no
+`AVAR2_*` set):
+
+- `spac-inject --rule` answers `e2i-c`.
+- `avar2-studio doctor` finds both helpers at the wheel path. `doctor --strict`
+  exits 0 with `fontc` and `gftools-builder` on PATH. Without them it exits 1 and
+  names those two only: a wheel does not bring them.
+- `kinetikern.bridge.Engine` loads the library: ABI 1, `kinetikern2 2.0.0`.
+- The wheel's CLI built the real Crispy copy in 70 s. A logging wrapper on the
+  helper shows the `--rule` handshake, then the inject call, so the native path ran.
+- Two builds differ only in `head` (`modified`, `checkSumAdjustment`).
+- Against the d9a777a checkpoint font (fontTools path): 0 of 127,848 tuples differ
+  and 0 of 29,760 HarfBuzz checks differ; `fvar`, `avar`, `HVAR`, `hmtx`, `glyf`
+  and `STAT` are byte-identical. FreeType = HarfBuzz, worst 0.0.
+
+`gvar` is the same length but not the same bytes, although its tuples match.
+`name` differs by one record: the fontTools path adds a Mac-platform copy of
+nameID 280 (`addMultilingualName`), and every other name in both fonts is
+Windows-platform only. The axis reads `Spacing` in both. Harmless, so not changed.
+
+Noticed, not blocking:
+
+- `opsz`, `wdth` and `wght` are named by their tags in the built font (nameIDs
+  277–279), not "Optical Size", "Width", "Weight".
+- The Linux wheel's glibc floor is 2.34, so older distributions cannot install it.
+
+R2 (B11b): `~/Documents/fontra-embed` `shared-studio-shim` pushed at `3de37a6`; no
+PR and no merge, which stays the user's call.
+
