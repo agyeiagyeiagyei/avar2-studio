@@ -108,7 +108,8 @@ def stand_in_fontra(tmp_path, monkeypatch):
             return proc
         monkeypatch.setattr(subprocess, "Popen", popen)
 
-    yield SimpleNamespace(run=run, log=workdir / "fontra.log", spawned=spawned)
+    yield SimpleNamespace(run=run, log=workdir / "fontra.log", spawned=spawned,
+                          blocker=blocker)
     blocker.close()
     for proc in spawned:
         if proc.poll() is None:
@@ -137,13 +138,32 @@ def test_a_fontra_that_exits_immediately_names_its_stderr(stand_in_fontra):
     assert "fontra: starting" in logged and "Address already in use" in logged
 
 
+def test_a_fontra_that_is_slow_to_start_still_opens(stand_in_fontra, monkeypatch):
+    """A cold start on a busy machine takes more than 5 s: right after a build,
+    with a compress job running, Fontra was still importing when the old wait
+    gave up, and the designer got a 500 for a Fontra that was about to come up.
+    """
+    port = state.FONTRA_PORT
+    stand_in_fontra.blocker.close()               # the stand-in binds it itself
+    monkeypatch.setattr(state, "FONTRA_SHADOW_MTIME", None, raising=False)
+    stand_in_fontra.run(
+        "import socket, time; time.sleep(6); s = socket.socket(); "
+        "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); "
+        f"s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)")
+    served = stand_in_fontra.log.parent / "shadow"
+    served.mkdir()
+
+    assert server._ensure_fontra_running(served) == port
+
+
 def test_a_fontra_that_never_binds_is_stopped_and_named(stand_in_fontra,
                                                          monkeypatch):
     """The timeout must stop the process it launched, or that orphan holds the
     port and the next open fails on it."""
     import time
 
-    monkeypatch.setattr(time, "sleep", lambda _s: None)   # the 5 s wait, at once
+    monkeypatch.setattr(time, "sleep", lambda _s: None)   # the bind wait, at once
+    monkeypatch.setattr(server, "FONTRA_BIND_ATTEMPTS", 5)
     stand_in_fontra.run(
         "import sys, time; print('fontra: still importing'); "
         "sys.stdout.flush(); time.sleep(60)")

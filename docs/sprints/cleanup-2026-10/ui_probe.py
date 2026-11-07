@@ -384,11 +384,13 @@ def wait_ui_idle(s, timeout=240):
     return h
 
 
-def wait_header_ready(s, timeout=60000):
+def wait_header_ready(s, timeout=240000):
     """The header menus are disabled while the app is busy (its own font
     fetch, a build, the veil), so a click straight after `load()` can hit a
     `disabled` trigger and time out — a harness artefact, not a product
-    failure. Wait for the chrome to be interactive."""
+    failure. Wait for the chrome to be interactive. A scenario can inherit
+    queued builds from the one before (two real-Crispy builds and a compress
+    took 66 s on a loaded machine), hence the same limit as wait_new_build."""
     s.page.wait_for_selector(".build-veil", state="detached", timeout=timeout)
     s.page.wait_for_selector(
         "header button.btn-load-font:not([disabled])", timeout=timeout)

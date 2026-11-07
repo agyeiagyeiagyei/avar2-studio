@@ -3034,3 +3034,15 @@ With those in place, the next full pass will name the cause.
 - CI green on the merged tip.
 - The automated pass at that tip.
 - The real-Crispy gate: on the same six files, the dialog's zip equals the CLI's member for member (README stamp aside).
+
+## Verifier finding (2026-11-07 11:52) — automated pass at 692e286: 16 of 18; both failures are timing limits under load, now named; the real-Crispy gate still to run
+
+**Report:** `~/avar2-verifier/reports/692e286.md`. pytest 705 passed; ruff, lint, typecheck, test:unit, build and a git-clean CLI build OK. Probe 16 of 18.
+
+**`control-axis`, the intermittent 500 (W3's logging named it).** `server.log`: `RuntimeError: fontra didn't bind 127.0.0.1:8003 within ~5s; its log … is empty`, 6 s after the build finished, with a compress job running. So Fontra was still starting: no crash, no port conflict. The orphan W3 fixed was therefore not the cause. Free RAM was about 0.1 GB at the time, with other sessions on the machine. A designer who opens the editor right after a build hits the same thing.
+
+**Fix:** the wait is now about a minute (`FONTRA_BIND_ATTEMPTS`). A Fontra that exits is still caught at once. New test `test_a_fontra_that_is_slow_to_start_still_opens` uses a stand-in that binds after 6 s. On the old limit it fails with the same `didn't bind … within ~5s`; it passes now.
+
+**`load-font` (probe, not product).** The scenario inherited queued builds from `config-roundtrip` (two real-Crispy builds and a compress, 66 s in the log), and `wait_header_ready` allowed 60 s. The screenshot shows the build veil, as intended. The limit is now 240 s, the same as `wait_new_build`.
+
+**Written by the verifier** (a few lines), so these two changes have no independent implementer. CI and the next full pass check them.

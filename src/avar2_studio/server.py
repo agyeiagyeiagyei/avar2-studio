@@ -703,6 +703,9 @@ def _get_glyphs_axis_tags() -> set:
 # ----------------------------------------------------------------------
 
 
+FONTRA_BIND_ATTEMPTS = 240   # one every 0.25 s: about a minute
+
+
 class FontraUnavailable(RuntimeError):
     """Fontra is an optional dependency and is not installed in this venv.
 
@@ -805,8 +808,10 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
         return (f"; its log {fontra_log} ends:\n" + "\n".join(lines)
                 if lines else f"; its log {fontra_log} is empty")
 
-    # Give Fontra a moment to bind the port.
-    for _ in range(20):
+    # Give Fontra time to bind the port: 0.3 s on an idle machine, but more than
+    # 5 s for a cold start on a busy one (right after a build, with a compress
+    # job running). An exit is caught at once; only a hung start waits it out.
+    for _ in range(FONTRA_BIND_ATTEMPTS):
         if proc.poll() is not None:
             raise RuntimeError(
                 f"fontra exited immediately (exit code {proc.returncode})"
@@ -831,7 +836,7 @@ def _ensure_fontra_running(content_root: Path, watch_file: Optional[Path] = None
             proc.kill()
             proc.wait()
         raise RuntimeError(f"fontra didn't bind 127.0.0.1:{state.FONTRA_PORT} "
-                           f"within ~5s{_log_tail()}")
+                           f"within ~60s{_log_tail()}")
 
     state.FONTRA_PROCESS = proc
     state.FONTRA_CONTENT_ROOT = content_root
