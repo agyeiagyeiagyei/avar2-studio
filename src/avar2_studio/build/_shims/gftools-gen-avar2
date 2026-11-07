@@ -20,7 +20,7 @@ font does NOT already have before handing off to the upstream
 function, which then behaves identically for the traditional case and
 appends nothing for parametric-in mappings. The studio prepends this
 script's directory to PATH for the gftools-builder subprocess
-(server.py, _perform_avar2_build), so it shadows the venv console
+(pipeline.py, _builder_env), so it shadows the venv console
 script of the same name. Delete it once the check is fixed upstream.
 """
 import json

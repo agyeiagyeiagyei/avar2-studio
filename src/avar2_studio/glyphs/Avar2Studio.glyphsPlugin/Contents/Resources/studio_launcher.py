@@ -49,9 +49,9 @@ def read_config(path=CONFIG_PATH):
         raise LauncherError(
             "avar2-studio is not set up for Glyphs yet: run "
             "`avar2-studio install-glyphs-plugins` in a terminal."
-        )
+        ) from None
     except (OSError, ValueError) as exc:
-        raise LauncherError("Could not read %s: %s" % (path, exc))
+        raise LauncherError("Could not read %s: %s" % (path, exc)) from exc
     python = data.get("python") if isinstance(data, dict) else None
     if not python or not Path(python).exists():
         raise LauncherError(

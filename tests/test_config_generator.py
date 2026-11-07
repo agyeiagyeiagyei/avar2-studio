@@ -16,7 +16,6 @@ import pytest
 
 from avar2_studio.build import config_generator as cg
 
-
 PARAM_ONLY_CSV = "Instance Name,XTRA,XOPQ,YOPQ\nThin Condensed,181.2,40.3,41.3\n"
 PARAM_ONLY_SPAC_CSV = "Instance Name,XOPQ,SPAC\nDefault,2.0,25\n"
 TRADITIONAL_CSV = "Instance Name,WGHT,XOPQ\nDefault,400,2.0\n"
@@ -154,6 +153,7 @@ def test_identical_duplicate_rows_are_dropped(tmp_path):
     """Two named instances at identical coordinates with identical values
     (e.g. HighContrast variants) share one avar2 entry — not an error."""
     from decimal import Decimal
+
     from avar2_studio.build.config_generator import RowMapping
     row = RowMapping("A", {"XOPQ": Decimal(2)}, {"XOPQ": Decimal(50)}, ("XOPQ",))
     dup = RowMapping("A HighContrast", {"XOPQ": Decimal(2)}, {"XOPQ": Decimal(50)}, ("XOPQ",))
@@ -165,6 +165,7 @@ def test_identical_duplicate_rows_are_dropped(tmp_path):
 def test_same_in_different_out_still_rejected(tmp_path):
     """Same in: mapping to different out: is a real contradiction."""
     from decimal import Decimal
+
     from avar2_studio.build.config_generator import RowMapping
     a = RowMapping("A", {"XOPQ": Decimal(2)}, {"XOPQ": Decimal(50)}, ("XOPQ",))
     b = RowMapping("B", {"XOPQ": Decimal(2)}, {"XOPQ": Decimal(70)}, ("XOPQ",))

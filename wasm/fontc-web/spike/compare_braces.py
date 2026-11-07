@@ -27,7 +27,9 @@ own instancer (the oracle), per the task's verification spec:
        has 8 segment maps, gvar axisCount is 8, and fontTools can
        instantiate at a spread of locations without error.
 
-Usage: compare_braces.py ORIGINAL CONTROL GRADE FULL
+Usage: compare_braces.py ORIGINAL CONTROL GRADE FULL CONTROL_JSON GRADE_JSON COORDS_JSON
+  The three JSON files are the control-axes bundle, the grade bundle and
+  the instance coordinates the crate was given (written by the test).
 """
 
 import json
@@ -79,9 +81,7 @@ def max_abs_diff(a, b):
 
 def main():
     original_path, control_path, grade_path, full_path = sys.argv[1:5]
-    control_json = json.load(open("/tmp/braces-control.json"))
-    grade_json = json.load(open("/tmp/braces-grade.json"))
-    coords_json = json.load(open("/tmp/braces-coords.json"))
+    control_json, grade_json, coords_json = (json.load(open(p)) for p in sys.argv[5:8])
 
     layer = control_json[0]["layers"][0]
     glyph = layer["glyph"]

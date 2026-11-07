@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './AddAxisModal.css';
 
 function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingMetadata = {}, parametricAxes = [] }) {
@@ -121,11 +122,9 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
     onClose();
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay">
-      <div className="modal-content add-axis-modal" onClick={(e) => e.stopPropagation()}>
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="modal-content add-axis-modal block border-0" onClick={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>Add New Axis</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -236,8 +235,8 @@ function AddAxisModal({ isOpen, onClose, onConfirm, existingAxes = [], existingM
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

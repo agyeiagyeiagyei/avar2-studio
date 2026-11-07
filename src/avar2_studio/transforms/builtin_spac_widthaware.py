@@ -42,6 +42,7 @@ glyph mean) also matches the gftools amount.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fontTools.pens.boundsPen import BoundsPen
@@ -52,8 +53,9 @@ from fontTools.ttLib.tables._g_l_y_f import USE_MY_METRICS
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 
+from .. import spac_amounts
 from .base import BuildContext, ParamSpec, Transform, TransformSpec
-from .builtin_spac import _spac_output_name, _instance_spac_overrides
+from .builtin_spac import _instance_spac_overrides, _spac_output_name
 
 
 def _native_injector():
@@ -64,15 +66,57 @@ def _native_injector():
     re-encodes the whole table and overflows gvar's 64KB per-glyph
     header ceiling on twin-heavy fonts (slant x rounding x grade).
     Returns the binary's path, or None (callers fall back to fontTools).
-    Override with $AVAR2_SPAC_INJECT."""
+    Discovery order: $AVAR2_SPAC_INJECT, then the wheel-carried copy in
+    avar2_studio/bin/ (docs/decisions/0015), then the repo build.
+    See docs/guides/transforms.md."""
     import os
     env = os.environ.get("AVAR2_SPAC_INJECT")
     if env:
         path = Path(env)
         return path if path.exists() else None
-    path = (Path(__file__).resolve().parents[3]
-            / "wasm" / "fontc-web" / "target" / "release" / "spac-inject")
+    here = Path(__file__).resolve()
+    path = here.parents[1] / "bin" / "spac-inject"
+    if path.exists():
+        return path
+    path = here.parents[3] / "wasm" / "fontc-web" / "target" / "release" / "spac-inject"
     return path if path.exists() else None
+
+
+#: The amount rule this module implements. ``spac-inject --rule`` must answer
+#: the same: a binary built before the per-master amounts (E2i-c) reads the
+#: same payload, ignores the master locations and writes one constant amount
+#: per glyph — a font that no longer matches the exported sources.
+NATIVE_RULE = "e2i-c"
+
+
+def _native_rule(native: Path):
+    """What ``spac-inject --rule`` answers, or None when the binary cannot say
+    (a build from before the flag prints its usage and exits 2)."""
+    import subprocess
+    try:
+        res = subprocess.run([str(native), "--rule"], capture_output=True,
+                             text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def _native_payload(lo: int, hi: int, bias: float, scale: float,
+                    instance_spac: dict, master_locations=None) -> str:
+    """The spac-inject transforms JSON. Per-instance SPAC coordinates ride
+    the payload (``params.instance_spac``): the mappings CSV is parsed
+    Python-side (csv_io.read_csv_spac_overrides, the one reader) — the
+    binary never opens it. So do the master locations
+    (``params.master_locations``, E2i-c), as the build context holds them:
+    user-space values, each location's axes in the designspace's order. The
+    binary normalizes them against the built font like ``_normalize_corners``."""
+    params = {"min": lo, "max": hi, "bias": bias, "scale": scale}
+    if instance_spac:
+        params["instance_spac"] = instance_spac
+    if master_locations:
+        params["master_locations"] = master_locations
+    return json.dumps([{"type": "spac_widthaware", "enabled": True,
+                        "params": params}])
 
 
 def _ink_width(glyph_set, name) -> float:
@@ -87,6 +131,100 @@ def _ink_width(glyph_set, name) -> float:
         return 0.0
     xmin, _ymin, xmax, _ymax = pen.bounds
     return xmax - xmin
+
+
+SPAC_TAG = "SPAC"
+
+
+def _parametric_corners(font) -> list:
+    """The normalized locations the font's own gvar varies over.
+
+    E2i-c needs one amount per master corner, so the corner set comes from the
+    built font itself: every distinct peak vector of an existing tuple, minus
+    the SPAC axis this transform adds (the tuples it emitted on a previous run
+    carry SPAC and would otherwise masquerade as corners).
+    """
+    # The DEFAULT is a corner too: VariationModel needs a base master at the
+    # origin, and the default master's amount is the one the built font's own
+    # mean defines.
+    corners = [{}]
+    for variations in font["gvar"].variations.values():
+        for variation in variations:
+            peaks = {}
+            for tag, support in variation.axes.items():
+                if tag == SPAC_TAG:
+                    continue
+                peak = support[1] if isinstance(support, tuple) else support
+                if peak:
+                    peaks[tag] = float(peak)
+            if peaks and peaks not in corners:
+                corners.append(peaks)
+    return corners
+
+
+def _normalize_corners(font, locations) -> list:
+    """Design-space-normalized corners from USER-SPACE master locations.
+
+    E2i-c-d: a master location must be normalized against the **built font's**
+    axis definitions, not the source designspace's. On Crispy the designspace
+    default is the 47-1-1 hairline while the studio relocates the default to the
+    ORIGIN row, so normalizing against the source put every derived corner on the
++ side, no SPAC tuple covered the narrow half, and that half got the default's
+    constant amount (H at Narrow 1 MaxOpsz: raw advance −121.9 u at SPAC −100).
+    fvar carries the relocated default and avar the segment maps, which is the
+    space gvar deltas are written in.
+    """
+    axes = {axis.axisTag: axis for axis in font["fvar"].axes}
+    # fontTools ≤4.6x exposed each axis' segment map on an object (``.mapping``);
+    # from 4.68 ``segments`` is already ``{from: to}`` per axis.
+    avar = {tag: getattr(segments, "mapping", segments)
+            for tag, segments in (font["avar"].segments.items()
+                                  if "avar" in font else [])}
+    out = []
+    for location in locations:
+        normalized = {}
+        for tag, value in (location or {}).items():
+            axis = axes.get(tag)
+            if axis is None or value is None:
+                continue
+            default, lo, hi = (axis.defaultValue, axis.minValue, axis.maxValue)
+            span = (hi - default) if value > default else (default - lo)
+            norm = ((value - default) / span) if span else 0.0
+            segment = avar.get(tag)
+            if segment is not None:
+                norm = _avar_map(norm, segment)
+            if norm:
+                normalized[tag] = round(norm, 6)
+        # A master that sits at the built font's default normalises onto the
+        # default corner, so the two collapse — and fontTools' VariationModel
+        # refuses duplicate locations.
+        if normalized not in out:
+            out.append(normalized)
+    return out
+
+
+def _avar_map(value: float, mapping) -> float:
+    """Apply an avar segment map (user-normalized → design-normalized)."""
+    points = sorted(mapping.items())
+    if not points:
+        return value
+    if value <= points[0][0]:
+        return points[0][1]
+    if value >= points[-1][0]:
+        return points[-1][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x0 <= value <= x1:
+            if x1 == x0:
+                return y1
+            return y0 + (y1 - y0) * (value - x0) / (x1 - x0)
+    return value
+
+
+def _ink_widths_at(font, location: dict) -> dict:
+    """``{glyph: ink width}`` at one normalized location (fontTools instancing)."""
+    glyph_set = font.getGlyphSet(location=location, normalized=True)
+    return {name: ink for name in font.getGlyphOrder()
+            if (ink := _ink_width(glyph_set, name)) > 0}
 
 
 def _gvar_point_count(glyph, glyf) -> int:
@@ -143,28 +281,48 @@ class WidthAwareSpacTransform(Transform):
             scale = 1.25
         scale = max(0.1, scale)
 
+        # E2i-c: the native injector computes the same per-master amounts
+        # (wasm/fontc-web spac.rs, held to this module's fontTools path by
+        # tests/spac_oracle.rs) — but only a build that says so. An older
+        # binary would still write one constant amount per glyph, and the
+        # studio and the exported sources would disagree at every SPAC end.
         native = _native_injector()
+        if native is None:
+            # Absence used to be silent: the fallback is slower and its gvar
+            # re-encode can overflow the 64KB per-glyph tuple-header ceiling
+            # on twin-heavy fonts — say which path is running and why.
+            ctx.log("spac_widthaware: native injector not found — the fontTools "
+                    "path runs (slower; can overflow gvar's 64KB tuple-header "
+                    "ceiling on twin-heavy fonts). `avar2-studio doctor` lists it.")
+        elif _native_rule(native) != NATIVE_RULE:
+            ctx.log(f"spac_widthaware: the native injector at {native} was "
+                    "built before the per-master amounts (E2i-c) — the "
+                    "fontTools path runs (slower; can overflow gvar's 64KB "
+                    "tuple-header ceiling on twin-heavy fonts). Rebuild it: "
+                    "docs/guides/transforms.md")
+            native = None
         if native is not None:
-            import json as _json
             import os
             import subprocess
             import tempfile
             out = vf_path.parent / _spac_output_name(ctx.family, vf_path)
-            payload = _json.dumps([{"type": "spac_widthaware", "enabled": True,
-                                    "params": {"min": lo, "max": hi,
-                                               "bias": bias, "scale": scale}}])
+            payload = _native_payload(lo, hi, bias, scale,
+                                      _instance_spac_overrides(ctx.source_path),
+                                      getattr(ctx, "master_locations", None))
             tf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
             try:
                 tf.write(payload)
                 tf.close()
-                csv_path = ctx.source_path.parent / f"{ctx.source_path.stem}-avar.csv"
                 cmd = [str(native), str(vf_path), str(out), tf.name]
-                if csv_path.exists():
-                    cmd.append(str(csv_path))
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             finally:
                 os.unlink(tf.name)
             if res.returncode == 0 and out.exists():
+                # What the fontTools path logs itself: the corner count and
+                # every floored amount.
+                for line in (res.stderr or "").splitlines():
+                    if line.strip():
+                        ctx.log(line.strip())
                 ctx.log(f"spac_widthaware: native injector ({lo}\u2026{hi}, "
                         f"bias {bias:g}, scale {scale:g})")
                 return out
@@ -184,14 +342,59 @@ class WidthAwareSpacTransform(Transform):
             # average-width glyph then tracks exactly like the uniform
             # gftools transform (see module docstring), whatever the
             # design's absolute width. space/.notdef (no ink) are skipped.
+            # `.notdef` is the compiler's own box: the sources carry no glyph
+            # for it, so the export cannot twin it (E2i-c). Leave it alone here
+            # too, and keep it out of the mean so both sides average the same
+            # glyph set.
             inks = {
                 name: ink
                 for name in font.getGlyphOrder()
-                if (ink := _ink_width(glyph_set, name)) > 0
+                if name != ".notdef"
+                and (ink := _ink_width(glyph_set, name)) > 0
             }
             if not inks:
                 raise RuntimeError("width-aware SPAC: no measurable glyph outlines")
             mean_ink = sum(inks.values()) / len(inks)
+
+            # E2i-c: the amount scales with EACH master's own ink, so one
+            # amount per corner — and gvar carries constants per support
+            # region, so the corners' amounts are decomposed into deltas by
+            # fontTools' own model (the exact inverse of the interpolation that
+            # will read them back).
+            # E2i-c: the corners are the designspace masters, handed in by the
+            # caller that has the designspace. Inferring them from the font is
+            # the fallback: inside a built font every axis looks alike, so the
+            # inference returned 1,280 "corners" on Crispy (transform, grade and
+            # control supports) against 9 real masters, and gvar overflowed.
+            given = getattr(ctx, "master_locations", None)
+            corners = (_normalize_corners(font, given) if given
+                       else _parametric_corners(font))
+            if given:
+                ctx.log(f"spac_widthaware: {len(corners)} master corner(s) from "
+                        f"the designspace")
+            corner_inks, corner_means, corner_advances = [], [], []
+            for corner in corners:
+                at = _ink_widths_at(font, corner)
+                # normalized=True: the corner dicts are design-space peaks, and
+                # reading them as user units silently returns the DEFAULT's
+                # advances (which floored 439 innocent glyphs on the first run).
+                adv_set = (font.getGlyphSet(location=corner, normalized=True)
+                           if corner else font.getGlyphSet())
+                corner_advances.append(
+                    {n: float(adv_set[n].width) for n in font.getGlyphOrder()})
+                shared = [n for n in inks if n in at]
+                if not shared:
+                    break
+                corner_inks.append(at)
+                corner_means.append(sum(at[n] for n in shared) / len(shared))
+            model = None
+            if len(corner_inks) == len(corners) and corners:
+                from fontTools.varLib.models import VariationModel
+
+                model = VariationModel(corners, axisOrder=sorted(
+                    {tag for corner in corners for tag in corner}))
+            if model is None:
+                corners, corner_inks, corner_means = [], [], []
 
             for name, ink in inks.items():
                 glyph = glyf[name]
@@ -202,8 +405,16 @@ class WidthAwareSpacTransform(Transform):
                 # double it — skip.
                 if composite and any(c.flags & USE_MY_METRICS for c in glyph.components):
                     continue
-
-                factor = (ink / mean_ink) ** bias  # average-width glyph → factor 1.0 at any bias
+                base_name = None
+                if composite:
+                    # E2k (the user's rule): a composite tracks exactly like its
+                    # base letter — the base's amount on BOTH sides. ufoLib2 has
+                    # no per-component metrics flag, and the first component is
+                    # the flagged one in every glyphsLib composite.
+                    base_name = glyph.components[0].glyphName
+                    ink = inks.get(base_name, 0.0)
+                    if ink <= 0:
+                        continue
 
                 variations = gvar.variations.get(name)
                 if variations:
@@ -212,16 +423,77 @@ class WidthAwareSpacTransform(Transform):
                     n = _gvar_point_count(glyph, glyf)
                     variations = gvar.variations.setdefault(name, [])
 
-                # Simple glyph: move both phantoms (±) for a symmetric grow.
-                # Composite: moving the LEFT phantom shifts the whole component,
-                # which opens BOTH sidebearings equally — so a right delta too
-                # would double the right side. Left phantom only.
-                for support, amount in (((-1.0, -1.0, 0.0), lo), ((0.0, 1.0, 1.0), hi)):
-                    coords = [None] * n
-                    coords[-4] = (round(-amount * factor * scale), 0)
-                    if not composite:
+                def amount_at(index: int, ink_here: float) -> float:
+                    """E2i-c: proportional to this master's own ink, and
+                    renormalised so the default master keeps its amount."""
+                    mean_here = corner_means[index]
+                    if mean_here <= 0 or mean_ink <= 0:
+                        return 0.0
+                    return ((ink_here / mean_here) ** bias
+                            * (mean_here / mean_ink))
+
+                if model is None:
+                    # No parametric variation to scale against: one constant
+                    # amount per glyph, the pre-E2i-c behaviour.
+                    factor = (ink / mean_ink) ** bias
+                    for support, amount in (((-1.0, -1.0, 0.0), lo),
+                                            ((0.0, 1.0, 1.0), hi)):
+                        coords = [None] * n
+                        coords[-4] = (round(-amount * factor * scale), 0)
                         coords[-3] = (round(amount * factor * scale), 0)
-                    variations.append(TupleVariation({"SPAC": support}, coords))
+                        variations.append(
+                            TupleVariation({"SPAC": support}, coords))
+                    continue
+
+                # A composite reads its BASE's ink at every corner, not its
+                # own — the same rule as the constant path and the export.
+                ink_name = base_name or name
+
+                def _corner_amounts(value, ink_name=ink_name, name=name,
+                                    composite=composite):
+                    """Per-corner per-side INTEGERS, plus the floored ones.
+
+                    Computed by the same function the export uses — round() in
+                    the same place, the same tight-end floor — so
+                    `getDeltas(..., round=round)` reconstructs each corner
+                    exactly. Float inputs used to leave the font a unit off the
+                    twin at every master (verifier, 2026-11-06).
+                    """
+                    out, floored = [], []
+                    for i in range(len(corners)):
+                        ink_i = corner_inks[i].get(ink_name, 0.0)
+                        mean_i = corner_means[i]
+                        raw = (value * ((ink_i / mean_i) ** bias)
+                               * (mean_i / mean_ink) * scale
+                               if mean_i > 0 and mean_ink > 0 else 0.0)
+                        dx = spac_amounts.per_side(
+                            value, ink_i, mean_i, mean_ink, bias, scale,
+                            corner_advances[i].get(name, 0.0), composite)
+                        out.append(dx)
+                        if dx != round(raw):
+                            floored.append((i, raw, dx))
+                    return out, floored
+
+                amounts_lo, floored_lo = _corner_amounts(lo)
+                amounts_hi, _floored_hi = _corner_amounts(hi)
+                for i, raw, dx in floored_lo:
+                    ctx.log(f"spac_widthaware floor: {name} at corner "
+                            f"{sorted(corners[i].items())} rule {raw:.1f} -> {dx}")
+                lo_deltas = model.getDeltas(amounts_lo, round=round)
+                hi_deltas = model.getDeltas(amounts_hi, round=round)
+                # Both phantoms, simple or composite: ±dx gives left +dx and
+                # advance +2dx, i.e. each side +dx — the base's amount for a
+                # composite, its own for a simple glyph (E2k).
+                for support, d_lo, d_hi in zip(model.supports, lo_deltas,
+                                               hi_deltas):
+                    for spac_support, delta in (
+                            ((-1.0, -1.0, 0.0), d_lo), ((0.0, 1.0, 1.0), d_hi)):
+                        coords = [None] * n
+                        coords[-4] = (round(-delta), 0)
+                        coords[-3] = (round(delta), 0)
+                        variations.append(
+                            TupleVariation({**support, "SPAC": spac_support},
+                                           coords))
 
             # fvar axis + instance pinning (vendored from gen_spac.add_spacing_axis)
             name_table = font["name"]
@@ -233,6 +505,14 @@ class WidthAwareSpacTransform(Transform):
             axis.maxValue = float(hi)
             fvar = font["fvar"]
             fvar.axes.append(axis)
+            if "avar" in font:
+                # avar carries one segment map per fvar axis, and fontTools
+                # compiles it only once the table is in memory — otherwise the
+                # old bytes are copied through and the shipped font has an avar
+                # axis count that no longer matches fvar, which makes consumers
+                # drop avar (and avar2) wholesale. Add the new axis' identity
+                # map, which also loads the table so it is recompiled.
+                font["avar"].segments.setdefault("SPAC", {})
             # Instance pinning: default 0 — EXCEPT instances the CSV gives a
             # per-instance SPAC coordinate (authored via the studio). Those
             # must survive injection, not be flattened to the default.
@@ -242,12 +522,14 @@ class WidthAwareSpacTransform(Transform):
                 inst.coordinates["SPAC"] = spac_overrides.get(iname, 0.0)
             add_HVAR(font)
 
-            # pad every VarStore's regions for the new axis
+            # pad every VarStore's regions for the new axis — avar v2 carries
+            # the avar2 mappings in its own VarStore, so it must be padded like
+            # the others (peak 0: a mapping does not vary with SPAC).
             spac_region = otTables.VarRegionAxis()
             spac_region.StartCoord = -1
             spac_region.PeakCoord = 0
             spac_region.EndCoord = 1
-            for table in ("MVAR", "HVAR", "BASE", "VVAR", "COLR", "GDEF"):
+            for table in ("avar", "MVAR", "HVAR", "BASE", "VVAR", "COLR", "GDEF"):
                 if table in font and hasattr(font[table].table, "VarStore"):
                     store = font[table].table.VarStore
                     store.VarRegionList.RegionAxisCount = len(fvar.axes)

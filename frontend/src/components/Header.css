@@ -139,6 +139,19 @@
   width: 8.5rem;
 }
 
+/* The preview font is behind the saved edits (health build_stale):
+   an amber dot on the Rebuild button, explained by its title. */
+.btn-rebuild-stale-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: var(--amber-500);
+  box-shadow: 0 0 0 2px #ffffff;
+  vertical-align: middle;
+}
+
 .mode-toggle {
   display: flex;
   gap: 0;

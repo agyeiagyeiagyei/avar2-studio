@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,6 +36,21 @@ def _isolated_user_transforms_dir(tmp_path_factory):
     registry.discover(force=True)
     yield
     registry.user_transforms_dir = original
+
+
+@pytest.fixture(autouse=True)
+def _python_spac_injector(monkeypatch, tmp_path):
+    """Keep this suite on the Python SPAC injector, whatever this machine has.
+
+    The width-aware transform hands the font to a native ``spac-inject`` when
+    it finds one (``$AVAR2_SPAC_INJECT``, the wheel's copy, a repo build), and
+    these tests would then measure the Rust engine instead of the
+    implementation they name. Naming a binary that is not there is the
+    documented way to get the fontTools path; a test that wants discovery
+    sets or deletes the variable itself. The Rust engine is held to this
+    implementation by the cargo oracle (wasm/fontc-web/tests/spac_oracle.rs).
+    """
+    monkeypatch.setenv("AVAR2_SPAC_INJECT", str(tmp_path / "no-native-injector"))
 
 
 @pytest.fixture
@@ -73,7 +89,7 @@ def _no_real_build_jobs(monkeypatch, request):
     if "real_jobs" in request.keywords:
         yield
         return
-    from avar2_studio import server
+    from avar2_studio import server, state
 
     class _FakeJobs:
         def __init__(self):
@@ -97,7 +113,34 @@ def _no_real_build_jobs(monkeypatch, request):
             return "export-fake"
         def export_artifact(self, job_id):
             return None
+        def job_status(self, job_id):
+            return None
 
     fake = _FakeJobs()
     monkeypatch.setattr(server, "JOBS", fake)
+    # pipeline.py reaches the queue through state.JOBS — patch both names.
+    monkeypatch.setattr(state, "JOBS", fake)
     yield
+
+@pytest.fixture
+def studio_client(monkeypatch):
+    """Flask test client with _ensure_fontra_running replaced by a
+    recording fake (returns a made-up port, spawns nothing)."""
+    import avar2_studio.server as server
+    from avar2_studio import state
+
+    calls = []
+
+    def fake_ensure_fontra(content_root, watch_file=None):
+        calls.append((Path(content_root), Path(watch_file) if watch_file else None))
+        return 8123
+
+    monkeypatch.setattr(server, "_ensure_fontra_running", fake_ensure_fontra)
+
+    def set_paths(original, active):
+        monkeypatch.setattr(state, "ORIGINAL_PATH", original)
+        monkeypatch.setattr(state, "GLYPHS_PATH", active)
+
+    return SimpleNamespace(
+        client=server.app.test_client(), fontra_calls=calls, set_paths=set_paths
+    )

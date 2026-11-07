@@ -104,19 +104,22 @@ export function apply_grade(font_bytes, grade_json, instance_coords_json) {
  * width-aware variant).
  *
  * `transforms_json` is the bundle's `transforms.transforms` array;
- * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
- * present, pins per-instance SPAC coordinates).
+ * per-instance SPAC coordinates ride it as `params.instance_spac`
+ * (parsed from the avar2 mappings CSV by the caller — csv_io on the
+ * desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+ * for caller/ABI compatibility and IGNORED: Rust no longer parses the
+ * CSV (one parse rule, Python-side).
  * @param {Uint8Array} font_bytes
  * @param {string} transforms_json
- * @param {string} avar2_csv
+ * @param {string} _avar2_csv
  * @returns {Uint8Array}
  */
-export function apply_transforms(font_bytes, transforms_json, avar2_csv) {
+export function apply_transforms(font_bytes, transforms_json, _avar2_csv) {
     const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(transforms_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(avar2_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr2 = passStringToWasm0(_avar2_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
     const ret = wasm.apply_transforms(ptr0, len0, ptr1, len1, ptr2, len2);
     if (ret[3]) {
@@ -212,6 +215,35 @@ export function glyph_model(source, glyph_name) {
         return getStringFromWasm0(ptr3, len3);
     } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+ * or `null` when no axis varies) — what the width-aware SPAC transform
+ * needs as `params.master_locations`, read the way the desktop pipeline
+ * reads it (editor.rs `master_locations`).
+ * @param {string} source
+ * @returns {string}
+ */
+export function master_locations(source) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.master_locations(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
 

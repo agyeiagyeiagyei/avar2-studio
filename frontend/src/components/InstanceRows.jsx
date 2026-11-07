@@ -2,18 +2,47 @@ import React, { useEffect, useState } from 'react';
 import './InstanceRows.css';
 import InstanceRow from './InstanceRow';
 import { api } from '../api';
-import { isStaticMode } from '../static-api';
 import { registerPreviewFont } from '../fontLoad';
+import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useTransforms } from '../hooks/useTransforms';
+import { useStudioData } from '../hooks/useStudioData';
 
-function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, grade, onSaveInstanceGrade, onRemoveInstanceGrade, rounding, onSaveInstanceRounding, onRemoveInstanceRounding, slant, onSaveInstanceSlant, onRemoveInstanceSlant, defaultOriginNames, axes }) {
+function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelectInstance, editingCoordinates, instanceEditingCoordinates, sampleText, fontUrl, fontLoaded, vfFamilyId, onReorderInstances, fontSize, onDeleteInstance, onMoveInstance, getInstanceSyncStatus, onRenameInstance, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, defaultOriginNames, originMasterByRow, axes }) {
+  // Per-row badge state (grade / rounding / slant) + save handlers come
+  // from the useTransforms context, renamed to the old prop names so the
+  // row rendering below is untouched.
+  const {
+    grade, rounding, slant,
+    handleSaveInstanceGrade: onSaveInstanceGrade,
+    handleRemoveInstanceGrade: onRemoveInstanceGrade,
+    handleSaveInstanceRounding: onSaveInstanceRounding,
+    handleRemoveInstanceRounding: onRemoveInstanceRounding,
+    handleSaveInstanceSlant: onSaveInstanceSlant,
+    handleRemoveInstanceSlant: onRemoveInstanceSlant,
+    kinetikern,
+    handleRemoveInstanceKinetikern: onRemoveInstanceKinetikern,
+  } = useTransforms();
+  const { setKinetikernFocus } = useStudioData();
+  // A row's K badge can ask the Kinetikern tab to open on its own style; App
+  // watches kinetikernFocus and switches the tab.
+  const openKinetikern = (name) => setKinetikernFocus({ name, at: Date.now() });
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [fontReady, setFontReady] = useState(false);
+  const { buildJob } = useBuildStatus();
 
   // Load font when available. The family id comes from /api/health so the
   // tool works on any .glyphs file, not just Crispy.
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) {
+      setFontReady(false);
+      return undefined;
+    }
+    // `building` clears as soon as the build lands, but the WOFF2 compress
+    // job runs AFTER it; asking for the cached WOFF2 in that window is a
+    // guaranteed 409 (and a console error per page load). Wait for the
+    // queue to be empty, not just for the font to be new.
+    if (buildJob) {
       setFontReady(false);
       return undefined;
     }
@@ -24,7 +53,7 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
     let retryTimer = null;
     const attempt = (triesLeft) => {
       registerPreviewFont(vfFamilyId, fontUrl,
-                          isStaticMode() ? null : api.getWoff2PreviewUrl())
+                          api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
         .then(() => {
           if (!cancelled) setFontReady(true);
         })
@@ -42,7 +71,7 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [fontUrl, fontLoaded, vfFamilyId]);
+  }, [fontUrl, fontLoaded, vfFamilyId, buildJob]);
 
   // Handle wheel scrolling during drag
   useEffect(() => {
@@ -173,7 +202,13 @@ function InstanceRows({ instances, selectedInstance, multiSelectedNames, onSelec
             slantAxisMin={(axes || []).find(a => a.tag === 'slnt')?.min ?? null}
             onSaveInstanceSlant={onSaveInstanceSlant}
             onRemoveInstanceSlant={onRemoveInstanceSlant}
+            kinetikernEnabled={kinetikern?.enabled !== false}
+            kinetikernLooseness={(kinetikern?.instances || [])
+              .find(e => e.name === instance.name)?.looseness ?? null}
+            onRemoveInstanceKinetikern={onRemoveInstanceKinetikern}
+            onOpenKinetikern={openKinetikern}
             isDefaultOrigin={!!defaultOriginNames?.has(instance.name)}
+            originMaster={originMasterByRow?.[instance.name] || null}
           />
         </div>
       ))}

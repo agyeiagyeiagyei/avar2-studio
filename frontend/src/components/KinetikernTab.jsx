@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import './KinetikernTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
+import { applyAllConfirm, applyAllLabel, fontSizeForStyle, instanceOptionLabel, revertLabel } from '../kinetikern-copy';
+import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
 
 // Kinetikern — per-instance spacing from Kinetikern2's engine (Mirko
 // Velimirovic, MIT). Pick an instance from the dropdown the way the plugin
@@ -30,7 +33,9 @@ function coordOf(instance, tag) {
   return v === undefined || v === null || v === '' ? undefined : Number(v);
 }
 
-function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
+function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, sampleText, onSampleTextChange, fontSize, onFontSizeChange }) {
+  const { building } = useBuildStatus();
+  const { kinetikernFocus, setKinetikern } = useStudioData();
   const { userAxes, controlAxes, transformAxes, parametricAxes } = useMemo(() => {
     const user = [];
     const control = [];
@@ -86,6 +91,12 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
     setSelected(name);
     if (!inst) return;
     setAnchor(name);
+    // K4: a style has an intended size — its opsz coordinate. Picking one moves
+    // the (shared) Font Size control onto it, clamped to the slider, so the
+    // panes show the style at the size it was drawn for. No opsz → leave the
+    // size alone; a manual slider move afterwards wins until the next pick.
+    const pt = fontSizeForStyle(inst, coordOf);
+    if (pt !== null) onFontSizeChange(ptToRem(pt));
     setCoords(prev => {
       const next = { ...prev };
       for (const a of userAxes) next[a.tag] = coordOf(inst, a.tag) ?? Number(a.default);
@@ -93,7 +104,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
       return next;
     });
     setOverrides(new Set());
-  }, [instances, userAxes, parametricAxes]);
+  }, [instances, userAxes, parametricAxes, onFontSizeChange]);
 
   useEffect(() => {
     if (!selected && instances.length && userAxes.length + parametricAxes.length > 0) pickInstance(instances[0].name);
@@ -136,13 +147,27 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
   const entry = applyName ? corrected.get(applyName) : undefined;
 
   const reloadStored = useCallback(() => {
-    api.getKinetikern().then(setStored).catch(() => {});
-  }, []);
+    api.getKinetikern().then((data) => {
+      setStored(data);
+      // Same payload the Instances rows badge from: without this the K badge
+      // only caught up on the next health poll, so an apply here left the row
+      // unbadged for a cycle (K1).
+      setKinetikern({ enabled: data.enabled !== false, instances: data.instances || [] });
+    }).catch(() => {});
+  }, [setKinetikern]);
   useEffect(() => { reloadStored(); }, [reloadStored]);
   useEffect(() => { if (!building) reloadStored(); }, [building, reloadStored]);
+  // A row's K badge jumps here with its style selected (K1). Keyed on the
+  // request object, so asking for the same style twice re-selects it.
+  useEffect(() => {
+    if (kinetikernFocus?.name) setSelected(kinetikernFocus.name);
+  }, [kinetikernFocus]);
   useEffect(() => {
     if (entry) setLooseness(entry.looseness);
-  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+    // K3: `entry` comes from `stored`, which arrives async — keying this on the
+    // selection alone left the slider at 0 when the initially selected style
+    // was the spaced one.
+  }, [selected, entry?.looseness]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const atAnchor = (nextCoords, nextOverrides) => {
     if (!anchorInstance || nextOverrides.size) return false;
@@ -213,7 +238,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
   );
   const revert = () => run(() => api.revertKinetikern(applyName), `Reverted ${applyName} — rebuilding`);
   const applyAll = () => {
-    if (!window.confirm(`Space all ${instances.length} instances at this looseness? Each gets its own correction; the font rebuilds once.`)) return;
+    if (!window.confirm(applyAllConfirm({ instances, stored, looseness }))) return;
     run(() => api.applyKinetikernAll(looseness), 'Applied to all instances — rebuilding');
   };
 
@@ -309,7 +334,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
   return (
     <div className="kinetikern-tab">
       <div className="preview-tab-panel">
-        <div className="preview-tab-panel-head">
+        <div className="footer-controls">
           <button
             type="button"
             className="preview-reset"
@@ -319,18 +344,6 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
           >
             Reset
           </button>
-        </div>
-        <div className="font-size-control">
-          <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
-          <input
-            type="range"
-            min="9"
-            max="144"
-            step="0.5"
-            value={roundHalf(remToPt(fontSize))}
-            onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
-            className="axis-slider"
-          />
         </div>
         {!parametricPromoted && (
           <section className="preview-axis-group">
@@ -393,9 +406,9 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
             aria-label="Instance"
           >
             {instances.map(i => (
-              <option key={i.name} value={i.name}>{corrected.has(i.name) ? '● ' : ''}{i.name}</option>
+              <option key={i.name} value={i.name}>{instanceOptionLabel(i.name, corrected.get(i.name))}</option>
             ))}
-            <option value={CUSTOM}>{corrected.has(customName.trim()) ? '● ' : ''}Custom location</option>
+            <option value={CUSTOM}>{corrected.has(customName.trim()) ? instanceOptionLabel('Custom location', corrected.get(customName.trim())) : 'Custom location'}</option>
           </select>
           {selected === CUSTOM && (
             <input
@@ -419,6 +432,7 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
             <span className="kk-looseness-end">tight</span>
             <input
               type="range"
+              aria-label="Looseness"
               min="-1"
               max="1"
               step="0.05"
@@ -429,8 +443,8 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
             <span className="kk-looseness-value">{looseness > 0 ? '+' : ''}{looseness.toFixed(2)}</span>
           </label>
           <button type="button" className="kk-btn primary" disabled={!canApply} onClick={apply}>Apply</button>
-          <button type="button" className="kk-btn" disabled={!entry || busy || building} onClick={revert}>Revert</button>
-          <button type="button" className="kk-btn" disabled={busy || building || !instances.length} onClick={applyAll}>Apply to all…</button>
+          <button type="button" className="kk-btn" disabled={!entry || busy || building} onClick={revert}>{revertLabel(applyName)}</button>
+          <button type="button" className="kk-btn" disabled={busy || building || !instances.length} onClick={applyAll}>{applyAllLabel(looseness)}</button>
           <textarea
             className="kk-sample"
             value={sampleText}
@@ -456,6 +470,22 @@ function KinetikernTab({ instances, axes, vfFamilyId, fontLoaded, building, samp
               {status && <span> · {status}</span>}
             </>
           )}
+        </div>
+
+        {/* K4: the size control belongs with the sample text it sizes, not in
+            the left column where the designer never found it. */}
+        <div className="font-size-control">
+          <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
+          <input
+            type="range"
+            aria-label="Font size"
+            min="9"
+            max="144"
+            step="0.5"
+            value={roundHalf(remToPt(fontSize))}
+            onChange={(e) => onFontSizeChange(ptToRem(parseFloat(e.target.value)))}
+            className="axis-slider"
+          />
         </div>
 
         <div className="kk-panes">

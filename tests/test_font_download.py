@@ -12,10 +12,11 @@ sys.path.insert(0, str(SRC))
 
 def test_download_flag_sets_attachment(tmp_path, monkeypatch):
     import avar2_studio.server as server
+    from avar2_studio import state
     importlib.reload(server)
     font = tmp_path / "T-VF.ttf"
     font.write_bytes(b"\x00\x01\x00\x00fake")
-    monkeypatch.setattr(server, "VARIABLE_FONT_PATH", font)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", font)
     server.app.config["TESTING"] = True
     c = server.app.test_client()
 

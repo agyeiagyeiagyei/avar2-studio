@@ -31,11 +31,13 @@ const CASES = [
   ['crispy-demo Control Test (near the box ceiling)',
     { XTRA: 1665.0, XOPQ: 700.0, YOPQ: 275.0 },
     { XTRA: [47.0, 1665.0], XOPQ: [1.0, 700.0], YOPQ: [1.0, 275.0] },
-    1.9927272727272727],
+    // Regenerated 2026-10 (was 1.99…): the headroom clamp leaves no room
+    // to grade at the box ceiling.
+    0.0],
   ['crispy-demo BC (XTRA at the floor binds)',
     { XTRA: 47.0, XOPQ: 143.5, YOPQ: 193.6 },
     { XTRA: [47.0, 1665.0], XOPQ: [1.0, 700.0], YOPQ: [1.0, 275.0] },
-    0.8409090909090909],
+    0.0],   // regenerated 2026-10 (was 0.84…) — same clamp
 ];
 for (const [name, base, ranges, expected] of CASES) {
   const got = maxPctFor(base, ranges);

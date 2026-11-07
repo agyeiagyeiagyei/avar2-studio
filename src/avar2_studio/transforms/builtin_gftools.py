@@ -62,7 +62,7 @@ class GenStatTransform(Transform):
         font = TTFont(str(vf_path))
         try:
             gen_stat_tables([font])
-        except Exception as e:  # noqa: BLE001 — custom axes aren't in the GF registry
+        except Exception as e:
             font.close()
             raise RuntimeError(
                 f"gen-stat failed (likely an axis not in the GF registry): {e}"

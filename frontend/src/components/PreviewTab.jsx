@@ -2,8 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PreviewTab.css';
 import AxisControl from './AxisControl';
 import { api } from '../api';
-import { isStaticMode } from '../static-api';
 import { registerPreviewFont } from '../fontLoad';
+import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
+import { previewRenderCoords, variationSettings } from '../preview-coords';
+import {
+  SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, sizeWarningCopy,
+  restingQuery, buttonLabel, exportFormats,
+} from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
 // (12pt = 1rem at the default 16px root — same convention as Sidebar).
@@ -84,6 +90,8 @@ function PreviewTab({
   // under a misleading "no avar2-mapped axes" empty state.
   const parametricPromoted = userAxes.length === 0 && parametricAxes.length > 0;
 
+  const { buildJob } = useBuildStatus();
+  const { originRelocationError } = useStudioData();
   const [coords, setCoords] = useState({});
   const [showParametric, setShowParametric] = useState(true);
 
@@ -127,14 +135,17 @@ function PreviewTab({
   // textarea is gone on this tab). Uncontrolled contentEditable —
   // React must never render its children or the caret resets on
   // every keystroke; this effect pushes only EXTERNAL changes (edits
-  // made on the Instances tab, initial load) into the DOM.
+  // made on the Instances tab, initial load) into the DOM. It also runs
+  // when fontLoaded flips: the "Nothing to preview yet" return below
+  // unmounts the canvas, so every rebuild the health poll picks up
+  // re-creates the specimen element, empty until it is filled here.
   const specimenRef = useRef(null);
   useEffect(() => {
     const el = specimenRef.current;
     if (el && el.textContent !== (sampleText || '')) {
       el.textContent = sampleText || DEFAULT_SAMPLE;
     }
-  }, [sampleText]);
+  }, [sampleText, fontLoaded]);
   // Post-mapping axis values from /api/mapped-location: the effective
   // location after the built font's avar table is applied to the
   // current inputs. Non-overridden parametric sliders DISPLAY these,
@@ -191,10 +202,13 @@ function PreviewTab({
   // same global document.fonts as InstanceRows.
   useEffect(() => {
     if (!(fontUrl && fontLoaded && typeof fontUrl === 'string' && vfFamilyId)) return;
+    // The WOFF2 compress job runs after the build: fetching the cached WOFF2
+    // while it is queued is a guaranteed 409 (S5).
+    if (buildJob) return;
     registerPreviewFont(vfFamilyId, fontUrl,
-                        isStaticMode() ? null : api.getWoff2PreviewUrl())
+                        api.capabilities.woff2 ? api.getWoff2PreviewUrl() : null)
       .catch(err => console.error('Preview: failed to load font:', err));
-  }, [fontUrl, fontLoaded, vfFamilyId]);
+  }, [fontUrl, fontLoaded, vfFamilyId, buildJob]);
 
   const setAxis = (tag, value) => {
     // Dragging a parametric slider is an explicit override: it stops
@@ -217,12 +231,26 @@ function PreviewTab({
     [axes, coords]
   );
 
+  // Degraded build (health.origin_relocation_error): the font's default could
+  // not be moved onto the ORIGIN row, so its avar2 table no longer anchors the
+  // resting state and driving the user axes renders the compiled origin
+  // instead of the authored style. Pin the parametric axes at the oracle's
+  // post-mapping values — the same technique the instance rows use — and hold
+  // the user axes at their defaults; the oracle is re-fetched from
+  // /api/mapped-location on every input change, so the canvas still follows
+  // the sliders (S1(c)).
+  const renderCoords = useMemo(() => previewRenderCoords({
+    degraded: Boolean(originRelocationError),
+    effectiveCoords, userAxes, parametricAxes, mappedParams, overrides,
+  }), [originRelocationError, effectiveCoords, userAxes, parametricAxes,
+       mappedParams, overrides]);
+
   // font-variation-settings uses the exact fvar tag, case-sensitively —
   // XTRA/XOPQ/YOPQ stay uppercase, crbr/wght stay as declared. (Matches
   // the working layer thumbnails; do NOT lowercase.)
   const fvs = useMemo(
-    () => (axes || []).map(a => `"${a.tag}" ${effectiveCoords[a.tag] ?? a.default}`).join(', '),
-    [axes, effectiveCoords]
+    () => variationSettings(axes || [], renderCoords),
+    [axes, renderCoords]
   );
 
   // Export options: axes to flag HIDDEN in the exported fvar, and an
@@ -236,11 +264,25 @@ function PreviewTab({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  // E2l: which master the font rests on. Two reports: the ORIGIN row (the
+  // resting style when "Set default at" is off) gates the sources note, and
+  // the live resting location (checkbox on ⇒ the preview location) drives the
+  // size warning. Both come from the backend, so the dialog never guesses.
+  const [originReport, setOriginReport] = useState(null);
+  const [restingReport, setRestingReport] = useState(null);
+  // The in-flight export's AbortController: Cancel aborts it (the poll
+  // stops and the queued job is dropped server-side).
+  const exportAbortRef = useRef(null);
+  const cancelExport = () => {
+    if (exportAbortRef.current) exportAbortRef.current.abort();
+    setShowExportModal(false);
+  };
 
   // File sizes come from the build queue's export status (TTF exact; WOFF2
   // exact once the background compression has caught up, else an estimate).
+  // Only where WOFF2 exists (the format row below is gated the same way).
   useEffect(() => {
-    if (!showExportModal || isStaticMode()) return;
+    if (!showExportModal || !api.capabilities.woff2) return;
     let live = true;
     api.getBuildStatus()
       .then((st) => { if (live) setExportSizes(st.sizes || null); })
@@ -259,6 +301,31 @@ function PreviewTab({
     () => Object.fromEntries(userAxes.map(a => [a.tag, coords[a.tag] ?? a.default])),
     [userAxes, coords]
   );
+
+  // E2l: ask the backend which master each resting location is. The ORIGIN row
+  // (no location ⇒ the backend reads the mappings row at the axis defaults)
+  // decides the sources note; the live resting location — the preview's own
+  // when "Set default at" is on — decides the size warning. A failure is
+  // silent: the warning is advisory, never a reason to block an export.
+  useEffect(() => {
+    if (!showExportModal) return undefined;
+    let live = true;
+    api.restingMaster(null)
+      .then(report => { if (live) setOriginReport(report); })
+      .catch(() => { if (live) setOriginReport(null); });
+    return () => { live = false; };
+  }, [showExportModal]);
+
+  useEffect(() => {
+    if (!showExportModal) return undefined;
+    let live = true;
+    api.restingMaster(restingQuery(exportUseDefault, currentUserLocation))
+      .then(report => { if (live) setRestingReport(report); })
+      .catch(() => { if (live) setRestingReport(null); });
+    return () => { live = false; };
+  }, [showExportModal, exportUseDefault, currentUserLocation]);
+
+  const sizeWarning = sizeWarningCopy(restingReport);
 
   const handleDownload = async () => {
     if (!fontUrl) {
@@ -282,6 +349,9 @@ function PreviewTab({
       setShowExportModal(false);
     };
     const plainDownload = exportHidden.size === 0 && !exportUseDefault;
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    const { signal } = controller;
     setExporting(true);
     setExportError(null);
     try {
@@ -293,7 +363,7 @@ function PreviewTab({
         // — observed as "nothing happens", then the file popping up
         // during the next hard refresh. The fetch keeps the button in a
         // visible busy state and saves via a blob the moment bytes land.
-        const resp = await fetch(fontUrl);
+        const resp = await fetch(fontUrl, { signal });
         if (!resp.ok) throw new Error(`font fetch failed (${resp.status})`);
         saveBlob(await resp.blob());
         return;
@@ -301,22 +371,26 @@ function PreviewTab({
       if (plainDownload && exportFormat === 'woff2' && exportSizes && exportSizes.woff2_exact) {
         // The background compression cache is current: download it
         // directly, no export job.
-        const resp = await fetch(api.getWoff2DownloadUrl());
+        const resp = await fetch(api.getWoff2DownloadUrl(), { signal });
         if (!resp.ok) throw new Error(`woff2 download failed (${resp.status})`);
         saveBlob(await resp.blob());
         return;
       }
       // Everything else is a queued export job on the build worker —
-      // api.exportFont polls the queue and resolves with the artifact.
+      // api.exportFont polls that job and resolves with the artifact.
       const blob = await api.exportFont({
         hidden_axes: [...exportHidden],
         default_location: exportUseDefault ? currentUserLocation : null,
         format: exportFormat,
-      });
+      }, { signal });
       saveBlob(blob);
     } catch (err) {
-      setExportError(err.message || 'Export failed');
+      // An AbortError is the user's own Cancel — nothing to report.
+      if (!err || err.name !== 'AbortError') {
+        setExportError(err.message || 'Export failed');
+      }
     } finally {
+      if (exportAbortRef.current === controller) exportAbortRef.current = null;
       setExporting(false);
     }
   };
@@ -409,6 +483,7 @@ function PreviewTab({
           <label className="axis-name">Font Size: {formatPt(fontSize)}pt</label>
           <input
             type="range"
+            aria-label="Font size"
             min="9"
             max="144"
             step="0.5"
@@ -445,6 +520,17 @@ function PreviewTab({
           >
             ⚠ The avar2 build is failing, so this preview is the plain
             build — mapped axes are missing. Hover for the error.
+          </div>
+        )}
+
+        {originRelocationError && (
+          <div
+            className="preview-relocation-notice"
+            role="status"
+            title={originRelocationError}
+          >
+            Resting state is approximated by the mapping until the ORIGIN row is
+            back on a master; exports will say the same.
           </div>
         )}
 
@@ -525,41 +611,51 @@ function PreviewTab({
                 {familyName || vfFamilyId || 'Aa'}
               </div>
               <div className="preview-export-options">
-                {!isStaticMode() && (
-                  <div className="preview-export-row">
-                    <span
-                      className="preview-export-label"
-                      title="WOFF2 is the same font, Brotli-compressed for the web — lossless (it decompresses back to identical tables). TTF is what you install locally."
-                    >
-                      Format
-                    </span>
-                    <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
-                      {['ttf', 'woff2'].map((fmt) => {
-                        const size = exportSizes
-                          ? (fmt === 'ttf' ? exportSizes.ttf_bytes : exportSizes.woff2_bytes)
-                          : null;
-                        const exact = fmt === 'ttf' || (exportSizes && exportSizes.woff2_exact);
-                        return (
-                          <button
-                            key={fmt}
-                            type="button"
-                            role="radio"
-                            aria-checked={exportFormat === fmt}
-                            className={`preview-export-chip preview-export-chip--format${exportFormat === fmt ? ' on' : ''}`}
-                            onClick={() => setExportFormat(fmt)}
-                          >
-                            {fmt.toUpperCase()}
-                            {size != null && (
-                              <span className="preview-export-size">
-                                {' '}· {formatBytes(size)}{exact ? '' : ' (est.)'}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div className="preview-export-row">
+                  <span
+                    className="preview-export-label"
+                    title="WOFF2 is the same font, Brotli-compressed for the web — lossless (it decompresses back to identical tables). TTF is what you install locally."
+                  >
+                    Format
+                  </span>
+                  <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
+                    {exportFormats({ woff2: api.capabilities.woff2 }).map(({ id, label }) => {
+                      const size = exportSizes
+                        ? (id === 'ttf' ? exportSizes.ttf_bytes
+                          : id === 'woff2' ? exportSizes.woff2_bytes : null)
+                        : null;
+                      const exact = id === 'ttf' || (exportSizes && exportSizes.woff2_exact);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="radio"
+                          aria-checked={exportFormat === id}
+                          className={`preview-export-chip preview-export-chip--format${exportFormat === id ? ' on' : ''}`}
+                          onClick={() => setExportFormat(id)}
+                          title={id === 'sources' ? SOURCES_COPY : undefined}
+                        >
+                          {label}
+                          {size != null && (
+                            <span className="preview-export-size">
+                              {' '}· {formatBytes(size)}{exact ? '' : ' (est.)'}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {exportFormat === 'sources' && (
+                      <p className="preview-export-note preview-export-note--spacing">
+                        {SOURCES_COPY}{originReport?.status === 'default_master' ? '' : ` ${RESTING_NOTE}`}
+                      </p>
+                    )}
+                    {exportFormat !== 'sources' && sizeWarning && (
+                      <p className="preview-export-note preview-export-note--size">
+                        {sizeWarning}
+                      </p>
+                    )}
                   </div>
-                )}
+                </div>
                 <div className="preview-export-row">
                   <span
                     className="preview-export-label"
@@ -590,7 +686,9 @@ function PreviewTab({
                   >
                     <input
                       type="checkbox"
-                      checked={exportUseDefault}
+                      checked={exportFormat !== 'sources' && exportUseDefault}
+                      disabled={exportFormat === 'sources'}
+                      title={exportFormat === 'sources' ? SOURCES_DEFAULT_REASON : undefined}
                       onChange={(e) => setExportUseDefault(e.target.checked)}
                     />
                     <span>
@@ -607,8 +705,8 @@ function PreviewTab({
                 <button
                   type="button"
                   className="btn btn-cancel"
-                  onClick={() => setShowExportModal(false)}
-                  disabled={exporting}
+                  onClick={cancelExport}
+                  title={exporting ? 'Stop this export and close' : undefined}
                 >
                   Cancel
                 </button>
@@ -617,11 +715,13 @@ function PreviewTab({
                   className="btn btn-secondary"
                   onClick={handleDownload}
                   disabled={exporting}
-                  title={exportUseDefault
-                    ? "Rebuilds the font at the chosen location — takes a few seconds"
-                    : "Download the built variable font"}
+                  title={exportFormat === 'sources'
+                    ? SOURCES_COPY
+                    : exportUseDefault
+                      ? "Rebuilds the font at the chosen location — takes a few seconds"
+                      : "Download the built variable font"}
                 >
-                  {exporting ? 'Preparing…' : 'Download'}
+                  {exporting ? 'Preparing…' : buttonLabel(exportFormat)}
                 </button>
               </div>
             </div>

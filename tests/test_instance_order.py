@@ -10,7 +10,7 @@ import csv as csv_mod
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -30,8 +30,8 @@ def harness(monkeypatch, tmp_path):
         "Gamma,900.0,10.0\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     # Alpha is source-defined; Beta/Gamma are studio-only CSV rows.
     monkeypatch.setattr(server, "get_instances_from_glyphs", lambda _p: [
         {"name": "Alpha", "coordinates": {"XTRA": 663.1, "XOPQ": 202.5},

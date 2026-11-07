@@ -22,6 +22,18 @@ Turning a declaration into brace layers is ``bake.py``.
 
 from __future__ import annotations
 
+from .. import sidecar_io
+
+
+def _locked(fn):
+    """Load → mutate → save under the shared sidecar lock (see sidecar_io)."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with sidecar_io.LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+import functools
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -73,9 +85,7 @@ def load(source_path: Path) -> Dict:
 
 def _save(source_path: Path, data: Dict) -> None:
     sidecar = sidecar_path_for(source_path)
-    tmp = sidecar.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(_normalise(data), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(sidecar)
+    sidecar_io.write_json(sidecar, _normalise(data))
 
 
 def entries(source_path: Path) -> List[Dict]:
@@ -94,6 +104,7 @@ def find(source_path: Path, name: str) -> Optional[Dict]:
     return None
 
 
+@_locked
 def set_enabled(source_path: Path, enabled: bool) -> Dict:
     data = load(source_path)
     data["enabled"] = bool(enabled)
@@ -101,6 +112,7 @@ def set_enabled(source_path: Path, enabled: bool) -> Dict:
     return data
 
 
+@_locked
 def set_entry(source_path: Path, name: str, looseness: float, deltas: Dict[str, List[int]],
               location: Optional[Dict[str, float]] = None) -> Dict:
     """Store (or replace) one instance's correction. Returns the stored entry."""
@@ -116,6 +128,7 @@ def set_entry(source_path: Path, name: str, looseness: float, deltas: Dict[str, 
     return find(source_path, name)
 
 
+@_locked
 def remove_entry(source_path: Path, name: str) -> bool:
     data = load(source_path)
     kept = [e for e in data["instances"] if e["name"] != name]
@@ -126,6 +139,7 @@ def remove_entry(source_path: Path, name: str) -> bool:
     return True
 
 
+@_locked
 def rename_instance(source_path: Path, old_name: str, new_name: str) -> bool:
     data = load(source_path)
     changed = False

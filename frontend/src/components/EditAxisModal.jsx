@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './EditAxisModal.css';
 
 function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, existingAxes = [], isParametricAxis = false, onDelete = null }) {
@@ -91,12 +92,12 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
     onClose();
   };
 
-  if (!isOpen || !axisMetadata) return null;
+  if (!axisMetadata) return null;
 
   if (isParametricAxis) {
     return (
-      <div className="modal-overlay">
-        <div className="modal-content edit-axis-modal" onClick={(e) => e.stopPropagation()}>
+      <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+        <DialogContent className="modal-content edit-axis-modal block border-0" onClick={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.preventDefault()}>
           <h3>Cannot Edit Parametric Axis</h3>
           <p>Axis "{axisName}" exists in the Glyphs file as a parametric axis. Parametric axes are managed in the Glyphs file and cannot be edited through avar2 mappings.</p>
           <div className="modal-buttons">
@@ -104,14 +105,14 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
               OK
             </button>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     );
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content edit-axis-modal" onClick={(e) => e.stopPropagation()}>
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="modal-content edit-axis-modal block border-0" onClick={(e) => e.stopPropagation()} onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>Edit Axis: {axisName}</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -218,8 +219,8 @@ function EditAxisModal({ isOpen, onClose, onConfirm, axisName, axisMetadata, exi
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

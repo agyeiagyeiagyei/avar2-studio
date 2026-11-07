@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from avar2_studio import kinetikern, server
+from avar2_studio import kinetikern, server, state
 
 REPO = Path(__file__).resolve().parents[1]
 FONTC = REPO / ".venv/bin/fontc"
@@ -53,7 +53,7 @@ def test_looser_slider_opens_the_sides(mini_vf):
 
 @needs_engine
 def test_route_by_coordinates_and_unknown_instance(mini_vf, monkeypatch):
-    monkeypatch.setattr(server, "VARIABLE_FONT_PATH", mini_vf)
+    monkeypatch.setattr(state, "VARIABLE_FONT_PATH", mini_vf)
     client = server.app.test_client()
     axes = kinetikern.propose(mini_vf, {}, 0.0)["location"]
     tag = next(iter(axes))

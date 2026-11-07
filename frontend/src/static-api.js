@@ -1,6 +1,6 @@
 /**
  * Static-demo data provider — lets the built bundle run with NO backend
- * (GitHub Pages). docs/migration-github-pages.md has the history.
+ * (GitHub Pages). docs/archive/migration-github-pages.md has the history.
  *
  * How it works: before the app renders, selectApiMode() probes
  * /api/health. A real server answers 200 → nothing changes. On a static
@@ -22,7 +22,7 @@
  */
 
 import { api } from './api';
-import { compileFont, compileWithOverlays, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade } from './fontc-compile';
+import { compileFont, compileWithOverlays, addAvar2, measureAt, pinCorner as pinCornerWasm, regenStat, clampOutOfRange as clampOutOfRangeWasm, applyTransforms, applyControlAxes, applyGrade, masterLocations } from './fontc-compile';
 import { parseFont } from './fvar';
 import { mappedLocation } from './avar2-eval';
 import * as mappingsCsv from './mappings-csv';
@@ -137,7 +137,7 @@ const buildUploadDataset = async ({
       ? JSON.stringify(axisMetadata)
       : null;
     bytes = await addAvar2(bytes, mappingsText, ranges, [...compiledTags]);
-    const header = mappingsText.split('\n', 1)[0].replace(/^﻿/, '');
+    const header = mappingsText.split('\n', 1)[0].replace(/^\uFEFF/, '');
     // Registered columns normalize to lowercase fvar tags (wght etc.);
     // user-tag matching must use the normalized form.
     userAxisTags = new Set(
@@ -579,7 +579,7 @@ const KNOWN_TRANSFORMS = {
   spac: {
     id: 'spac',
     name: 'Spacing — uniform (gftools)',
-    description: 'Inject a SPAC axis via gftools-gen-spac; every glyph tracks by the same amount, outlines unchanged.',
+    description: 'Inject a SPAC axis via gftools-gen-spac. Best with decomposed composites: like gftools, it tracks every outline glyph by the same amount and leaves composite glyphs at their own width.',
     injected_axis_tag: 'SPAC',
     params_schema: [
       { key: 'min', label: 'Min', type: 'int', default: -20 },
@@ -616,10 +616,10 @@ const KNOWN_TRANSFORMS = {
 };
 
 const csvRowCount = (text) =>
-  text.split('\n').filter(l => l.trim() && !l.startsWith('﻿')).length - 1;
+  text.split('\n').filter(l => l.trim() && !l.startsWith('\uFEFF')).length - 1;
 
 const csvHeaderTags = (csv) =>
-  csv.split('\n', 1)[0].replace(/^﻿/, '').split(',').slice(1).map(s => s.trim()).filter(Boolean);
+  csv.split('\n', 1)[0].replace(/^\uFEFF/, '').split(',').slice(1).map(s => s.trim()).filter(Boolean);
 
 const PARAM_TAGS = ['XTRA', 'XOPQ', 'YOPQ'];
 
@@ -631,7 +631,7 @@ const resolveGradeCoords = (dataset, avar2Csv) => {
   const coords = {};
   if (avar2Csv && avar2Csv.trim()) {
     const lines = avar2Csv.trim().split('\n').filter(l => l.trim());
-    const header = lines[0].replace(/^﻿/, '').split(',').map(s => s.trim());
+    const header = lines[0].replace(/^\uFEFF/, '').split(',').map(s => s.trim());
     for (const line of lines.slice(1)) {
       const cells = line.split(',');
       const row = {};
@@ -650,6 +650,53 @@ const resolveGradeCoords = (dataset, avar2Csv) => {
     if (Object.keys(row).length) coords[inst.name] = row;
   }
   return coords;
+};
+
+// Per-instance SPAC coordinates ride the transforms JSON
+// (params.instance_spac) — the injector never parses the CSV itself
+// (one parse rule; the desktop parses Python-side via csv_io). The CSV
+// argument still goes over the wire for the pre-JSON wasm builds.
+const withSpacOverrides = (transforms, avar2Csv) => {
+  const overrides = {};
+  if (avar2Csv && avar2Csv.trim()) {
+    for (const row of mappingsCsv.parseMappingsCsv(avar2Csv).rows) {
+      const cell = (row.values.SPAC || '').trim();
+      if (!row.name || !cell) continue;
+      const v = parseFloat(cell);
+      if (Number.isNaN(v)) break;  // csv_io's bad-cell rule: prefix kept
+      overrides[row.name] = v;
+    }
+  }
+  if (!Object.keys(overrides).length) return transforms;
+  return transforms.map(t => (
+    t.enabled && (t.type === 'spac' || t.type === 'spac_widthaware')
+      ? { ...t, params: { ...(t.params || {}), instance_spac: overrides } }
+      : t
+  ));
+};
+
+// The width-aware spacing amount follows each master's own width, so the
+// injector needs the master grid (params.master_locations) — read from the
+// source, as the desktop pipeline does. When the source cannot give it (no
+// in-browser source, or one the reader does not understand) the injector
+// infers the grid from the built font, which is also the desktop's fallback.
+const withSpacMasters = async (transforms, dataset) => {
+  if (dataset.sourceText == null
+      || !transforms.some(t => t.enabled && t.type === 'spac_widthaware')) {
+    return transforms;
+  }
+  let locations = null;
+  try {
+    locations = await masterLocations(dataset.sourceText);
+  } catch (e) {
+    console.warn(`master locations unavailable (${e.message}); the spacing transform infers them from the built font`);
+  }
+  if (!locations) return transforms;
+  return transforms.map(t => (
+    t.enabled && t.type === 'spac_widthaware'
+      ? { ...t, params: { ...(t.params || {}), master_locations: locations } }
+      : t
+  ));
 };
 
 const validateBundle = (bundle, dataset) => {
@@ -865,7 +912,10 @@ const applyBundle = async (bundle, dataset) => {
   // reach the font — the wasm side applies only enabled known ones.
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     if (!rebuildFromSource) {
-      dataset.fontBytes = await applyTransforms(dataset.fontBytes, JSON.stringify(transforms), avar2Csv);
+      dataset.fontBytes = await applyTransforms(
+        dataset.fontBytes,
+        JSON.stringify(await withSpacMasters(withSpacOverrides(transforms, avar2Csv), dataset)),
+        avar2Csv);
     }
     report.applied.push('transforms (SPAC)');
   }
@@ -1093,7 +1143,10 @@ const rebuildUploadFont = async (dataset) => {
     .map(t => ({ type: t.type || t.id, enabled: !!t.enabled, params: t.params || {} }));
   if (transforms.some(t => t.enabled && KNOWN_TRANSFORMS[t.type])) {
     dataset.fontBytes = await applyTransforms(
-      dataset.fontBytes, JSON.stringify(transforms), dataset.mappingsCsv || ''
+      dataset.fontBytes,
+      JSON.stringify(await withSpacMasters(
+        withSpacOverrides(transforms, dataset.mappingsCsv || ''), dataset)),
+      dataset.mappingsCsv || ''
     );
   }
   await applyPins(dataset);
@@ -1282,6 +1335,18 @@ const loadExampleProject = async (id) => {
 };
 
 const staticOverrides = {
+  // See api.js — the browser provider's answers. A live-only method that is
+  // NOT overridden here would still hit /api/… in the browser, so the UI
+  // gates those calls on these flags (e2e/api-parity.spec.mjs checks that
+  // every live-only method maps to a flag that is false here).
+  capabilities: {
+    kinetikern: false,      // needs the live engine routes
+    woff2: false,           // no background compression in the browser
+    cancel: false,          // builds run to completion in the worker
+    masters: false,         // no /api/masters: the pins list stays instance-only
+    sourceWriteback: false, // the source file never changes in the browser
+    fontraEditor: true,     // fontra-embed session (editor-bridge) for .glyphs projects
+  },
   health: async () => (uploadDataset
     ? { ...uploadDataset.health, session_lock_lost: sessionLockLost }
     : { ...noProjectHealth(), session_lock_lost: sessionLockLost }),
@@ -1296,11 +1361,10 @@ const staticOverrides = {
     await persistSession();
     return {};
   },
-  // STUB on purpose: the one consumer (the removed Rounding tab) is
-  // gone, and implementing this via glyph_model turned out to PERTURB
-  // later measure_at results in the shared wasm instance (pin synthesis
-  // stopped triggering) — see HANDOVER §4 before resurrecting it.
-  getMasters: async () => ({ masters: [] }),
+  // No getMasters here (capabilities.masters is false and App skips the
+  // call): implementing it via glyph_model turned out to PERTURB later
+  // measure_at results in the shared wasm instance (pin synthesis stopped
+  // triggering) — see HANDOVER §4 before resurrecting it.
   getAxes: async () => (uploadDataset ? uploadDataset.axes : { axes: [] }),
   getAvar2Instances: async () => {
     if (!uploadDataset) return { instances: [] };
@@ -1973,6 +2037,10 @@ const staticOverrides = {
     bytes = await regenStat(bytes);
     return new Blob([bytes], { type: 'font/ttf' });
   },
+  // E2l's warning is a live-studio note: the browser has no source file to
+  // classify the resting location against, so the dialog stays silent there
+  // instead of asking a server that does not exist.
+  restingMaster: async () => ({ status: 'unknown', name: null, default_master: null }),
   importConfig: async (bundle, dryRun) => {
     requireProject();
     const report = validateBundle(bundle, uploadDataset);
@@ -2027,21 +2095,35 @@ const staticOverrides = {
  * Returns true when static mode was selected.
  */
 export async function selectApiMode() {
-  // A timeout is NOT "no backend": the desktop server goes silent for
-  // minutes while the source-transform chain grinds (GIL-bound), and a
-  // tab probed in that window used to latch static mode for its whole
-  // life — "No font loaded" with no way back. Retry timeouts with
-  // growing patience; an actual response (any status) or a fast
-  // connection refusal still decides immediately, so GitHub Pages
-  // (404s fast) and true no-backend hosts are unaffected.
-  for (const ms of [1500, 4000, 8000]) {
-    try {
-      const r = await fetch('/api/health', { signal: AbortSignal.timeout(ms) });
-      if (r.ok) return false;
-      break; // responded with non-ok — a static host, not a busy server
-    } catch (err) {
-      if (err && err.name === 'TimeoutError') continue; // busy server? retry
-      break; // refused/network error — no backend here
+  // A backend serves index.html with this marker (routes/ui.py). Checking
+  // it is synchronous and silent, so a static host never sees the
+  // /api/health 404 that Chrome logged as a console error on every visit.
+  if (typeof document !== 'undefined'
+      && document.querySelector('meta[name="avar2-backend"]')) {
+    return false;
+  }
+  // Vite dev serves its own index.html (no marker) and proxies /api to the
+  // backend, so it keeps the probe. A production build without the marker
+  // is a static host (GitHub Pages, `python -m http.server`) — there is no
+  // backend to look for, and probing only produces a 404.
+  const production = typeof import.meta !== 'undefined' && !import.meta.env.DEV;
+  if (!production) {
+    // A timeout is NOT "no backend": the desktop server goes silent for
+    // minutes while the source-transform chain grinds (GIL-bound), and a
+    // tab probed in that window used to latch static mode for its whole
+    // life — "No font loaded" with no way back. Retry timeouts with
+    // growing patience; an actual response (any status) or a fast
+    // connection refusal still decides immediately, so GitHub Pages
+    // (404s fast) and true no-backend hosts are unaffected.
+    for (const ms of [1500, 4000, 8000]) {
+      try {
+        const r = await fetch('/api/health', { signal: AbortSignal.timeout(ms) });
+        if (r.ok) return false;
+        break; // responded with non-ok — a static host, not a busy server
+      } catch (err) {
+        if (err && err.name === 'TimeoutError') continue; // busy server? retry
+        break; // refused/network error — no backend here
+      }
     }
   }
   staticMode = true;
@@ -2061,11 +2143,11 @@ export async function selectApiMode() {
       console.warn('The bundled example could not be loaded:', err);
     }
   }
-  // BLIND static mode (no session, no example — a desktop tab that lost
-  // the probe race): keep listening for the backend and reboot into it.
-  // On a true static host the probe returns non-ok fast and never
-  // triggers; where there is no backend at all it stays refused.
-  if (!uploadDataset && typeof window !== 'undefined') {
+  // BLIND static mode (no session, no example — a dev tab that lost the
+  // probe race): keep listening for the backend and reboot into it. A
+  // production build without the backend marker is a static host, where
+  // no backend can appear; probing there only logs 404s.
+  if (!production && !uploadDataset && typeof window !== 'undefined') {
     const retry = setInterval(async () => {
       try {
         const r = await fetch('/api/health', { signal: AbortSignal.timeout(10000) });

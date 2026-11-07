@@ -10,7 +10,7 @@ server restart."""
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -28,8 +28,8 @@ def _ui_entry(tid, enabled, params=None):
 @pytest.fixture
 def harness(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(server, "ORIGINAL_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "ORIGINAL_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server, "_resolve_active_source",
                         lambda: calls.append("resolve"))
     monkeypatch.setattr(server, "trigger_build",

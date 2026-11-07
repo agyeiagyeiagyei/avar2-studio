@@ -365,7 +365,8 @@ def test_a_difference_of_a_unit_is_within_tolerance(parity):
 
 
 def test_a_composite_is_measured_through_what_it_is_built_from(parity):
-    colon = lambda: Layer(160, 0, 0, components=[Component("period"), Component("period", (1, 0, 0, 1, 0, 400))])
+    def colon():
+        return Layer(160, 0, 0, components=[Component("period"), Component("period", (1, 0, 0, 1, 0, 400))])
     p = parity(two_masters({"colon": (colon(), colon()),
                             "period": (Layer(160, 30, 30), Layer(160, 42, 30))}))
     rows = dict((r["glyph"], (r["dadv"], r["dlsb"], r["drsb"])) for r in p._panel.list.get())
@@ -400,7 +401,8 @@ def test_sidebearings_are_taken_along_the_slant(parity):
 
 
 def test_an_empty_glyph_is_compared_by_its_advance(parity):
-    empty = lambda w: Layer(w, 0, 0, components=[Component("nothing")])
+    def empty(w):
+        return Layer(w, 0, 0, components=[Component("nothing")])
     p = parity(two_masters({"space": (empty(200), empty(240))}))
     row = p._panel.list.get()[0]
     assert (row["glyph"], row["dadv"], row["dlsb"], row["drsb"]) == ("space", "40", "0", "0")

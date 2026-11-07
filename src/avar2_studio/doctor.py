@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
+from . import state
+
 
 # ANSI colour helpers — only emit colour if stdout is a TTY so logs and
 # captured output stay clean.
@@ -42,6 +44,14 @@ class CheckResult:
     ok: bool
     detail: str
     fix: Optional[str] = None
+    # A headless-build prerequisite (fontc, gftools-builder, glyphsLib, or a
+    # native engine the environment points at). ``--strict`` fails on these
+    # and ignores UI-only checks — a CI box needs the build, not the bundle.
+    build_prereq: bool = False
+    # Set when the environment CONFIGURED a prerequisite that is missing
+    # (e.g. $AVAR2_SPAC_INJECT names a binary that is not there): that is a
+    # hard failure in strict mode even though the fallback still builds.
+    configured_missing: bool = False
 
 
 def _run_version(binary: str, *args: str) -> Optional[str]:
@@ -88,9 +98,11 @@ def check_fontc() -> CheckResult:
             ok=False,
             detail="not on PATH",
             fix="brew install fontc    # or: cargo install fontc",
+            build_prereq=True,
         )
     version = _run_version("fontc", "--version") or "version unknown"
-    return CheckResult(name="fontc", ok=True, detail=f"{version} at {path}")
+    return CheckResult(name="fontc", ok=True, detail=f"{version} at {path}",
+                       build_prereq=True)
 
 
 def check_gftools() -> CheckResult:
@@ -102,9 +114,11 @@ def check_gftools() -> CheckResult:
             ok=False,
             detail="not on PATH",
             fix="pipx install gftools    # or: pip install gftools",
+            build_prereq=True,
         )
     version = _run_version("gftools-builder", "--version") or "version unknown"
-    return CheckResult(name="gftools-builder", ok=True, detail=f"{version} at {path}")
+    return CheckResult(name="gftools-builder", ok=True, detail=f"{version} at {path}",
+                       build_prereq=True)
 
 
 def check_glyphslib() -> CheckResult:
@@ -116,9 +130,10 @@ def check_glyphslib() -> CheckResult:
             ok=False,
             detail="not importable",
             fix="pip install glyphsLib    # (should have come with avar2-studio's deps)",
+            build_prereq=True,
         )
     try:
-        import glyphsLib  # noqa: F401
+        import glyphsLib
         version = getattr(glyphsLib, "__version__", "version unknown")
     except Exception as e:
         return CheckResult(
@@ -205,7 +220,7 @@ def check_stale_processes() -> CheckResult:
         age = info.split(None, 1)[0] if info else "?"
         plist = ",".join(str(p) for p in sorted(ports))
         suspects.append(f"pid {lpid} (up {age}) on :{plist}")
-        if 8001 in ports:
+        if state.FONTRA_PORT in ports:
             fontra_squatter = True
 
     if not suspects:
@@ -216,8 +231,8 @@ def check_stale_processes() -> CheckResult:
     if fontra_squatter:
         return CheckResult(
             name="stale processes", ok=False,
-            detail=f"a process holds Fontra's port 8001 — {listing}",
-            fix="kill <pid>  # the embedded editor cannot launch while :8001 is taken",
+            detail=f"a process holds Fontra's port {state.FONTRA_PORT} — {listing}",
+            fix=f"kill <pid>  # the embedded editor cannot launch while :{state.FONTRA_PORT} is taken",
         )
     return CheckResult(
         name="stale processes", ok=True,
@@ -279,6 +294,56 @@ def check_fontra() -> CheckResult:
     )
 
 
+def check_spac_injector() -> CheckResult:
+    """The native SPAC injector (Rust `spac-inject` binary). Optional:
+    without it the fontTools path runs, whose gvar re-encode can overflow
+    the 64 KB per-glyph tuple-header ceiling on twin-heavy fonts."""
+    import os
+
+    from .transforms import builtin_spac_widthaware
+    env = os.environ.get("AVAR2_SPAC_INJECT")
+    found = builtin_spac_widthaware._native_injector()
+    if found:
+        via = f" via $AVAR2_SPAC_INJECT ({env})" if env else ""
+        return CheckResult(name="spac-inject (optional)", ok=True,
+                           detail=f"{found}{via}")
+    detail = "not found — builds fall back to the fontTools SPAC path"
+    if env:
+        detail += f" ($AVAR2_SPAC_INJECT={env} does not exist)"
+    return CheckResult(
+        name="spac-inject (optional)", ok=True,
+        detail=detail,
+        fix="cargo build --release --manifest-path wasm/fontc-web/Cargo.toml --bin spac-inject",
+        # Strict mode fails when the environment NAMED an injector and it is
+        # not there: the build would silently take the slow, overflow-prone
+        # fontTools path.
+        configured_missing=bool(env) and not found,
+    )
+
+
+def check_kinetikern_engine() -> CheckResult:
+    """The Kinetikern2 engine library (ctypes). Optional: the Kinetikern
+    tab reports it missing; everything else works."""
+    import os
+
+    from . import kinetikern
+    env = os.environ.get("AVAR2_KK2_DYLIB")
+    found = kinetikern.engine_path()
+    if found:
+        via = f" via $AVAR2_KK2_DYLIB ({env})" if env else ""
+        return CheckResult(name="kinetikern2 (optional)", ok=True,
+                           detail=f"{found}{via}")
+    detail = "not built — the Kinetikern tab is disabled"
+    if env:
+        detail += f" ($AVAR2_KK2_DYLIB={env} does not exist)"
+    return CheckResult(
+        name="kinetikern2 (optional)", ok=True,
+        detail=detail,
+        fix="cargo build --release --manifest-path native/kinetikern2/Cargo.toml",
+        configured_missing=bool(env) and not found,
+    )
+
+
 CHECKS: List[Callable[[], CheckResult]] = [
     check_python,
     check_fontc,
@@ -286,13 +351,23 @@ CHECKS: List[Callable[[], CheckResult]] = [
     check_glyphslib,
     check_static_bundle,
     check_fontra,
+    check_spac_injector,
+    check_kinetikern_engine,
     check_install_shadowing,
     check_stale_processes,
 ]
 
 
-def run() -> int:
-    """Run every check, print results, and return an exit code."""
+def run(strict: bool = False) -> int:
+    """Run every check, print results, and return an exit code.
+
+    Default: 1 when any check fails (the report everything is meant to read).
+    ``strict`` (``doctor --strict``): 1 only when a HEADLESS-BUILD
+    prerequisite is missing — fontc, gftools-builder, glyphsLib, or a native
+    engine the environment points at. The frontend bundle and Fontra are UI
+    concerns; a CI box that only runs ``avar2-studio build`` must not fail on
+    them (findings.md, phase C item C6).
+    """
     print("avar2-studio doctor — checking environment\n")
 
     name_w = max(len(c().name) for c in CHECKS) + 1
@@ -303,6 +378,20 @@ def run() -> int:
         results.append(result)
         mark = _green("✓") if result.ok else _red("✗")
         print(f"  {mark} {result.name:<{name_w}} {_dim(result.detail)}")
+
+    if strict:
+        failures = [r for r in results
+                    if r.configured_missing or (r.build_prereq and not r.ok)]
+        if failures:
+            print(f"\n{_red(f'{len(failures)} build prerequisite(s) missing.')} Fix-it commands:\n")
+            for r in failures:
+                print(f"  # {r.name}: {r.detail}")
+                if r.fix:
+                    print(f"  {r.fix}\n")
+            return 1
+        print(f"\n{_green('All build prerequisites present.')} "
+              "`avar2-studio build` can run on this machine.\n")
+        return 0
 
     failures = [r for r in results if not r.ok]
 
@@ -319,8 +408,17 @@ def run() -> int:
     return 1
 
 
-def main() -> None:
-    sys.exit(run())
+def main(argv=None) -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="avar2-studio doctor",
+                                 description="Check the environment avar2-studio needs.")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 1 when a headless-build prerequisite is missing "
+                         "(fontc, gftools-builder, glyphsLib, a configured engine); "
+                         "ignore UI-only checks")
+    args = ap.parse_args(argv)
+    sys.exit(run(strict=args.strict))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './DeleteInstanceModal.css';
 
 function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsFileHasUnsavedChanges }) {
@@ -7,8 +8,6 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
   // path keeps the source instance but removes its avar2 mapping row
   // (useful when "unmapping" without losing the source-side instance).
   const [deleteFromGlyphs, setDeleteFromGlyphs] = useState(true);
-
-  if (!isOpen) return null;
 
   const handleConfirm = () => {
     onConfirm(deleteFromGlyphs);
@@ -23,8 +22,8 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
   const isDisabled = deleteFromGlyphs && glyphsFileHasUnsavedChanges;
 
   return (
-    <div className="modal-overlay">
-      <div className="delete-instance-modal">
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) handleCancel(); }}>
+      <DialogContent className="delete-instance-modal block border-0" onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>Delete instance</h3>
         <p className="delete-instance-message">
           {deleteFromGlyphs
@@ -67,8 +66,8 @@ function DeleteInstanceModal({ isOpen, onClose, instanceName, onConfirm, glyphsF
             {deleteFromGlyphs ? 'Delete from source + studio' : 'Remove from studio only'}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

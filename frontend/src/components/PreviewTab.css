@@ -364,3 +364,17 @@
   color: inherit;
   opacity: 0.65;
 }
+
+/* S1(c): the build could not relocate its default onto the ORIGIN row, so the
+   parametric axes are pinned at the mapping's oracle values. Amber, like the
+   other "the font is intact but not exactly what you authored" notices. */
+.preview-relocation-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #f1c277;
+  border-radius: 6px;
+  background: #fff4e0;
+  color: #8a4b00;
+  font-size: 12px;
+  line-height: 1.4;
+}

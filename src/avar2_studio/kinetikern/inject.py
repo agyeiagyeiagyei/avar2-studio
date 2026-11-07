@@ -7,37 +7,26 @@ so the shift is exactly metrics (sidebearings and advance), composites stay
 rigid (a component ignores its base's phantoms), and nothing else in the
 font is touched. HVAR is rebuilt from the phantoms afterwards.
 
-This runs on the compiled font, after the studio's default relocation. A
-sparse master in the source would be split into dozens of tuples by that
-relocation (measured: 55 to 838 tuples per glyph without any brace), and the
-preview font already sits at gvar's 64 KB per-glyph header ceiling; one
-small tuple per instance per glyph stays well inside it.
-
-The supports and deltas come from fontTools' VariationModel over the
-corrected locations, exactly as a compiler treats sparse masters: every
-corrected instance comes out exact, the field blends in between, and
-beyond the outermost instance on an axis the correction holds (OpenType
-keeps a tuple's full value past its peak when no end coordinate is written).
-Locations are quantized to F2Dot14 first, so the model solves on exactly
-the regions the font stores: a coordinate that rounds to the default must
-be the default (a stored peak of 0 means "axis not involved", and a model
-that still saw a sliver of a region there would put a huge delta on it).
-A correction at the default location itself is the model's base value and
-goes in as a tuple with no axes, which applies everywhere.
+Runs on the compiled font after the default relocation and before SPAC;
+supports come from fontTools' VariationModel over the corrected locations,
+quantised to F2Dot14 first (a coordinate that rounds to the default must be
+the default); a correction at the default location is the base tuple. See
+docs/decisions/0004-kinetikern-font-stage-phantom-tuples.md.
 """
 
 from __future__ import annotations
 
-import csv
+import json
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.tables._g_l_y_f import USE_MY_METRICS
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.hvar import add_HVAR
 from fontTools.varLib.models import VariationModel, normalizeValue, piecewiseLinearMap
 
+from .. import csv_io as _csv_io
 from .. import grade as _grade
 from .. import source_font as _source_font
 from . import sidecar
@@ -69,22 +58,56 @@ def _point_count(glyph, glyf) -> int:
     return len(coords) + 4
 
 
+# Private sfnt table recording which gvar tuples inject() added, as
+# {"v": 1, "tuples": [[glyph, [[tag, [start, peak, end]], ...]], ...]}.
+# strip() removes exactly those — a shape heuristic ("phantom-only on the
+# parametric axes") also matched genuine compile output (22 such tuples in
+# Crispy's `three`) and deleted it. Every later stage repacks the sfnt with
+# its tables intact (fontTools saves, the native SPAC injector's raw
+# FontBuilder copy), so the record survives to the next chain run.
+MARKER_TABLE = "KKRN"
+
+
+def _tuple_key(name: str, axes: Dict[str, Tuple[float, float, float]]) -> Tuple[str, Tuple]:
+    return (name, tuple(sorted((tag, tuple(float(v) for v in span)) for tag, span in axes.items())))
+
+
+def _record_injected(font: TTFont, keys: List[Tuple[str, Tuple]]) -> None:
+    table = newTable(MARKER_TABLE)
+    table.data = json.dumps({"v": 1, "tuples": [[name, [[tag, list(span)] for tag, span in axes]]
+                                               for name, axes in keys]}).encode("utf-8")
+    font[MARKER_TABLE] = table
+
+
+def _recorded(font: TTFont) -> set:
+    if MARKER_TABLE not in font:
+        return set()
+    try:
+        payload = json.loads(font[MARKER_TABLE].data.decode("utf-8"))
+        return {(name, tuple((tag, tuple(float(v) for v in span)) for tag, span in axes))
+                for name, axes in payload.get("tuples", [])}
+    except (ValueError, AttributeError, TypeError):
+        return set()
+
+
 def strip(font: TTFont) -> int:
-    """Remove every tuple this module injected (phantom-only, on the
-    parametric axes), so applying the chain twice lands in the same place
-    as once. Returns the number removed."""
+    """Remove the tuples this module injected on an earlier chain run (as
+    recorded in the marker table), so applying the chain twice lands in
+    the same place as once. A font without the record has nothing of ours
+    to remove. Returns the number removed."""
+    ours = _recorded(font)
+    if not ours:
+        return 0
     removed = 0
     for name, variations in font["gvar"].variations.items():
         keep = []
         for tv in variations:
-            outline = tv.coordinates[:-4]
-            phantom_only = (all(c is None for c in outline) and tv.coordinates[-2] is None
-                            and tv.coordinates[-1] is None and set(tv.axes) <= set(PARAM_TAGS))
-            if phantom_only:
+            if _tuple_key(name, tv.axes) in ours:
                 removed += 1
             else:
                 keep.append(tv)
         variations[:] = keep
+    del font[MARKER_TABLE]
     return removed
 
 
@@ -106,6 +129,7 @@ def inject(font: TTFont, corrections: List[Tuple[Dict[str, float], Dict[str, Tup
     model = VariationModel([loc for loc, _ in merged])
     glyf, gvar = font["glyf"], font["gvar"]
     added = 0
+    injected: List[Tuple[str, Tuple]] = []
     for name in font.getGlyphOrder():
         lefts = [float(d.get(name, (0, 0))[0]) for _, d in merged]
         rights = [float(d.get(name, (0, 0))[1]) for _, d in merged]
@@ -126,8 +150,10 @@ def inject(font: TTFont, corrections: List[Tuple[Dict[str, float], Dict[str, Tup
             coords[-4] = (-dl, 0)
             coords[-3] = (dr, 0)
             variations.append(TupleVariation(dict(support), coords))
+            injected.append(_tuple_key(name, support))
             added += 1
     if added:
+        _record_injected(font, injected)
         add_HVAR(font)
     return added
 
@@ -141,23 +167,26 @@ def instance_locations(source_path: Path) -> Dict[str, Dict[str, float]]:
         font, _fmt = _source_font.load_source_cached(source_path)
         for inst in _source_font.get_source_instances(font):
             coords[inst["name"]] = {str(k).upper(): float(v) for k, v in dict(inst.get("coordinates", {})).items()}
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     csv_path = source_path.parent / f"{source_path.stem}-avar.csv"
     if csv_path.exists():
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                name = (row.get("Instance Name") or "").strip()
-                if not name:
+        try:
+            csv_rows, _fieldnames = _csv_io.read_csv_mappings(csv_path)
+        except ValueError:
+            csv_rows = []  # headerless (empty) CSV: no rows, as before
+        for row in csv_rows:
+            name = row.get("Instance Name", "").strip()
+            if not name:
+                continue
+            c = coords.setdefault(name, {})
+            for tag in PARAM_TAGS:
+                if tag in c or not row.get(tag, ""):
                     continue
-                c = coords.setdefault(name, {})
-                for tag in PARAM_TAGS:
-                    if tag in c or row.get(tag) in (None, ""):
-                        continue
-                    try:
-                        c[tag] = float(row[tag])
-                    except (TypeError, ValueError):
-                        pass
+                try:
+                    c[tag] = float(row[tag])
+                except (TypeError, ValueError):
+                    pass
     return coords
 
 
@@ -168,7 +197,7 @@ def _compiled_names(font: TTFont, source_path: Path) -> Dict[str, str]:
     out = {}
     try:
         src, fmt = _source_font.load_source_cached(source_path)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return out
     if "glyphs" not in str(fmt).lower():
         return out

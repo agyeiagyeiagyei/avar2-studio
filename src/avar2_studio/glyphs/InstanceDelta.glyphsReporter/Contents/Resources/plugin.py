@@ -436,10 +436,10 @@ class InstanceDelta(ReporterPlugin):
             g = interp.glyphs[glyphName]
             if g is None:
                 return None
-            l = g.layers[self._interpMasterId]
-            if l is None and len(g.layers):
-                l = g.layers[0]
-            return l
+            layer = g.layers[self._interpMasterId]
+            if layer is None and len(g.layers):
+                layer = g.layers[0]
+            return layer
         except Exception:
             _dbgexc("overlayLayer: ")
             return None

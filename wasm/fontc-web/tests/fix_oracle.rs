@@ -9,7 +9,10 @@ use std::process::Command;
 fn fixers_match_gftools_oracle() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
     let font_path = manifest.join("../../frontend/e2e/fixtures/WasmTest-VF.ttf");
     let before = std::fs::read(&font_path).expect("read WasmTest-VF.ttf");
 
@@ -20,13 +23,14 @@ fn fixers_match_gftools_oracle() {
     let after = fontc_web::apply_transforms(before.clone(), &transforms.to_string(), "")
         .expect("apply transforms");
 
-    std::fs::write("/tmp/fix-before.ttf", &before).expect("write before");
-    std::fs::write("/tmp/fix-after.ttf", &after).expect("write after");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    std::fs::write(format!("{}/target/tmp/fix-before.ttf", env!("CARGO_MANIFEST_DIR")), &before).expect("write before");
+    std::fs::write(format!("{}/target/tmp/fix-after.ttf", env!("CARGO_MANIFEST_DIR")), &after).expect("write after");
     let comparator = manifest.join("spike/compare_fix.py");
     let status = Command::new(&python)
         .arg(comparator)
-        .arg("/tmp/fix-before.ttf")
-        .arg("/tmp/fix-after.ttf")
+        .arg(format!("{}/target/tmp/fix-before.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/fix-after.ttf", env!("CARGO_MANIFEST_DIR")))
         .status()
         .expect("run comparator");
     assert!(status.success(), "fix oracle comparison failed");
@@ -45,7 +49,10 @@ fn fixers_match_gftools_oracle() {
 fn fix_instances_doubles_like_gftools_on_a_slnt_font() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+        .unwrap_or_else(|_| {
+        let venv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
+        if std::path::Path::new(venv).exists() { venv.to_string() } else { "python3".to_string() }
+    });
     let source = std::fs::read_to_string(manifest.join("../../frontend/e2e/fixtures/WasmTest.glyphs"))
         .expect("read WasmTest.glyphs");
     let slanted = fontc_web::slant_source(source, r#"{}"#).expect("slant");
@@ -58,13 +65,14 @@ fn fix_instances_doubles_like_gftools_on_a_slnt_font() {
     let after = fontc_web::apply_transforms(before.clone(), &transforms.to_string(), "")
         .expect("apply transforms");
 
-    std::fs::write("/tmp/fix-slnt-before.ttf", &before).expect("write before");
-    std::fs::write("/tmp/fix-slnt-after.ttf", &after).expect("write after");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    std::fs::write(format!("{}/target/tmp/fix-slnt-before.ttf", env!("CARGO_MANIFEST_DIR")), &before).expect("write before");
+    std::fs::write(format!("{}/target/tmp/fix-slnt-after.ttf", env!("CARGO_MANIFEST_DIR")), &after).expect("write after");
     let comparator = manifest.join("spike/compare_fix.py");
     let status = Command::new(&python)
         .arg(comparator)
-        .arg("/tmp/fix-slnt-before.ttf")
-        .arg("/tmp/fix-slnt-after.ttf")
+        .arg(format!("{}/target/tmp/fix-slnt-before.ttf", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("{}/target/tmp/fix-slnt-after.ttf", env!("CARGO_MANIFEST_DIR")))
         .status()
         .expect("run comparator");
     assert!(status.success(), "slnt fix oracle comparison failed");

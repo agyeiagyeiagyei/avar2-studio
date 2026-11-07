@@ -306,7 +306,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                           replaceLayer: (newEntry) => replaceLayer(entry, newEntry),
                         })}
                         title={readOnly
-                          ? "Source-derived layer — authored in your source file, not the studio sidecar."
+                          ? "Source-derived layer — authored in your source file, not in the studio."
                           : "Click to edit this brace layer's axis values."}
                       >
                         {fontLoaded && vfFamilyId && thumbLoc && thumbChar && (
@@ -333,7 +333,7 @@ function LayersEditor({ tag, axis, layers, allAxes, onLayerDelta, onOpenInEditor
                             {readOnly ? (
                               <span className="layer-coords-source-badge" title="Layer read from your source file — a brace layer (.glyphs) or an alternate master (.designspace).">source</span>
                             ) : (
-                              <span className="layer-coords-studio-badge" title="Brace layer authored through avar2-studio. Lives in the sidecar; written to the shadow .glyphs on save.">studio</span>
+                              <span className="layer-coords-studio-badge" title="Brace layer authored in avar2-studio. Saved with your studio data and applied to the build on save.">studio</span>
                             )}
                             {entry.has_outline && (
                               <span

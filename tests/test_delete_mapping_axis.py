@@ -9,7 +9,7 @@ import csv as csv_mod
 
 import pytest
 
-from avar2_studio import server
+from avar2_studio import server, state
 
 
 @pytest.fixture
@@ -32,8 +32,8 @@ def harness(monkeypatch, tmp_path):
                      "min": 5, "default": 5, "max": 220},
             "WGHT": {"display_name": "Weight", "registered_tag": "wght",
                      "min": 1, "default": 1, "max": 1000}}
-    monkeypatch.setattr(server, "GLYPHS_PATH", tmp_path / "F.glyphs")
-    monkeypatch.setattr(server, "LAST_BUILD_STATUS", "ok")
+    monkeypatch.setattr(state, "GLYPHS_PATH", tmp_path / "F.glyphs")
+    monkeypatch.setattr(state, "LAST_BUILD_STATUS", "ok")
     monkeypatch.setattr(server, "_get_avar2_csv_path", lambda: csv_path)
     monkeypatch.setattr(server, "_check_csv_external_edit", lambda _p: False)
     monkeypatch.setattr(server._csv_io, "read_csv_mappings_with_axes",

@@ -1,4 +1,4 @@
-# Deploy the static demo to GitHub Pages (see docs/migration-github-pages.md).
+# Deploy the static demo to GitHub Pages (see docs/ARCHITECTURE.md).
 # Modelled on fontspector's pages.yml: build artifacts in CI, deploy static.
 name: Deploy static demo to Pages
 
@@ -26,21 +26,34 @@ jobs:
           python-version: "3.11"
 
       # The staging script needs the package (its example registry) and
-      # the fontc binary pip installs with it. The mkdir: hatchling
-      # force-includes src/avar2_studio/static (gitignored), which fails
-      # metadata generation on a fresh clone.
-      - run: mkdir -p src/avar2_studio/static && pip install -e .
+      # the fontc binary pip installs with it.
+      - run: pip install -e .
 
       # Stages each bundled example as a project zip plus a pristine
       # fontc compile into frontend/public/static-demo/ (gitignored
       # build artifact); the browser edits and rebuilds them itself.
       - run: python scripts/snapshot_static_demo.py
 
+      # The wasm binary is not committed (decision 0014): build it here so
+      # the static demo's fontc worker has it. Cold cache: fontc + fontations
+      # compile from source for wasm32 (10+ min); rust-cache keeps it warm.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm/fontc-web
+      - run: cargo install wasm-pack --locked
+      - run: wasm-pack build --release --target web --out-dir ../../frontend/src/wasm/fontc-web
+        working-directory: wasm/fontc-web
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - run: npm ci
+        working-directory: frontend
+
+      - run: npm run lint && npm run typecheck && npm run test:unit
         working-directory: frontend
 
       # Base = the repo's project-Pages path; dist-pages is a separate

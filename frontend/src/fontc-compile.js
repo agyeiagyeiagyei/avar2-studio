@@ -1,7 +1,7 @@
 /**
  * compileFont / addAvar2 / applyControlAxes / applyGrade — font
  * compilation and bundle application in a Web Worker (fontc → WASM;
- * see wasm/fontc-web and docs/migration-github-pages.md).
+ * see wasm/fontc-web and docs/ARCHITECTURE.md (history: docs/archive/migration-github-pages.md)).
  *
  * One worker for the app's lifetime; calls serialize through a queue (the
  * worker resolves one job at a time — see send()).
@@ -60,6 +60,13 @@ export function compileFont(source, round = null, slant = null) {
  *  editor bridge. Returns the parsed object. */
 export async function glyphModel(source, glyph) {
   return JSON.parse(await send({ kind: 'glyph-model', source, glyph }));
+}
+
+/** .glyphs source → its master locations (`[{}, {tag: value}, …]`, or
+ *  null when no axis varies): the grid the width-aware spacing transform
+ *  computes its amounts on, read as the desktop pipeline reads it. */
+export async function masterLocations(source) {
+  return JSON.parse(await send({ kind: 'master-locations', source }));
 }
 
 /** .glyphs source + an overlay request ({axes, overlays}) → TTF bytes with
@@ -132,7 +139,12 @@ export function applyGrade(fontBytes, gradeJson, coordsJson) {
 
 /** TTF bytes + transforms JSON array + avar2 CSV → TTF bytes with the
  * enabled SPAC transform applied (SPAC fvar axis + gvar phantom tuples
- * + rebuilt HVAR — the axis stays a live slider). */
+ * + rebuilt HVAR — the axis stays a live slider). Per-instance SPAC
+ * coordinates ride the JSON (`params.instance_spac`, filled by
+ * withSpacOverrides in static-api.js), and so do the master locations
+ * the width-aware amounts are computed at (`params.master_locations`,
+ * filled by withSpacMasters); the CSV argument is retained for
+ * pre-JSON wasm builds and ignored by the current one. */
 export function applyTransforms(fontBytes, transformsJson, avar2Csv) {
   return send({ kind: 'transforms', fontBytes, json: transformsJson, csv: avar2Csv });
 }

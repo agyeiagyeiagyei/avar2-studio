@@ -1,5 +1,5 @@
 """Build/export job queue — the server-side half of the worker rework
-(docs/WORKER_BUILD_PLAN.md).
+(docs/decisions/0003-worker-subprocess-finish-then-rebuild.md).
 
 One worker subprocess at a time runs builds, exports and WOFF2
 compression; the Flask process only stages snapshots, supervises, and
@@ -27,25 +27,59 @@ import subprocess
 import sys
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
+
+from . import state
+from .studio_log import get_logger
 
 #: Source-set sidecars staged into every job snapshot (siblings of the
 #: original source), plus the small preview-dir files builds/exports read.
-SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json")
+
+log = get_logger(__name__)
+SIDECAR_SUFFIXES = ("-avar.csv", "-control.json", "-transforms.json", "-grade.json", "-kinetikern.json", "-axis-metadata.json")
 PREVIEW_FILES = ("axis-metadata.json", "instance-renames.json", "config.yaml")
 LEGACY_CSV = "avar2-mappings.csv"
 
-#: Worker env passthrough — the build consults these (see server.py).
+#: Worker env passthrough — the build consults these (see pipeline.py).
 ENV_KEYS = ("AVAR2_RELOCATE_BUILD_DEFAULT", "AVAR2_STUDIO_GFTOOLS_BUILDER",
             "AVAR2_SPAC_INJECT")
 
 #: Export artifacts kept on disk for download; older ones are reaped.
 KEEP_EXPORTS = 5
+# Fonts kept in .avar2-studio/build/ besides the one just promoted: an
+# axis-set change renames the output, so stale names otherwise pile up
+# (33 files / 78 MB observed) behind the newest-by-mtime picker.
+KEEP_BUILDS = 2
 
+#: Finished-job results kept for ``job_status`` lookups by id. ``_last_result``
+#: alone lost any job that finished inside one client poll window.
+KEEP_RESULTS = 50
+
+
+
+def reap_build_dir(current: Path, keep: int = KEEP_BUILDS) -> int:
+    """Delete fonts in ``current``'s directory beyond the newest ``keep``
+    (plus the one just promoted), together with their WOFF2 cache twins.
+    Returns the number of files removed."""
+    build_dir = Path(current).parent
+    fonts = sorted(build_dir.glob("*.ttf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    protected = {Path(current).resolve()} | {p.resolve() for p in fonts[:keep]}
+    removed = 0
+    for font in fonts:
+        if font.resolve() in protected:
+            continue
+        for twin in (font, font.with_suffix(".woff2"), font.with_suffix(".woff2.json")):
+            try:
+                twin.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+    return removed
 
 class JobQueue:
     def __init__(self, server, worker_cmd=None):
-        self.server = server  # the server module itself (globals live there)
+        self.server = server  # the server module itself (methods; value state lives in state.py)
         self._worker_cmd = worker_cmd  # tests stub the worker subprocess
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -55,6 +89,7 @@ class JobQueue:
         self._pending_compress = None
         self._running = None         # job dict with proc attached
         self._last_result = None
+        self._results = OrderedDict()  # job id → result, newest last, bounded
         self._last_build_ok = None   # last BUILD job's success, for waiters
         self._supervisor = threading.Thread(target=self._supervise, daemon=True,
                                             name="build-jobs")
@@ -74,11 +109,15 @@ class JobQueue:
             self._wake.set()
         return True
 
-    def submit_export(self, hidden_axes, default_location, format="ttf"):
-        if self.server.ORIGINAL_PATH is None:
+    def submit_export(self, hidden_axes, default_location, format="ttf", *,
+                      family_name=None):
+        if state.ORIGINAL_PATH is None:
             return None
         job = {"kind": "export", "hidden_axes": list(hidden_axes),
-               "default_location": default_location, "format": format}
+               "default_location": default_location, "format": format,
+               # E1: the sources zip is named after the family; the README's
+               # composed list is the writer's (E1c), not the caller's.
+               "family_name": family_name}
         with self._lock:
             self._pending_exports.append(job)
             self._wake.set()
@@ -108,6 +147,11 @@ class JobQueue:
                 for job in list(q):
                     if self._job_id(job) == job_id:
                         q.remove(job)
+                        # Never ran, so _finish never records it: a client
+                        # polling by id must still see a terminal state.
+                        self._record_result({"job_id": job_id, "kind": job["kind"],
+                                             "success": False, "cancelled": True,
+                                             "error": "cancelled"})
                         return True
             running = self._running
             if running is None or self._job_id(running) != job_id:
@@ -162,10 +206,48 @@ class JobQueue:
         return {"running": running, "queued": queued, "last": last,
                 "sizes": self.export_sizes()}
 
+    def job_status(self, job_id):
+        """One job's state by id: ``queued`` / ``running`` / ``finished``
+        (+ ``success``, ``cancelled``, ``error``, ``artifact_ready``), or
+        None when the id is unknown (never submitted, or evicted after
+        KEEP_RESULTS newer results). Finished is checked first: _finish
+        records the result before _running clears, and a recorded result
+        means the artifact is already promoted."""
+        with self._lock:
+            result = self._results.get(job_id)
+            if result is not None:
+                return {"job_id": job_id, "kind": result.get("kind"),
+                        "state": "finished",
+                        "success": bool(result.get("success")),
+                        "cancelled": bool(result.get("cancelled")),
+                        "error": result.get("error"),
+                        "artifact_ready": (result.get("kind") == "export"
+                                           and bool(result.get("success"))
+                                           and self.export_artifact(job_id) is not None)}
+            running = self._running
+            if running is not None and self._job_id(running) == job_id:
+                return {"job_id": job_id, "kind": running["kind"], "state": "running",
+                        "elapsed": round(time.time() - running.get("started", time.time()), 1),
+                        "phase": self._read_phase(running)}
+            for job in self._pending_exports:
+                if self._job_id(job) == job_id:
+                    return {"job_id": job_id, "kind": job["kind"], "state": "queued"}
+        return None
+
+    def _record_result(self, result):
+        """Caller holds ``_lock``. Bounded: the oldest result goes first."""
+        jid = result.get("job_id")
+        if jid is None:
+            return
+        self._results[jid] = result
+        self._results.move_to_end(jid)
+        while len(self._results) > KEEP_RESULTS:
+            self._results.popitem(last=False)
+
     def export_sizes(self):
         """TTF exact; WOFF2 exact when the cache matches the current build,
         else an estimate from the last known ratio (fallback 8%)."""
-        font = self.server.VARIABLE_FONT_PATH
+        font = state.VARIABLE_FONT_PATH
         if not font or not Path(font).exists():
             return {"ttf_bytes": None, "woff2_bytes": None, "woff2_exact": False}
         font = Path(font)
@@ -178,7 +260,7 @@ class JobQueue:
                 if k.get("ttf_size") == ttf_size and k.get("ttf_mtime") == font.stat().st_mtime:
                     return {"ttf_bytes": ttf_size, "woff2_bytes": cache.stat().st_size,
                             "woff2_exact": True}
-            except Exception:  # noqa: BLE001 — a corrupt key just re-estimates
+            except Exception:
                 pass
         ratio = None
         if cache.exists() and key.exists():
@@ -186,7 +268,7 @@ class JobQueue:
                 k = json.loads(key.read_text())
                 if k.get("source_bytes"):
                     ratio = k["woff2_bytes"] / k["source_bytes"]
-            except Exception:  # noqa: BLE001
+            except Exception:
                 ratio = None
         est = round(ttf_size * (ratio if ratio else 0.08))
         return {"ttf_bytes": ttf_size, "woff2_bytes": est, "woff2_exact": False}
@@ -194,7 +276,8 @@ class JobQueue:
     def export_artifact(self, job_id):
         exports = self._exports_dir()
         for p in sorted(exports.glob(f"{job_id}-*")):
-            if p.suffix in (".ttf", ".woff2"):
+            # .zip is the sources export (E1): same job, same download route.
+            if p.suffix in (".ttf", ".woff2", ".zip"):
                 return p
         return None
 
@@ -212,7 +295,7 @@ class JobQueue:
                     break
                 try:
                     self._run_one(job)
-                except Exception as exc:  # noqa: BLE001 — a job must NEVER
+                except Exception as exc:
                     # kill the supervisor: that's the wedge this rework exists
                     # to remove. Clear running, record the failure, move on.
                     import traceback
@@ -247,14 +330,22 @@ class JobQueue:
         job["started"] = time.time()
         try:
             if job["kind"] == "build" and job.get("source_refresh") in ("original", "source"):
-                # A source change landed mid-build: the CSV sync stays
-                # server-side (the server owns sidecar writes) and runs
-                # BEFORE the snapshot, so the job builds the new state.
-                hook = self.server._SYNC_CSV_HOOK
+                # A source change landed mid-build: re-resolve the active
+                # source FIRST — the shadow still reflects the pre-save
+                # state, and both the CSV hook and the staging below read
+                # from it (a stale one syncs old instances and builds old
+                # outlines while looking like success).
+                resolve = getattr(self.server, "_resolve_active_source", None)
+                if resolve is not None:
+                    resolve()
+                # The CSV sync stays server-side (the server owns sidecar
+                # writes) and runs BEFORE the snapshot, so the job builds
+                # the new state.
+                hook = state._SYNC_CSV_HOOK
                 if hook is not None:
                     hook()
             self._stage(job)
-        except Exception as exc:  # noqa: BLE001 — a staging failure is a result too
+        except Exception as exc:
             with self._lock:
                 self._running = None
             self._finish(job, {"job_id": jid, "kind": job["kind"], "success": False,
@@ -276,12 +367,15 @@ class JobQueue:
             start_new_session=True)  # own process group: cancel = killpg
         with self._lock:
             job["proc"] = proc
-        print(f"[jobs] {jid} started ({job['kind']})", file=sys.stderr)
+        log.info(f"[jobs] {jid} started ({job['kind']})")
         proc.wait()
-        with self._lock:
-            self._running = None
         result = self._read_result(job)
         self._finish(job, result)
+        # Running until the result is READ and promoted: clearing this right
+        # after proc.wait() let wait_for_idle answer with the PREVIOUS
+        # build's outcome in the gap.
+        with self._lock:
+            self._running = None
 
     def _kill(self, job):
         job["cancelled"] = True
@@ -297,7 +391,7 @@ class JobQueue:
         result_path = job["dir"] / "result.json"
         try:
             return json.loads(result_path.read_text())
-        except Exception:  # noqa: BLE001 — no result = the worker died
+        except Exception:
             if job.get("cancelled"):
                 return {"job_id": self._job_id(job), "kind": job["kind"],
                         "success": False, "cancelled": True, "error": "cancelled"}
@@ -309,12 +403,12 @@ class JobQueue:
         jid = self._job_id(job)
         result.setdefault("job_id", jid)
         result.setdefault("kind", job["kind"])
-        print(f"[jobs] {jid} finished: success={result.get('success')} "
-              f"in {result.get('duration', '?')}s", file=sys.stderr)
+        log.info(f"[jobs] {jid} finished: success={result.get('success')} "
+              f"in {result.get('duration', '?')}s")
         if result.get("success"):
             try:
                 self._promote(job, result)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result = dict(result, success=False,
                               error=f"could not promote the artifact: {exc}")
         if job["kind"] == "build":
@@ -322,7 +416,9 @@ class JobQueue:
             self._last_build_ok = bool(result.get("success"))
             if result.get("success"):
                 self._maybe_compress()
-        self._last_result = result
+        with self._lock:
+            self._last_result = result
+            self._record_result(result)
         if job.get("dir"):
             shutil.rmtree(job["dir"], ignore_errors=True)
 
@@ -343,7 +439,7 @@ class JobQueue:
         job["dir"] = self._job_dir(job)
         src_dir = job["dir"] / "src"
         src_dir.mkdir()
-        orig = Path(self.server.ORIGINAL_PATH)
+        orig = Path(state.ORIGINAL_PATH)
         stem = orig.stem
         copies = [orig]
         for suffix in SIDECAR_SUFFIXES:
@@ -365,20 +461,47 @@ class JobQueue:
                 target = src_dir / ".avar2-studio" / p.name
                 target.parent.mkdir(exist_ok=True)
             shutil.copy2(str(p), str(target))
+        # The control-axis shadow is derived state EXCEPT for the drawings
+        # in it: until capture_outlines writes them into the sidecar, a
+        # Fontra-drawn brace outline exists only here. The worker's regen
+        # preserves a staged shadow and silently rebuilds from the sidecar
+        # alone when it is missing — so a build would drop every uncaptured
+        # drawing. .glyphs only: the designspace shadow regen ignores
+        # outlines, and its shadow references pooled UFOs we do not stage.
+        # shadow/transformed/ stays out: the worker re-derives it from the
+        # staged shadow.
+        if orig.suffix == ".glyphs":
+            from . import control_axes
+            shadow = control_axes.shadow_path_for(orig)
+            if shadow.exists():
+                target = src_dir / ".avar2-studio" / "shadow" / orig.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(shadow), str(target))
         if orig.suffix == ".designspace":
             for ufo in orig.parent.glob("*.ufo"):
                 if ufo.is_dir():
                     shutil.copytree(str(ufo), str(src_dir / ufo.name))
+        # The relocation memo outlives the job dir: it lives next to the built
+        # fonts, which the supervisor promotes into.
+        from .pipeline import RELOCATION_MEMO_DIRNAME
+        from .transforms import config as _tx_config
         spec = {"job_id": self._job_id(job), "kind": job["kind"],
                 "job_dir": str(job["dir"]),
+                "memo_dir": str(Path(self.server._get_avar2_font_dir())
+                                / RELOCATION_MEMO_DIRNAME),
+                # C7: a build config's transform override is a PROCESS global in
+                # the caller; the build runs in a worker subprocess, so it has to
+                # travel in the spec or the worker reads the committed sidecar
+                # and the config silently does nothing at the resting style (P3).
+                "transform_override": _tx_config.override(),
                 "original_path": str(src_dir / orig.name),
-                "use_fontc": bool(self.server.USE_FONTC),
+                "use_fontc": bool(state.USE_FONTC),
                 "env": {k: os.environ.get(k) for k in ENV_KEYS},
                 "progress_path": str(job["dir"] / "progress.jsonl"),
                 "result_path": str(job["dir"] / "result.json"),
                 "out_dir": str(job["dir"] / "out")}
         if job["kind"] == "export":
-            current = self.server.VARIABLE_FONT_PATH
+            current = state.VARIABLE_FONT_PATH
             if not current or not Path(current).exists():
                 raise RuntimeError("no built font to export from")
             staged_font = src_dir / Path(current).name
@@ -386,8 +509,8 @@ class JobQueue:
             # The active source (possibly the transformed build copy) is
             # staged too — a server-side shadow regen could otherwise
             # rewrite it under the worker's feet.
-            active = Path(self.server.GLYPHS_PATH)
-            if active.resolve() == Path(self.server.ORIGINAL_PATH).resolve():
+            active = Path(state.GLYPHS_PATH)
+            if active.resolve() == Path(state.ORIGINAL_PATH).resolve():
                 staged_active = spec["original_path"]
             else:
                 staged_active = src_dir / ("active-" + active.name)
@@ -396,7 +519,8 @@ class JobQueue:
                          "glyphs_path": str(staged_active),
                          "hidden_axes": job["hidden_axes"],
                          "default_location": job["default_location"],
-                         "format": job.get("format", "ttf")})
+                         "format": job.get("format", "ttf"),
+                         "family_name": job.get("family_name")})
         elif job["kind"] == "compress":
             spec["font_path"] = job["font_path"]
         job["spec"] = spec
@@ -407,17 +531,17 @@ class JobQueue:
         can fetch the served font at any moment, and a truncate-and-copy
         window hands it a torn font that fails to parse — the preview falls
         back to the system font until the next build."""
-        preview = Path(self.server._get_preview_dir())
         if job["kind"] == "build":
             built = result.get("built_font")
             if not built or not Path(built).exists():
                 raise RuntimeError("worker reported success but produced no font")
             dst = Path(self.server._get_avar2_font_dir()) / Path(built).name
             shutil.move(built, str(dst))  # jobs/ and build/ share a filesystem
-            self.server.VARIABLE_FONT_PATH = dst
+            state.VARIABLE_FONT_PATH = dst
+            reap_build_dir(dst)
             # The regenerated gftools config is the current one — the
             # export row-lookup reads it (from snapshots).
-            cfg = Path(self.server.ORIGINAL_PATH).parent / ".avar2-studio" / "config.yaml"
+            cfg = Path(self.server._get_preview_dir()) / "config.yaml"
             job_cfg = job["dir"] / "src" / ".avar2-studio" / "config.yaml"
             if job_cfg.exists():
                 shutil.move(str(job_cfg), str(cfg))
@@ -443,18 +567,26 @@ class JobQueue:
 
     def _apply_build_state(self, result):
         for key in ("last_build_status", "last_build_error", "last_avar2_error",
+                    "last_origin_relocation_error", "last_origin_relocation_memo",
+                    "last_origin_authored_avar", "last_build_degraded",
                     "last_grade_error", "last_source_transform_error",
                     "last_transform_error", "last_origin_warning", "last_build_time"):
             if key in result:
-                setattr(self.server, key.upper(), result[key])
+                setattr(state, key.upper(), result[key])
         if not result.get("success") and "last_build_status" not in result:
-            # The worker died before it could report state (kill -9,
-            # crash) — fail loudly, keep serving the last-good font.
-            self.server.LAST_BUILD_STATUS = "failed"
-            self.server.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
+            if result.get("cancelled"):
+                # A cancel is not a broken source: leave the previous
+                # status alone — "ok" keeps the gate open, a prior
+                # "failed" (cancelled retry) keeps it closed.
+                pass
+            else:
+                # The worker died before it could report state (kill -9,
+                # crash) — fail loudly, keep serving the last-good font.
+                state.LAST_BUILD_STATUS = "failed"
+                state.LAST_BUILD_ERROR = result.get("error") or "build worker failed"
 
     def _maybe_compress(self):
-        font = self.server.VARIABLE_FONT_PATH
+        font = state.VARIABLE_FONT_PATH
         if not font:
             return
         sizes = self.export_sizes()
@@ -482,7 +614,7 @@ class JobQueue:
                 entry = json.loads(line)
                 if "phase" in entry:
                     return entry["phase"]
-        except Exception:  # noqa: BLE001 — a partial line while writing
+        except Exception:
             return None
         return None
 

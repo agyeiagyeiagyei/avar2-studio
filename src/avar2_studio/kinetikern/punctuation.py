@@ -38,6 +38,7 @@ import json
 import os
 
 from . import bridge as kb
+
 CASE_SUFFIXES = ("case",)  # kk2_harness.CASE_SUFFIXES
 
 TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "punctuation.json")

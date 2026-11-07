@@ -1,12 +1,13 @@
 """Build worker — a fresh interpreter per job, so the Flask process never
 runs fontTools-heavy build code (the GIL-starvation fix; see
-docs/WORKER_BUILD_PLAN.md).
+docs/decisions/0003-worker-subprocess-finish-then-rebuild.md).
 
     python -m avar2_studio.build_worker <spec.json>
 
 The spec points at a SNAPSHOT of the source set (the server stages it per
 job), so a mid-build save in Glyphs can't tear the worker's inputs. The
-worker imports the server module and runs the very same pipeline the
+worker imports the pipeline module — Flask-free, so no app or supervisor
+thread is constructed here — and runs the very same pipeline the
 in-process build ran — parity by construction — writing line-delimited
 JSON progress to ``progress_path`` and a single ``result.json``
 (atomically renamed) at the end. Only the job directory is written;
@@ -21,6 +22,8 @@ import sys
 import time
 import traceback
 from pathlib import Path
+
+from . import state
 
 
 class _Progress:
@@ -50,71 +53,91 @@ class _Progress:
         pass
 
 
-def _apply_result(server, result):
-    """Snapshot the server module's build-state globals into the result."""
+def _apply_result(result):
+    """Snapshot the shared build-state globals into the result."""
     for name in ("LAST_BUILD_STATUS", "LAST_BUILD_ERROR", "LAST_AVAR2_ERROR",
+                 "LAST_ORIGIN_RELOCATION_ERROR", "LAST_ORIGIN_RELOCATION_MEMO",
+                 "LAST_ORIGIN_AUTHORED_AVAR", "LAST_BUILD_DEGRADED",
                  "LAST_GRADE_ERROR", "LAST_SOURCE_TRANSFORM_ERROR",
                  "LAST_TRANSFORM_ERROR", "LAST_ORIGIN_WARNING", "LAST_BUILD_TIME"):
-        result[name.lower()] = getattr(server, name, None)
+        result[name.lower()] = getattr(state, name, None)
 
 
-def _bind_server_globals(server, spec):
-    """Point the server module's path globals at the job snapshot, exactly
+def _bind_server_globals(spec):
+    """Point the shared path globals at the job snapshot, exactly
     as _apply_source_path would after loading a source."""
     src = Path(spec["original_path"])
-    server.ORIGINAL_PATH = src
-    server.GLYPHS_PATH = src
-    server.BUILD_DIR = Path(spec["job_dir"]) / "build"
-    server.USE_FONTC = bool(spec.get("use_fontc", True))
+    state.ORIGINAL_PATH = src
+    state.GLYPHS_PATH = src
+    state.BUILD_DIR = Path(spec["job_dir"]) / "build"
+    state.RELOCATION_MEMO_DIR = (Path(spec["memo_dir"])
+                                 if spec.get("memo_dir") else None)
+    state.USE_FONTC = bool(spec.get("use_fontc", True))
     # Lazy getters derive everything (preview dir, CSV, config, build dir)
     # from ORIGINAL_PATH — clear any memoized values so nothing leaks a
     # server-side path in.
-    server.PREVIEW_DIR = None
-    server.PREVIEW_CSV_PATH = None
-    server.PREVIEW_CONFIG_PATH = None
-    server.CSV_PATH = None
+    state.PREVIEW_DIR = None
+    state.PREVIEW_CSV_PATH = None
+    state.PREVIEW_CONFIG_PATH = None
+    state.CSV_PATH = None
     for var, val in (spec.get("env") or {}).items():
         if val is None:
             os.environ.pop(var, None)
         else:
             os.environ[var] = str(val)
+    # C7/P3: the caller's transform override travels in the spec. Without this
+    # the worker reads the committed <stem>-transforms.json and a build config's
+    # transforms/instances silently do nothing (the committed file is never
+    # rewritten — the override is for this job only).
+    from .transforms import config as _tx_config
+    _tx_config.set_override(spec.get("transform_override"))
 
 
-def _run_build_job(server, spec, progress):
-    _bind_server_globals(server, spec)
+def _run_build_job(pipeline, spec, progress):
+    _bind_server_globals(spec)
     progress.phase("resolve")
-    server._resolve_active_source()
+    pipeline._resolve_active_source()
     progress.phase("build")
-    ok = server._run_build()
+    ok = pipeline._run_build()
     return {"success": bool(ok),
-            "built_font": str(server.VARIABLE_FONT_PATH) if server.VARIABLE_FONT_PATH else None}
+            "built_font": str(state.VARIABLE_FONT_PATH) if state.VARIABLE_FONT_PATH else None}
 
 
-def _run_export_job(server, spec, progress):
-    _bind_server_globals(server, spec)
+def _run_export_job(pipeline, spec, progress):
+    _bind_server_globals(spec)
     current = Path(spec["current_font"])
-    server.VARIABLE_FONT_PATH = current
-    server.GLYPHS_PATH = Path(spec["glyphs_path"])
+    state.VARIABLE_FONT_PATH = current
+    state.GLYPHS_PATH = Path(spec["glyphs_path"])
     out_dir = Path(spec["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     progress.phase("export")
-    artifact = server._export_pipeline(
-        current,
-        hidden_axes=spec.get("hidden_axes") or [],
-        default_location=spec.get("default_location"),
-        export_dir=out_dir,
-        format=spec.get("format", "ttf"),
-    )
+    fmt = spec.get("format", "ttf")
+    if fmt == "sources":
+        # E1: the sources come from the ACTIVE source, not from the built font.
+        artifact = pipeline._sources_pipeline(
+            state.GLYPHS_PATH,
+            out_dir,
+            hidden_axes=spec.get("hidden_axes") or [],
+            family_name=spec.get("family_name"),
+        )
+    else:
+        artifact = pipeline._export_pipeline(
+            current,
+            hidden_axes=spec.get("hidden_axes") or [],
+            default_location=spec.get("default_location"),
+            export_dir=out_dir,
+            format=fmt,
+        )
     return {"success": True, "artifact": str(artifact),
             "artifact_name": Path(artifact).name}
 
 
-def _run_compress_job(server, spec, progress):
+def _run_compress_job(pipeline, spec, progress):
     font_path = Path(spec["font_path"])
     progress.phase("compress")
     out = Path(spec["out_dir"]) / (font_path.stem + ".woff2")
     out.parent.mkdir(parents=True, exist_ok=True)
-    server._save_woff2(font_path, out)
+    pipeline._save_woff2(font_path, out)
     return {"success": True, "artifact": str(out), "artifact_name": out.name,
             "woff2_bytes": out.stat().st_size, "source_bytes": font_path.stat().st_size}
 
@@ -125,14 +148,14 @@ def main(spec_path):
     result = {"job_id": spec["job_id"], "kind": spec["kind"], "success": False}
     try:
         # Imported here so a failure lands in the result, not on the floor.
-        from avar2_studio import server
+        from avar2_studio import pipeline
         sys.stderr = progress
         progress.emit(job_id=spec["job_id"], kind=spec["kind"], phase="start")
         handler = {"build": _run_build_job, "export": _run_export_job,
                    "compress": _run_compress_job}[spec["kind"]]
-        result.update(handler(server, spec, progress))
-        _apply_result(server, result)
-    except Exception as exc:  # noqa: BLE001 — the supervisor needs it structured
+        result.update(handler(pipeline, spec, progress))
+        _apply_result(result)
+    except Exception as exc:
         result["success"] = False
         result["error"] = str(exc)
         result["details"] = traceback.format_exc()[-2000:]

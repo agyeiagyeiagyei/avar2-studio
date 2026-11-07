@@ -36,13 +36,18 @@ _ENGINE = None
 
 
 def engine_path():
-    """The built engine library, or None. ``$AVAR2_KK2_DYLIB`` overrides the
-    repo build at native/kinetikern2/target/release."""
+    """The built engine library, or None. Discovery order: ``$AVAR2_KK2_DYLIB``,
+    then the wheel-carried copy in ``avar2_studio/bin/`` (docs/decisions/0015),
+    then the repo build at native/kinetikern2/target/release."""
     env = os.environ.get("AVAR2_KK2_DYLIB")
     if env:
         p = Path(env)
         return p if p.exists() else None
-    p = Path(__file__).resolve().parents[3] / "native" / "kinetikern2" / "target" / "release" / kb.DYLIB_NAME
+    here = Path(__file__).resolve()
+    p = here.parents[1] / "bin" / kb.DYLIB_NAME
+    if p.exists():
+        return p
+    p = here.parents[3] / "native" / "kinetikern2" / "target" / "release" / kb.DYLIB_NAME
     return p if p.exists() else None
 
 
@@ -51,7 +56,7 @@ def _engine():
     if _ENGINE is None:
         path = engine_path()
         if path is None:
-            raise kb.EngineError("Kinetikern2 engine not built; see native/kinetikern2/README.md")
+            raise kb.EngineError("Kinetikern2 engine not available in this installation")
         _ENGINE = kb.Engine(str(path))
     return _ENGINE
 
@@ -264,4 +269,4 @@ def propose(vf_path, location, looseness=0.0, style="text", threads=0):
     }
 
 
-from . import inject, sidecar  # noqa: E402,F401  (the sidecar and the font-stage injection)
+from . import inject, sidecar  # noqa: F401  (the sidecar and the font-stage injection)

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import './ControlAxes.css';
 import LayersEditor from './LayersEditor';
 import AddBraceLocationModal from './AddBraceLocationModal';
+import { useBuildStatus } from '../hooks/useBuildStatus';
 
 /**
  * SECONDARY PARAMETRIC AXES panel.
@@ -9,7 +10,7 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  * Naming seam: the UI label is "secondary parametric axes" (renamed
  * from "control axes" on designer feedback, v0.1.0.dev8), while the
  * component/file names, CSS classes, API routes (/api/control-axes),
- * the -control.json sidecar, and docs/control-axes.md keep the
+ * the -control.json sidecar, and docs/guides/secondary-parametric-axes.md keep the
  * original "control axis" term. Same concept; grep either name from
  * here.
  *
@@ -31,7 +32,8 @@ import AddBraceLocationModal from './AddBraceLocationModal';
  *   onToggleDisable — (tag) => void; flips the disabled state for an
  *                     axis. State + persistence lives in App.js.
  */
-function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, onReseed, allAxes, allMasters, allInstances, vfFamilyId, fontLoaded, building = false, glyphChars = {} }) {
+function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisabledReason, onEditAxis, onDeleteAxis, onOpenInEditor, onLayerDelta, onReseed, allAxes, allMasters, allInstances, vfFamilyId, fontLoaded, glyphChars = {} }) {
+  const { building } = useBuildStatus();
   // Set of axis tags currently expanded. All axes default collapsed
   // — matches the per-glyph-block treatment one level down. Designer
   // clicks an axis row to drill in.
@@ -239,12 +241,12 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                     className="control-axis-delete"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                      if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? Its studio data is removed; the source file is untouched.`)) {
                         markEdit();
                         onDeleteAxis(ax.tag);
                       }
                     }}
-                    title="Delete this studio-declared secondary parametric axis from the sidecar."
+                    title="Delete this studio-declared secondary parametric axis."
                   >
                     🗑
                   </button>
@@ -304,7 +306,7 @@ function ControlAxes({ axes, disabledAxes, onToggleDisable, onAddClick, addDisab
                       className="control-axis-delete-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? The sidecar entry is removed; the source file is untouched.`)) {
+                        if (window.confirm(`Delete secondary parametric axis "${ax.tag}"? Its studio data is removed; the source file is untouched.`)) {
                           onDeleteAxis(ax.tag);
                         }
                       }}

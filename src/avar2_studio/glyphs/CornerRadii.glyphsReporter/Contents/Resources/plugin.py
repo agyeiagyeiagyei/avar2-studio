@@ -35,7 +35,7 @@ from GlyphsApp import *
 from GlyphsApp.plugins import *
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cornerfit  # noqa: E402
+import cornerfit
 
 try:
     from vanilla import (
@@ -461,7 +461,7 @@ class CornerRadii(ReporterPlugin):
         font = self._currentFont()
         w = self._panel
         # drop previous rows
-        for mid, cb in list(self._masterRows.items()):
+        for mid, _cb in list(self._masterRows.items()):
             try:
                 delattr(w, "master_%s" % mid.replace("-", "_"))
             except Exception:

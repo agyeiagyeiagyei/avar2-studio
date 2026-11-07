@@ -13,6 +13,7 @@
 //   {kind: 'pin', fontBytes, request}     → {ok, ttf|error}
 //   {kind: 'clamp', fontBytes}            → {ok, ttf|error}
 //   {kind: 'glyph-model', source, glyph}  → {ok, model|error} (JSON string)
+//   {kind: 'master-locations', source}    → {ok, model|error} (JSON string)
 //   {kind: 'compile-overlays', source, request} → {ok, ttf|error}
 // The ttf is transferred (zero-copy) back to the caller.
 
@@ -22,6 +23,7 @@ import init, {
   round_corners_source,
   slant_source,
   glyph_model,
+  master_locations,
   add_avar2,
   apply_control_axes,
   apply_grade,
@@ -42,6 +44,8 @@ self.onmessage = async (e) => {
     if (e.data && e.data.kind === 'glyph-model') {
       const model = glyph_model(e.data.source, e.data.glyph);
       self.postMessage({ ok: true, model });
+    } else if (e.data && e.data.kind === 'master-locations') {
+      self.postMessage({ ok: true, model: master_locations(e.data.source) });
     } else if (e.data && e.data.kind === 'compile-overlays') {
       let src = e.data.source;
       // Slant before round, like the desktop chain (source_priority):

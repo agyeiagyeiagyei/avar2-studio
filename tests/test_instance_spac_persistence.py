@@ -23,6 +23,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     import avar2_studio.server as server
+    from avar2_studio import state
     importlib.reload(server)
 
     glyphs = FIXTURES / "WasmTest.glyphs"
@@ -38,8 +39,8 @@ def client(tmp_path, monkeypatch):
         w.writerow(["Alpha", "100.0"])
         w.writerow(["Beta", "400.0"])
 
-    monkeypatch.setattr(server, "GLYPHS_PATH", source)
-    monkeypatch.setattr(server, "ORIGINAL_PATH", source)
+    monkeypatch.setattr(state, "GLYPHS_PATH", source)
+    monkeypatch.setattr(state, "ORIGINAL_PATH", source)
     monkeypatch.setattr(server, "_get_preview_csv_path", lambda: csv_path)
     monkeypatch.setattr(server, "_get_avar2_csv_path", lambda: csv_path)
     monkeypatch.setattr(server, "_check_csv_external_edit", lambda p: False)

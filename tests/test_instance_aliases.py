@@ -1,5 +1,4 @@
 """Studio-side instance renames: durable across shadow regeneration."""
-from pathlib import Path
 
 from glyphsLib.classes import GSFont, GSInstance
 
