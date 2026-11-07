@@ -995,10 +995,11 @@ def scenario_export_sources(s):
     note.wait_for(timeout=5000)
     text = note.inner_text()
     print("    note:", " ".join(text.split())[:110])
-    # E2: spacing now rides the sources, so the note is about where the font
-    # rests, not about missing spacing.
-    assert "rest at the compiled origin" in text, text
-    assert "ORIGIN row" in text, text
+    # E2: spacing now rides the sources, so a note is about where the font rests,
+    # not about missing spacing. E2l: a font resting on its default master has no
+    # such note, so only check the wording when the note is there.
+    if "rest at the compiled origin" in text:
+        assert "ORIGIN row" in text, text
     s.shot("export-sources-modal")
     # No size estimate for this format, and the button names it.
     modal = s.page.locator(".preview-export-modal").inner_text()
