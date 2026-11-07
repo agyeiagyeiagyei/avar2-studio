@@ -3046,3 +3046,12 @@ With those in place, the next full pass will name the cause.
 **`load-font` (probe, not product).** The scenario inherited queued builds from `config-roundtrip` (two real-Crispy builds and a compress, 66 s in the log), and `wait_header_ready` allowed 60 s. The screenshot shows the build veil, as intended. The limit is now 240 s, the same as `wait_new_build`.
 
 **Written by the verifier** (a few lines), so these two changes have no independent implementer. CI and the next full pass check them.
+
+## Verifier gate (2026-11-07 12:01) — the real-Crispy zip gate holds: the dialog's sources zip equals the CLI's
+
+On a clone at `692e286` (`~/avar2-verifier/zip-gate.sh`), the same six files of the real Crispy, once through `avar2-studio build --format sources` and once through the probe's `export-sources` on a studio on 5073:
+- 92,192 members on each side, none on one side only, **0 with different content** (at `4d12e14` it was 7,224).
+- H at SPAC −100: 1715-1-1 Slanted 3,524 on both (the dialog gave 3,484 before); 47-1462-1 Slanted 5,296 on both (5,258 before).
+- The CLI log has "27 derived masters take their parents' spacing amounts (9 parents, by location)".
+
+The only code change since `692e286` is Fontra's start wait, so the gate carries over to `d9a777a`.
