@@ -40,6 +40,7 @@ from pathlib import Path
 from fontTools.ttLib import TTFont
 from fontTools.varLib.models import VariationModel
 
+from avar2_studio import spac_amounts
 from avar2_studio.transforms import builtin_spac_widthaware as wa
 from avar2_studio.transforms.base import BuildContext
 
@@ -286,6 +287,8 @@ def reference_trace(input_path, master_locations):
         "corners": [[[tag, value] for tag, value in corner.items()] for corner in corners],
         "inks": [[order.index(name), ink] for name, ink in inks.items()],
         "mean_ink": sum(inks.values()) / len(inks),
+        "reference_ink": spac_amounts.reference_ink(
+            wa._master_means(font, master_locations, corners, corner_means)),
         "corner_inks": corner_inks,
         "corner_means": corner_means,
         "corner_advances": corner_advances,
@@ -298,7 +301,7 @@ def check_trace(input_path, trace_path, master_locations):
     mine = json.loads(Path(trace_path).read_text())
     theirs = reference_trace(input_path, master_locations)
     order = TTFont(input_path).getGlyphOrder()
-    for key in ("corners", "inks", "mean_ink", "corner_means", "supports"):
+    for key in ("corners", "inks", "mean_ink", "reference_ink", "corner_means", "supports"):
         ok(mine[key] == theirs[key], f"{key} equal the reference's, exactly"
            + ("" if mine[key] == theirs[key] else f" (Rust {mine[key]} vs {theirs[key]})"))
     for key in ("corner_inks", "corner_advances"):

@@ -9,8 +9,8 @@
 //!
 //! `--rule` prints the width-aware amount rule this build implements. The
 //! studio asks before it trusts the binary (builtin_spac_widthaware.py
-//! `NATIVE_RULE`): a build from before the per-master amounts would read
-//! the same JSON and still write one constant amount per glyph.
+//! `NATIVE_RULE`): a build for an older rule would read the same JSON and
+//! write different amounts.
 //!
 //! transforms.json is the studio's transform list shape, e.g.
 //!   [{"type": "spac_widthaware", "enabled": true,
@@ -28,8 +28,9 @@
 
 use std::{env, fs, process::exit};
 
-/// The width-aware amount rule: per-master corner amounts (E2i-c).
-const RULE: &str = "e2i-c";
+/// The width-aware amount rule: per-master corner amounts (E2i-c), with a SPAC
+/// unit measured against the masters' average width.
+const RULE: &str = "e2i-c-masters";
 
 fn main() {
     let args: Vec<String> = env::args().collect();

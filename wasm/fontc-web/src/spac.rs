@@ -19,7 +19,9 @@
 //!   fvar/avar — as the integer the sources export writes
 //!   (`spac_amounts.per_side`, with its 1 u floor on the tight end), and
 //!   the corners' amounts become gvar deltas through fontTools'
-//!   VariationModel (`getDeltas(…, round=round)`). Composites are
+//!   VariationModel (`getDeltas(…, round=round)`). A SPAC unit is measured
+//!   against the masters' average width (`spac_amounts.reference_ink`), so
+//!   it means the same wherever the font rests. Composites are
 //!   spaced too — with their base (first) component's amount on both
 //!   sides (E2k) — USE_MY_METRICS composites are skipped (they already
 //!   inherit their base glyph's delta), and `.notdef` is left alone.
@@ -601,16 +603,16 @@ fn per_side(
     value: f64,
     ink: f64,
     mean_here: f64,
-    mean_default: f64,
+    reference: f64,
     bias: f64,
     scale: f64,
     advance: f64,
     composite: bool,
 ) -> i64 {
-    if mean_here <= 0.0 || mean_default <= 0.0 {
+    if mean_here <= 0.0 || reference <= 0.0 {
         return 0;
     }
-    let amount = value * (ink / mean_here).powf(bias) * (mean_here / mean_default) * scale;
+    let amount = value * (ink / mean_here).powf(bias) * (mean_here / reference) * scale;
     let dx = amount.round_ties_even() as i64;
     if dx < 0 {
         fit_dx(dx, advance, composite)
@@ -1093,6 +1095,8 @@ struct Plan {
     /// (gid, default ink) for every glyph with ink, `.notdef` excluded.
     inks: Vec<(u16, f64)>,
     mean_ink: f64,
+    /// What a SPAC unit is measured against (`spac_amounts.reference_ink`).
+    reference_ink: f64,
     /// Per corner, by gid: ink width (0.0 = none), and advance.
     corner_inks: Vec<Vec<f64>>,
     corner_means: Vec<f64>,
@@ -1164,7 +1168,26 @@ impl Plan {
         } else {
             None
         };
-        Ok(Self { corners, inks, mean_ink, corner_inks, corner_means, corner_advances, model })
+        let reference_ink = if model.is_some() {
+            let reference = reference_ink(wa, master_locations, &corners, &corner_means);
+            eprintln!(
+                "spac_widthaware: a SPAC unit is measured against {reference:.1} u, \
+                 the masters' average width"
+            );
+            reference
+        } else {
+            mean_ink
+        };
+        Ok(Self {
+            corners,
+            inks,
+            mean_ink,
+            reference_ink,
+            corner_inks,
+            corner_means,
+            corner_advances,
+            model,
+        })
     }
 
     /// `_corner_amounts`: the per-side integer at every corner for SPAC
@@ -1185,7 +1208,7 @@ impl Plan {
                     value,
                     self.corner_inks[i][ink_gid as usize],
                     self.corner_means[i],
-                    self.mean_ink,
+                    self.reference_ink,
                     bias,
                     scale,
                     self.corner_advances[i][gid as usize],
@@ -1194,6 +1217,41 @@ impl Plan {
             })
             .collect()
     }
+}
+
+/// `spac_amounts.reference_ink` over `_master_means`: the average of the real
+/// masters' mean ink. `given` lists the masters with explicit coordinates and
+/// the built font's default as `{}`. The default is a corner of the model but
+/// not a master unless a master sits there, and then that master normalizes onto
+/// the same corner, so skipping the `{}` entry keeps the result independent of
+/// where the font rests. With no designspace, every inferred corner counts.
+fn reference_ink(
+    wa: &WidthAware,
+    given: Option<&[Option<UserLocation>]>,
+    corners: &[Corner],
+    corner_means: &[f64],
+) -> f64 {
+    let mut masters: Vec<Corner> = Vec::new();
+    for location in given.unwrap_or_default() {
+        if !location.as_ref().is_some_and(|l| !l.0.is_empty()) {
+            continue;
+        }
+        for corner in wa.axes.normalize_corners(std::slice::from_ref(location)) {
+            if !masters.iter().any(|master| same_location(master, &corner)) {
+                masters.push(corner);
+            }
+        }
+    }
+    let means: Vec<f64> = if masters.is_empty() {
+        corner_means.to_vec()
+    } else {
+        masters
+            .iter()
+            .filter_map(|master| corners.iter().position(|c| same_location(c, master)))
+            .map(|i| corner_means[i])
+            .collect()
+    };
+    means.iter().sum::<f64>() / means.len() as f64
 }
 
 /// Width-aware `spac_widthaware`: every glyph with measurable ink gets a
@@ -1282,10 +1340,10 @@ fn widthaware_extras(
         let amounts_hi =
             plan.corner_amounts(hi as f64, gid, ink_gid, composite.is_some(), bias, scale);
         for (i, &dx) in amounts_lo.iter().enumerate() {
-            let raw = if plan.corner_means[i] > 0.0 && plan.mean_ink > 0.0 {
+            let raw = if plan.corner_means[i] > 0.0 && plan.reference_ink > 0.0 {
                 lo as f64
                     * (plan.corner_inks[i][ink_gid as usize] / plan.corner_means[i]).powf(bias)
-                    * (plan.corner_means[i] / plan.mean_ink)
+                    * (plan.corner_means[i] / plan.reference_ink)
                     * scale
             } else {
                 0.0
@@ -1570,6 +1628,7 @@ pub(crate) fn widthaware_trace(font_bytes: &[u8], transforms_json: &str) -> Resu
         "corners": corners,
         "inks": plan.inks,
         "mean_ink": plan.mean_ink,
+        "reference_ink": plan.reference_ink,
         "corner_inks": plan.corner_inks,
         "corner_means": plan.corner_means,
         "corner_advances": plan.corner_advances,

@@ -222,6 +222,21 @@ fn spac_matches_studio_oracle_at_the_masters() {
 /// behind avar, a location between masters, the floor, a zero advance,
 /// curve extremes, composites — with HVAR and without, and off the
 /// default bias.
+/// The same fixture resting elsewhere, on a master and between masters. The
+/// default is then an extra corner of the model that must stay out of what a
+/// SPAC unit is measured against (user report, 2026-11-07).
+#[test]
+fn spac_matches_studio_oracle_when_the_default_moves() {
+    let params = r#""min":-100,"max":100,"bias":1.0,"scale":1.25"#;
+    for (label, moves) in [
+        ("moved-master", &["XTRA=500", "XOPQ=110"][..]),
+        ("moved-interior", &["XTRA=300", "XOPQ=60"][..]),
+    ] {
+        let (font, locations) = common::spac_masters_relocated(label, moves);
+        compare_at_the_masters(label, &font, &transforms_with_masters(params, &locations));
+    }
+}
+
 #[test]
 fn spac_matches_studio_oracle_on_the_masters_fixture() {
     for (label, hvar, params) in [

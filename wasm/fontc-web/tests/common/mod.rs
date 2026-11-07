@@ -96,3 +96,19 @@ pub fn spac_masters_fixture(label: &str, hvar: bool) -> (PathBuf, String) {
     let locations = std::fs::read_to_string(&locations).expect("read master locations");
     (font, locations)
 }
+
+/// `spac_masters_fixture`, resting at `moves` (`["XTRA=300", …]`, user values).
+pub fn spac_masters_relocated(label: &str, moves: &[&str]) -> (PathBuf, String) {
+    let (font, locations) = spac_masters_fixture(label, true);
+    let moved = tmp_dir().join(format!("spac-masters-{label}-moved.ttf"));
+    let status = Command::new(python())
+        .arg(manifest().join("spike/relocate_default.py"))
+        .arg(&font)
+        .arg(&moved)
+        .args(moves)
+        .status()
+        .expect("run spike/relocate_default.py");
+    assert!(status.success(), "spike/relocate_default.py failed");
+    (moved, locations)
+}
+
