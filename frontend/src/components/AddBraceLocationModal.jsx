@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './AddBraceLocationModal.css';
 
 /**
@@ -22,6 +23,7 @@ import './AddBraceLocationModal.css';
  *   axisTag            — control axis tag
  *   axisDefault        — its default value (used for non-default check)
  *   allAxes            — every axis (for pin inputs)
+ *   allInstances       — instances offered as corners alongside the masters
  *   prefillGlyphs      — optional initial value for the glyph field
  *   lockGlyphs         — if true, the glyph field is read-only
  *                        (per-glyph "+ Add layer for X" sets this)
@@ -37,11 +39,11 @@ import './AddBraceLocationModal.css';
  *   initialAllApplicable — open with that toggle on (the panel's
  *                        "+ Add layer for all N glyphs" button sets this).
  */
-function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded, glyphChars = {}, applicableGlyphs = [], initialAllApplicable = false }) {
+function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault, allAxes, allMasters, allInstances, prefillGlyphs, lockGlyphs, editLayer, duplicateFrom, vfFamilyId, fontLoaded, glyphChars = {}, applicableGlyphs = [], initialAllApplicable = false }) {
   const [glyphsInput, setGlyphsInput] = useState('');
   const [pins, setPins] = useState({});           // edit mode: the single location
   const [controlValue, setControlValue] = useState(0);  // add mode: the crbr value
-  const [selectedCorners, setSelectedCorners] = useState(() => new Set()); // master names
+  const [selectedCorners, setSelectedCorners] = useState(() => new Set()); // "master:<name>" / "instance:<name>" keys — prefixed so a master and an instance sharing a name stay distinct
   const [customOn, setCustomOn] = useState(false); // add a custom (non-corner) location
   const [customPins, setCustomPins] = useState({}); // parametric coords for the custom point
   const [error, setError] = useState(null);
@@ -148,14 +150,19 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
   };
 
   // Add mode: the parametric locations to create a view at — each
-  // ticked corner, plus the custom point if enabled. A brace layer is
-  // a full point: this parametric location × the control-axis value.
+  // ticked corner (master or instance), plus the custom point if
+  // enabled. A brace layer is a full point: this parametric location
+  // × the control-axis value.
   const buildLocations = () => {
     const locs = [];
-    for (const m of (allMasters || [])) {
-      if (!selectedCorners.has(m.name)) continue;
+    const corners = [
+      ...(allMasters || []).map(m => [`master:${m.name}`, m.coordinates]),
+      ...(allInstances || []).map(inst => [`instance:${inst.name}`, inst.coordinates]),
+    ];
+    for (const [key, coordinates] of corners) {
+      if (!selectedCorners.has(key)) continue;
       const parametric = {};
-      for (const [tag, v] of Object.entries(m.coordinates || {})) {
+      for (const [tag, v] of Object.entries(coordinates || {})) {
         if (tag === axisTag) continue;
         parametric[tag] = Number(v);
       }
@@ -171,8 +178,6 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     }
     return locs;
   };
-
-  if (!isOpen) return null;
 
   const parsedGlyphs = parseGlyphString(glyphsInput);
   // "Add to all applicable glyphs": offered whenever the axis covers a
@@ -274,7 +279,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
     }
     const locations = buildLocations();
     if (locations.length === 0) {
-      setError('Pick at least one master corner (or add a custom location)');
+      setError('Pick at least one corner (or add a custom location)');
       return;
     }
     // One brace layer per glyph × location: the parametric point + the
@@ -317,8 +322,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
           : `Add applicable glyphs to ${axisTag}`;
 
   return (
-    <div className="modal-overlay">
-      <div className="add-brace-location-modal">
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="add-brace-location-modal block border-0" onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>{title}</h3>
         <p className="modal-help">
           {isEdit
@@ -326,16 +331,17 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             : isDuplicate
               ? <>Starts at the same coordinates — change what you need, then save as a NEW layer. Edit the glyph field to duplicate this location onto other glyphs.</>
             : effectiveLockGlyphs
-              ? <>Add {axisTag} views for <code>{prefillGlyphs}</code> — one editable layer per master corner you tick.</>
+              ? <>Add {axisTag} views for <code>{prefillGlyphs}</code> — one editable layer per corner you tick.</>
               : initialAllApplicable
                 ? <>One new layer for every glyph this axis already covers, at the location
                   you set below. Name extra glyphs in the field to widen coverage in the
                   same step. A glyph that already has a layer at that exact location is
                   left as is.</>
-              : <>Each view is one editable layer: a master corner × the {axisTag} value.
+              : <>Each view is one editable layer: a corner (master or instance) × the {axisTag} value.
                 Set the {axisTag} value, tick the corners to define it at, then edit
-                each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>) or
-                slash-named (<code>/idotless</code>).</>}
+                each outline in Fontra. Glyphs: plain characters (<code>AEFH</code>),
+                slash-named (<code>/idotless</code>), or dotted/underscored names
+                taken whole (<code>Z.noterminal</code>).</>}
         </p>
         <form onSubmit={handleSubmit}>
           {/* Glyph field only when it's editable — in the locked modes
@@ -401,7 +407,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="pin-tag">{axis.tag}</span>
                     </label>
                     <div className="pin-slider-wrap">
-                      <input type="range" className="pin-slider" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
+                      <input type="range" className="pin-slider" aria-label={`Pin ${axis.tag}`} disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
                       <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                     </div>
                     <input type="number" className="pin-value" disabled={!isPinned} min={axis.min} max={axis.max} step={0.1} value={currentValue} onChange={e => setPinValue(axis.tag, e.target.value)} />
@@ -423,7 +429,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                       <span className="form-row-hint">the control-axis position these views define</span>
                     </label>
                     <div className="control-value-row">
-                      <input type="range" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
+                      <input type="range" aria-label={`${axisTag} value`} min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
                       <input type="number" className="pin-value" min={ctrl.min} max={ctrl.max} step={0.1} value={controlValue} onChange={e => setControlValue(round1(e.target.value))} />
                     </div>
                   </div>
@@ -431,16 +437,28 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
               })()}
 
               <div className="corner-picker">
-                <div className="location-pins-header">Master corners · one view per corner</div>
+                <div className="location-pins-header">Corners · one view per picked location</div>
                 <div className="corner-list">
+                  {(allMasters || []).length > 0 && (
+                    <div className="corner-group-header">Masters</div>
+                  )}
                   {(allMasters || []).map(m => (
-                    <label key={m.name} className={`corner-item ${selectedCorners.has(m.name) ? 'selected' : ''}`}>
-                      <input type="checkbox" checked={selectedCorners.has(m.name)} onChange={() => toggleCorner(m.name)} />
+                    <label key={`master:${m.name}`} className={`corner-item ${selectedCorners.has(`master:${m.name}`) ? 'selected' : ''}`}>
+                      <input type="checkbox" checked={selectedCorners.has(`master:${m.name}`)} onChange={() => toggleCorner(`master:${m.name}`)} />
                       <span className="corner-name">{m.name}</span>
                     </label>
                   ))}
-                  {(allMasters || []).length === 0 && (
-                    <div className="corner-empty">No masters found — use a custom location below.</div>
+                  {(allInstances || []).length > 0 && (
+                    <div className="corner-group-header">Instances</div>
+                  )}
+                  {(allInstances || []).map(inst => (
+                    <label key={`instance:${inst.name}`} className={`corner-item ${selectedCorners.has(`instance:${inst.name}`) ? 'selected' : ''}`}>
+                      <input type="checkbox" checked={selectedCorners.has(`instance:${inst.name}`)} onChange={() => toggleCorner(`instance:${inst.name}`)} />
+                      <span className="corner-name">{inst.name}</span>
+                    </label>
+                  ))}
+                  {(allMasters || []).length === 0 && (allInstances || []).length === 0 && (
+                    <div className="corner-empty">No masters or instances found — use a custom location below.</div>
                   )}
                 </div>
                 <label className={`corner-item corner-custom ${customOn ? 'selected' : ''}`}>
@@ -455,7 +473,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                         <div key={axis.tag} className="location-pin-row pinned">
                           <span className="pin-tag">{axis.tag}</span>
                           <div className="pin-slider-wrap">
-                            <input type="range" className="pin-slider" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
+                            <input type="range" className="pin-slider" aria-label={`Pin ${axis.tag}`} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
                             <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                           </div>
                           <input type="number" className="pin-value" min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCustomPinValue(axis.tag, e.target.value)} />
@@ -479,7 +497,10 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                 if (!previewChar) return null;
                 const items = [];
                 for (const m of (allMasters || [])) {
-                  if (selectedCorners.has(m.name)) items.push({ label: m.name, coords: m.coordinates });
+                  if (selectedCorners.has(`master:${m.name}`)) items.push({ label: m.name, coords: m.coordinates });
+                }
+                for (const inst of (allInstances || [])) {
+                  if (selectedCorners.has(`instance:${inst.name}`)) items.push({ label: inst.name, coords: inst.coordinates });
                 }
                 if (customOn) {
                   const coords = {};
@@ -546,7 +567,7 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
                         <span className="pin-tag">{axis.tag}</span>
                       </label>
                       <div className="pin-slider-wrap">
-                        <input type="range" className="pin-slider" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
+                        <input type="range" className="pin-slider" aria-label={`Correction ${axis.tag}`} disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
                         <div className="pin-slider-ticks"><span>{axis.min}</span><span>{axis.max}</span></div>
                       </div>
                       <input type="number" className="pin-value correction-value" disabled={!isOn} min={axis.min} max={axis.max} step={0.1} value={val} onChange={e => setCorrectionValue(axis.tag, e.target.value)} />
@@ -595,8 +616,8 @@ function AddBraceLocationModal({ isOpen, onClose, onCreate, axisTag, axisDefault
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -690,6 +711,7 @@ function summariseGlyphs(list, limit = 8) {
  *   "AEFH"          → ["A", "E", "F", "H"]
  *   "/idotless"     → ["idotless"]
  *   "A/idotless/B"  → ["A", "idotless", "B"]
+ *   "Z.noterminal"  → ["Z.noterminal"]
  *   "A E F H"       → ["A", "E", "F", "H"]
  *   "A, E, F, H"    → ["A", "E", "F", "H"]
  *   "  "            → []
@@ -697,6 +719,10 @@ function summariseGlyphs(list, limit = 8) {
  * Tokens with no leading "/" are treated as raw text — each
  * character is one glyph. Tokens starting with "/" are a named
  * glyph (the name continues until the next "/" or whitespace).
+ * Exception: a bare token containing "." or "_" is a glyph NAME
+ * typed without the slash ("Z.noterminal", "f_f_i") — nobody
+ * means the period/underscore glyphs inside run-together text,
+ * and suffixed alternates are what designers paste most.
  */
 function parseGlyphString(input) {
   if (!input) return [];
@@ -712,6 +738,10 @@ function parseGlyphString(input) {
   // Split into tokens by whitespace / commas first.
   const tokens = input.split(/[\s,]+/).filter(Boolean);
   for (const token of tokens) {
+    if (token.length > 1 && !token.includes('/') && /[._]/.test(token)) {
+      push(token);
+      continue;
+    }
     let i = 0;
     while (i < token.length) {
       if (token[i] === '/') {

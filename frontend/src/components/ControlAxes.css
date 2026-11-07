@@ -938,6 +938,12 @@
   margin-right: 0.15rem;
 }
 
+.layer-coords-corner {
+  color: var(--zinc-700);
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+
 .layer-coords-axis-pair {
   display: inline-flex;
   gap: 0.18rem;

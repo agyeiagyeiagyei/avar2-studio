@@ -8,6 +8,7 @@ import AddAxisModal from './AddAxisModal';
 import EditAxisModal from './EditAxisModal';
 import ControlAxes from './ControlAxes';
 import AddControlAxisModal from './AddControlAxisModal';
+import { useControlAxes } from '../hooks/useControlAxes';
 import { formatAxisValue } from '../utils/formatNumber';
 
 // Font size stays in rem internally (CSS font-size + /api/text-width's
@@ -21,8 +22,21 @@ const formatPt = (rem) => {
   return Number.isInteger(pt) ? String(pt) : pt.toFixed(1);
 };
 
-function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded, building = false, glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes, onToggleDisableControlAxis, onCreateControlAxis, onUpdateControlAxis, onDeleteControlAxis, onSetControlAxisLayers, onControlAxisLayerDelta,
-  onControlAxisReseed, onOpenControlAxisInEditor, controlAxisAuthoringDisabledReason }) {
+function Sidebar({ axes, coordinates, onAxisChange, badgeGovernedTags, disabled, multiTargetCount = 0, sampleText, onSampleTextChange, selectedInstance, familyName, onUpdateInstance, onResetCoordinates, originalCoordinates, fontSize, onFontSizeChange, onDuplicateInstance, onCreateNewInstance, avar2Mode, avar2Instances, avar2Axes, onAddAvar2Axis, onUpdateAvar2Axis, onDeleteAvar2Axis, onUpdateAvar2Mapping, onReloadAvar2Data, glyphsFileHasUnsavedChanges, getInstanceSyncStatus, instances, masters = [], vfFamilyId, fontLoaded }) {
+  // CONTROL AXES come from the useControlAxes context (renamed to the
+  // old prop names so the body below is untouched) instead of being
+  // drilled through App.
+  const {
+    glyphCoverageAxes = [], glyphChars = {}, disabledControlAxes,
+    handleToggleDisableControlAxis: onToggleDisableControlAxis,
+    handleCreateControlAxis: onCreateControlAxis,
+    handleUpdateControlAxis: onUpdateControlAxis,
+    handleDeleteControlAxis: onDeleteControlAxis,
+    controlAxisAuthoringDisabledReason,
+    handleControlAxisLayerDelta: onControlAxisLayerDelta,
+    handleControlAxisReseed: onControlAxisReseed,
+    handleOpenControlAxisInEditor: onOpenControlAxisInEditor,
+  } = useControlAxes();
   // CONTROL AXES — modal for declaring a new axis. State + render
   // live in Sidebar because the +Add button does too; the App-level
   // handler does the actual POST + refetch and surfaces the result.
@@ -188,6 +202,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         <div className="axis-slider-container">
           <input
             type="range"
+            aria-label="Font size"
             min="9"
             max="144"
             step="0.5"
@@ -243,15 +258,55 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           // Every axis renders as a plain AxisControl. SPAC support is
           // deferred; if a source happens to declare a SPAC axis it just
           // renders as a normal parametric/avar2 axis with no special UX.
-          const renderAxis = (axis) => (
-            <AxisControl
-              key={axis.tag}
-              axis={axis}
-              value={coordinates[axis.tag] ?? axis.default}
-              onChange={(value) => onAxisChange(axis.tag, value)}
-              disabled={disabled}
-            />
-          );
+          const renderAxis = (axis) => {
+            // Badge-governed transform axes (ROND/slnt): the row's
+            // badge sets the per-style value AND the row renders at that
+            // percent, so a slider here would be overridden — it renders
+            // inert with a pointer to the badge and the Preview tab.
+            // GRAD is exempt (live preview; the G badge owns the saved
+            // grade) — see badgeGovernedTags in App.
+            const badgeGoverned = !!(badgeGovernedTags && badgeGovernedTags.has(axis.tag));
+            if (axis.is_grade_axis) {
+              return (
+                <div
+                  key={axis.tag}
+                  title={`Preview the grade on the selected row — not saved: the G badge on each instance row sets the per-instance grade the build uses.`}
+                >
+                  <AxisControl
+                    axis={axis}
+                    value={coordinates[axis.tag] ?? axis.default}
+                    onChange={(value) => onAxisChange(axis.tag, value)}
+                    disabled={disabled}
+                  />
+                </div>
+              );
+            }
+            if (badgeGoverned) {
+              return (
+                <div
+                  key={axis.tag}
+                  className="axis-secondary-off"
+                  title={`${axis.tag} is set per style from the badge on each instance row — explore the axis on the Preview tab.`}
+                >
+                  <AxisControl
+                    axis={axis}
+                    value={coordinates[axis.tag] ?? axis.default}
+                    onChange={() => {}}
+                    disabled
+                  />
+                </div>
+              );
+            }
+            return (
+              <AxisControl
+                key={axis.tag}
+                axis={axis}
+                value={coordinates[axis.tag] ?? axis.default}
+                onChange={(value) => onAxisChange(axis.tag, value)}
+                disabled={disabled}
+              />
+            );
+          };
 
           // Sidebar only renders the axes that actively deform the font
           // (has_master_coverage=true) plus the GRAD axis when grade is
@@ -260,8 +315,8 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
           // conceptually (with the mapping rows that drive them), not
           // duplicated up here.
           // Secondary parametric (control) axes get their own group: they
-          // deform only their applicable glyphs, and their value is preview
-          // state — saves strip it, like SPAC. The static app flags them
+          // deform only their applicable glyphs. Their per-instance value
+          // persists in the control sidecar. The static app flags them
           // has_master_coverage=false (they'd vanish from Core), the server
           // flags true (they'd blend into Core); splitting on is_control_axis
           // gives both the same sidebar as the Preview tab.
@@ -281,7 +336,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                 <div className="axis-group axis-group-secondary">
                   <h3 className="axis-group-heading">
                     Secondary parametric axes
-                    <span className="axis-group-sub">glyph-scoped · preview only</span>
+                    <span className="axis-group-sub">glyph-scoped · saved per row{multiTargetCount > 0 ? ` · applying to ${multiTargetCount} selected rows` : ''}</span>
                   </h3>
                   {secondaryAxes.map(axis => {
                     const off = !!(disabledControlAxes && disabledControlAxes.has(axis.tag));
@@ -291,7 +346,7 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                         className={`axis-secondary${off ? ' axis-secondary-off' : ''}`}
                         title={off
                           ? `${axis.tag} is disabled in preview (eye icon in the section below) — rows render it at the axis default.`
-                          : `Moves only the glyphs ${axis.tag} has layers for. Preview state: not saved with the instance.`}
+                          : `Moves only the glyphs ${axis.tag} has layers for. Saved with the selected instance row.`}
                       >
                         <AxisControl
                           axis={axis}
@@ -322,9 +377,9 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
         glyphChars={glyphChars}
         allAxes={axes}
         allMasters={masters}
+        allInstances={instances}
         vfFamilyId={vfFamilyId}
         fontLoaded={fontLoaded}
-        building={building}
         disabledAxes={disabledControlAxes || new Set()}
         onToggleDisable={onToggleDisableControlAxis || (() => {})}
         onAddClick={onCreateControlAxis ? () => setShowAddControlAxisModal(true) : undefined}
@@ -539,13 +594,22 @@ function Sidebar({ axes, coordinates, onAxisChange, disabled, sampleText, onSamp
                             <div className="axis-slider-container traditional-axis-slider-container">
                               <input
                                 type="range"
+                                aria-label={axisLabel}
                                 className="axis-slider"
                                 min={axisMin}
                                 max={axisMax}
                                 step={sliderStep}
                                 value={shown}
                                 onChange={(e) => scheduleMappingCommit(selectedInstance.name, axisColumn, parseFloat(e.target.value))}
-                                onPointerUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
+                                onPointerUp={() => {
+                                  // An UNSET cell whose wanted value IS the
+                                  // resting position never fires a change
+                                  // event (wght default = its min here), so
+                                  // releasing the slider commits the value
+                                  // it rests at.
+                                  if (unset) scheduleMappingCommit(selectedInstance.name, axisColumn, shown, 0);
+                                  flushMappingCommit(selectedInstance.name, axisColumn);
+                                }}
                                 onKeyUp={() => flushMappingCommit(selectedInstance.name, axisColumn)}
                               />
                               <div className="axis-values">

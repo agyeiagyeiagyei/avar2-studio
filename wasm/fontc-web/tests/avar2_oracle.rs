@@ -2,38 +2,29 @@
 //! font + the studio's CrispyMini-avar.csv and structurally compare the
 //! result against the gftools `gen_avar2_mapping` oracle with fontTools.
 //!
-//! Prerequisites (paths overridable via env):
-//!   - spike font:  $AVAR2_SPIKE_FONT  (default /tmp/fontc-wasm-spike.ttf)
-//!   - mappings:    $AVAR2_CSV         (default the studio's CrispyMini-avar.csv)
-//!   - oracle TTF:  $AVAR2_ORACLE      (default /tmp/av2-oracle.ttf),
-//!     built by `spike/build_oracle.py`
-//!   - python with fontTools: $AVAR2_PYTHON (default the avar2-studio venv)
+//! Fixtures come from tests/common (generated from examples/crispy-mini;
+//! $AVAR2_SPIKE_FONT / $AVAR2_CSV / $AVAR2_ORACLE / $AVAR2_PYTHON override).
 
 use std::path::Path;
 use std::process::Command;
 
+mod common;
+
 #[test]
 fn avar2_matches_gftools_oracle() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let font_path = std::env::var("AVAR2_SPIKE_FONT")
-        .unwrap_or_else(|_| "/tmp/fontc-wasm-spike.ttf".to_string());
-    let csv_path = std::env::var("AVAR2_CSV").unwrap_or_else(|_| {
-        manifest
-            .join("../../examples/crispy-mini/sources/CrispyMini-avar.csv")
-            .to_string_lossy()
-        .into_owned()
-    });
-    let oracle_path =
-        std::env::var("AVAR2_ORACLE").unwrap_or_else(|_| "/tmp/av2-oracle.ttf".to_string());
-    let python = std::env::var("AVAR2_PYTHON")
-        .unwrap_or_else(|_| "/Users/agyei/Documents/avar2-studio/.venv/bin/python".to_string());
+    let font_path = common::spike_font();
+    let csv_path = common::mappings_csv();
+    let oracle_path = common::oracle_font(&font_path, &csv_path);
+    let python = common::python();
 
     let font_bytes = std::fs::read(&font_path).expect("read spike font");
     let csv = std::fs::read_to_string(&csv_path).expect("read mappings csv");
     let out = fontc_web::add_avar2(font_bytes, &csv, None, None).expect("add_avar2");
 
-    let rust_out = "/tmp/av2-rust.ttf";
-    std::fs::write(rust_out, &out).expect("write rust output");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/target/tmp")).expect("create target/tmp");
+    let rust_out = format!("{}/target/tmp/av2-rust.ttf", env!("CARGO_MANIFEST_DIR"));
+    std::fs::write(&rust_out, &out).expect("write rust output");
 
     let comparator = manifest.join("spike/compare_avar2.py");
     let status = Command::new(&python)

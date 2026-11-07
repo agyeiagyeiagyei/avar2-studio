@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useBuildStatus } from '../hooks/useBuildStatus';
+import { useStudioData } from '../hooks/useStudioData';
+import { useTransforms } from '../hooks/useTransforms';
 import './Header.css';
 import { api } from '../api';
-import logoGif from '../assets/logo.gif';
 import ImportConfigModal, { type ImportReport } from './ImportConfigModal';
 import GradeDiagnostics from './GradeDiagnostics';
+import { kinetikernMenuDesc } from '../kinetikern-copy';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,51 +20,15 @@ interface ExampleInfo {
   subtitle?: string;
 }
 
-interface TransformParamOption {
-  value: string;
-  label: string;
-}
-
-interface TransformParamSpec {
-  key: string;
-  label: string;
-  type: string; // 'select' | 'bool' | 'float' | 'int' (int/float share the number input)
-  default?: any; // server-defined; type depends on ``type``
-  options?: TransformParamOption[];
-  min?: number;
-  max?: number;
-}
-
-interface TransformEntry {
-  id: string;
-  name: string;
-  description?: string;
-  enabled?: boolean;
-  injected_axis_tag?: string | null;
-  params_schema?: TransformParamSpec[];
-  params?: Record<string, any>; // user values keyed by ParamSpec.key
-}
-
 interface ImportData {
   bundle: unknown;
   report: ImportReport;
 }
 
 interface HeaderProps {
-  onBuildFont?: () => void;
-  building?: boolean;
   fontLoaded?: boolean;
   familyName?: string;
   onSourceLoaded?: () => void;
-  busy?: boolean;
-  transforms?: TransformEntry[];
-  onToggleTransform?: (id: string, enabled: boolean) => void;
-  onTransformParam?: (id: string, key: string, value: any) => void;
-  grade?: GradeState;
-  onToggleGrade?: (enabled: boolean) => void;
-  onGradeDefault?: (pct: number) => void;
-  onGradeIntensity?: (value: number) => void;
-  onGradeClamp?: (value: boolean) => void;
   // Static demo (GitHub Pages): hide every action that needs the backend.
   staticMode?: boolean;
   // Static demo showing an uploaded source (not a baked snapshot) —
@@ -73,40 +40,6 @@ interface HeaderProps {
   // Static demo with an uploaded source: config import becomes
   // available (bundles apply in-browser via the static provider).
   allowImportInStatic?: boolean;
-  // Coverage audit findings (uploads only — see coverage.js). The
-  // header shows only the count badge; the findings list and its
-  // actions live in the Space tab.
-  coverageFindings?: CoverageFinding[];
-  onShowCoverage?: () => void;
-}
-
-interface CoverageFinding {
-  severity: 'fail' | 'info';
-  type: 'uncovered-corner' | 'out-of-range-source' | 'collapse' | 'inert-sweep';
-  location?: Record<string, number> | null;
-  detail: string;
-}
-
-// Grade transform — source-level (adds a GRAD axis); toggle + global default
-// here, per-instance grade% in each style's row menu.
-interface GradeDiagnostic {
-  level: 'error' | 'warning' | 'info';
-  code: string;
-  instance: string | null;
-  message: string;
-  detail?: string;
-}
-
-interface GradeState {
-  enabled?: boolean;
-  default_pct?: number;
-  /** Global multiplier on every authored grade%. */
-  intensity?: number;
-  /** Stop a grade thickening where the counters have no room to open. */
-  clamp_to_headroom?: boolean;
-  instances?: { name: string; pct: number }[];
-  max_pct?: Record<string, number>;
-  diagnostics?: GradeDiagnostic[];
 }
 
 // "Load Font" dropdown sitting in the top bar. The dropdown is the
@@ -125,11 +58,34 @@ interface GradeState {
 // useEffect. Its content keeps the original load-font-menu /
 // transforms-menu markup and styling hooks. The Load Font and Config
 // dropdowns still use the old manual pattern.
-function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded, busy,
-                 transforms = [], onToggleTransform, onTransformParam,
-                 grade, onToggleGrade, onGradeDefault, onGradeIntensity, onGradeClamp, staticMode = false,
+function Header({ fontLoaded, familyName, onSourceLoaded, staticMode = false,
                  hideRebuild = false, allowImportInStatic = false,
-                 coverageFindings = [], onShowCoverage, isUploadDataset = false }: HeaderProps) {
+                 isUploadDataset = false }: HeaderProps) {
+  // Building / stale come from the shared build signal, not a threaded prop.
+  const { building, buildStale } = useBuildStatus();
+  // Transforms / grade state + commit handlers come from the
+  // useTransforms context (renamed to the old prop names so the body
+  // below is untouched); the build action + first-load flag come from
+  // useStudioData.
+  const { loading, buildFont: onBuildFont } = useStudioData();
+  const {
+    transforms = [], transformsDirty = {}, grade, kinetikern,
+    handleToggleTransform: onToggleTransform,
+    handleTransformParam: onTransformParam,
+    handleApplyTransform: onApplyTransform,
+    handleToggleGrade: onToggleGrade,
+    handleGradeDefault: onGradeDefault,
+    handleGradeIntensity: onGradeIntensity,
+    handleGradeClamp: onGradeClamp,
+    handleToggleKinetikern: onToggleKinetikern,
+  } = useTransforms();
+  // Same formula App drilled as `busy`: building (build signal) or the
+  // first-load gate is up.
+  const busy = building || loading;
+  // Styles Kinetikern actually has a correction for — the count the menu
+  // reports (K1). Entries survive the family switch, so this is entries,
+  // not "enabled and entries".
+  const spacedCount = (kinetikern?.instances || []).length;
   const [examples, setExamples] = useState<ExampleInfo[]>([]);
   const [open, setOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -172,7 +128,8 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [configOpen]);
 
-  const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0);
+  const enabledCount = transforms.filter(t => t.enabled).length + (grade?.enabled ? 1 : 0)
+    + (kinetikern?.enabled !== false && spacedCount > 0 ? 1 : 0);
 
   const handleLoadExample = async (id: string, name: string) => {
     setOpen(false);
@@ -288,7 +245,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
       try {
         parsed = JSON.parse(reader.result as string); // readAsText → string
       } catch (parseErr) {
-        setLoadingMsg(`Not valid JSON: ${parseErr.message}`);
+        setLoadingMsg(`Couldn't read that file: ${parseErr.message}`);
         setTimeout(() => setLoadingMsg(null), 6000);
         return;
       }
@@ -326,7 +283,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
     <>
     <header className="header">
       <div className="header-title">
-        <img className="header-logo" src={logoGif} alt="avar2 studio" />
+        <span className="header-logo">avar2studio</span>
         {loadingMsg && <span className="header-loading-msg">{loadingMsg}</span>}
       </div>
       <div className="header-actions">
@@ -360,7 +317,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
               <button
                 className="load-font-item load-font-item-upload"
                 onClick={handleUploadClick}
-                title={staticMode ? 'Uploads trigger a build — they need the full app' : undefined}
+                title={staticMode ? 'Compiles in your browser (fontc-wasm) — nothing is sent to a server' : undefined}
               >
                 <div className="load-font-item-name">Upload .glyphs or project .zip…</div>
                 <div className="load-font-item-subtitle">
@@ -374,11 +331,11 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                   <button
                     className="load-font-item"
                     onClick={handleForgetSession}
-                    title="Clear the auto-restored session and unload this project back to the example"
+                    title="Discard this project's saved session and reload the pristine example"
                   >
                     <div className="load-font-item-name" style={{ color: '#c0392b' }}>Forget this project</div>
                     <div className="load-font-item-subtitle">
-                      Clear the saved session (auto-restored on every visit) and unload back to the example
+                      Discard the saved session (auto-restored on every visit) and reload the pristine example
                     </div>
                   </button>
                 </>
@@ -402,7 +359,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             onChange={handleFileChange}
           />
         </div>
-        {familyName && (transforms.length > 0 || grade) && (
+        {familyName && (transforms.length > 0 || grade || kinetikern) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -490,6 +447,28 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                   </div>
                 </>
               )}
+              {kinetikern && (
+                <>
+                  <div className="load-font-section-label">Kinetikern</div>
+                  <div className="transform-row">
+                    <label
+                      className="transform-toggle"
+                      title="Per-style spacing from the Kinetikern tab. Off builds the font without it and keeps the entries, so turning it back on restores them."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={kinetikern.enabled !== false}
+                        disabled={busy || (staticMode && !isUploadDataset)}
+                        onChange={(e) => onToggleKinetikern && onToggleKinetikern(e.target.checked)}
+                      />
+                      <span className="transform-name">Kinetikern</span>
+                    </label>
+                    <div className="transform-desc">
+                      {kinetikernMenuDesc(kinetikern.enabled !== false, spacedCount)}
+                    </div>
+                  </div>
+                </>
+              )}
               {transforms.length > 0 && <div className="load-font-section-label">Post-build transforms</div>}
               {transforms.map(t => {
                 // Client-side mirror of the server's one-injector-per-axis
@@ -512,9 +491,9 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                     <span className="transform-name">{t.name}</span>
                   </label>
                   {t.description && <div className="transform-desc">{t.description}</div>}
-                  {t.enabled && (t.params_schema || []).length > 0 && (
+                  {t.enabled && (t.params_schema || []).filter(p => p.type !== 'table').length > 0 && (
                     <div className="transform-params">
-                      {(t.params_schema || []).map(p => (
+                      {(t.params_schema || []).filter(p => p.type !== 'table').map(p => (
                         <label key={p.key} className="transform-param">
                           <span className="transform-param-label">{p.label}</span>
                           {p.type === 'select' ? (
@@ -553,6 +532,20 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                           )}
                         </label>
                       ))}
+                      {t.stage === 'source' && (
+                        // A source-stage transform rebuilds the whole shadow —
+                        // seconds, not the ~1s a font-stage rebuild costs — so
+                        // its edits wait for a deliberate Apply instead of the
+                        // per-pause auto-commit.
+                        <button
+                          type="button"
+                          className="transform-apply"
+                          disabled={busy || !transformsDirty[t.id]}
+                          onClick={() => onApplyTransform && onApplyTransform(t.id)}
+                        >
+                          {transformsDirty[t.id] ? 'Apply' : 'Applied'}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -561,22 +554,13 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {coverageFindings.length > 0 && onShowCoverage && (
-          <button
-            className="btn btn-load-font"
-            onClick={onShowCoverage}
-            title="Design-space coverage: missing corners, out-of-range sources, collapses. Opens the Space tab."
-          >
-            Coverage <span className="count-flag">{coverageFindings.length}</span>
-          </button>
-        )}
         {familyName && (
           <div className="config-dropdown" ref={configRef}>
             <button
               className="btn btn-load-font"
               onClick={() => setConfigOpen(o => !o)}
               disabled={busy}
-              title="Export or import the studio configuration (control axes, avar2 mappings, transforms) as one JSON file"
+              title="Export or import the studio configuration (control axes, avar2 mappings, transforms) as one file"
             >
               Config ▾
             </button>
@@ -589,7 +573,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Export configuration…</div>
                   <div className="load-font-item-subtitle">
-                    Control axes, avar2 mappings, transforms as one JSON file
+                    Control axes, avar2 mappings, transforms as one file
                   </div>
                 </button>
                 {staticMode && allowImportInStatic && (
@@ -599,7 +583,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Download workspace (.zip)…</div>
                   <div className="load-font-item-subtitle">
-                    Source, avar2 mappings, sidecars and the current build as one project zip — loads back here or in the full app
+                    Source, avar2 mappings, studio data and the current build as one project zip — loads back here or in the full app
                   </div>
                 </button>
                 )}
@@ -610,7 +594,7 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
                 >
                   <div className="load-font-item-name">Import configuration…</div>
                   <div className="load-font-item-subtitle">
-                    Replace the current configuration from an exported JSON file. You review a validation report before anything is applied.
+                    Replace the current configuration from an exported file. You review a validation report before anything is applied.
                   </div>
                 </button>
                 )}
@@ -631,8 +615,12 @@ function Header({ onBuildFont, building, fontLoaded, familyName, onSourceLoaded,
           <button
             onClick={onBuildFont}
             disabled={building}
-            className="btn btn-3d btn-rebuild"
+            className={`btn btn-3d btn-rebuild${buildStale && !building ? ' btn-rebuild-stale' : ''}`}
+            title={buildStale && !building
+              ? 'The preview font is out of date — edits saved since the last build are not in it yet. Rebuild to refresh it.'
+              : undefined}
           >
+            {buildStale && !building && <span className="btn-rebuild-stale-dot" aria-hidden="true" />}
             {building ? 'Building...' : fontLoaded ? 'Rebuild' : 'Build'}
           </button>
         )}

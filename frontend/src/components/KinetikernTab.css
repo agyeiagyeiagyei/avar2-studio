@@ -1,0 +1,197 @@
+.kinetikern-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* The side panel reuses the Preview tab's panel classes (PreviewTab.css,
+   AxisControl.css) so the two tabs' sliders look and behave alike. */
+
+/* ---- main column ---- */
+.kk-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kk-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 1.25rem 0.5rem;
+}
+
+.kk-instance {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--zinc-800);
+  background: #ffffff;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  max-width: 320px;
+}
+
+.kk-custom-name {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  background: #ffffff;
+  width: 180px;
+}
+
+.kk-coords {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--zinc-500);
+  white-space: pre;
+}
+
+.kk-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 1.25rem 0.6rem;
+  border-bottom: 1px solid var(--zinc-200);
+}
+
+.kk-looseness {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--zinc-700);
+}
+
+.kk-looseness input[type="range"] {
+  width: 180px;
+}
+
+.kk-looseness-label {
+  font-weight: 600;
+}
+
+.kk-looseness-end {
+  font-size: 0.65rem;
+  color: var(--zinc-500);
+}
+
+.kk-looseness-value {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  min-width: 3.2em;
+  color: var(--zinc-600);
+}
+
+.kk-btn {
+  border: 1px solid var(--zinc-300);
+  background: #ffffff;
+  color: var(--zinc-700);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.kk-btn:hover:not(:disabled) {
+  background: var(--zinc-50);
+  border-color: var(--zinc-400);
+}
+
+.kk-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.kk-btn.primary:hover:not(:disabled) {
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+}
+
+.kk-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.kk-sample {
+  flex: 1;
+  min-width: 160px;
+  resize: none;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--zinc-300);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--zinc-800);
+}
+
+.kk-status {
+  padding: 0.35rem 1.25rem;
+  font-size: 0.7rem;
+  color: var(--zinc-500);
+  border-bottom: 1px solid var(--zinc-200);
+  min-height: 1.6em;
+}
+
+.kk-error {
+  color: var(--color-destructive);
+}
+
+/* ---- the two panes share one scroll ---- */
+.kk-panes {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.kk-pane {
+  padding: 0.75rem 1.25rem 2rem;
+  min-width: 0;
+}
+
+.kk-pane:first-child {
+  border-right: 1px solid var(--zinc-200);
+}
+
+.kk-pane-label {
+  position: sticky;
+  top: 0;
+  background: #ffffff;
+  padding: 0.25rem 0 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zinc-500);
+}
+
+.kk-text {
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "kern" 0, "liga" 0;
+  line-height: 1.25;
+  color: var(--zinc-900);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kk-line {
+  min-height: 1.25em;
+}
+
+.kk-word {
+  white-space: nowrap;
+}

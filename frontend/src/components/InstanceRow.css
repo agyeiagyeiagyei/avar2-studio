@@ -20,6 +20,13 @@
   background-color: #ffffff;
 }
 
+/* Shift/cmd-click multi-selection: part of the broadcast set, but not
+   the editing anchor — a lighter echo of the selected ring. */
+.instance-row.multi-selected {
+  border-color: rgba(10, 132, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.06);
+}
+
 .instance-row-header {
   display: flex;
   justify-content: space-between;
@@ -346,6 +353,14 @@
   background: var(--primary-soft);
   color: var(--primary-strong);
   border-color: var(--primary-border);
+}
+
+/* Default origin — this row's inputs sit at the axis defaults; its
+   parametric values are the compiled font's resting state. */
+.origin-badge-default {
+  background: #fff4e0;
+  color: #8a4b00;
+  border-color: #f1c277;
 }
 
 /* Grade indicator — this style carries a grade (darkening at fixed advance). */

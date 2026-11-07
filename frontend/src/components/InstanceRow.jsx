@@ -2,9 +2,38 @@ import React, { useState, useRef, useEffect } from 'react';
 import './InstanceRow.css';
 import InstanceFlyout from './InstanceFlyout';
 import GradeBadge from './GradeBadge';
+import RoundingBadge from './RoundingBadge';
+import SlantBadge from './SlantBadge';
+import KinetikernBadge from './KinetikernBadge';
 import { formatAxisValue } from '../utils/formatNumber';
 
-function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag }) {
+// S1(d): the ORIGIN tooltip says whether this row's parametric location is a
+// point the source actually interpolates. A row that sits ON a master relocates
+// for free; one that misses needs the instancer to synthesise the origin, which
+// is what ends in the gvar header overflow on a twin-heavy source.
+function originMasterSummary(master) {
+  if (!master) return '';
+  if (master.on_master) {
+    return ` Its parametric location sits on the compiled master “${master.nearest}”, so the origin is a point the source already interpolates.`;
+  }
+  const parts = Object.entries(master.delta || {})
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 4)
+    .map(([tag, value]) => `${tag} ${value > 0 ? '+' : ''}${value}`);
+  const gap = parts.length ? ` (${parts.join(', ')} font units)` : '';
+  return ` It does NOT sit on a compiled master: the nearest is “${master.nearest}”, off by${gap}. The build has to synthesise this origin with the instancer, which densifies gvar.`;
+}
+
+function InstanceRow({ instance, isSelected, isMultiSelected, onSelect, editingCoordinates, instanceEditingCoordinates, sampleText, fontLoaded, fontSize, vfFamilyId, onDelete, onMove, allInstances, syncStatus = 'green', onRename, onUpdateInstanceStudio, onUpdateInstanceSource, onDemoteFromSource, disabledControlAxes, axisDefaults, gradeEnabled, gradePct, gradeMaxPct, gradeDefaultPct, gradeDiagnostics, onSaveInstanceGrade, onRemoveInstanceGrade, parametricTags, transformTags, gradeTag,
+  roundingEnabled, roundingPct, roundingDefaultPct,
+  onSaveInstanceRounding, onRemoveInstanceRounding,
+  slantEnabled, slantPct, slantDefaultPct, slantAxisMin,
+  onSaveInstanceSlant, onRemoveInstanceSlant,
+  kinetikernEnabled = false, kinetikernLooseness = null,
+  onRemoveInstanceKinetikern, onOpenKinetikern,
+  isDefaultOrigin = false,
+  originMaster = null,
+}) {
   const isStudioOnly = instance.origin === 'studio';
   const [showMoveControls, setShowMoveControls] = useState(false);
   const [movePosition, setMovePosition] = useState('before');
@@ -25,7 +54,8 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   // Graded rows render at GRAD 0 — the badge marks the grade, the GRAD
   // chip shows 0, and the outline must agree with both (server-app
   // behavior). The grade itself is inspected with the Preview tab's
-  // GRAD slider. (An earlier revision injected GRAD at max here so the
+  // GRAD slider, or by dragging the sidebar's GRAD slider while the
+  // row is selected (editingCoordinates carry the drag; preview only). (An earlier revision injected GRAD at max here so the
   // row showed "the instance at its grade" — near the grade cap that
   // renders closed counters under a chip claiming GRAD: 0.)
 
@@ -64,6 +94,20 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   for (const [tag, value] of Object.entries(previewCoordinates)) {
     if (tag in pinnedAxes) pinnedAxes[tag] = value;
   }
+  // Per-style rounding renders in the row: the style's own percent, or
+  // the broad default — its ROND coordinate in the built font.
+  if (roundingEnabled && 'ROND' in pinnedAxes) {
+    pinnedAxes.ROND = roundingPct != null ? roundingPct : (roundingDefaultPct || 0);
+  }
+  // Per-style slant likewise: the percent of the axis minimum the
+  // built font stamps as the style's slnt coordinate. Styles named
+  // Italic/Slanted are never stamped (they keep their own slnt), so
+  // they get no overlay and no S badge.
+  const slantExempt = /italic|slanted/i.test(instance.name);
+  if (slantEnabled && !slantExempt && 'slnt' in pinnedAxes && slantAxisMin != null) {
+    const slantRowPct = slantPct != null ? slantPct : (slantDefaultPct || 0);
+    pinnedAxes.slnt = slantAxisMin * slantRowPct / 100;
+  }
   const axesForRender = Object.keys(pinnedAxes).length > 0 ? pinnedAxes : previewCoordinates;
   let fontVariationSettings = Object.entries(axesForRender)
     .map(([tag, value]) => `"${tag}" ${value}`)
@@ -72,13 +116,17 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
   return (
     <div
       ref={rowRef}
-      className={`instance-row ${isSelected ? 'selected' : ''}`}
+      className={`instance-row ${isSelected ? 'selected' : ''}${isMultiSelected ? ' multi-selected' : ''}`}
+      onMouseDown={(e) => {
+        // Shift-click is range-select, not text-select.
+        if (e.shiftKey) e.preventDefault();
+      }}
       onClick={(e) => {
         // Don't select if clicking on the dot wrapper
         if (e.target.closest('.sync-status-dot-wrapper')) {
           return;
         }
-        onSelect();
+        onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey });
       }}
       data-instance-name={instance.name}
     >
@@ -181,10 +229,19 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               read both the persistence-location and the
               edited/saved status as a single visual block. Studio-only
               rows get no badge (absence == studio). */}
+          {isDefaultOrigin && (
+            <span
+              className="origin-badge origin-badge-default"
+              title={`This instance's mapping inputs all sit at the axis defaults, so its parametric values define the font's RESTING state: the build interpolates a real master here and compiles with it as the origin (avar2 cannot remap the default location). Move an axis default, or this row's inputs, to hand the origin to another instance.${originMasterSummary(originMaster)}`}
+              aria-label="default origin instance"
+            >
+              ORIGIN
+            </span>
+          )}
           {!isStudioOnly && (
             <span
               className="origin-badge origin-badge-source"
-              title="Source-defined instance — this row is declared in the .glyphs / .designspace source file. Saving from the flyout's 'Save to source file' option writes any edited coordinates back into that file. Removing the SRC badge means the row exists only in the avar2 mapping CSV."
+              title="Source-defined instance — this row is declared in the .glyphs / .designspace source file. Saving from the flyout's 'Save to source file' option writes any edited coordinates back into that file. Removing the SRC badge means the row exists only in the studio."
               aria-label="source-defined instance"
             >
               SRC
@@ -199,6 +256,33 @@ function InstanceRow({ instance, isSelected, onSelect, editingCoordinates, insta
               diagnostics={gradeDiagnostics}
               onSave={onSaveInstanceGrade}
               onRemove={onRemoveInstanceGrade}
+            />
+          )}
+          {roundingEnabled && (
+            <RoundingBadge
+              instanceName={instance.name}
+              pct={roundingPct}
+              defaultPct={roundingDefaultPct}
+              onSave={onSaveInstanceRounding}
+              onRemove={onRemoveInstanceRounding}
+            />
+          )}
+          {slantEnabled && !slantExempt && (
+            <SlantBadge
+              instanceName={instance.name}
+              pct={slantPct}
+              defaultPct={slantDefaultPct}
+              onSave={onSaveInstanceSlant}
+              onRemove={onRemoveInstanceSlant}
+            />
+          )}
+          {/* Absence means "not spaced" — there is no add affordance here. */}
+          {kinetikernEnabled && kinetikernLooseness != null && (
+            <KinetikernBadge
+              instanceName={instance.name}
+              looseness={kinetikernLooseness}
+              onOpen={onOpenKinetikern}
+              onRemove={onRemoveInstanceKinetikern}
             />
           )}
           {/* Coordinates moved below the sample text — see render-end. */}

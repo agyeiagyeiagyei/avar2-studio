@@ -13,6 +13,11 @@ crate-type = ["cdylib", "rlib"]
 # under wasm32 (single-threaded compile never returns). main carries
 # the in-memory/wasm fixes (PRs #1478/#1796) and the public Input API.
 fontc = { git = "https://github.com/googlefonts/fontc.git", default-features = false }
+# Source-level access for the glyph editor (editor.rs): .glyphs plist
+# parse/serialize (Plist) — the same git revision as fontc so the types
+# fontc sees through its own glyphs-reader dep match ours.
+glyphs-reader = { git = "https://github.com/googlefonts/fontc.git" }
+smol_str = "0.3"
 wasm-bindgen = "0.2"
 
 # Bundle JSON parsing for control axes / grade application (braces.rs).
@@ -28,6 +33,10 @@ write-fonts = "0.49.2"
 
 # Outline evaluation at a location for the coverage probe (measure_at).
 skrifa = "0.40"
+
+[dev-dependencies]
+# The split-build test parses fvar/gvar out of the produced fonts.
+read-fonts = "0.40.2"
 
 [profile.release]
 # Keep the blob small: static demo payload discipline (fontspector model).

@@ -2,204 +2,181 @@
 
 Visual authoring and preview tool for avar2 variable fonts.
 
-For type designers working in parametric designspaces (XOPQ / YOPQ /
-XTRA, …) who want to expose familiar axes (`wght`, `wdth`, `opsz`, …)
-to end users. Author named instances at parametric coordinates;
-avar2-studio builds the avar2 table that makes a user's `wght=400`
-slider land on the point you chose.
+For designers working in parametric designspaces (XOPQ / YOPQ / XTRA, …) who
+want to expose familiar axes (`wght`, `wdth`, `opsz`, …) to end users. Author
+named instances at parametric coordinates; avar2-studio builds the avar2 table
+that makes a user's `wght=400` slider land on the point you chose.
 
-Point it at a `.glyphs` or `.designspace` file and it opens a
-browser-based editor on the **actual built font**. You can also
-declare **secondary parametric axes** that deform only chosen glyphs
-(editable in an embedded [Fontra](https://github.com/fontra/fontra)
-editor), and chain optional **post-build transforms** onto every build.
+Point it at a `.glyphs` or `.designspace` file and it opens a browser-based
+editor on the **actual built font**: declare **secondary parametric axes** that
+deform only chosen glyphs, chain **build transforms** onto every build, grade and
+space styles, and — with [Fontra](https://github.com/fontra/fontra) installed
+alongside — draw those glyphs' brace layers in an embedded editor.
 
 ![avar2-studio — the Instances tab, each instance rendering live in the built font](docs/images/app-overview.png)
 
-Try it without installing: the [static demo](https://agyeiagyeiagyei.github.io/avar2-studio/)
-(example fonts, plus in-browser compile of uploaded `.glyphs` — including
-secondary-axis authoring, correction layers, and the fixer transforms).
+## Try it in the browser
 
-## Getting started
+The [hosted demo](https://agyeiagyeiagyei.github.io/avar2-studio/) runs the studio
+in your browser, nothing to install. It opens on Crispy Mini; **Load Font ▾ →
+Examples** also has Roboto Delta Mini. Crispy Mini is live end to end: edit
+instances and mappings, declare secondary axes, grade styles, rebuild — compiled
+in the browser by [fontc](https://github.com/googlefonts/fontc) as WebAssembly.
+Roboto Delta Mini loads and previews, but it is a `.designspace` and the browser
+cannot compile UFO sources, so every action that needs a rebuild — **Rebuild**,
+saving a grade, adding a secondary axis — refuses with *needs the full app*.
+Work persists until you choose **Forget this project**.
 
-Pre-release — not yet on PyPI.
+Your own font comes in through **Load Font ▾ → Upload .glyphs or project .zip…**.
+The browser cannot write back to your source (export with **Config ▾ → Download
+workspace (.zip)…**), recompile a `.designspace` project (fontc-wasm cannot read
+UFOs from a filesystem), or space styles with Kinetikern.
+
+## Install
+
+**There is no PyPI release yet** — `0.1.0` is published by a `v*` tag that has not
+been cut, so install from git. The Python side installs, but the frontend bundle
+is a build output rather than a committed file, so the GUI needs one frontend
+build and the server answers 503 until it has one:
 
 ```bash
-pipx install https://github.com/agyeiagyeiagyei/avar2-studio/releases/latest/download/avar2_studio-0.1.0.dev6-py3-none-any.whl
-avar2-studio /path/to/MyFont.glyphs       # or .designspace
+git clone https://github.com/agyeiagyeiagyei/avar2-studio && cd avar2-studio
+pipx install .
+cd frontend && npm install && npm run build \
+  && rsync -a --delete build/ ../src/avar2_studio/static/
+avar2-studio path/to/MyFont.glyphs      # or .designspace → http://localhost:5001
 ```
 
-All dependencies (fontc, gftools, …) come with the wheel. The server
-prints a URL (default `http://localhost:5001`); the first build runs
-on launch. The released wheel (dev6) predates most current features —
-install from source ([Development](#development)) for the newest.
-Launching with no argument opens a **Load Font** picker —
-upload your own source or start from a bundled example (Crispy Mini,
-Roboto Delta Mini). `avar2-studio doctor` checks the environment.
-Useful flags: `--port` (default 5001, avoids macOS AirPlay on 5000),
-`--no-fontc` (compile with fontmake instead of fontc), `--debug`.
+Launching with no source opens a **Load Font** picker. `fontc` and `gftools` come
+with the package. `build` and `doctor` need no frontend at all — flags, the
+committed build config, exit codes and the CI recipe are in
+[docs/CLI.md](docs/CLI.md).
+
+Optional: **Fontra** for the embedded outline editor (`pipx inject avar2-studio
+git+https://github.com/fontra/fontra.git git+https://github.com/fontra/fontra-glyphs.git`),
+and the **native accelerators** (`spac-inject`, `libkinetikern2`) — they ship in
+the platform wheels, and from a checkout you build them with `cargo build
+--release` in `wasm/fontc-web` and `native/kinetikern2` ([decision
+0015](docs/decisions/0015-native-accelerators-ship-in-platform-wheels.md)).
+Without them spacing falls back to a slower pure-Python path and Kinetikern
+answers *"Kinetikern2 engine not available in this installation, so the
+Kinetikern tab is disabled."* `avar2-studio doctor` says what is present;
+`--strict` exits non-zero only for a missing **headless-build** prerequisite
+(`fontc`, `gftools-builder`, `glyphsLib` — the names `doctor` prints) or an
+environment override that names a file which does not exist — an absent
+accelerator is reported, never fatal.
+
+**In Glyphs.** `avar2-studio install-glyphs-plugins` links the bundled plugins
+into Glyphs 3: a **Window → avar2 Studio** menu that opens the studio on the font
+you are editing, plus six design tools (Corner Radii, Instance Delta, Multi-Source
+Edit, Metrics Parity, Slant Master, Width Matcher). Restart Glyphs afterwards;
+[the plugin README](src/avar2_studio/glyphs/README.md) documents each.
 
 ## Your files
 
-Artifacts live next to your source, as committable sidecars:
+Everything the studio authors lives beside your source, named after its stem, so
+it can be committed with it. Your original is never written for studio
+authoring: once studio brace layers exist, builds compile from a shadow copy in
+`.avar2-studio/shadow/`, regenerated whenever you save in Glyphs.
 
-```
-MyFont.glyphs             # your source (written back only when you save edits)
-MyFont-avar.csv           # avar2 mappings
-MyFont-control.json       # secondary parametric axes + brace layers (once used)
-MyFont-transforms.json    # enabled transforms + params (once used)
-MyFont-grade.json         # grade settings (once used)
-.avar2-studio/            # tool-managed (config, builds, shadow source) — gitignore
-```
+| File | Commit? | Holds |
+|---|---|---|
+| `MyFont.glyphs` / `.designspace` | yes, it's yours | the source — written when you act on an instance row or edit a source-derived axis layer through ↗ (that opens the original in Fontra) |
+| `MyFont-avar.csv` | yes | named instances and avar2 mappings |
+| `MyFont-control.json` | yes | secondary parametric axes, their layers and drawings |
+| `MyFont-transforms.json` | yes | which transforms are on, with their parameters |
+| `MyFont-grade.json` | yes | grade on/off, default %, intensity, headroom clamp, per-style anchors |
+| `MyFont-kinetikern.json` | yes | per-style spacing corrections |
+| `<stem>-axis-metadata.json` | yes | declared axis defaults and display names — the build exits 2 without it and without the legacy `.avar2-studio/axis-metadata.json` |
+| `<stem>-build.json` | optional | reproducible export choices for `avar2-studio build` |
+| `.avar2-studio/` | no, gitignore it | build output, shadow, exports, jobs, config, backups |
 
-Studio axis authoring never modifies your original source: builds
-compile from a shadow copy once studio-authored brace layers exist —
-and the studio watches your original, regenerating the shadow
-automatically when you edit it in Glyphs.
+Every format is specified in [docs/SIDECARS.md](docs/SIDECARS.md).
 
 ## Features
 
-### Instances & avar2 mappings
+**Instances & avar2 mappings.** Named instances tuned with the sidebar sliders,
+each rendering live in the built font; user-axis coordinates under **AVAR2
+MAPPINGS** turn a row into an avar2 mapping. (The browser demo additionally
+lints the mappings — rows the build would silently drop and unmapped grid
+points; that lint ships only with the static demo's dataset, not with the
+desktop app.) [Guide](docs/guides/authoring-instances.md).
 
-The **Instances** tab is the authoring surface: create named instances
-and tune each one's parametric coordinates with the sidebar sliders —
-each row renders live in the built font. Give an instance user-axis
-coordinates (`wght`, `wdth`, `opsz`, …) and it becomes an avar2
-mapping. [docs/authoring-instances.md](./docs/authoring-instances.md)
-walks the full workflow.
+![The Instances sidebar: sample text, core and secondary parametric axes, and the avar2 mappings of the selected style](docs/images/sidebar-axes.png)
 
-- **CORE / PARAMETRIC AXES** — deform every glyph in the font.
-- **SECONDARY PARAMETRIC AXES** — deform only chosen glyphs (`scoped`
-  and `studio` badges). See the next section.
-- **Mapping lint** flags rows the build would silently drop: grid
-  points no axis reaches, and rows sitting at the default location
-  (discarded, skewing every sibling row) — before they bite.
+**Secondary parametric axes.** Sliders that deform only the glyphs you give them,
+from brace layers pinned anywhere in the designspace — Crispy's `LCWD` moves the
+lowercase and leaves the capitals put (measured on the production font,
+2026-11-04: `a` 2001 → 1969 u, `A` 2443 → 2443 u at `LCWD` 0 → 100).
+Correction layers are re-derived on every build; the rest you draw in the
+**embedded Fontra editor**. [Guide](docs/guides/secondary-parametric-axes.md).
 
-### Secondary parametric axes
+![The LCWD axis expanded: its applicable glyphs, their layers, and a correction layer computed as if at another XOPQ](docs/images/correction-layers.png)
 
-Sometimes the global axes are *almost* right. Crispy's `wght` runs to
-1000, and the heavy end gains contrast that sits wrong on the
-lowercase — so Crispy declares `lcwd`, an axis that renders each
-lowercase glyph there *as if at* a lighter XOPQ, while the capitals
-stay put. A secondary parametric axis is a slider that deforms only
-the glyphs you give it, built from brace layers pinned anywhere in the
-designspace.
+**Preview & export.** Drive the built font the way an end user's app would, then
+**Download font…** as **TTF** or **WOFF2**, flag axes hidden, or **set a default**
+so the export rests at a picked style — the source is never touched. **UFO +
+designspace (zip)** hands fontmake users the masters plus a designspace 5 with the
+mappings and the spacing.
 
-- **+ Add** to declare one: name it, pick its glyphs, pin the
-  locations. New locations can land on every applicable glyph in one
-  submit.
-- **Correction layers** compute an outline *as if at* another
-  parametric point, re-derived on every build; the studio warns when a
-  correction is unpinned and would leak along an axis.
-- Draw the outlines in the **embedded Fontra editor** — against a
-  reference font, with live measurements in the HUD.
-- Everything lands in the `-control.json` sidecar, drawings included.
+When the resting style is not the source's default master the export is larger —
+the studio rebuilds the variations around it — and the preview's spacing is
+approximate between masters, while the exported fonts are exact. The dialog says
+so, naming the master the font actually rests on.
 
-![Secondary parametric axes in the sidebar](docs/images/secondary-axes-sidebar.png)
+![Export dialog: mark axes hidden, set the default location](docs/images/export-modal.png)
 
-![Correction layers — computed "as if at" another parametric point](docs/images/correction-layers.png)
+**Grade.** Darken or lighten a style **without changing advance widths**: turn
+Grade on, click a style's **`G`** badge, and grades interpolate between the styles
+you set. [Guide](docs/guides/grade.md).
 
-<img src="docs/images/fontra-reference.png" width="450" alt="Embedded Fontra editor: drawing a brace layer against a reference font, with live measurements">
+**Kinetikern.** Space a style with
+[Kinetikern2](https://github.com/bghryct/kinetikern2)'s kinetic equilibrium, per
+style, with before/after panes and a looseness slider; the result bakes into every
+build as spacing-only variation tuples. A family-wide switch turns it off without
+losing the work. Kerning is not part of this pass.
+[Guide](docs/guides/kinetikern.md).
 
-![At wght 1000, engaging lcwd de-contrasts the lowercase only](docs/images/wght-heavy-lcwd.gif)
+**Build transforms.** Optional steps on every build: spacing uniform or
+width-aware (a `SPAC` axis), clean fvar, rebuild STAT, smooth unhinted rendering
+(`gasp` + `prep`), round corners (`ROND`), build-time slant (`slnt`) — plus your
+own Python transform scripts.
+[Guide](docs/guides/transforms.md).
 
-Deep-dive:
-[docs/secondary-parametric-axes.md](./docs/secondary-parametric-axes.md).
+**Configuration export / import.** Move a whole configuration between sources or
+machines as one file: secondary axes with drawings, mappings, transforms, grade.
+Import validates first and applies nothing until you confirm. In the hosted demo,
+**Download workspace (.zip)…** also packs source, studio files and the current
+build into one project zip that loads back into either the demo or the app; the
+desktop app has no such item, because its project already lives on disk.
 
-### Preview & export
+## Command line
 
-The **Preview** tab drives the built font the way an end user's app
-would: type directly in the specimen, move any fvar axis. Moving a
-user axis reflects the computed avar2 mapping onto the parametric
-sliders.
+`avar2-studio build SOURCE --out DIR` runs the pipeline the app runs on load,
+with no server and no watcher: hide axes, re-origin at a resting style, write
+WOFF2 or the UFO + designspace zip, reproduce a repo's exports from a committed
+`<stem>-build.json`, and `doctor --strict` for CI. Exit codes tell a build
+failure from a usage error. All of it is in [docs/CLI.md](docs/CLI.md).
 
-![Moving wght drives the parametric sliders through the avar2 mapping](docs/images/preview-sliders.gif)
+## Documentation
 
-![Typing directly in the specimen](docs/images/specimen-typing.gif)
-
-A note on rendering engines: the exported font's avar2 works wherever
-avar2 is implemented — HarfBuzz-based stacks and recent WebKit/CoreText
-apply it. Chrome does not apply avar2 in its text pipeline yet, so in
-the in-browser preview the glyphs follow the fvar axes while the
-sliders show the computed mapping. What ships is the real table either
-way.
-
-**Download** opens an export dialog: mark axes as hidden in the
-exported font, or **set a default** — pick an axis combination and the
-export interpolates a master there and makes it the font's origin (the
-source file is never touched).
-
-<img src="docs/images/export-modal.png" width="450" alt="Export dialog: mark axes hidden, set the default location">
-
-### Space tab
-
-The **Space** tab shows the designspace as an orbitable Noordzij cube —
-N-dimensional, so a fourth master-covered axis renders as a tesseract
-you can spin. Masters, brace layers and instances appear as points in
-the axis box, corner chips render live specimens at their exact
-locations — red when a corner has no source coverage (a ghost), with
-one-click pinning that **synthesizes the corner by extrapolation** when
-no sweep reaches it (and refuses inline, with the reason, when it
-can't). The findings rail in the tab lists the same audit — missing
-corners, out-of-range sources, collapses — with the fixes alongside.
-
-![The Space tab — the designspace as an orbitable cube with live corner specimens](docs/images/space-tab.png)
-
-### Grade
-
-Darken or lighten a style **without changing its advance widths**.
-Turn **Grade** on in the Transforms menu, then click a style's **`G`**
-badge to set its %; grades interpolate between the styles you set, so
-you grade a few anchors, not every style.
-[docs/grade.md](./docs/grade.md).
-
-### Post-build transforms
-
-Optional VF→VF steps that run after every build, saved to
-`<basename>-transforms.json`:
-
-- **Spacing — uniform (gftools)** / **Spacing — width-aware** — a
-  `SPAC` axis; sidebearings and advances only, outlines never change.
-- **Clean fvar instances**, **Rebuild STAT table**, **Smooth unhinted
-  rendering** (`gftools`).
-
-Write your own: drop a `.py` subclassing `Transform` into
-`~/.avar2-studio/transforms/` and it appears in the menu on the next
-launch.
-
-![The Transforms menu](docs/images/transforms-menu.png)
-
-### Configuration export / import
-
-The **Config** menu moves a whole studio configuration between sources
-or machines as a single JSON bundle — secondary parametric axes, avar2
-mappings, transforms, grade, corner pins. Import validates first and
-is all-or-nothing: a report lists anything the loaded source is
-missing, and nothing is applied until you confirm.
-
-## Development
-
-```bash
-git clone https://github.com/agyeiagyeiagyei/avar2-studio
-cd avar2-studio
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cd frontend && npm ci && npm run build && cd ..
-```
-
-For frontend hot reload, run `npm start` in `frontend/` alongside the
-backend and open `http://localhost:3000`. New to the codebase?
-[docs/HANDOVER.md](./docs/HANDOVER.md) covers the architecture,
-environment traps, and known issues.
+[docs/README.md](docs/README.md) is the map. For designers:
+[instances and mappings](docs/guides/authoring-instances.md), [secondary
+parametric axes](docs/guides/secondary-parametric-axes.md),
+[grade](docs/guides/grade.md), [Kinetikern](docs/guides/kinetikern.md),
+[transforms](docs/guides/transforms.md),
+[example projects](examples/README.md). Appendices: [command
+line](docs/CLI.md), [sidecars](docs/SIDECARS.md),
+[architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md),
+[decisions](docs/decisions/README.md),
+[Glyphs plugins](src/avar2_studio/glyphs/README.md).
 
 ## Roadmap
 
-- [ ] PyPI publish (`pipx install avar2-studio`)
-- [ ] v0.1.0 release (current pre-releases are `v0.1.0.devN`)
-- [ ] Push-to-source sync (write studio-declared axes from the sidecar
-  into the `.glyphs` on request)
-- [ ] Grade-master comparison panel (parked on the `grade-comparison`
-  branch)
+- [x] Outline editing in the browser demo (Fontra as a separate GPL sub-project,
+  [fontra-embed](https://github.com/agyeiagyeiagyei/fontra-embed))
+- [ ] Push-to-source sync (write studio-declared axes into the `.glyphs` on request)
+- [ ] Grade-master comparison panel (parked on the `grade-comparison` branch)
 
 ## License
 

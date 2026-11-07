@@ -6,13 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node e2e/avar2-eval.spec.mjs && node e2e/grade-model.spec.mjs && node e2e/avar2-lint.spec.mjs && node e2e/export-poll.spec.mjs && node e2e/build-wait.spec.mjs && node e2e/api-parity.spec.mjs && node e2e/instance-sync.spec.mjs && node e2e/promote-flush.spec.mjs && node e2e/kinetikern-copy.spec.mjs && node e2e/transforms-context.spec.mjs && node e2e/preview-coords.spec.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
-    "@radix-ui/react-slot": "^1.2.3",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
     "lucide-react": "^0.525.0",

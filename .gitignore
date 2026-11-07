@@ -10,7 +10,7 @@ htmlcov/
 dist/
 /build/
 *.egg
-.venv/
+.venv
 venv/
 
 # Node
@@ -18,11 +18,18 @@ frontend/node_modules/
 frontend/build/
 frontend/.eslintcache
 
-# Frontend bundle assembled by release CI — never commit
-src/avar2_studio/static/
+# Frontend bundle assembled by release CI — never commit. Contents only
+# (not the dir itself) so the .gitkeep exception at the bottom can apply.
+src/avar2_studio/static/*
+
+# Native accelerators (cargo builds of spac-inject + libkinetikern2) staged
+# into the package for the platform wheels (decision 0015) — build outputs,
+# never commit; release.yml assembles them per platform.
+src/avar2_studio/bin/
 
 # Tool scratch
 .avar2-studio/
+
 
 # Launching directly against a bundled fixture bootstraps a sibling
 # CSV — keep the shipped fixtures git-clean (the Load Font dropdown
@@ -33,9 +40,8 @@ examples/*/sources/*-avar.csv
 # axis metadata ship deliberately so the bundled example opens as a
 # complete three-axis avar2 demo (opsz/wght/wdth + width-aware SPAC).
 !examples/crispy-mini/sources/CrispyMini-avar.csv
-!examples/crispy-mini/sources/.avar2-studio/
-examples/crispy-mini/sources/.avar2-studio/*
-!examples/crispy-mini/sources/.avar2-studio/axis-metadata.json
+!examples/crispy-mini/sources/CrispyMini-transforms.json
+!examples/crispy-mini/sources/CrispyMini-axis-metadata.json
 
 # macOS
 .DS_Store
@@ -56,9 +62,17 @@ frontend/dist-pages/
 
 # Rust/wasm build artifacts
 wasm/fontc-web/pkg/
+# The wasm binary is built in CI (pages.yml / release.yml) and locally with
+# wasm-pack (docs/DEVELOPMENT.md); the small JS glue stays tracked.
+frontend/src/wasm/fontc-web/fontc_web_bg.wasm
 wasm/fontc-web/target/
 
 # Keep the (otherwise gitignored, CI-populated) static dir present in every
 # clone: hatchling force-includes it, and `pip install git+…` on a fresh
 # checkout fails metadata generation when it is missing.
 !src/avar2_studio/static/.gitkeep
+native/kinetikern2/target/
+
+# sprint scratch: build/fixture artifacts never belong in git
+test-output/
+scratch-e2ic/

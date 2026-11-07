@@ -104,19 +104,22 @@ export function apply_grade(font_bytes, grade_json, instance_coords_json) {
  * width-aware variant).
  *
  * `transforms_json` is the bundle's `transforms.transforms` array;
- * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
- * present, pins per-instance SPAC coordinates).
+ * per-instance SPAC coordinates ride it as `params.instance_spac`
+ * (parsed from the avar2 mappings CSV by the caller — csv_io on the
+ * desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+ * for caller/ABI compatibility and IGNORED: Rust no longer parses the
+ * CSV (one parse rule, Python-side).
  * @param {Uint8Array} font_bytes
  * @param {string} transforms_json
- * @param {string} avar2_csv
+ * @param {string} _avar2_csv
  * @returns {Uint8Array}
  */
-export function apply_transforms(font_bytes, transforms_json, avar2_csv) {
+export function apply_transforms(font_bytes, transforms_json, _avar2_csv) {
     const ptr0 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(transforms_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(avar2_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr2 = passStringToWasm0(_avar2_csv, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
     const ret = wasm.apply_transforms(ptr0, len0, ptr1, len1, ptr2, len2);
     if (ret[3]) {
@@ -159,6 +162,89 @@ export function compile_glyphs(source) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * Compile a .glyphs source with editor overlays spliced in at the Plist
+ * level: request-declared axes are appended (masters extended, Virtual
+ * Masters pinned) and each overlay replaces — or inserts — the brace
+ * layer at its location, carrying the editor's outline (see editor.rs).
+ * @param {string} source
+ * @param {string} request_json
+ * @returns {Uint8Array}
+ */
+export function compile_with_overlays(source, request_json) {
+    const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_with_overlays(ptr0, len0, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Extract one glyph's source data (all layers — masters + brace layers —
+ * with outlines in the studio's sidecar schema) plus the font's axes and
+ * masters, as JSON for the browser glyph editor (see editor.rs).
+ * @param {string} source
+ * @param {string} glyph_name
+ * @returns {string}
+ */
+export function glyph_model(source, glyph_name) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(glyph_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.glyph_model(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+ * or `null` when no axis varies) — what the width-aware SPAC transform
+ * needs as `params.master_locations`, read the way the desktop pipeline
+ * reads it (editor.rs `master_locations`).
+ * @param {string} source
+ * @returns {string}
+ */
+export function master_locations(source) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.master_locations(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
 }
 
 /**
@@ -229,6 +315,37 @@ export function regen_stat(font_bytes) {
 }
 
 /**
+ * @param {string} source
+ * @param {string} params_json
+ * @param {string | null} [control_json]
+ * @returns {string}
+ */
+export function round_corners_source(source, params_json, control_json) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(control_json) ? 0 : passStringToWasm0(control_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.round_corners_source(ptr0, len0, ptr1, len1, ptr2, len2);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
  * parametric values, resolved JS-side) and the avar2 table regenerates
@@ -280,6 +397,43 @@ export function set_hidden_axes(font_bytes, hidden_tags_json) {
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
+}
+
+/**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ * Slant a .glyphs source (the slant transform, source-stage): the
+ * same engine the desktop studio runs, ported — returns the
+ * transformed source text. Runs BEFORE round_corners_source, so
+ * rounds land on the slanted drawings.
+ * @param {string} source
+ * @param {string} params_json
+ * @returns {string}
+ */
+export function slant_source(source, params_json) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.slant_source(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
 }
 function __wbg_get_imports() {
     const import0 = {

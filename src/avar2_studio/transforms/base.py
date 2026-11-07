@@ -1,9 +1,16 @@
 """Transform interface — the contract every post-build transform implements.
 
-A **transform** is a pure VF→VF post-build step: it takes one compiled
-``.ttf`` and returns a (possibly new) ``.ttf``. It never edits the source
-``.glyphs``, the shadow, or the CSV — that keeps transforms orthogonal to
-the control-axis/shadow machinery and lets them compose by chaining.
+A **transform** runs at one of two stages:
+
+- ``stage="font"`` (the default): a pure VF→VF post-build step — one
+  compiled ``.ttf`` in, a (possibly new) ``.ttf`` out. It never edits
+  the source ``.glyphs``, the shadow, or the CSV.
+- ``stage="source"``: a pre-compile step over the COMPOSED SHADOW
+  ``.glyphs`` (never the user's original), mutating the loaded font in
+  place through :meth:`Transform.apply_to_source` — corner rounding
+  lives here. Source-stage transforms run after the control-axis and
+  grade braces are generated, so everything that interpolates goes
+  through them together.
 
 Built-in transforms live in :mod:`avar2_studio.transforms.builtin_*`.
 User transforms are ordinary ``.py`` files dropped into
@@ -56,6 +63,10 @@ class ParamSpec:
         if self.type == "select":
             allowed = [o["value"] for o in (self.options or [])]
             return value if value in allowed else self.default
+        if self.type == "table":
+            # A structured value (dict), round-tripped as-is; the
+            # transform's validate() is its real gatekeeper.
+            return dict(value) if isinstance(value, dict) else dict(self.default or {})
         try:
             num = int(value) if self.type == "int" else float(value)
         except (TypeError, ValueError):
@@ -76,18 +87,33 @@ class TransformSpec:
     id: str                            # stable key persisted in the sidecar
     name: str                          # header label
     description: str = ""              # one-line subtitle
+    stage: str = "font"                # "font" (post-build VF→VF) or "source" (shadow .glyphs)
     params: List[ParamSpec] = field(default_factory=list)
     default_enabled: bool = False
     # If this transform injects an fvar axis (e.g. SPAC), its tag. The registry
     # enforces at most one enabled transform per injected tag, so two SPAC
     # transforms can't both add a SPAC axis (which would corrupt the font).
     injected_axis_tag: Optional[str] = None
+    # For a SOURCE-stage transform: params that only affect its FONT-stage
+    # apply(). Edits limited to these skip the full shadow rebuild.
+    font_stage_param_keys: tuple = ()
+    # SOURCE-stage application order (ascending). Slant runs before
+    # rounding so rounds are applied to the slanted drawings (round arcs
+    # stay round instead of being sheared) — the order XCrispy proved.
+    source_priority: int = 100
+    # Axis tags the SOURCE must declare for this transform to work at
+    # all (round_corners' radius formula reads XOPQ/XTRA). The
+    # transforms PUT refuses to enable it on a source without them, with
+    # a message naming the missing tags, instead of building an
+    # enabled-but-inert transform.
+    requires_axis_tags: tuple = ()
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "stage": self.stage,
             "params_schema": [p.to_dict() for p in self.params],
             "default_enabled": self.default_enabled,
             "injected_axis_tag": self.injected_axis_tag,
@@ -112,6 +138,13 @@ class BuildContext:
     glyphs_path: Path                  # active source (shadow or original)
     family: str                        # source stem, for output naming
     log: Callable[[str], None] = lambda _m: None
+    #: Normalized design-space locations of the designspace masters (E2i-c).
+    #: A built font cannot name its own design axes — LCWD looks like XTRA
+    #: from inside fvar, and gvar stores the interpolation model's regions,
+    #: not the master grid (measured: 1,280 inferred "corners" against 9
+    #: masters) — so the caller, which has the designspace, passes them in.
+    #: ``None`` means "derive from gvar", the pre-E2i-c behaviour.
+    master_locations: Optional[list] = None
 
 
 class Transform:
@@ -135,4 +168,10 @@ class Transform:
         ``vf_path.parent`` (co-located with the build) so the served-font
         plumbing stays consistent.
         """
+        raise NotImplementedError
+
+    def apply_to_source(self, font, params: dict, ctx: BuildContext):
+        """Source stage only: mutate the loaded shadow ``GSFont`` in
+        place. The caller saves it and compiles from it. Never handed the
+        user's original."""
         raise NotImplementedError

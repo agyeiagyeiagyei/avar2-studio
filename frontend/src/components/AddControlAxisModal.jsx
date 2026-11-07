@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import './AddControlAxisModal.css';
 
 /**
@@ -62,11 +63,9 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
     }
   }, [isOpen, isEdit, editAxis]);
 
-  if (!isOpen) return null;
-
   const validate = () => {
     const next = {};
-    const tagTrim = tag.trim().toLowerCase();
+    const tagTrim = tag.trim();
     // In edit mode the tag is locked so we don't re-validate it; only
     // create mode enforces uniqueness + shape.
     if (!isEdit) {
@@ -74,9 +73,9 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
         next.tag = 'Required';
       } else if (tagTrim.length !== 4) {
         next.tag = 'Must be exactly 4 characters';
-      } else if (!/^[a-z0-9_-]{4}$/.test(tagTrim)) {
-        next.tag = 'Use lowercase letters, digits, _ or -';
-      } else if (existingTags.some(t => String(t).toLowerCase() === tagTrim)) {
+      } else if (!/^[A-Za-z0-9_-]{4}$/.test(tagTrim)) {
+        next.tag = 'Use letters, digits, _ or -';
+      } else if (existingTags.some(t => String(t).toLowerCase() === tagTrim.toLowerCase())) {
         next.tag = 'Tag already used by another axis';
       }
     }
@@ -115,7 +114,7 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
         });
       } else {
         await onCreate({
-          tag: tag.trim().toLowerCase(),
+          tag: tag.trim(),
           display_name: displayName.trim(),
           default: parseFloat(defaultValue),
           min: parseFloat(minValue),
@@ -131,8 +130,8 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="add-control-axis-modal">
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="add-control-axis-modal block border-0" onPointerDownOutside={(e) => e.preventDefault()}>
         <h3>{isEdit ? `Edit secondary parametric axis · ${editAxis.tag}` : 'New secondary parametric axis'}</h3>
         <p className="modal-help">
           {isEdit
@@ -220,8 +219,8 @@ function AddControlAxisModal({ isOpen, onClose, onCreate, onUpdate, editAxis, ex
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

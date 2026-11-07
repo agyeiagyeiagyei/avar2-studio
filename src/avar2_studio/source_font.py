@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from fontTools.designspaceLib import (
-    AxisDescriptor,
     DesignSpaceDocument,
     InstanceDescriptor,
 )
-from glyphsLib import GSFont, load as _glyphs_load
+from glyphsLib import GSFont
+from glyphsLib import load as _glyphs_load
 
 
 def save_font_atomically(font: GSFont, path: Path) -> None:
@@ -86,6 +86,40 @@ def load_source(path: Path) -> Tuple[object, str]:
         f"avar2-studio does not understand source files with suffix {suffix!r}. "
         f"Supported: {', '.join(SUPPORTED_SUFFIXES)}"
     )
+
+
+#: Read-mostly endpoints used to re-parse the source on EVERY request
+#: (~1.5–3.5s each on a 670KB .glyphs, and the frontend polls). The cache
+#: keys on (path, mtime, size), so any on-disk change re-parses. Only
+#: .glyphs is cached: a .designspace's content lives in its UFOs, whose
+#: edits don't move the document's mtime, and its parse is cheap anyway.
+#: Callers that MUTATE the font must keep using load_source() — the cached
+#: object is shared by every read of the same file version.
+_source_cache: Dict[str, Tuple[float, int, object, str]] = {}
+
+
+def load_source_cached(path: Path) -> Tuple[object, str]:
+    """``load_source`` for read-only callers, memoized by file version.
+
+    A missing path falls through to ``load_source`` rather than raising from
+    ``stat()``: callers treat "the source cannot be read" as a normal outcome
+    (the A18 pre-flight, the writeback routes), and the cached loader must not
+    turn that into a different error than the uncached one.
+    """
+    path = Path(path)
+    if path.suffix.lower() != ".glyphs":
+        return load_source(path)
+    try:
+        st = path.stat()
+    except OSError:
+        return load_source(path)
+    key = str(path)
+    entry = _source_cache.get(key)
+    if entry and entry[0] == st.st_mtime and entry[1] == st.st_size:
+        return entry[2], entry[3]
+    font, fmt = load_source(path)
+    _source_cache[key] = (st.st_mtime, st.st_size, font, fmt)
+    return font, fmt
 
 
 def reload_source(path: Path) -> Tuple[object, str]:

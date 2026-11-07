@@ -1,0 +1,82 @@
+/* Per-row Kinetikern badge — same footprint as .grade-badge so the row's
+   badge strip stays aligned (B7 K1). */
+.kinetikern-badge-wrap {
+  position: relative;
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.kinetikern-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  background: var(--zinc-100, #f4f4f5);
+  color: var(--zinc-700);
+  border: 1px solid var(--zinc-200);
+}
+
+.kinetikern-badge:hover {
+  border-color: var(--zinc-300, #d4d4d8);
+  color: var(--zinc-900);
+}
+
+/* Opens leftwards from its right edge: the badge sits at the far right of
+   the row and the rows list clips anything that grows past it. */
+.kinetikern-popover {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 10000;
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px -2px rgb(0 0 0 / 0.06), 0 6px 16px -6px rgb(0 0 0 / 0.12);
+  padding: 0.7rem;
+  width: 15rem;
+}
+
+.kinetikern-popover-hint {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--zinc-500);
+  margin-bottom: 0.6rem;
+}
+
+.kinetikern-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.kinetikern-popover-open,
+.kinetikern-popover-remove {
+  padding: 0.25rem 0.6rem;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  border: 1px solid var(--zinc-200);
+  background: #fff;
+  color: var(--zinc-700);
+}
+
+.kinetikern-popover-open:hover,
+.kinetikern-popover-remove:hover {
+  border-color: var(--zinc-300, #d4d4d8);
+  color: var(--zinc-900);
+}
+
+.kinetikern-popover-remove {
+  color: var(--red-600, #dc2626);
+  border-color: #fecaca;
+}
+
+.kinetikern-popover-remove:hover {
+  background: #fef2f2;
+}

@@ -1,6 +1,6 @@
 //! fontc → WASM: compile a .glyphs source (as an in-memory string) to
 //! TTF bytes in the browser. Part of the avar2-studio GitHub Pages
-//! migration (docs/migration-github-pages.md, Phase 2).
+//! migration (docs/ARCHITECTURE.md, Phase 2).
 //!
 //! JS side: `compile_glyphs(source: string) -> Uint8Array` (throws on
 //! compiler error).
@@ -32,6 +32,9 @@ use write_fonts::tables::variations::{
 use write_fonts::FontBuilder;
 
 mod braces;
+mod editor;
+mod round_corners;
+mod slanting;
 mod extrapolate;
 mod fix;
 mod iup;
@@ -55,6 +58,43 @@ pub fn pin_corner(font_bytes: Vec<u8>, request_json: &str) -> Result<Vec<u8>, Js
     braces::pin_corner(font_bytes, request_json)
 }
 
+/// Round every corner of a .glyphs source (the round_corners
+/// transform, source-stage): the same engine the desktop studio runs,
+/// ported — returns the transformed source text for `compile_glyphs` /
+/// `compile_with_overlays`. `control_json` is the `-control.json`
+/// sidecar (correction targets), when the project has one.
+/// Slant a .glyphs source (the slant transform, source-stage): the
+/// same engine the desktop studio runs, ported — returns the
+/// transformed source text. Runs BEFORE round_corners_source, so
+/// rounds land on the slanted drawings.
+#[wasm_bindgen]
+pub fn slant_source(source: String, params_json: &str) -> Result<String, JsError> {
+    let (out, _summary) = slanting::slant_source(&source, params_json).map_err(|e| err(e))?;
+    Ok(out)
+}
+
+/// Native test hook: the wasm entries wrap errors in JsError, whose
+/// construction panics off-wasm — error-path tests assert on the
+/// String error through this instead.
+pub fn round_corners_source_result(
+    source: &str,
+    params_json: &str,
+    control_json: Option<&str>,
+) -> Result<String, String> {
+    round_corners::round_source(source, params_json, control_json).map(|(out, _summary)| out)
+}
+
+#[wasm_bindgen]
+pub fn round_corners_source(
+    source: String,
+    params_json: &str,
+    control_json: Option<String>,
+) -> Result<String, JsError> {
+    let (out, _summary) = round_corners::round_source(&source, params_json, control_json.as_deref())
+        .map_err(|e| err(e))?;
+    Ok(out)
+}
+
 #[wasm_bindgen]
 pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
     let input = fontc::Input::from_glyphs(source);
@@ -65,6 +105,23 @@ pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
     fontc::generate_font(source, options).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Extract one glyph's source data (all layers — masters + brace layers —
+/// with outlines in the studio's sidecar schema) plus the font's axes and
+/// masters, as JSON for the browser glyph editor (see editor.rs).
+#[wasm_bindgen]
+pub fn glyph_model(source: String, glyph_name: String) -> Result<String, JsError> {
+    editor::glyph_model(&source, &glyph_name)
+}
+
+/// Compile a .glyphs source with editor overlays spliced in at the Plist
+/// level: request-declared axes are appended (masters extended, Virtual
+/// Masters pinned) and each overlay replaces — or inserts — the brace
+/// layer at its location, carrying the editor's outline (see editor.rs).
+#[wasm_bindgen]
+pub fn compile_with_overlays(source: String, request_json: &str) -> Result<Vec<u8>, JsError> {
+    editor::compile_with_overlays(&source, request_json)
+}
+
 /// Apply the bundle's post-build transforms (the SPAC injectors,
 /// `transforms.transforms` with `enabled: true`) to a compiled variable
 /// font: SPAC fvar axis + gvar phantom tuples + rebuilt HVAR
@@ -72,15 +129,35 @@ pub fn compile_glyphs(source: String) -> Result<Vec<u8>, JsError> {
 /// width-aware variant).
 ///
 /// `transforms_json` is the bundle's `transforms.transforms` array;
-/// `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
-/// present, pins per-instance SPAC coordinates).
+/// per-instance SPAC coordinates ride it as `params.instance_spac`
+/// (parsed from the avar2 mappings CSV by the caller — csv_io on the
+/// desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+/// for caller/ABI compatibility and IGNORED: Rust no longer parses the
+/// CSV (one parse rule, Python-side).
 #[wasm_bindgen]
 pub fn apply_transforms(
     font_bytes: Vec<u8>,
     transforms_json: &str,
-    avar2_csv: &str,
+    _avar2_csv: &str,
 ) -> Result<Vec<u8>, JsError> {
-    spac::apply_transforms(font_bytes, transforms_json, avar2_csv)
+    spac::apply_transforms(font_bytes, transforms_json)
+}
+
+/// A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+/// or `null` when no axis varies) — what the width-aware SPAC transform
+/// needs as `params.master_locations`, read the way the desktop pipeline
+/// reads it (editor.rs `master_locations`).
+#[wasm_bindgen]
+pub fn master_locations(source: String) -> Result<String, JsError> {
+    editor::master_locations(&source)
+}
+
+/// Test instrumentation for the SPAC oracle (not part of the wasm ABI):
+/// what the width-aware injector measures, as JSON — see
+/// `spac::widthaware_trace`.
+#[doc(hidden)]
+pub fn spac_widthaware_trace(font_bytes: &[u8], transforms_json: &str) -> Result<String, JsError> {
+    spac::widthaware_trace(font_bytes, transforms_json)
 }
 
 /// Add control (secondary parametric) axes from a config bundle to a
@@ -552,7 +629,7 @@ pub fn add_avar2(font_bytes: Vec<u8>, mappings_csv: &str, axis_metadata_json: Op
     // equivalent byte-level rewrite (a 0.0 coordinate means the axis does
     // not participate in the tuple).
     let gvar_bytes = match font.data_for_tag(TAG_GVAR) {
-        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &HashMap::new())?),
+        Some(d) => Some(patch_gvar(d.as_bytes(), total_axes, &HashMap::new(), false)?),
         None => None,
     };
 
@@ -664,12 +741,14 @@ fn repack(font: &FontRef, mut replacements: HashMap<Tag, Vec<u8>>) -> Vec<u8> {
 
 // Tuple variation header flags (gvar / OT TupleVariation).
 const GVAR_TUPLE_COUNT_MASK: u16 = 0x0FFF;
+const GVAR_TUPLE_INDEX_MASK: u16 = 0x0FFF;
 const GVAR_EMBEDDED_PEAK_TUPLE: u16 = 0x8000;
 const GVAR_INTERMEDIATE_REGION: u16 = 0x4000;
 const GVAR_PRIVATE_POINT_NUMBERS: u16 = 0x2000;
 // tupleVariationCount flag (glyph variation data level).
 const GVAR_TUPLES_SHARE_POINT_NUMBERS: u16 = 0x8000;
 // Packed-delta run header flags.
+const DELTAS_ARE_ZERO: u8 = 0x80;
 const DELTAS_ARE_WORDS: u8 = 0x40;
 const DELTA_RUN_COUNT_MASK: u8 = 0x3F;
 // Packed point-number run flags.
@@ -724,25 +803,54 @@ pub(crate) struct NewTuple {
     pub end: Vec<f64>,
     /// (x, y) per point, including the 4 phantom points.
     pub deltas: Vec<(i16, i16)>,
+    /// Ascending point numbers this tuple touches; the rest are untouched
+    /// (fontTools' `None` coordinates). `None` writes every point. The
+    /// width-aware SPAC lists only its two phantoms, which is what
+    /// fontTools compiles for the reference transform's tuples.
+    pub points: Option<Vec<u16>>,
 }
 
 impl NewTuple {
+    /// The peak as gvar stores it: one F2Dot14 per axis (fontTools
+    /// `compileCoord`).
+    fn peak_bytes(&self) -> Vec<u8> {
+        self.peak.iter().flat_map(|&p| (fl2fi(p) as i16).to_be_bytes()).collect()
+    }
+
     /// Serialize as (tuple header, serialized delta data), mirroring
-    /// fontTools `TupleVariation.compile`: embedded peak, private point
-    /// numbers (a single 0 byte = all points), deltas as int16 runs.
-    fn serialize(&self) -> (Vec<u8>, Vec<u8>) {
-        let mut aux = vec![0u8]; // all points in the glyph
-        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.0));
-        pack_deltas(&mut aux, self.deltas.iter().map(|d| d.1));
+    /// fontTools `TupleVariation.compile`: the peak embedded, or named by
+    /// its index among gvar's shared tuples; private point numbers (a
+    /// single 0 byte = all points, deltas as int16 runs; or the packed
+    /// point list with fontTools' size-optimized delta runs).
+    fn serialize(&self, shared_peak: Option<u16>) -> (Vec<u8>, Vec<u8>) {
+        let mut aux = Vec::new();
+        match &self.points {
+            None => {
+                aux.push(0u8); // all points in the glyph
+                pack_deltas(&mut aux, self.deltas.iter().map(|d| d.0));
+                pack_deltas(&mut aux, self.deltas.iter().map(|d| d.1));
+            }
+            Some(points) => {
+                pack_points(&mut aux, points);
+                let xs: Vec<i16> = points.iter().map(|&p| self.deltas[p as usize].0).collect();
+                let ys: Vec<i16> = points.iter().map(|&p| self.deltas[p as usize].1).collect();
+                pack_deltas_compact(&mut aux, &xs);
+                pack_deltas_compact(&mut aux, &ys);
+            }
+        }
 
         let intermediate = self.peak.iter().enumerate().any(|(i, &p)| {
             let (s, e) = (self.start[i], self.end[i]);
             (s, e) != (p.min(0.0), p.max(0.0))
         });
-        let mut flags = GVAR_EMBEDDED_PEAK_TUPLE | GVAR_PRIVATE_POINT_NUMBERS;
+        let mut flags = GVAR_PRIVATE_POINT_NUMBERS;
         let mut coords = Vec::with_capacity(self.peak.len() * 2);
-        for &p in &self.peak {
-            coords.extend_from_slice(&(fl2fi(p) as i16).to_be_bytes());
+        match shared_peak {
+            Some(index) => flags |= index,
+            None => {
+                flags |= GVAR_EMBEDDED_PEAK_TUPLE;
+                coords = self.peak_bytes();
+            }
         }
         if intermediate {
             flags |= GVAR_INTERMEDIATE_REGION;
@@ -761,6 +869,94 @@ impl NewTuple {
     }
 }
 
+/// fontTools `TupleVariation.compilePoints` for a non-empty ascending
+/// point set: the count (one or two bytes), then runs of increments from
+/// the previous point number. A run is byte-encoded when its FIRST
+/// increment fits a byte and ends at the first one that does not; a
+/// word-encoded run never switches back.
+fn pack_points(out: &mut Vec<u8>, points: &[u16]) {
+    let n = points.len();
+    if n < 0x80 {
+        out.push(n as u8);
+    } else {
+        out.push((n >> 8) as u8 | 0x80);
+        out.push(n as u8);
+    }
+    let (mut pos, mut last) = (0usize, 0u16);
+    while pos < n {
+        let header = out.len();
+        out.push(0);
+        let mut run = 0usize;
+        let mut bytes: Option<bool> = None;
+        while pos < n && run <= POINT_RUN_COUNT_MASK as usize {
+            let delta = points[pos] - last;
+            let use_bytes = *bytes.get_or_insert(delta <= 0xFF);
+            if use_bytes && delta > 0xFF {
+                break; // the next run starts here, word-encoded
+            }
+            if use_bytes {
+                out.push(delta as u8);
+            } else {
+                out.extend_from_slice(&delta.to_be_bytes());
+            }
+            last = points[pos];
+            pos += 1;
+            run += 1;
+        }
+        out[header] = (run as u8 - 1) | if bytes == Some(true) { 0 } else { POINTS_ARE_WORDS };
+    }
+}
+
+/// fontTools `TupleVariation.compileDeltaValues_` (optimizeSize=True)
+/// for int16 values: zero runs carry no data, small values pack as
+/// bytes, the rest as words, with fontTools' run-splitting rules.
+fn pack_deltas_compact(out: &mut Vec<u8>, deltas: &[i16]) {
+    let is_byte = |v: i16| (-128..=127).contains(&v);
+    let n = deltas.len();
+    let mut pos = 0usize;
+    while pos < n {
+        let start = pos;
+        if deltas[pos] == 0 {
+            // encodeDeltaRunAsZeroes_
+            while pos < n && deltas[pos] == 0 {
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(DELTAS_ARE_ZERO | (chunk.len() as u8 - 1));
+            }
+        } else if is_byte(deltas[pos]) {
+            // encodeDeltaRunAsBytes_: a lone zero stays in the run, two or
+            // more start a zero run.
+            while pos < n && is_byte(deltas[pos]) {
+                if deltas[pos] == 0 && pos + 1 < n && deltas[pos + 1] == 0 {
+                    break;
+                }
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(chunk.len() as u8 - 1);
+                out.extend(chunk.iter().map(|&d| d as i8 as u8));
+            }
+        } else {
+            // encodeDeltaRunAsWords_: a zero, or two byte-sized values in
+            // a row, end the run; a lone byte-sized value stays in it.
+            while pos < n {
+                let v = deltas[pos];
+                if v == 0 || (is_byte(v) && pos + 1 < n && is_byte(deltas[pos + 1])) {
+                    break;
+                }
+                pos += 1;
+            }
+            for chunk in deltas[start..pos].chunks(64) {
+                out.push(DELTAS_ARE_WORDS | (chunk.len() as u8 - 1));
+                for d in chunk {
+                    out.extend_from_slice(&d.to_be_bytes());
+                }
+            }
+        }
+    }
+}
+
 /// Packed delta values as int16 runs of ≤ 64 (DELTAS_ARE_WORDS).
 fn pack_deltas(out: &mut Vec<u8>, deltas: impl Iterator<Item = i16>) {
     let deltas: Vec<i16> = deltas.collect();
@@ -774,6 +970,51 @@ fn pack_deltas(out: &mut Vec<u8>, deltas: impl Iterator<Item = i16>) {
 
 fn gvar_err(context: &str) -> JsError {
     err(format!("gvar table malformed: {context}"))
+}
+
+/// Maximum |delta| in a tuple's packed delta runs (x and y together).
+/// `data` starts AFTER any private point numbers. Used by the pruning
+/// pass in `patch_gvar` to find visually negligible splinter tuples.
+fn max_abs_packed_delta(data: &[u8]) -> Result<i32, JsError> {
+    let mut pos = 0usize;
+    let mut max = 0i32;
+    while pos < data.len() {
+        let run = data[pos];
+        pos += 1;
+        let n = (run & 0x3F) as usize + 1;
+        match run & 0xC0 {
+            0x80 => {} // DELTAS_ARE_ZERO
+            0x40 => {
+                for _ in 0..n {
+                    let b = data
+                        .get(pos..pos + 2)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max((i16::from_be_bytes([b[0], b[1]]) as i32).abs());
+                    pos += 2;
+                }
+            }
+            0x00 => {
+                for _ in 0..n {
+                    let b = *data
+                        .get(pos)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max(((b as i8) as i32).abs());
+                    pos += 1;
+                }
+            }
+            _ => {
+                // 0xC0: 32-bit deltas (post-v1 spec); walk, never prune.
+                for _ in 0..n {
+                    let b = data
+                        .get(pos..pos + 4)
+                        .ok_or_else(|| gvar_err("delta run truncated"))?;
+                    max = max.max(i32::from_be_bytes([b[0], b[1], b[2], b[3]]).abs());
+                    pos += 4;
+                }
+            }
+        }
+    }
+    Ok(max)
 }
 
 fn be_u16(bytes: &[u8], off: usize, context: &str) -> Result<u16, JsError> {
@@ -801,10 +1042,16 @@ fn be_u32(bytes: &[u8], off: usize, context: &str) -> Result<u32, JsError> {
 /// coordinates for the full (grown) axis list with missing axes at 0.0.
 /// A zero coordinate means the tuple does not participate in that axis,
 /// so glyph variation behavior along the new axes is unchanged.
+///
+/// With `share_peaks`, an injected peak that more than one injected tuple
+/// uses joins gvar's shared tuples (fontTools `compileSharedTuples`: every
+/// coordinate used more than once, most used first), and those tuples'
+/// headers name it by index instead of embedding one coordinate per axis.
 fn patch_gvar(
     bytes: &[u8],
     total_axes: u16,
     extras: &HashMap<u16, Vec<NewTuple>>,
+    share_peaks: bool,
 ) -> Result<Vec<u8>, JsError> {
     if bytes.len() < 20 {
         return Err(gvar_err("header truncated"));
@@ -840,6 +1087,25 @@ fn patch_gvar(
         glyph_offsets.push(off);
     }
 
+    // The injected peaks to share, after the font's own shared tuples and
+    // within the format's 12-bit tuple index.
+    let mut new_shared: Vec<Vec<u8>> = Vec::new();
+    if share_peaks {
+        let mut uses: HashMap<Vec<u8>, usize> = HashMap::new();
+        for tuple in extras.values().flatten() {
+            *uses.entry(tuple.peak_bytes()).or_default() += 1;
+        }
+        let mut shared: Vec<(Vec<u8>, usize)> = uses.into_iter().filter(|(_, n)| *n > 1).collect();
+        shared.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let room = (GVAR_TUPLE_INDEX_MASK as usize + 1).saturating_sub(shared_count);
+        new_shared = shared.into_iter().take(room).map(|(peak, _)| peak).collect();
+    }
+    let shared_index: HashMap<&[u8], u16> = new_shared
+        .iter()
+        .enumerate()
+        .map(|(i, peak)| (peak.as_slice(), (shared_count + i) as u16))
+        .collect();
+
     // Rebuild each glyph's variation data, padding tuple headers and
     // appending any injected tuples.
     let mut new_glyph_data: Vec<u8> = Vec::new();
@@ -858,7 +1124,17 @@ fn patch_gvar(
         if start == end && gid_extras.is_none() {
             continue; // no variation data for this glyph
         }
-        let (count_flags, mut headers, data_section, trailing) = if start == end {
+        // One record per existing tuple: (padded header, its slice of
+        // the data section, max |delta|). Collected individually so the
+        // pruning pass below can drop splinter tuples when the padded
+        // header block would overflow the format's u16 offsetToData.
+        struct TupleRec<'a> {
+            header: Vec<u8>,
+            data: &'a [u8],
+            max_delta: i32,
+            has_private_points: bool,
+        }
+        let (count_flags, mut tuples_vec, shared_prefix, trailing) = if start == end {
             (0u16, Vec::new(), &[][..], &[][..])
         } else {
             let g = bytes
@@ -868,14 +1144,12 @@ fn patch_gvar(
             let tuple_count = (count_flags & GVAR_TUPLE_COUNT_MASK) as usize;
             let off_data = be_u16(g, 2, "offsetToData")? as usize;
 
-            let mut headers: Vec<u8> = Vec::new();
-            let mut pos = 4usize;
-            // Byte length of the old tuple data (shared point numbers +
-            // each tuple's serialized deltas). Anything after it in the
-            // glyph's data slice is trailing alignment padding, which
+            // Shared point numbers prefix the data section; each tuple's
+            // serialized deltas follow in header order. Anything after
+            // the last tuple's data is trailing alignment padding, which
             // must stay at the END — injected tuple data goes before it,
             // since the spec reads tuple data sequentially.
-            let mut old_data_len = if count_flags & GVAR_TUPLES_SHARE_POINT_NUMBERS != 0 {
+            let shared_pts_len = if count_flags & GVAR_TUPLES_SHARE_POINT_NUMBERS != 0 {
                 packed_points_len(
                     g.get(off_data..)
                         .ok_or_else(|| gvar_err("shared points out of range"))?,
@@ -883,23 +1157,26 @@ fn patch_gvar(
             } else {
                 0
             };
+            let mut tuples_vec: Vec<TupleRec> = Vec::with_capacity(tuple_count);
+            let mut pos = 4usize;
+            let mut data_cursor = off_data + shared_pts_len;
             for _ in 0..tuple_count {
                 let data_size = be_u16(g, pos, "tuple header")? as usize;
-                old_data_len += data_size;
                 let tflags = be_u16(g, pos + 2, "tuple header")?;
-                headers.extend_from_slice(
+                let mut header: Vec<u8> = Vec::new();
+                header.extend_from_slice(
                     g.get(pos..pos + 4)
                         .ok_or_else(|| gvar_err("tuple header truncated"))?,
                 );
                 pos += 4;
                 if tflags & GVAR_EMBEDDED_PEAK_TUPLE != 0 {
                     let len = old_axes * 2;
-                    headers.extend_from_slice(
+                    header.extend_from_slice(
                         g.get(pos..pos + len)
                             .ok_or_else(|| gvar_err("embedded peak truncated"))?,
                     );
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
                     pos += len;
                 }
@@ -912,45 +1189,127 @@ fn patch_gvar(
                     let end_coords = g
                         .get(pos + len..pos + 2 * len)
                         .ok_or_else(|| gvar_err("intermediate end truncated"))?;
-                    headers.extend_from_slice(start_coords);
+                    header.extend_from_slice(start_coords);
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
-                    headers.extend_from_slice(end_coords);
+                    header.extend_from_slice(end_coords);
                     for _ in 0..n_new {
-                        headers.extend_from_slice(&zero_coord);
+                        header.extend_from_slice(&zero_coord);
                     }
                     pos += 2 * len;
                 }
+                let data = g
+                    .get(data_cursor..data_cursor + data_size)
+                    .ok_or_else(|| gvar_err("tuple data out of range"))?;
+                data_cursor += data_size;
+                tuples_vec.push(TupleRec {
+                    header,
+                    data,
+                    max_delta: i32::MAX, // computed lazily if pruning is needed
+                    has_private_points: tflags & GVAR_PRIVATE_POINT_NUMBERS != 0,
+                });
             }
-            let data_end = off_data
-                .checked_add(old_data_len)
-                .ok_or_else(|| gvar_err("tuple data section overflow"))?;
-            let data_section = g
-                .get(off_data..data_end)
-                .ok_or_else(|| gvar_err("tuple data section out of range"))?;
-            let trailing = g.get(data_end..).unwrap_or(&[]);
-            (count_flags, headers, data_section, trailing)
+            let shared_prefix = g
+                .get(off_data..off_data + shared_pts_len)
+                .ok_or_else(|| gvar_err("shared points out of range"))?;
+            let trailing = g.get(data_cursor..).unwrap_or(&[]);
+            (count_flags, tuples_vec, shared_prefix, trailing)
         };
 
         // Injected tuples for this glyph.
         let mut added: u16 = 0;
+        let mut extra_headers: Vec<u8> = Vec::new();
         let mut added_data: Vec<u8> = Vec::new();
         if let Some(tuples) = gid_extras {
             for tuple in tuples {
-                let (header, aux) = tuple.serialize();
-                headers.extend_from_slice(&header);
+                let shared = shared_index.get(tuple.peak_bytes().as_slice()).copied();
+                let (header, aux) = tuple.serialize(shared);
+                extra_headers.extend_from_slice(&header);
                 added_data.extend_from_slice(&aux);
                 added += 1;
             }
         }
-        let new_count_flags =
-            (count_flags & !GVAR_TUPLE_COUNT_MASK) | (added + (count_flags & GVAR_TUPLE_COUNT_MASK));
+
+        // PRUNE if the padded header block cannot fit offsetToData's
+        // u16. Writing the wrapped value instead (shipped once) points
+        // readers into the middle of the headers: the glyph's deltas
+        // decode as garbage and renderers silently drop ALL variations
+        // for it — 'g' froze at the default in every style. Splinter
+        // tuples with max |delta| <= PRUNE_TOL font units (relocation
+        // shards; invisible at 2000 upm) are dropped smallest-first
+        // until the block fits; a glyph that cannot fit even then is a
+        // hard error, never a corrupt table.
+        const PRUNE_TOL: i32 = 2;
+        const HEADROOM: usize = 64;
+        let headers_len = |tv: &Vec<TupleRec>| -> usize {
+            tv.iter().map(|t| t.header.len()).sum::<usize>() + extra_headers.len()
+        };
+        if 4 + headers_len(&tuples_vec) > u16::MAX as usize - HEADROOM {
+            for t in tuples_vec.iter_mut() {
+                let body = if t.has_private_points {
+                    let pts = packed_points_len(t.data)?;
+                    &t.data[pts..]
+                } else {
+                    t.data
+                };
+                t.max_delta = max_abs_packed_delta(body)?;
+            }
+            let mut order: Vec<usize> = (0..tuples_vec.len()).collect();
+            order.sort_by_key(|&i| tuples_vec[i].max_delta);
+            let mut drop = std::collections::HashSet::new();
+            for &i in &order {
+                if 4 + headers_len(&tuples_vec)
+                    - drop
+                        .iter()
+                        .map(|&j: &usize| tuples_vec[j].header.len())
+                        .sum::<usize>()
+                    <= u16::MAX as usize - HEADROOM
+                {
+                    break;
+                }
+                if tuples_vec[i].max_delta > PRUNE_TOL {
+                    return Err(gvar_err(&format!(
+                        "glyph {gid}: padded tuple headers exceed gvar's 64KB                          per-glyph limit and cannot be pruned within the                          {PRUNE_TOL}-unit tolerance"
+                    )));
+                }
+                drop.insert(i);
+            }
+            if !drop.is_empty() {
+                eprintln!(
+                    "spac-inject: glyph {gid}: pruned {} splinter tuple(s)                      (max delta <= {PRUNE_TOL} units) to fit gvar's per-glyph                      header limit",
+                    drop.len()
+                );
+                let mut idx = 0usize;
+                tuples_vec.retain(|_| {
+                    let keep = !drop.contains(&idx);
+                    idx += 1;
+                    keep
+                });
+            }
+        }
+
+        let kept = tuples_vec.len() as u16;
+        let new_count_flags = (count_flags & !GVAR_TUPLE_COUNT_MASK) | (kept + added);
+        let mut headers: Vec<u8> = Vec::new();
+        for t in &tuples_vec {
+            headers.extend_from_slice(&t.header);
+        }
+        headers.extend_from_slice(&extra_headers);
+        let off_to_data = 4 + headers.len();
+        let off_to_data: u16 = off_to_data.try_into().map_err(|_| {
+            gvar_err(&format!(
+                "glyph {gid}: tuple headers still exceed the u16 offsetToData after pruning"
+            ))
+        })?;
 
         new_glyph_data.extend_from_slice(&new_count_flags.to_be_bytes());
-        new_glyph_data.extend_from_slice(&(4 + headers.len() as u16).to_be_bytes());
+        new_glyph_data.extend_from_slice(&off_to_data.to_be_bytes());
         new_glyph_data.extend_from_slice(&headers);
-        new_glyph_data.extend_from_slice(data_section);
+        new_glyph_data.extend_from_slice(shared_prefix);
+        for t in &tuples_vec {
+            new_glyph_data.extend_from_slice(t.data);
+        }
         new_glyph_data.extend_from_slice(&added_data);
         new_glyph_data.extend_from_slice(trailing);
         if !new_glyph_data.len().is_multiple_of(2) {
@@ -972,7 +1331,7 @@ fn patch_gvar(
     // the shared region and the glyph data is preserved. The offsets
     // array may itself grow (short→long), shifting everything after it.
     let old_shared_len = shared_count * old_axes * 2;
-    let new_shared_len = shared_count * new_axes * 2;
+    let new_shared_len = (shared_count + new_shared.len()) * new_axes * 2;
     let shared_end = off_shared
         .checked_add(old_shared_len)
         .ok_or_else(|| gvar_err("shared tuples overflow"))?;
@@ -1000,10 +1359,14 @@ fn patch_gvar(
             out.extend_from_slice(&zero_coord);
         }
     }
+    for peak in &new_shared {
+        out.extend_from_slice(peak);
+    }
     out.extend_from_slice(&bytes[shared_end..off_glyph_data]); // inter-region padding
     out.extend_from_slice(&new_glyph_data);
 
     out[4..6].copy_from_slice(&total_axes.to_be_bytes());
+    out[6..8].copy_from_slice(&((shared_count + new_shared.len()) as u16).to_be_bytes());
     out[8..12].copy_from_slice(&(new_off_shared as u32).to_be_bytes());
     out[14..16].copy_from_slice(&new_flags.to_be_bytes());
     out[16..20].copy_from_slice(&(new_off_glyph_data as u32).to_be_bytes());
@@ -1086,4 +1449,121 @@ pub fn set_hidden_axes(font_bytes: Vec<u8>, hidden_tags_json: &str) -> Result<Ve
             rec[16..18].copy_from_slice(&flags.to_be_bytes());
         }
     })
+}
+
+// The sparse tuple encoding against fontTools 4.68's own bytes
+// (`TupleVariation.compilePoints`, `compileDeltaValues_`, and
+// `TupleVariation(axes, coords).compile(["XTRA", "XOPQ", "SPAC"])` with
+// only the two horizontal phantoms set — the width-aware SPAC's tuples).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn packed_points_are_fonttools_compile_points() {
+        let mut out = Vec::new();
+        pack_points(&mut out, &[3, 4, 300, 301, 302, 1000]);
+        assert_eq!(hex(&out), "060103018301280001000102ba");
+        // 150 points: a two-byte count, then runs of at most 128.
+        let mut out = Vec::new();
+        pack_points(&mut out, &(0..300).step_by(2).collect::<Vec<u16>>());
+        assert_eq!(out.len(), 154);
+        assert_eq!(hex(&out[..20]), "80967f0002020202020202020202020202020202");
+    }
+
+    #[test]
+    fn compact_deltas_are_fonttools_compile_delta_values() {
+        let ones = "01".repeat(64);
+        let thousands = "03e8".repeat(64);
+        for (deltas, expected) in [
+            (vec![0, 0, 0], "82".to_string()),
+            (vec![5, 0, -3], "020500fd".to_string()),
+            (vec![5, 0, 0, 7], "0005810007".to_string()),
+            (vec![300, 2, 400], "42012c00020190".to_string()),
+            (vec![300, 2, 3, 400], "40012c010203400190".to_string()),
+            (vec![300, 0, 400], "40012c80400190".to_string()),
+            (vec![-128, 127, 128], "01807f400080".to_string()),
+            (vec![0; 70], "bf85".to_string()),
+            (vec![1; 65], format!("3f{ones}0001")),
+            (vec![1000; 65], format!("7f{thousands}4003e8")),
+        ] {
+            let mut out = Vec::new();
+            pack_deltas_compact(&mut out, &deltas);
+            assert_eq!(hex(&out), expected, "{:?}…", &deltas[..deltas.len().min(6)]);
+        }
+    }
+
+    /// A SPAC tuple over (XTRA, XOPQ, SPAC): `delta` on the advance
+    /// phantom, its negative on the origin phantom, nothing else touched.
+    fn spac_tuple_at(
+        region: [(f64, f64, f64); 3],
+        points: usize,
+        delta: i16,
+        shared_peak: Option<u16>,
+    ) -> (String, String) {
+        let mut deltas = vec![(0, 0); points];
+        deltas[points - 4] = (-delta, 0);
+        deltas[points - 3] = (delta, 0);
+        let tuple = NewTuple {
+            peak: region.iter().map(|r| r.1).collect(),
+            start: region.iter().map(|r| r.0).collect(),
+            end: region.iter().map(|r| r.2).collect(),
+            deltas,
+            points: Some(vec![(points - 4) as u16, (points - 3) as u16]),
+        };
+        let (header, data) = tuple.serialize(shared_peak);
+        (hex(&header), hex(&data))
+    }
+
+    fn spac_tuple(region: [(f64, f64, f64); 3], points: usize, delta: i16) -> (String, String) {
+        spac_tuple_at(region, points, delta, None)
+    }
+
+    #[test]
+    fn sparse_tuples_are_fonttools_tuple_variation_compile() {
+        const OFF: (f64, f64, f64) = (0.0, 0.0, 0.0);
+        const SPAC_MIN: (f64, f64, f64) = (-1.0, -1.0, 0.0);
+        const SPAC_MAX: (f64, f64, f64) = (0.0, 1.0, 1.0);
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MIN], 12, -50),
+            ("0008a00000000000c000".into(), "020108010132ce81".into())
+        );
+        // An interior master: the intermediate region is written, and the
+        // point numbers no longer fit a byte.
+        assert_eq!(
+            spac_tuple([(0.0, 0.25, 1.0), OFF, SPAC_MAX], 300, 200),
+            (
+                "000ce000100000004000000000000000400000004000".into(),
+                "02810128000141ff3800c881".into()
+            )
+        );
+        // All-zero deltas are still a tuple (the reference keeps them).
+        assert_eq!(
+            spac_tuple([(-1.0, -1.0, 0.0), (0.0, 1.0, 1.0), SPAC_MAX], 6, 0),
+            ("0006a000c00040004000".into(), "020102018181".into())
+        );
+        // -128 fits a byte, +128 does not.
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MAX], 260, 128),
+            ("000ca000000000004000".into(), "028101000001008040008081".into())
+        );
+        assert_eq!(
+            spac_tuple([OFF, OFF, SPAC_MAX], 4, -129),
+            ("000aa000000000004000".into(), "02010001410081ff7f81".into())
+        );
+        // A shared peak: the header names it by index and embeds nothing —
+        // except the intermediate region, which is never shared.
+        assert_eq!(
+            spac_tuple_at([OFF, OFF, SPAC_MIN], 12, -50, Some(5)),
+            ("00082005".into(), "020108010132ce81".into())
+        );
+        assert_eq!(
+            spac_tuple_at([(0.0, 0.25, 1.0), OFF, SPAC_MAX], 300, 200, Some(4095)),
+            ("000c6fff000000000000400000004000".into(), "02810128000141ff3800c881".into())
+        );
+    }
 }

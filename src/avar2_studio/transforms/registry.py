@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from ..studio_log import get_logger
 from . import config as _config
 from .base import Transform
 from .builtin_gftools import (
@@ -29,10 +29,14 @@ from .builtin_gftools import (
     FixUnhintedTransform,
     GenStatTransform,
 )
+from .builtin_round_corners import RoundCornersTransform
+from .builtin_slant import SlantTransform
 from .builtin_spac import SpacTransform
 from .builtin_spac_widthaware import WidthAwareSpacTransform
 
 # id -> Transform instance
+
+log = get_logger(__name__)
 REGISTRY: Dict[str, Transform] = {}
 
 _discovered = False
@@ -41,7 +45,7 @@ _discovered = False
 def register(transform: Transform) -> None:
     tid = transform.spec.id
     if tid in REGISTRY:
-        print(f"transforms: '{tid}' already registered; overriding", file=sys.stderr)
+        log.info(f"transforms: '{tid}' already registered; overriding")
     REGISTRY[tid] = transform
 
 
@@ -62,6 +66,8 @@ def discover(force: bool = False) -> None:
     register(FixInstancesTransform())
     register(GenStatTransform())
     register(FixUnhintedTransform())
+    register(RoundCornersTransform())
+    register(SlantTransform())
 
     # User scripts.
     d = user_transforms_dir()
@@ -70,14 +76,14 @@ def discover(force: bool = False) -> None:
             d.mkdir(parents=True, exist_ok=True)
             _write_readme(d)
     except OSError as e:
-        print(f"transforms: could not create {d}: {e}", file=sys.stderr)
+        log.info(f"transforms: could not create {d}: {e}")
 
     if d.exists():
         for py in sorted(d.glob("*.py")):
             try:
                 _load_script(py)
-            except Exception as e:  # noqa: BLE001 — never let a bad script break startup
-                print(f"transforms: failed to load {py.name}: {e}", file=sys.stderr)
+            except Exception as e:
+                log.info(f"transforms: failed to load {py.name}: {e}")
 
     _discovered = True
 
@@ -98,10 +104,7 @@ def _load_script(path: Path) -> None:
             register(obj())
             found += 1
     if found == 0:
-        print(
-            f"transforms: {path.name} defines no Transform subclass — skipped",
-            file=sys.stderr,
-        )
+        log.info(f"transforms: {path.name} defines no Transform subclass — skipped")
 
 
 def get(transform_id: str):
@@ -136,15 +139,17 @@ def available(source_path: Path) -> List[Dict]:
     return out
 
 
-def active(source_path: Path) -> List[Tuple[Transform, Dict]]:
+def active(source_path: Path, stage: str = "font") -> List[Tuple[Transform, Dict]]:
     """Build list: ordered ``(transform, params)`` for enabled entries whose
-    type is a registered transform. Preserves the sidecar's order."""
+    type is a registered transform OF THAT STAGE. Preserves the sidecar's
+    order. The default is the post-build (font) stage, which is what every
+    pre-existing caller means."""
     out: List[Tuple[Transform, Dict]] = []
     for e in _config.entries(source_path):
         if not e["enabled"]:
             continue
         t = REGISTRY.get(e["type"])
-        if t is None:
+        if t is None or getattr(t.spec, "stage", "font") != stage:
             continue
         out.append((t, t.spec.coerce_params(e["params"])))
     return out

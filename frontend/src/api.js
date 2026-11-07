@@ -8,7 +8,27 @@
 // broke any non-default port. VITE_API_URL still wins so the
 // dev-server + backend-on-5001 split workflow keeps working (the dev
 // server also proxies /api — see vite.config.js).
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// ``?.``: import.meta.env is undefined outside Vite (the node-only specs
+// under e2e/ import this module); Vite still inlines the value.
+const API_BASE = import.meta.env?.VITE_API_URL || '/api';
+
+const EXPORT_TIMEOUT_MS = 20 * 60 * 1000;
+
+// AbortSignal plumbing for the export poll: fetch rejects with a DOMException
+// named AbortError when its signal fires; sleep() does the same so a Cancel
+// mid-wait returns at once instead of after the poll interval.
+const abortError = () => new DOMException('Export cancelled', 'AbortError');
+const isAbort = (err) => !!err && err.name === 'AbortError';
+const throwIfAborted = (signal) => { if (signal && signal.aborted) throw abortError(); };
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  throwIfAborted(signal);
+  const onAbort = () => { clearTimeout(timer); reject(abortError()); };
+  const timer = setTimeout(() => {
+    if (signal) signal.removeEventListener('abort', onAbort);
+    resolve();
+  }, ms);
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+});
 
 // Helper to parse JSON response with error handling
 async function parseJSON(response) {
@@ -24,6 +44,19 @@ async function parseJSON(response) {
 }
 
 export const api = {
+  // What this provider can do. The UI consults these instead of probing the
+  // mode; the browser provider (static-api.js) swaps in its own answers, and
+  // e2e/api-parity.spec.mjs keeps the two providers' method sets and these
+  // keys in step.
+  capabilities: {
+    kinetikern: true,       // per-instance spacing engine (Kinetikern tab)
+    woff2: true,            // WOFF2 preview/download + export sizes from the build queue
+    cancel: true,           // cancel a running or queued build/export job
+    masters: true,          // /api/masters (the brace-location pins list the masters)
+    sourceWriteback: true,  // edits can be written back to the source file
+    fontraEditor: true,     // open a brace layer in the outline editor
+  },
+
   async health() {
     const response = await fetch(`${API_BASE}/health`);
     if (!response.ok) {
@@ -91,6 +124,17 @@ export const api = {
     // Add cache busting timestamp to force reload when font is rebuilt
     const timestamp = Date.now();
     return `${API_BASE}/avar2-font?t=${timestamp}`;
+  },
+
+  getWoff2DownloadUrl() {
+    // The background-compressed WOFF2 cache (409 while stale — callers check
+    // the queue's export sizes for woff2_exact first).
+    return `${API_BASE}/font?format=woff2&download=1`;
+  },
+
+  getWoff2PreviewUrl() {
+    // Same cache, content-disposition inline, for preview FontFace loads.
+    return `${API_BASE}/font?format=woff2`;
   },
 
   async createInstance(instanceName, coordinates, insertAfter = null) {
@@ -233,6 +277,30 @@ export const api = {
     if (!response.ok) {
       const error = await parseJSON(response).catch(() => ({ error: `Failed to add axis: ${response.status}` }));
       throw new Error(error.error || `Failed to add axis: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
+  async reorderInstances(names) {
+    const response = await fetch(`${API_BASE}/instances/order`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names }),
+    });
+    if (!response.ok) {
+      const error = await parseJSON(response).catch(() => ({ error: `Failed to reorder: ${response.status}` }));
+      throw new Error(error.error || `Failed to reorder: ${response.status} ${response.statusText}`);
+    }
+    return parseJSON(response);
+  },
+
+  async deleteAvar2Axis(axisName) {
+    const response = await fetch(`${API_BASE}/avar2/axis/${encodeURIComponent(axisName)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await parseJSON(response).catch(() => ({ error: `Failed to delete axis: ${response.status}` }));
+      throw new Error(error.error || `Failed to delete axis: ${response.status} ${response.statusText}`);
     }
     return parseJSON(response);
   },
@@ -464,13 +532,17 @@ export const api = {
     return parseJSON(response);
   },
 
-  async openControlAxisInEditor(tag, glyph) {
+  // Same arguments as the browser provider, which needs the layer location
+  // and the axes for its fontra-embed session; the server derives those from
+  // the sidecar and only needs the glyph, which rides along so the injected
+  // shim can show reference measurements for THIS layer without reading
+  // Fontra's scene state.
+  // eslint-disable-next-line no-unused-vars
+  async openControlAxisInEditor(tag, glyphName, layerLocation = null, studioAxes = null) {
     const response = await fetch(`${API_BASE}/control-axes/${encodeURIComponent(tag)}/open-editor`, {
       method: 'POST',
-      // The glyph rides along so the injected shim can show reference
-      // measurements for THIS layer without reading Fontra's scene state.
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ glyph: glyph || null }),
+      body: JSON.stringify({ glyph: glyphName || null }),
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
@@ -518,19 +590,102 @@ export const api = {
     return parseJSON(response);
   },
 
-  async exportFont(options) {
-    // POST /api/export-font — returns the font binary. Options:
-    // {hidden_axes: [tags], default_location: {tag: value} | null}.
+  async restingMaster(location) {
+    // E2l: which master the font rests on. The export dialog's size warning
+    // asks the backend instead of guessing from the master list; `null` means
+    // "the ORIGIN row", which the backend resolves from the mappings CSV.
+    const response = await fetch(`${API_BASE}/resting-master`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: location || null }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({}));
+      throw new Error(err.error || `Resting master failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async exportFont(options, { signal } = {}) {
+    // POST /api/export-font — the export runs as a QUEUED JOB (build worker,
+    // see docs/archive/WORKER_BUILD_PLAN.md): the POST returns 202 + a job id, we poll
+    // THAT job's status until its artifact is ready, then download it.
+    // Options: {hidden_axes: [tags], default_location: {tag: value} | null,
+    //  format: "ttf" | "woff2"}. An AbortSignal stops the poll, cancels the
+    // job server-side and rejects with an AbortError.
+    throwIfAborted(signal);
     const response = await fetch(`${API_BASE}/export-font`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options),
+      signal,
     });
     if (!response.ok) {
       const err = await parseJSON(response).catch(() => ({}));
       throw new Error(err.error || `Export failed: ${response.status}`);
     }
-    return response.blob();
+    const { job_id } = await parseJSON(response);
+    const cancelJob = () => this.cancelBuild(job_id).catch(() => {});
+    // Exports are full builds when a default location is involved — budget
+    // 20 minutes, then give up loudly (and drop the job: nobody will
+    // download it).
+    const deadline = Date.now() + EXPORT_TIMEOUT_MS;
+    try {
+      for (;;) {
+        const status = await this.getBuildJob(job_id, { signal });
+        if (status.state === 'finished') {
+          if (status.cancelled) throw new Error('The export was cancelled before it finished.');
+          if (!status.success) throw new Error(status.error || 'Export failed');
+          break;
+        }
+        if (Date.now() > deadline) {
+          await cancelJob();
+          throw new Error(`Export timed out after ${EXPORT_TIMEOUT_MS / 60000} minutes — the build worker is still busy. Try again once the studio is idle.`);
+        }
+        await sleep(1000, signal);
+      }
+      const dl = await fetch(`${API_BASE}/export/${job_id}/download`, { signal });
+      if (!dl.ok) {
+        const err = await parseJSON(dl).catch(() => ({}));
+        throw new Error(err.error || `Export download failed: ${dl.status}`);
+      }
+      return await dl.blob();
+    } catch (err) {
+      if (isAbort(err)) {
+        await cancelJob();
+        throw abortError();
+      }
+      throw err;
+    }
+  },
+
+  async getBuildStatus() {
+    const response = await fetch(`${API_BASE}/build/status`);
+    if (!response.ok) {
+      throw new Error(`Build status failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async getBuildJob(jobId, { signal } = {}) {
+    // One job's state by id: {state: queued|running|finished, success,
+    // cancelled, error, artifact_ready}. 404 = the studio no longer knows
+    // the job (restarted, or long since evicted).
+    const response = await fetch(`${API_BASE}/build/${encodeURIComponent(jobId)}`, { signal });
+    if (response.status === 404) {
+      throw new Error('The studio no longer knows this export job — was it restarted? Try the export again.');
+    }
+    if (!response.ok) {
+      throw new Error(`Build job status failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async cancelBuild(jobId) {
+    const response = await fetch(`${API_BASE}/build/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+    });
+    return parseJSON(response);
   },
 
   async getMappedLocation(coordinates) {
@@ -573,6 +728,83 @@ export const api = {
       const err = new Error(message);
       if (body && body.errors) err.report = body;
       throw err;
+    }
+    return parseJSON(response);
+  },
+
+  // --- Kinetikern: per-instance spacing (sidecar + engine proposals) ---
+  async getKinetikern() {
+    const response = await fetch(`${API_BASE}/kinetikern`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Kinetikern state: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async proposeKinetikern({ instance, coordinates, looseness }) {
+    const params = new URLSearchParams();
+    if (instance) params.set('instance', instance);
+    if (coordinates) params.set('coordinates', JSON.stringify(coordinates));
+    params.set('looseness', String(looseness ?? 0));
+    const response = await fetch(`${API_BASE}/kinetikern/propose?${params}`);
+    if (!response.ok) {
+      // A server started before Kinetikern existed answers 404, or 503 from
+      // the Fontra fallthrough; say what that means instead of echoing it.
+      if (response.status === 404 || response.status === 503) {
+        throw new Error('This studio server does not have Kinetikern yet — restart the studio to load it.');
+      }
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern proposal failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async applyKinetikern(name, looseness, location) {
+    const response = await fetch(`${API_BASE}/kinetikern/instances/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(location ? { looseness, location } : { looseness }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern apply failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async revertKinetikern(name) {
+    const response = await fetch(`${API_BASE}/kinetikern/instances/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern revert failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  async applyKinetikernAll(looseness) {
+    const response = await fetch(`${API_BASE}/kinetikern/all`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ looseness }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern apply-all failed: ${response.status}`);
+    }
+    return parseJSON(response);
+  },
+
+  // The family switch (K1). Off builds without Kinetikern but keeps the
+  // entries, so this is not a destructive "clear".
+  async setKinetikernEnabled(enabled) {
+    const response = await fetch(`${API_BASE}/kinetikern`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !!enabled }),
+    });
+    if (!response.ok) {
+      const err = await parseJSON(response).catch(() => ({ error: `Failed: ${response.status}` }));
+      throw new Error(err.error || `Kinetikern toggle failed: ${response.status}`);
     }
     return parseJSON(response);
   },

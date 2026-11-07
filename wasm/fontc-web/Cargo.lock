@@ -536,10 +536,12 @@ dependencies = [
  "font-types 0.12.2",
  "fontc",
  "fontdrasil",
+ "glyphs-reader",
  "read-fonts 0.40.2",
  "serde",
  "serde_json",
  "skrifa",
+ "smol_str",
  "wasm-bindgen",
  "write-fonts",
 ]

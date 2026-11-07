@@ -16,12 +16,12 @@ crate consumed, then compares:
      (the transform touches no outline data), and HVAR is present (the
      advance adjustment is variation-driven, not a static hmtx rewrite).
 
-Usage: compare_spac.py ORIGINAL WA UNI INST_PLAIN INST_OVR
+Usage: compare_spac.py ORIGINAL WA UNI INST_PLAIN INST_OVR INSTANCED OVERRIDE_CSV
   WA / UNI are the wasm crate's outputs (width-aware, uniform).
-  INST_PLAIN / INST_OVR are its outputs on the synthesized instanced
-  font (/tmp/spac-instanced-input.ttf, built by make_instanced_font.py)
-  with the plain avar2 CSV and with a SPAC-column CSV (the last read
-  back from /tmp/spac-override-avar.csv for the oracle sidecar).
+  INST_PLAIN / INST_OVR are its outputs on INSTANCED, the synthesized
+  instanced font (built by make_instanced_font.py), with the plain avar2
+  CSV and with OVERRIDE_CSV, the SPAC-column CSV (copied in as the
+  oracle's source sidecar).
 """
 
 import os
@@ -37,9 +37,15 @@ from fontTools.varLib import instancer
 # venv's python.
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]
 
+from avar2_studio.transforms import builtin_spac_widthaware
 from avar2_studio.transforms.base import BuildContext
 from avar2_studio.transforms.builtin_spac import SpacTransform
 from avar2_studio.transforms.builtin_spac_widthaware import WidthAwareSpacTransform
+
+# The oracle is the transform's own fontTools path. Left alone, apply() hands
+# the font to any spac-inject binary it finds — the engine under test — and
+# the comparison would be Rust against Rust.
+builtin_spac_widthaware._native_injector = lambda: None
 
 CRISPY_GLYPHS = Path(__file__).resolve().parents[3] / "examples/crispy-mini/sources/CrispyMini.glyphs"
 WA_PARAMS = {"min": -20, "max": 40, "bias": 1.0, "scale": 1.25}
@@ -159,8 +165,8 @@ def check_instances(label, wasm_path, oracle_path):
 
 def main():
     global ORIGINAL_PATH
-    ORIGINAL_PATH, wa_wasm, uni_wasm, inst_plain_wasm, inst_ovr_wasm = sys.argv[1:6]
-    instanced_input = "/tmp/spac-instanced-input.ttf"
+    (ORIGINAL_PATH, wa_wasm, uni_wasm, inst_plain_wasm, inst_ovr_wasm,
+     instanced_input, override_csv) = sys.argv[1:8]
     tmp = tempfile.mkdtemp(prefix="spac-oracle-")
 
     print("0. structure")
@@ -182,7 +188,7 @@ def main():
     check_instances("plain CSV → default 0.0", inst_plain_wasm, plain_oracle)
     src_dir = Path(tmp) / "ovr-src"
     src_dir.mkdir()
-    shutil.copy2("/tmp/spac-override-avar.csv", src_dir / "OverrideSrc-avar.csv")
+    shutil.copy2(override_csv, src_dir / "OverrideSrc-avar.csv")
     ovr_oracle = run_oracle(
         WidthAwareSpacTransform(), WA_PARAMS, src_dir / "OverrideSrc.glyphs", f"{tmp}/ovr",
         instanced_input,

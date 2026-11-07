@@ -51,10 +51,13 @@ export function apply_grade(font_bytes: Uint8Array, grade_json: string, instance
  * width-aware variant).
  *
  * `transforms_json` is the bundle's `transforms.transforms` array;
- * `avar2_csv` is the bundle's avar2 mappings CSV (a SPAC column, when
- * present, pins per-instance SPAC coordinates).
+ * per-instance SPAC coordinates ride it as `params.instance_spac`
+ * (parsed from the avar2 mappings CSV by the caller — csv_io on the
+ * desktop, mappings-csv.js in the browser). `_avar2_csv` is retained
+ * for caller/ABI compatibility and IGNORED: Rust no longer parses the
+ * CSV (one parse rule, Python-side).
  */
-export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, avar2_csv: string): Uint8Array;
+export function apply_transforms(font_bytes: Uint8Array, transforms_json: string, _avar2_csv: string): Uint8Array;
 
 /**
  * Bring stranded (out-of-range) gvar sources back to the axis edge
@@ -63,6 +66,29 @@ export function apply_transforms(font_bytes: Uint8Array, transforms_json: string
 export function clamp_out_of_range(font_bytes: Uint8Array): Uint8Array;
 
 export function compile_glyphs(source: string): Uint8Array;
+
+/**
+ * Compile a .glyphs source with editor overlays spliced in at the Plist
+ * level: request-declared axes are appended (masters extended, Virtual
+ * Masters pinned) and each overlay replaces — or inserts — the brace
+ * layer at its location, carrying the editor's outline (see editor.rs).
+ */
+export function compile_with_overlays(source: string, request_json: string): Uint8Array;
+
+/**
+ * Extract one glyph's source data (all layers — masters + brace layers —
+ * with outlines in the studio's sidecar schema) plus the font's axes and
+ * masters, as JSON for the browser glyph editor (see editor.rs).
+ */
+export function glyph_model(source: string, glyph_name: string): string;
+
+/**
+ * A `.glyphs` source's master locations as JSON (`[{}, {tag: value}, …]`,
+ * or `null` when no axis varies) — what the width-aware SPAC transform
+ * needs as `params.master_locations`, read the way the desktop pipeline
+ * reads it (editor.rs `master_locations`).
+ */
+export function master_locations(source: string): string;
 
 /**
  * Sum of filled outline area (font units² at the font's upm) across
@@ -89,6 +115,8 @@ export function pin_corner(font_bytes: Uint8Array, request_json: string): Uint8A
  */
 export function regen_stat(font_bytes: Uint8Array): Uint8Array;
 
+export function round_corners_source(source: string, params_json: string, control_json?: string | null): string;
+
 /**
  * Rebuild the export so its resting state IS the current location:
  * fvar defaults move to the given location (user values + mapped
@@ -104,6 +132,19 @@ export function set_default_location(font_bytes: Uint8Array, default_location_js
  */
 export function set_hidden_axes(font_bytes: Uint8Array, hidden_tags_json: string): Uint8Array;
 
+/**
+ * Round every corner of a .glyphs source (the round_corners
+ * transform, source-stage): the same engine the desktop studio runs,
+ * ported — returns the transformed source text for `compile_glyphs` /
+ * `compile_with_overlays`. `control_json` is the `-control.json`
+ * sidecar (correction targets), when the project has one.
+ * Slant a .glyphs source (the slant transform, source-stage): the
+ * same engine the desktop studio runs, ported — returns the
+ * transformed source text. Runs BEFORE round_corners_source, so
+ * rounds land on the slanted drawings.
+ */
+export function slant_source(source: string, params_json: string): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -114,10 +155,15 @@ export interface InitOutput {
     readonly apply_transforms: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly clamp_out_of_range: (a: number, b: number) => [number, number, number, number];
     readonly compile_glyphs: (a: number, b: number) => [number, number, number, number];
+    readonly compile_with_overlays: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly glyph_model: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly master_locations: (a: number, b: number) => [number, number, number, number];
     readonly pin_corner: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly regen_stat: (a: number, b: number) => [number, number, number, number];
+    readonly round_corners_source: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly set_default_location: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly set_hidden_axes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly slant_source: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly measure_at: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
