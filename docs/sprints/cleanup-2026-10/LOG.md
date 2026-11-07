@@ -3966,7 +3966,8 @@ The arm64 wheel, in a clean venv (`~/avar2-verifier/wheel-a5161db`, `env -i`, no
 - `spac-inject --rule` answers `e2i-c`.
 - `avar2-studio doctor` finds both helpers at the wheel path. `doctor --strict`
   exits 0 with `fontc` and `gftools-builder` on PATH. Without them it exits 1 and
-  names those two only: a wheel does not bring them.
+  names those two only, which is a false alarm: the wheel installs both (corrected
+  in ROUND 47).
 - `kinetikern.bridge.Engine` loads the library: ABI 1, `kinetikern2 2.0.0`.
 - The wheel's CLI built the real Crispy copy in 70 s. A logging wrapper on the
   helper shows the `--rule` handshake, then the inject call, so the native path ran.
@@ -3988,4 +3989,62 @@ Noticed, not blocking:
 
 R2 (B11b): `~/Documents/fontra-embed` `shared-studio-shim` pushed at `3de37a6`; no
 PR and no merge, which stays the user's call.
+
+## ROUND 47 — R3 and R4 done; awaiting user (written by the verifier as coordinator)
+
+**R3, squash into `main`.** `6534765`, parent `a37ca53`, tree equal to the sprint
+tip `72cce56` (`git diff` empty). The push added 400 blobs, 6.4 MB uncompressed,
+largest 0.61 MB; 04cc018, 431524e, aec81b9 and c606e25 are not reachable from it.
+CI on `main`: run 42354797706, six jobs green. Pages from `main`: run 42354797646,
+green. The push was a normal fast-forward, with no force and no tag.
+
+**R4, `main` into `github-pages`.** `5e83e17`, parents `17360ba` and `6534765`,
+tree equal to `main` (`git diff` empty). An ordinary merge stops on 97 conflicts,
+and its result differs from `main` in 100 files, so every path takes `main`'s
+version. The 27 commits that were only on `github-pages` are ancestors of the
+sprint tip. The 15 files `main` no longer has were each removed by a named sprint
+commit (T1.17, T1.21, T2.16, T3.3, T3.8, D1), and none is site-only content.
+CI: run 42355134802, green. Pages: run 42355134881, green.
+
+Live site, https://agyeiagyeiagyei.github.io/avar2-studio/: serves
+`assets/index-BeIw5bdp.js` and `assets/index-CNFgIsSY.css`, last modified at the
+deploy. `frontend/e2e/static-demo.spec.mjs` run against that URL: 160 checks,
+0 failures, including the SPAC sections 2, 9, 22 and 23. Log:
+`~/avar2-verifier/static-demo-live-5e83e17.log`.
+
+**Correction to R1.** The wheel does install `fontc` (1.0.0) and `gftools`, in the
+venv's `bin/`. `doctor.check_fontc` and its `gftools-builder` check use
+`shutil.which` on PATH alone, while `pipeline.py` puts `sys.executable`'s folder
+first on the build PATH. Run with PATH=/usr/bin:/bin:/usr/sbin, `doctor --strict`
+exits 1 while `avar2-studio build` exits 0 in 69 s. That is a false alarm in a
+non-activated venv, and in a `pipx install` by the same reasoning (pipx not run).
+
+**fontc versions.** A fresh install gets `fontc` 1.0.0; the user's `.venv` has
+0.6.0. The same wheel built the real Crispy copy with each. 0 of 127,848 tuples
+differ and 0 of 29,760 HarfBuzz checks differ. `gvar`, `glyf`, `hmtx`, `HVAR`,
+`avar`, `fvar`, `STAT` and `GPOS` are byte-identical. What 1.0.0 changes: `GDEF`
+has 172 glyph classes (0.6.0 has none), and name ID 5 reads
+`Version 1.100;fontc 1.0.0` (0.6.0: `Version 1.100`). Both matter for the
+production font, not for B12.
+
+**For B12: what the user's install points at.** `~/Documents/avar2-studio/.venv`
+is an editable install from `~/Documents/avar2-studio-sprint`, and the
+Avar2Studio, CornerRadii, InstanceDelta, MultiSourceEdit and ParametricMasters
+Glyphs plugin links (at least) point there too. That worktree is on `76a76c6`. It
+must stay until the venv and plugins are re-pointed at a checkout of `main`.
+
+**Backlog, not blocking; fix forward on a branch from `main`.**
+
+- `doctor`'s false alarm for tools in the venv's own `bin/`.
+- `opsz`, `wdth` and `wght` axis names read as their tags in the built font.
+- Linux wheel glibc floor 2.34.
+- The sprint docs on `main` stop at the squash (`STATE: working`, the uncorrected
+  R1 line). This branch has the final state; a later commit to `main` can carry it.
+- Stale docstrings in `registry.py` and `transforms/__init__.py`.
+- The static spec is not in CI; its `waitForFunction` options are misused.
+- `npm run lint` reaches `dist-pages/`.
+- The Coverage engine has no UI.
+- The header-29 count is unexplained.
+- B7 UX notes, and the cent vs Lowercase width design question.
+- The stale HANDOVER pointer in Crispy's AGENTS.md.
 
