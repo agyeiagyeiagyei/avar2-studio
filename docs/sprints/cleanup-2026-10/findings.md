@@ -3014,3 +3014,23 @@ With those in place, the next full pass will name the cause.
   - `_injected_axis_tags` with an undiscovered registry returns the slant and rounding tags;
   - an export-worker-shaped call (no build in the process) logs the derived masters and writes twins equal to the build-then-export path.
 - Gate: the dialog zip and the CLI zip of the same folder are equal member for member (README stamp aside), on the real Crispy copy.
+
+## Verifier finding (2026-11-07 11:11) — W7 merged (w7-export-registry @ ac67a31); the real-Crispy zip gate runs after the next automated pass
+
+**The fix:** `_tx_registry.discover()` in `sources_export._injected_axis_tags`, plus a comment. No other `src` change.
+
+**Re-run by the verifier:**
+- `test_the_injected_axes_are_found_in_a_process_that_discovered_nothing` and `test_the_export_worker_gives_slanted_twins_their_parents_amounts`: 2 passed at `ac67a31`.
+- With `sources_export.py` from `b4284d5` (before the fix): 2 failed. The first gives `set() == {'ROND', 'SPAC', 'slnt'}`. The second gives `980 of 1008 advances in the slanted twins differ from the upright parent's twin`. The second test runs the real `python -m avar2_studio.build_worker` in its own interpreter.
+- CI on `ac67a31` (run 42336823673): all six jobs green.
+
+**Accepted:** the other registry read with the same shape, `routes/source.py` `get_axes`, stays as it is. It can only run with an empty registry inside a server's first load, and the agent's probe shows the only wrong answer there comes from a source that declares `slnt` itself, which is already broken.
+
+**Side effect (intended):** a derived master with no parent now raises `SourcesError` in the dialog too, as it always did in the CLI, instead of silently writing sheared amounts.
+
+**Backlog (not blocking):** the `registry.py` docstring ("Discovery runs once at server startup") and `transforms/__init__.py` ("call at startup") are stale: `server.main()` has no such call.
+
+**Still to do before APPROVED:**
+- CI green on the merged tip.
+- The automated pass at that tip.
+- The real-Crispy gate: on the same six files, the dialog's zip equals the CLI's member for member (README stamp aside).
