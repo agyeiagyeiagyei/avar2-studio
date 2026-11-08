@@ -1342,6 +1342,7 @@ const staticOverrides = {
   capabilities: {
     kinetikern: false,      // needs the live engine routes
     woff2: false,           // no background compression in the browser
+    sources: false,         // the browser can't write UFO sources (exportFont makes fonts only)
     cancel: false,          // builds run to completion in the worker
     masters: false,         // no /api/masters: the pins list stays instance-only
     sourceWriteback: false, // the source file never changes in the browser

@@ -51,6 +51,7 @@ export const api = {
   capabilities: {
     kinetikern: true,       // per-instance spacing engine (Kinetikern tab)
     woff2: true,            // WOFF2 preview/download + export sizes from the build queue
+    sources: true,          // UFO + designspace zip export from the build queue
     cancel: true,           // cancel a running or queued build/export job
     masters: true,          // /api/masters (the brace-location pins list the masters)
     sourceWriteback: true,  // edits can be written back to the source file
