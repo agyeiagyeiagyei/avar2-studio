@@ -657,7 +657,7 @@ def _lsb_of(glyph) -> float:
 
 def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                    kind: str, value: float, bias: float, scale: float,
-                   mean_default: Optional[float] = None) -> int:
+                   reference: Optional[float] = None) -> int:
     """Move one twin's metrics as the injector moves its phantom points.
 
     Simple glyph: ``advance + 2·dx`` with the drawing moved right by ``dx``, so
@@ -672,7 +672,7 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
     E2i-c will make ``amount`` depend on the master's own ink; the base rule is
     written against ``shifts`` so it follows that change.
     """
-    mean_D = mean_default if mean_default else mean_ink
+    reference = reference if reference else mean_ink
     capped = 0
     shifts: Dict[str, int] = {}
     pending: Dict[str, bool] = {}
@@ -701,10 +701,10 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
         # with the injector so the two renderers cannot round apart.
         rule = (round(value) if kind == "spac"
                 else round(value * ((ink / mean_ink) ** bias)
-                           * (mean_ink / mean_D) * scale))
+                           * (mean_ink / reference) * scale))
         dx = (spac_amounts.fit_dx(rule, glyph.width, composite)
               if kind == "spac"
-              else spac_amounts.per_side(value, ink, mean_ink, mean_D, bias,
+              else spac_amounts.per_side(value, ink, mean_ink, reference, bias,
                                          scale, glyph.width, composite))
         if dx < 0:
             before = rule
@@ -725,7 +725,7 @@ def _shift_spacing(twin, original, inks: Dict[str, float], mean_ink: float, *,
                     "rule_advance": glyph.width + 2 * before,
                     "floored_advance": glyph.width + 2 * dx,
                     "mean_L": mean_ink,
-                    "mean_D": mean_D,
+                    "reference": reference,
                     "ink_used": ink,
                 })
         if dx:
@@ -934,10 +934,11 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     # One twin per non-zero end. A symmetric range is NOT an exception: an
     # axis with no master below the default has no negative side at all.
     ends = [hi] if lo == hi else [hi, lo]
-    # E2i-c: the amount scales with EACH MASTER's own ink, so both means are
-    # taken over the same glyph set — the sources' names, minus `.notdef` (the
-    # sources carry none; the compiler synthesises the box). `mean_D` is the
-    # default design's, from the built font when there is one.
+    # E2i-c: the amount scales with EACH MASTER's own ink, so every mean is taken
+    # over the same glyph set — the sources' names, minus `.notdef` (the sources
+    # carry none; the compiler synthesises the box). `mean_D` is the default
+    # design's, from the built font when there is one: the fallback for a master
+    # with no ink, not what a SPAC unit is measured against.
     names = [n for n in basis if n in default_source.font and n != ".notdef"]
     mean_D = (sum(basis[n] for n in names) / len(names)) if names else 0.0
     capped_total = 0
@@ -965,9 +966,23 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
     injected = _injected_axis_tags(source_path)
     defaults = {a.tag: float(a.default or 0.0) for a in doc.axes}
     derived, parents = 0, set()
-    for index, (source, location, inks) in enumerate(measured):
-        parent = _parent_master(index, location, measured, injected, defaults,
-                                source.styleName or source.name)
+    parent_of = [
+        _parent_master(index, location, measured, injected, defaults,
+                       source.styleName or source.name)
+        for index, (source, location, inks) in enumerate(measured)]
+
+    def mean_over_names(inks):
+        kept = [width for name, width in inks.items() if name in names]
+        return sum(kept) / len(kept) if kept else None
+
+    master_means = [mean for (_source, _location, inks), parent
+                    in zip(measured, parent_of)
+                    if parent is None and (mean := mean_over_names(inks)) is not None]
+    reference = spac_amounts.reference_ink(master_means) if master_means else mean_D
+    log.info("sources_export: a SPAC unit is measured against %.1f u, the "
+             "masters' average width", reference)
+    for index, (source, _location, inks) in enumerate(measured):
+        parent = parent_of[index]
         if parent is not None:
             derived += 1
             parents.add(parent)
@@ -979,7 +994,7 @@ def _add_spacing_axis(doc: DesignSpaceDocument, source_path: Path,
             twin_font = _copy.deepcopy(source.font)
             capped_total += _shift_spacing(
                 twin_font, source.font, master_inks, mean_L, kind=kind,
-                value=value, bias=bias, scale=scale, mean_default=mean_D)
+                value=value, bias=bias, scale=scale, reference=reference)
             twin = SourceDescriptor()
             twin.font = twin_font
             twin.familyName = source.familyName

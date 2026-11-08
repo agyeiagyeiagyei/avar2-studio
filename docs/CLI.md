@@ -32,12 +32,10 @@ artifact path on stdout, one per line.
 
 `--format sources` writes `<family>-sources.zip` from the active source, and it
 **needs the font build to succeed first** — the same build every other format
-uses. The spacing amounts are normalised against the built font at its resting
-default (`_ink_widths_from_build`), exactly as the injector normalises the font
-it is handed; without a build the writer would fall back to the designspace's
-default source, which on a parametric design is a different, much narrower one
-(Crispy's hairline: mean ink 96 u against 1,750 u). So a failed build fails the
-run (exit 1) before any zip is written — there is no sources-only shortcut.
+uses. The spacing amounts are measured on the built font at each master
+(`_ink_widths_from_build`), exactly as the injector measures the font it is
+handed, so the two agree. So a failed build fails the run (exit 1) before any zip
+is written — there is no sources-only shortcut.
 
 It refuses `--default` (`sources rest at the compiled origin; --default applies
 to ttf/woff2 only`) because a designspace default must be a master location. A

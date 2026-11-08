@@ -52,9 +52,13 @@ transform when it pins instance coordinates; blank = 0).
   base letter.
 - **Width-aware** is the studio's own: each glyph's delta scales with its
   ink width relative to the font's own mean ink width (`(ink / mean_ink)
-  ** bias`), so the font loosens by a consistent *proportion* — an
-  average-width glyph tracks exactly like the uniform transform, wide
-  glyphs get proportionally more, narrow less; composites are spaced too
+  ** bias`), so the font loosens by a consistent *proportion* — a glyph as
+  wide as the masters' average tracks exactly like the uniform transform,
+  wide glyphs get proportionally more, narrow less. A SPAC unit is measured
+  against that average (the mean ink of each designed master, averaged), not
+  against the style the font rests on, so moving an axis default leaves every
+  stored SPAC value's meaning alone; adding or removing a master can shift it
+  slightly. Composites are spaced too
   (gen-spac skips them). Two things learned the hard way: moving the
   *left* phantom shifts the whole component, so composites get
   left-phantom-only treatment, and `USE_MY_METRICS` composites inherit
@@ -70,8 +74,8 @@ transform when it pins instance coordinates; blank = 0).
   the native path too. The master locations the per-master amounts are
   computed at ride the same JSON (`params.master_locations`). Before it
   trusts a binary the studio asks it which amount rule it implements
-  (`spac-inject --rule`): a build from before the per-master amounts is
-  left alone, with a log line, and the fontTools path runs. The injector is
+  (`spac-inject --rule`): a build for an older rule is left alone, with a
+  log line, and the fontTools path runs. The injector is
   found via
   `$AVAR2_SPAC_INJECT`, the wheel-carried `avar2_studio/bin/spac-inject`
   ([decision 0015](../decisions/0015-native-accelerators-ship-in-platform-wheels.md))

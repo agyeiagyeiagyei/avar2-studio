@@ -14,6 +14,8 @@ tight end.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 
 def fit_dx(dx: int, advance: float, composite: bool) -> int:
     """Cap a NEGATIVE move so the advance cannot go below 1 u.
@@ -34,19 +36,30 @@ def fit_dx(dx: int, advance: float, composite: bool) -> int:
     return max(dx, lowest)
 
 
-def per_side(value: float, ink: float, mean_here: float, mean_default: float,
+def reference_ink(master_means: Sequence[float]) -> float:
+    """What a SPAC unit is measured against: the masters' average width.
+
+    The average of each designed master's mean ink. It must not depend on where
+    the font rests: it used to be the mean ink at the default, so moving Crispy's
+    default from the 400 row (1,754.5 u) to the hairline (92 u) made every stored
+    SPAC value about 19 times stronger (user report and decision, 2026-11-07).
+    Transform-derived masters are left out: a sheared box is not a width.
+    """
+    return sum(master_means) / len(master_means)
+
+
+def per_side(value: float, ink: float, mean_here: float, reference: float,
              bias: float, scale: float, advance: float,
              composite: bool) -> int:
     """One corner's per-side amount, as the integer both renderers apply.
 
     ``value`` is the SPAC coordinate (lo or hi), ``ink`` the glyph's ink at this
-    corner, ``mean_here`` that corner's mean ink and ``mean_default`` the
-    default's — the amount scales with each master's own width (E2i-c), so the
-    two means cancel out of the ratio but not out of the interpolation.
+    corner, ``mean_here`` that corner's mean ink and ``reference`` the font's
+    `reference_ink` — the amount scales with each master's own width (E2i-c).
     """
-    if mean_here <= 0 or mean_default <= 0:
+    if mean_here <= 0 or reference <= 0:
         return 0
     amount = (value * ((ink / mean_here) ** bias)
-              * (mean_here / mean_default) * scale)
+              * (mean_here / reference) * scale)
     dx = round(amount)
     return fit_dx(dx, advance, composite) if dx < 0 else dx

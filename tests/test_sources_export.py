@@ -28,6 +28,7 @@ from xml.etree import ElementTree
 import pytest
 from fontTools.designspaceLib import DesignSpaceDocument
 from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
 from fontTools.varLib.instancer import instantiateVariableFont
 
 from avar2_studio import pipeline, sources_export, state
@@ -636,15 +637,11 @@ def test_the_validator_rejects_an_empty_or_default_mapping_input(project, tmp_pa
 @needs_fontc
 @pytest.mark.skipif(FONTMAKE is None, reason="fontmake is not installed")
 def test_the_spacing_basis_is_the_built_font(project, tmp_path):
-    """E2i: the amounts normalise against the built font, not the default source.
+    """E2i: the amounts are measured on the built font, not on the sources.
 
-    The injector measures the font it is handed — the studio's build at ITS
-    default (on Crispy the relocated default, mean ink ~1,750 u), not the
-    designspace's default source (the 47-1-1 hairline master, mean 96.3 u).
-    Measuring the source made every amount ~18× too strong (`i` +6 u where the
-    injector gives +58). The renderer now takes the same measurement from the
-    built font; this test passes a font whose ink differs from the source and
-    checks the twin's amount follows IT.
+    The injector measures the font it is handed, so the renderer takes the same
+    measurement from the build. This test passes a font whose ink differs from
+    the source and checks the twin's amount follows IT.
     """
 
     # A built font of the same project (no SPAC), then one glyph fattened so
@@ -667,10 +664,10 @@ def test_the_spacing_basis_is_the_built_font(project, tmp_path):
     assert res.returncode == 0, (res.stderr or "")[-1200:]
     built = TTFont(str(next((quiet / "fm").glob("*.ttf"))))
     fat = built["glyf"]["i"]
-    fat.coordinates.scale((8, 1)) if hasattr(fat.coordinates, "scale") else None
-    if not hasattr(fat.coordinates, "scale"):  # simple glyph: x *= 8
-        xs = fat.coordinates.x
-        fat.coordinates.x = [int(round(x * 8)) for x in xs]
+    left = min(x for x, _y in fat.coordinates)
+    # The hairline `i` is 2 u of ink: 1,000 times that earns a measurable amount.
+    fat.coordinates = GlyphCoordinates(
+        [(left + (x - left) * 1000, y) for x, y in fat.coordinates])
     basis_path = quiet / "basis.ttf"
     built.save(str(basis_path))
 
@@ -715,8 +712,8 @@ def test_the_spacing_basis_is_the_built_font(project, tmp_path):
     # The source basis would give a different amount — the test can fail.
     source_basis = sources_export._ink_widths(
         ufoLib2.Font.open(str(work / master.filename)))
-    mean_source = sum(source_basis.values()) / len(source_basis)
-    source_dx = round(40 * (source_basis["i"] / mean_source) * 1.25)
+    fat_ink = sources_export._ink_widths_from_build(basis_path)["i"]
+    source_dx = (ref / 2) * source_basis["i"] / fat_ink
     assert abs(source_dx - ref / 2) > 5, (
         "the fixture must make the two bases disagree, or it proves nothing")
 
@@ -861,8 +858,9 @@ def test_a_derived_master_takes_its_parents_amounts_whatever_the_order(tmp_path)
 
     The derived master's ink is 700 u where its parent's is 400 u (a shear
     widens the bounding box without changing the gaps), so inheriting has to
-    show up in the twin's delta: at scale 1 and SPAC +40 the parent's own
-    amount is 2·40·400/700 ≈ 46 u while the derived master's would be 80 u."""
+    show up in the twin's delta. The parent is the only designed master, so it
+    is the average: at scale 1 and SPAC +40 its amount is 2·40·400/400 = 80 u,
+    while the derived master's own ink would earn 2·40·700/400 = 140 u."""
     from avar2_studio import sources_export
 
     doc = _spac_doc()
@@ -875,9 +873,34 @@ def test_a_derived_master_takes_its_parents_amounts_whatever_the_order(tmp_path)
     derived, parent = _twin_delta(doc, "Thin Slanted"), _twin_delta(doc, "Thin")
     assert derived == parent, (
         "the slanted master must reuse its parent's amounts, not its sheared ink")
-    assert derived < 80, (
-        f"{derived} u is the derived master's own amount — the parent was not "
-        "found")
+    assert derived == 80, (
+        f"{derived} u is not the parent's amount — the parent was not found")
+
+
+@pytest.mark.parametrize("default", [0, 100])
+def test_moving_the_default_does_not_change_the_twins_amounts(tmp_path, default):
+    """A SPAC unit means the same wherever the sources rest (user report,
+    2026-11-07), and a derived master's sheared ink does not move the yardstick.
+
+    The two designed masters average 800 u of ink. The slanted ones are far wider
+    (a shear widens the box, not the gaps), so counting them would change every
+    amount."""
+    from avar2_studio import sources_export
+
+    doc = _spac_doc()
+    next(a for a in doc.axes if a.tag == "XTRA").default = default
+    _spac_master(doc, "Narrow", {"XTRA": 0.0, "slnt": 0.0}, 400)
+    _spac_master(doc, "Wide", {"XTRA": 100.0, "slnt": 0.0}, 1200)
+    _spac_master(doc, "Narrow Slanted", {"XTRA": 0.0, "slnt": -12.0}, 2000)
+    _spac_master(doc, "Wide Slanted", {"XTRA": 100.0, "slnt": -12.0}, 3000)
+    sources_export._add_spacing_axis(
+        doc, _spac_sidecar(tmp_path, {"type": "slant", "enabled": True,
+                                      "params": {}}))
+
+    assert _twin_delta(doc, "Narrow") == 2 * round(40 * 400 / 800)
+    assert _twin_delta(doc, "Wide") == 2 * round(40 * 1200 / 800)
+    assert _twin_delta(doc, "Narrow Slanted") == _twin_delta(doc, "Narrow")
+    assert _twin_delta(doc, "Wide Slanted") == _twin_delta(doc, "Wide")
 
 
 def test_a_master_whose_name_ends_in_rounded_keeps_its_own_amounts(tmp_path):
@@ -1211,18 +1234,27 @@ def test_a_glyph_with_a_production_name_still_gets_its_spacing(project, tmp_path
         "the source-named glyph must take the built font's amount, not be "
         "skipped because the built font calls it uni0061")
 
-    # …and the amount is the one that glyph's ink earns, over the same glyph set
-    # the writer averages (the sources' glyphs, `.notdef` excluded — E2i-c).
+    # …and the amount is the one that glyph's ink earns, against the masters'
+    # average over the same glyph set the writer averages (the sources' glyphs,
+    # `.notdef` excluded — E2i-c).
     master_font = ufoLib2.Font.open(str(work / master.filename))
     renames = sources_export._production_to_source(master_font)
-    inks = {renames.get(n, n): w
-            for n, w in sources_export._ink_widths_from_build(built).items()}
-    inks.pop(".notdef", None)
-    mean = sum(inks.values()) / len(inks)
+    tags = {axis.name: axis.tag for axis in doc.axes}
+    means = []
+    for source in doc.sources:
+        if source.layerName or source.location.get(spac.name) is not None:
+            continue
+        where = {tags[name]: value for name, value in source.location.items()}
+        inks = {renames.get(n, n): w for n, w
+                in sources_export._ink_widths_from_build(built, where).items()}
+        inks.pop(".notdef", None)
+        means.append(sum(inks.values()) / len(inks))
+    reference = sum(means) / len(means)
     ink = _ink_width(TTFont(str(built)).getGlyphSet(), "uni0061")
-    assert twin_width - master_width == 2 * round(40 * (ink / mean) * 1.25), (
+    earned = 2 * round(40 * (ink / reference) * 1.25)
+    assert twin_width - master_width == earned, (
         f"{twin_width - master_width} u against the amount the built font's "
-        f"ink earns ({2 * round(40 * (ink / mean) * 1.25)} u)")
+        f"ink earns ({earned} u)")
 
 
 def test_a_mixed_glyph_flattens_and_tracks_like_a_simple_one():

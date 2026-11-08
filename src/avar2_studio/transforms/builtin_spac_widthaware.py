@@ -34,10 +34,12 @@ width, it is UPM- and design-invariant (same magnitude on condensed and
 wide designs alike). Outlines never move — only phantom points.
 
 Per-unit rate: at ``scale = 1``, ±N SPAC units ≈ ∓N units on each
-sidebearing of an average-width glyph (±2N advance — exactly the uniform
-gftools amount). ``scale`` multiplies that rate; the default 1.25 sits
-just above parity so lowercase-heavy sample text (narrower than the
-glyph mean) also matches the gftools amount.
+sidebearing of a glyph as wide as the masters' average
+(`spac_amounts.reference_ink`) — ±2N advance, exactly the uniform gftools
+amount. ``scale`` multiplies that rate; the default 1.25 sits just above
+parity so lowercase-heavy sample text (narrower than the glyph mean) also
+matches the gftools amount. The rate does not depend on where the font
+rests, so moving the default leaves every stored SPAC value's meaning alone.
 """
 
 from __future__ import annotations
@@ -83,10 +85,9 @@ def _native_injector():
 
 
 #: The amount rule this module implements. ``spac-inject --rule`` must answer
-#: the same: a binary built before the per-master amounts (E2i-c) reads the
-#: same payload, ignores the master locations and writes one constant amount
-#: per glyph — a font that no longer matches the exported sources.
-NATIVE_RULE = "e2i-c"
+#: the same: a binary built for an older rule reads the same payload and writes
+#: different amounts — a font that no longer matches the exported sources.
+NATIVE_RULE = "e2i-c-masters"
 
 
 def _native_rule(native: Path):
@@ -203,6 +204,22 @@ def _normalize_corners(font, locations) -> list:
     return out
 
 
+def _master_means(font, given, corners, corner_means) -> list:
+    """The mean ink of each real master, for `spac_amounts.reference_ink`.
+
+    ``given`` lists the masters with explicit coordinates and the built font's
+    default as ``{}``. The default is a corner of the model but not a master
+    unless a master sits there, and then that master normalises onto the same
+    corner, so skipping the ``{}`` entry is what keeps the result independent of
+    where the font rests. With no designspace, every inferred corner counts.
+    """
+    masters = (_normalize_corners(font, [where for where in given if where])
+               if given else [])
+    if not masters:
+        return list(corner_means)
+    return [corner_means[corners.index(master)] for master in masters]
+
+
 def _avar_map(value: float, mapping) -> float:
     """Apply an avar segment map (user-normalized → design-normalized)."""
     points = sorted(mapping.items())
@@ -296,7 +313,7 @@ class WidthAwareSpacTransform(Transform):
                     "ceiling on twin-heavy fonts). `avar2-studio doctor` lists it.")
         elif _native_rule(native) != NATIVE_RULE:
             ctx.log(f"spac_widthaware: the native injector at {native} was "
-                    "built before the per-master amounts (E2i-c) — the "
+                    "built for an older spacing rule — the "
                     "fontTools path runs (slower; can overflow gvar's 64KB "
                     "tuple-header ceiling on twin-heavy fonts). Rebuild it: "
                     "docs/guides/transforms.md")
@@ -395,6 +412,12 @@ class WidthAwareSpacTransform(Transform):
                     {tag for corner in corners for tag in corner}))
             if model is None:
                 corners, corner_inks, corner_means = [], [], []
+                reference = mean_ink
+            else:
+                reference = spac_amounts.reference_ink(
+                    _master_means(font, given, corners, corner_means))
+                ctx.log(f"spac_widthaware: a SPAC unit is measured against "
+                        f"{reference:.1f} u, the masters' average width")
 
             for name, ink in inks.items():
                 glyph = glyf[name]
@@ -422,15 +445,6 @@ class WidthAwareSpacTransform(Transform):
                 else:
                     n = _gvar_point_count(glyph, glyf)
                     variations = gvar.variations.setdefault(name, [])
-
-                def amount_at(index: int, ink_here: float) -> float:
-                    """E2i-c: proportional to this master's own ink, and
-                    renormalised so the default master keeps its amount."""
-                    mean_here = corner_means[index]
-                    if mean_here <= 0 or mean_ink <= 0:
-                        return 0.0
-                    return ((ink_here / mean_here) ** bias
-                            * (mean_here / mean_ink))
 
                 if model is None:
                     # No parametric variation to scale against: one constant
@@ -464,10 +478,10 @@ class WidthAwareSpacTransform(Transform):
                         ink_i = corner_inks[i].get(ink_name, 0.0)
                         mean_i = corner_means[i]
                         raw = (value * ((ink_i / mean_i) ** bias)
-                               * (mean_i / mean_ink) * scale
-                               if mean_i > 0 and mean_ink > 0 else 0.0)
+                               * (mean_i / reference) * scale
+                               if mean_i > 0 and reference > 0 else 0.0)
                         dx = spac_amounts.per_side(
-                            value, ink_i, mean_i, mean_ink, bias, scale,
+                            value, ink_i, mean_i, reference, bias, scale,
                             corner_advances[i].get(name, 0.0), composite)
                         out.append(dx)
                         if dx != round(raw):

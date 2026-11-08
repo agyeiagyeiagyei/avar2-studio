@@ -61,6 +61,12 @@ fn widthaware_measurements_match_reference() {
         );
         compare_trace(label, &font, &transforms);
     }
+    // The default between the masters: an extra corner, but not a master.
+    let (font, locations) = common::spac_masters_relocated("trace-moved", &["XTRA=300", "XOPQ=60"]);
+    let transforms = format!(
+        r#"[{{"type":"spac_widthaware","enabled":true,"params":{{"min":-100,"max":100,"master_locations":{locations}}}}}]"#
+    );
+    compare_trace("moved", &font, &transforms);
     // CrispyMini (a real fontc build): with the pipeline's master
     // locations, and with none — the corners inferred from gvar, brace
     // layers included, so most of them fall between masters.

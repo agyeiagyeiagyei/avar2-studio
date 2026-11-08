@@ -19,12 +19,14 @@ exactly through `getDeltas(..., round=round)`.
 """
 from __future__ import annotations
 
+import pytest
 import uharfbuzz as hb
 from fontTools.fontBuilder import FontBuilder
-from fontTools.ttLib import newTable
+from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.tables._g_l_y_f import Glyph, GlyphCoordinates
 from fontTools.ttLib.tables.ttProgram import Program
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib import instancer
 from fontTools.varLib.models import VariationModel
 
 from avar2_studio import spac_amounts
@@ -33,10 +35,12 @@ from avar2_studio.transforms.builtin_spac_widthaware import WidthAwareSpacTransf
 
 ADVANCE = 1000
 HEIGHT = 600
-# glyph -> (left, ink at the base, ink at the wide master). Base mean 312.5, so
-# at SPAC ±100 with scale 1.25 and bias 1 a glyph's amount is ±0.4 × its ink.
+# glyph -> (left, ink at the base, ink at the wide master). The masters average
+# 363.75 u (312.5 and 415), so at SPAC ±100 with scale 1.455 and bias 1 a glyph's
+# amount is ±0.4 × its ink.
 INKS = {"H": (100, 351, 452), "n": (100, 274, 378)}
-PARAMS = {"min": -100, "max": 100, "bias": 1.0, "scale": 1.25}
+REFERENCE = 363.75
+PARAMS = {"min": -100, "max": 100, "bias": 1.0, "scale": 1.455}
 
 
 def _box(left, ink):
@@ -103,7 +107,7 @@ def test_the_injector_writes_the_exports_integer_amounts(tmp_path):
     vf = _vf(tmp_path / "amounts.ttf")
     ctx = BuildContext(build_dir=tmp_path, source_path=tmp_path / "x.glyphs",
                        glyphs_path=tmp_path / "x.glyphs", family="Amounts",
-                       master_locations=[{}, {"XTRA": 100.0}])
+                       master_locations=[{}, {"XTRA": 0.0}, {"XTRA": 100.0}])
     out = WidthAwareSpacTransform().apply(vf, dict(PARAMS), ctx)
 
     base_mean = sum(ink for _l, ink, _w in INKS.values()) / len(INKS)
@@ -112,7 +116,7 @@ def test_the_injector_writes_the_exports_integer_amounts(tmp_path):
     checked = []
     for name, inks in INKS.items():
         for end in (PARAMS["min"], PARAMS["max"]):
-            floats = [end * inks[1 + i] / base_mean * PARAMS["scale"]
+            floats = [end * inks[1 + i] / REFERENCE * PARAMS["scale"]
                       for i in (0, 1)]
             # The fixture must be one the float path gets wrong: summing the
             # per-tuple roundings misses the export's integer at the wide corner.
@@ -120,7 +124,7 @@ def test_the_injector_writes_the_exports_integer_amounts(tmp_path):
                     != round(floats[1])), (name, end, floats)
             for label, (where, index, mean) in corners.items():
                 expected = spac_amounts.per_side(
-                    float(end), inks[1 + index], mean, base_mean,
+                    float(end), inks[1 + index], mean, REFERENCE,
                     PARAMS["bias"], PARAMS["scale"], ADVANCE, False)
                 advance0, lsb0 = _hb_metrics(out, name, where)
                 advance1, lsb1 = _hb_metrics(out, name, {**where, "SPAC": end})
@@ -150,3 +154,52 @@ def test_the_amounts_are_integers_and_read_back_exactly():
     assert all(float(d).is_integer() for d in deltas), deltas
     for corner, amount in zip(corners, amounts):
         assert model.interpolateFromDeltas(corner, deltas) == amount
+
+
+def _spaced_at_rest(tmp_path, default):
+    """The fixture resting at XTRA ``default``, spaced with the pipeline's masters."""
+    work = tmp_path / f"rest-{default}"
+    work.mkdir()
+    path = _vf(work / "vf.ttf")
+    if default:
+        moved = instancer.instantiateVariableFont(
+            TTFont(str(path)), {"XTRA": (0, default, 100)})
+        moved.save(str(path))
+    ctx = BuildContext(build_dir=work, source_path=work / "x.glyphs",
+                       glyphs_path=work / "x.glyphs", family="Amounts",
+                       master_locations=[{}, {"XTRA": 0.0}, {"XTRA": 100.0}])
+    return WidthAwareSpacTransform().apply(path, dict(PARAMS), ctx)
+
+
+@pytest.mark.parametrize("default, tolerance", [
+    # On a master the relocation is exact.
+    (100, 0),
+    # Off the masters it rounds the moved outlines, which can move an amount by
+    # 1 u per side. Averaging this default in with the masters would move H by
+    # more than 3 u per side, so that mistake fails here too.
+    (25, 2),
+])
+def test_moving_the_default_does_not_change_the_amounts(tmp_path, default, tolerance):
+    """A SPAC unit means the same wherever the font rests (user report, 2026-11-07).
+
+    Moving Crispy's default from the 400 row to the hairline made every stored
+    SPAC value about 19 times stronger, because the amount was measured against
+    the mean ink at the default (`Wide 900 MinOpsz`: 69 u per side became 1,436 u).
+    """
+    home = _spaced_at_rest(tmp_path, 0)
+    moved = _spaced_at_rest(tmp_path, default)
+    wrong = []
+    for name in INKS:
+        for where in ({"XTRA": 0}, {"XTRA": 100}):
+            for end in (PARAMS["min"], PARAMS["max"]):
+                reads = []
+                for font in (home, moved):
+                    resting, _ = _hb_metrics(font, name, where)
+                    spaced, _ = _hb_metrics(font, name, {**where, "SPAC": end})
+                    reads.append(spaced - resting)
+                if abs(reads[0] - reads[1]) > tolerance:
+                    wrong.append(f"{name} at {where}, SPAC {end:+d}: the advance moves "
+                                 f"by {reads[0]} resting at XTRA 0, by {reads[1]} "
+                                 f"resting at XTRA {default}")
+    assert not wrong, "\n".join(wrong)
+
