@@ -62,12 +62,31 @@ export function restingQuery(exportUseDefault, location) {
   return exportUseDefault ? (location || null) : null;
 }
 
+/**
+ * The export request's default location. Sources never take one (the box is
+ * disabled and shown unticked there), so a "Set default at" left ticked from a
+ * TTF/WOFF2 export must not ride along: the backend refuses that combination.
+ */
+export function exportDefaultLocation(format, exportUseDefault, location) {
+  return format !== 'sources' && exportUseDefault ? (location || null) : null;
+}
+
+/**
+ * The downloaded file's name. The sources zip is named after the family, as the
+ * backend and the CLI name it (`<Family>-sources.zip`); the fonts keep the
+ * built font's name.
+ */
+export function exportFilename(format, fontFilename, familyName) {
+  if (format === 'sources') return `${(familyName || 'font').replace(/ /g, '')}-sources.zip`;
+  return fontFilename.replace(/\.ttf$/i, format === 'woff2' ? '.woff2' : '.ttf');
+}
+
 /** The chips, in display order. `estimate` false ⇒ no size is shown. */
-export function exportFormats({ woff2 = true } = {}) {
+export function exportFormats({ woff2 = true, sources = true } = {}) {
   return [
     { id: 'ttf', label: 'TTF', button: 'Download TTF', estimate: true },
     ...(woff2 ? [{ id: 'woff2', label: 'WOFF2', button: 'Download WOFF2', estimate: true }] : []),
-    {
+    ...(sources ? [{
       id: 'sources',
       label: 'UFO + designspace (zip)',
       button: 'Download sources',
@@ -75,7 +94,7 @@ export function exportFormats({ woff2 = true } = {}) {
       copy: SOURCES_COPY,
       warning: RESTING_NOTE,
       defaultDisabledReason: SOURCES_DEFAULT_REASON,
-    },
+    }] : []),
   ];
 }
 

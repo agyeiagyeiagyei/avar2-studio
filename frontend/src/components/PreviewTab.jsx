@@ -8,7 +8,7 @@ import { useStudioData } from '../hooks/useStudioData';
 import { previewRenderCoords, variationSettings } from '../preview-coords';
 import {
   SOURCES_COPY, SOURCES_DEFAULT_REASON, RESTING_NOTE, sizeWarningCopy,
-  restingQuery, buttonLabel, exportFormats,
+  restingQuery, buttonLabel, exportFormats, exportDefaultLocation, exportFilename,
 } from '../export-formats';
 
 // Font size stays in rem internally; the slider presents it in pt
@@ -333,8 +333,8 @@ function PreviewTab({
       setExportError('The font is still loading in this tab — wait for the preview to finish, then try again.');
       return;
     }
-    const filename = (builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`)
-      .replace(/\.ttf$/i, exportFormat === 'woff2' ? '.woff2' : '.ttf');
+    const filename = exportFilename(exportFormat,
+      builtFontFilename || `${vfFamilyId || 'avar2-font'}.ttf`, familyName);
     const saveBlob = (blob) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -380,7 +380,7 @@ function PreviewTab({
       // api.exportFont polls that job and resolves with the artifact.
       const blob = await api.exportFont({
         hidden_axes: [...exportHidden],
-        default_location: exportUseDefault ? currentUserLocation : null,
+        default_location: exportDefaultLocation(exportFormat, exportUseDefault, currentUserLocation),
         format: exportFormat,
       }, { signal });
       saveBlob(blob);
@@ -619,7 +619,7 @@ function PreviewTab({
                     Format
                   </span>
                   <div className="preview-export-chips" role="radiogroup" aria-label="Export format">
-                    {exportFormats({ woff2: api.capabilities.woff2 }).map(({ id, label }) => {
+                    {exportFormats({ woff2: api.capabilities.woff2, sources: api.capabilities.sources }).map(({ id, label }) => {
                       const size = exportSizes
                         ? (id === 'ttf' ? exportSizes.ttf_bytes
                           : id === 'woff2' ? exportSizes.woff2_bytes : null)

@@ -545,6 +545,9 @@ await page.click('button:text-is("Preview")');
 await page.waitForSelector('.preview-tab-download', { timeout: 20000 });
 await page.click('.preview-tab-download button');
 await page.waitForSelector('.preview-export-modal', { timeout: 10000 });
+// The browser can only make fonts: offering sources here downloaded a TTF.
+ok(!(await page.$('.preview-export-chip--format:has-text("UFO + designspace")')),
+  'no sources format in the browser (it can only make fonts)');
 const [fontDownload] = await Promise.all([
   page.waitForEvent('download', { timeout: 30000 }),
   page.click('button:has-text("Download")'),

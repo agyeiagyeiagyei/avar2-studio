@@ -4093,3 +4093,50 @@ inputs, so it is not in the row figures.
 it. CrispyMini rests on a hairline, so the website demo's slider now moves its specimen little at rest
 (4.4 to 4.6 px, was 3.2 to 7.0 px, SPAC −20 to +40).
 
+**Merged, 2026-11-08, on the user's "merge".** `main` fast-forwarded 6534765 → db7277e (CI 42430374664,
+six jobs green; Pages 42430374549). `github-pages` 758869d, a clean merge whose tree equals `main`'s
+(`git diff` empty); CI 42430773091 six jobs green, Pages 42430773090. Live site: the static spec passes
+160 of 160, and the served engine `fontc_web_bg-Dlmtlkam.wasm` carries the new rule's log line.
+
+## ROUND 49 — the export dialog's sources format (written by the verifier as coordinator)
+
+**The report (B12, B5, 2026-11-08).** Set-default and origin TTF exports work, with the expected
+sizes. "Download sources" did not: the dialog showed the backend's refusal, "sources rest at the
+compiled origin; the default location applies to ttf/woff2 only". The user had ticked "Set default at"
+for a TTF export first. On the sources format that box is disabled and shown unticked, but the request
+still carried the location (`PreviewTab.jsx`, `default_location: exportUseDefault ? … : null`).
+
+Two more defects on the same path:
+- A sources zip that did download was saved under the font's name, `<Family>[…].ttf`, because the
+  dialog names every blob after the built font. The backend and the CLI name it `<Family>-sources.zip`.
+- The website offered the sources format, but the browser's `exportFont` ignores the format and makes
+  a TTF. On the live site, "Download sources" gave `Crispy Mini.ttf`, 60,652 B, magic `00 01 00 00`.
+
+The earlier dialog-vs-CLI gate opened the sources format fresh, and saved the download under its
+own name, so it saw neither defect.
+
+**The change.** `export-formats.js` gains `exportDefaultLocation` (no location for sources) and
+`exportFilename` (`<Family>-sources.zip`, spaces dropped and `font` as the fallback, as the backend
+does). The dialog uses both. A new `sources` capability, true live and false in the browser, hides
+the chip on the website the way `woff2: false` already does. Tests: `e2e/export-sources.spec.mjs`
+(19 checks, now in `npm run test:unit`, so CI runs it), and one check in the static spec.
+
+**Evidence** (`~/avar2-verifier/b12/sources-dialog`):
+
+| Check | Result |
+|---|---|
+| Browser probe of the user's sequence on a CrispyMini studio (5073), code on `main` | 3 failures: the request carries `{opsz 144, wdth 20, wght 100}` and gets the user's error; a fresh sources download is named `CrispyMini[…].ttf` |
+| Same probe on the fix | all pass: no location on the sources request, `CrispyMini-sources.zip`, a real zip with the designspace; the set-default TTF request still carries its location; back on TTF the box is still ticked |
+| `export-sources.spec.mjs` on `main`'s frontend | stops at import: the helpers do not exist there |
+| Live site (`main`) | offers TTF and sources; sources downloads a TTF |
+| Website build of the fix, served locally | offers TTF only; static spec 161 of 161 |
+| Frontend | lint 0 errors (34 older warnings, none on a changed line); typecheck clean; test:unit passes |
+| Python | no Python changed; `ruff check src tests` clean; the two dialog-related tests in `test_sources_export.py` pass |
+
+Not run: the user's studio on 5070 with this code.
+
+**Noticed, not changed.** `api.exportFont`'s comment still lists only `"ttf" | "woff2"`.
+`e2e/export-warning.spec.mjs` is not in `test:unit`, and its last checks run after its exit-code
+summary, so they cannot fail the run. `docs/sprints/cleanup-2026-10/ui_probe.py` has a ruff E741
+from before ROUND 48 (CI lints `src` and `tests` only).
+
