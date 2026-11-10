@@ -110,8 +110,10 @@ export function pin_corner(font_bytes: Uint8Array, request_json: string): Uint8A
  * axis, registry elidable defaults, linked values (wght 400→700,
  * ital 0→1), and style-token axes from the family/subfamily names.
  * Avar2-added user axes (registered ones like opsz/wght/wdth and GF
- * customs like XOPQ/GRAD) get Google-Fonts-ready STAT records; axes
- * absent from the GF registry are skipped. See stat.rs.
+ * customs like XOPQ/GRAD) get Google-Fonts-ready STAT records; every
+ * other fvar axis gets a value-less record under fvar's own name ID,
+ * and fvar is repointed so both tables share one name ID per axis
+ * (the fvar bytes are re-emitted). See stat.rs.
  */
 export function regen_stat(font_bytes: Uint8Array): Uint8Array;
 

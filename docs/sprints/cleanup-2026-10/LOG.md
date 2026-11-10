@@ -4140,3 +4140,68 @@ Not run: the user's studio on 5070 with this code.
 summary, so they cannot fail the run. `docs/sprints/cleanup-2026-10/ui_probe.py` has a ruff E741
 from before ROUND 48 (CI lints `src` and `tests` only).
 
+**Merged, 2026-11-08, on the user's "push and merge".** Branch CI 42434877260 green; `main`
+fast-forwarded db7277e → cb48ec5 (CI 42435160919 six jobs green, Pages 42435160951). `github-pages`
+87b25e5, tree equal to `main`'s; Pages 42435476028, CI 42435476030 six jobs green. Live site: TTF is
+the only format offered; the static spec passes 161 of 161. The user then confirmed the renamed zip
+("renamed zip file looks good"), so B5 passes.
+
+## ROUND 50 — a STAT record for every axis (written by the verifier as coordinator)
+
+**The report (B12 follow-up, 2026-11-08 to 10).** The CLI export the user asked for
+(`avar2-studio build … --format ttf --format woff2 --format sources`, 2 min, all three files checked)
+showed the built font's STAT holds 3 design-axis records for 12 fvar axes, and names opsz/wdth/wght
+twice: "Weight" in STAT, the raw tag "wght" in fvar. OpenType STAT requires a record for every fvar
+axis under fvar's name ID; Fontbakery 1.1.0 `opentype/varfont/STAT_axis_record_for_each_axis`: FAIL,
+listing GRAD, LCWD, ROND, SPAC, XOPQ, XTRA, YMOD, YOPQ, slnt. Cause: step 3 writes STAT from the
+config before avar2 (step 4) adds the user axes and before the SPAC transform adds its axis. The
+website's exports build STAT another way (`regen_stat`, a port of `axisregistry.build_stat`), which
+skipped axes absent from the GF registry (LCWD, YMOD) and named registry axes from the registry.
+Crispy issue 52 (davelab6) is about the same table. The user approved the proposal
+(`Crispy/documentation/stat-axis-records-proposal.md`) on all three points: the Python change, the
+website matching it in the same push, and the ordering opsz, wdth, wght, slnt, then fvar order.
+
+Also found, reported, and deferred by the user ("none until production"): every fvar named instance
+sits at the default location whatever its name (the config writes lower-case parametric tags, which
+gftools' `gen_fvar_instances` does not match against fvar's upper-case ones), and the user's studio
+carries a stale `fvarInstances` list ("Control Test", "Regular", "Regular") that
+`_initialize_preview_config_from_glyphs` never refreshes.
+
+**The change.** Python: `pipeline._complete_stat_axis_records`, run at the end of the transform chain
+before `_repair_avar_axis_count`, when the axis set is final: a record for every fvar axis STAT lacks,
+named with fvar's own name ID and carrying no values, appended slnt first then fvar order; where STAT
+already names an axis, fvar takes that ID and the orphaned raw-tag name (ID ≥ 256, unreferenced) is
+removed; a complete table is left byte-identical. Browser: `regen_stat` applies the same rule on top
+of the registry records (registry axes keep their registry names and fallback values; fvar is
+repointed at them; the fvar bytes are re-emitted), and it now reuses the old STAT's name records
+instead of deleting and re-adding them, so a second run is byte-identical. Tests:
+`tests/test_stat_axis_records.py` (3), `wasm/fontc-web/tests/stat_oracle.rs` (a new LCWD case and a
+byte-identity second run; the comparator `spike/compare_stat.py` gained the rule), two checks in the
+static spec's section 14 (`fvar.js` now exposes `nameID`). `docs/ARCHITECTURE.md` lists the step.
+
+**Evidence** (`~/avar2-verifier/…` has nothing new; the prototype and build outputs are in the
+session scratchpad):
+
+| Check | Result |
+|---|---|
+| Prototype of the rule on a copy of the 2026-11-08 export | Fontbakery `STAT_axis_record_for_each_axis` FAIL → PASS; STAT 188 → 260 B, name 1,546 → 1,486 B, file +12 B; every other table byte-identical |
+| Real Crispy through the new chain (CLI, fresh workdir) | 12 records in the approved order; the 10 axis values identical to the reference; only STAT, name, fvar, head differ; 751,296 B |
+| Same font, Fontbakery STAT/fvar/varfont checks | `STAT_axis_record_for_each_axis` PASS; the three named-instance FAILs (`regular_coords_correct`, `valid_default_instance_nameids`, `weight_class_fvar`) unchanged, as expected |
+| Same font, FreeType vs HarfBuzz | avar header 12 = fvar 12; worst 1 u (opsz minimum), as before |
+| Python suite on the branch | 712 passed, 3 skipped; `ruff check src tests` clean |
+| Rust | `cargo test`: 39 passed, 0 failed, 1 ignored (older); wasm32 `cargo build --lib` ok; `wasm-pack build` ok |
+| Static spec, local, new bundle | 163 of 163; on the old bundle 162 of 163, the one failure being the new name-ID check (XTRA 256 … ROND 262), so the check discriminates |
+| Frontend | `test:unit` passes; eslint 0 errors, 34 older warnings, none on a changed line |
+
+Not run: CI on the branch (it needs the push); the user's studio on 5070 with this code; the live
+site.
+
+**Noticed, not changed.** The two builds still differ on stops and names: the studio's STAT values
+come from the CSV (wght "1", "1000", wdth "5", "Ultra Extended" at 220; "Regular" links to a 700
+that has no stop), the website's from the GF registry ("Counter Width" for XTRA, a "Normal" stop at
+the registry default on each parametric axis — issue 52's complaint). Deferred with the production
+naming, as is the named-instance pair above. Crispy's own CI has failed since 2026-09-17 at
+`pip install "avar2-studio @ git+…@github-pages"`: the interface bundle is a built file the git
+install cannot force-include; the last release wheel (v0.1.0.dev6, June) predates SPAC. Separate
+item, with the version tag.
+

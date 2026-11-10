@@ -76,6 +76,7 @@ export function parseFont(bytes) {  const view = new DataView(bytes.buffer, byte
         default: view.getInt32(a + 8) / 65536,
         max: view.getInt32(a + 12) / 65536,
         flags: view.getUint16(a + 16),
+        nameID: view.getUint16(a + 18),
         name: names[view.getUint16(a + 18)] || TAG(view, a),
       });
     }

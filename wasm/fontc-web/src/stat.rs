@@ -12,8 +12,21 @@
 //! become Format 3 records linked to 700 / 1 when the link target is
 //! also in range. Style tokens in the family/subfamily names that match
 //! a registry fallback (e.g. "Regular" when wght is not an fvar axis)
-//! add a single-value axis record. Axes absent from the GF registry get
-//! no STAT records (the Python rule: warn and skip).
+//! add a single-value axis record.
+//!
+//! On top of build_stat (which warns and skips axes absent from the GF
+//! registry), every fvar axis ends up with a STAT axis record and the
+//! two tables share one name ID per axis (OpenType STAT: "there must be
+//! an axis record for every axis defined in the 'fvar' table, and it
+//! must use the same name ID used in the 'fvar' table" — fontbakery
+//! `STAT_axis_record_for_each_axis`). A registry axis's fvar record is
+//! repointed at its STAT record's name (the registry display name) and
+//! the old fvar name record is dropped once nothing references it;
+//! every other fvar axis (not in the registry, or no fallback in range)
+//! gets a record carrying fvar's own name ID and no value records,
+//! appended after the registry records — slnt first, then fvar order.
+//! The old STAT's name records are reused rather than deleted and
+//! re-added, so a second run reproduces the first byte for byte.
 
 use std::collections::{HashMap, HashSet};
 
@@ -21,90 +34,83 @@ use font_types::{Fixed, NameId, Tag};
 use read_fonts::{FontRef, TableProvider};
 use wasm_bindgen::JsError;
 use write_fonts::from_obj::ToOwnedTable;
+use write_fonts::tables::fvar as w_fvar;
 use write_fonts::tables::name as w_name;
 use write_fonts::tables::stat as w_stat;
 use write_fonts::tables::stat::AxisValueTableFlags;
 
 use crate::stat_registry::{AxisFallback, RegistryAxis, AXIS_REGISTRY};
-use crate::{dump_replacement, err, repack, TAG_AVAR, TAG_NAME};
+use crate::{dump_replacement, err, repack, TAG_AVAR, TAG_FVAR, TAG_NAME};
 
 const TAG_STAT: Tag = Tag::new(b"STAT");
+const TAG_SLNT: Tag = Tag::new(b"slnt");
 
 pub(crate) fn regen_stat(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
     let font = FontRef::new(&font_bytes).map_err(|e| err(format!("invalid font: {e}")))?;
     // axisregistry: assert is_variable(ttFont), "not a VF!"
-    let fvar = font
+    let mut fvar: w_fvar::Fvar = font
         .fvar()
-        .map_err(|e| err(format!("not a variable font (no fvar): {e}")))?;
-    let fvar_arrays = fvar
-        .axis_instance_arrays()
-        .map_err(|e| err(format!("invalid fvar: {e}")))?;
-    let fvar_axes: Vec<(String, f64, f64)> = fvar_arrays
-        .axes()
+        .map_err(|e| err(format!("not a variable font (no fvar): {e}")))?
+        .to_owned_table();
+    let fvar_axes: Vec<(String, f64, f64)> = fvar
+        .axis_instance_arrays
+        .axes
         .iter()
         .map(|a| {
             (
-                a.axis_tag().to_string(),
-                a.min_value().to_f64(),
-                a.max_value().to_f64(),
+                a.axis_tag.to_string(),
+                a.min_value.to_f64(),
+                a.max_value.to_f64(),
             )
         })
         .collect();
-
-    // NameIDs that must survive the old-STAT cleanup: 0..=25 plus fvar
-    // axis and instance (subfamily) name IDs.
-    let mut keep: HashSet<u16> = (0..=25u16).collect();
-    keep.extend(
-        fvar_arrays
-            .axes()
-            .iter()
-            .map(|a| a.axis_name_id().to_u16()),
-    );
-    for inst in fvar_arrays.instances().iter() {
-        let inst = inst.map_err(|e| err(format!("invalid fvar instance: {e}")))?;
-        keep.insert(inst.subfamily_name_id.to_u16());
-    }
 
     let mut name: w_name::Name = font
         .name()
         .map_err(|e| err(format!("missing/invalid name table: {e}")))?
         .to_owned_table();
 
-    // Style tokens are read from the ORIGINAL name table: build_stat
-    // collects fallbacks_in_name_table before removing old STAT names.
+    // Style tokens are read from the name table as found: build_stat
+    // collects fallbacks_in_name_table before touching old STAT names.
     let family = first_debug_name(&name.name_record, &[21, 16, 1])
         .ok_or_else(|| err("no family name (nameID 21/16/1) in name table"))?;
     let subfamily = first_debug_name(&name.name_record, &[22, 17, 2])
         .ok_or_else(|| err("no subfamily name (nameID 22/17/2) in name table"))?;
 
-    // ---- Remove the old STAT's name records (the table itself is
-    // dropped by not carrying it into the repack replacements). --------
+    // ---- The old STAT is dropped by not carrying it into the repack
+    // replacements. Its name records stay for the rebuild to reuse
+    // (find_or_add_name: same string, same ID, so a second run adds
+    // nothing) and go at the end when orphaned — as do the fvar axis
+    // names repointed below (ID >= 256 only: a standard name is never
+    // removed).
+    let mut old_ids: HashSet<u16> = HashSet::new();
     if let Ok(stat) = font.stat() {
-        let mut delete_ids: HashSet<u16> = HashSet::new();
         if let Ok(axes) = stat.design_axes() {
-            for axis in axes {
-                let id = axis.axis_name_id().to_u16();
-                if !keep.contains(&id) {
-                    delete_ids.insert(id);
-                }
-            }
+            old_ids.extend(axes.iter().map(|a| a.axis_name_id().to_u16()));
         }
         if let Some(values) = stat.offset_to_axis_values().transpose().ok().flatten() {
-            for value in values.axis_values().iter().flatten() {
-                let id = value.value_name_id().to_u16();
-                if !keep.contains(&id) {
-                    delete_ids.insert(id);
-                }
-            }
+            old_ids.extend(
+                values
+                    .axis_values()
+                    .iter()
+                    .flatten()
+                    .map(|v| v.value_name_id().to_u16()),
+            );
         }
-        name.name_record
-            .retain(|r| !delete_ids.contains(&r.name_id.to_u16()));
     }
+    old_ids.extend(
+        fvar.axis_instance_arrays
+            .axes
+            .iter()
+            .map(|a| a.axis_name_id.to_u16())
+            .filter(|id| *id >= 256),
+    );
 
     // ---- fallbacks_in_fvar: registry fallbacks within each fvar
     // axis's range, in fvar order. Axes not in the GF registry are
-    // skipped (Python logs a warning); axes with no in-range fallback
-    // produce no STAT record (defaultdict: no key without an append).
+    // skipped here (Python logs a warning), as are axes with no
+    // in-range fallback (defaultdict: no key without an append); both
+    // get their record further down.
     let mut fvar_fallbacks: Vec<(&'static RegistryAxis, Vec<&'static AxisFallback>)> = Vec::new();
     for (tag, min, max) in &fvar_axes {
         let Some(rax) = registry_axis(tag) else {
@@ -187,6 +193,46 @@ pub(crate) fn regen_stat(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
         ));
     }
 
+    // ---- Every other fvar axis (not in the GF registry, or no registry
+    // fallback in range): a record carrying fvar's own name ID and no
+    // value records, after the records above — slnt first, then fvar
+    // order.
+    let (slnt, rest): (Vec<_>, Vec<_>) = fvar
+        .axis_instance_arrays
+        .axes
+        .iter()
+        .filter(|a| !seen_axes.contains(a.axis_tag.to_string().as_str()))
+        .partition(|a| a.axis_tag == TAG_SLNT);
+    for a in slnt.into_iter().chain(rest) {
+        let ordering = design_axes.len() as u16;
+        design_axes.push(w_stat::AxisRecord::new(a.axis_tag, a.axis_name_id, ordering));
+    }
+
+    // ---- fvar and STAT share one name ID per axis: repoint each fvar
+    // axis at its STAT record (a no-op for the records just added).
+    for axis in fvar.axis_instance_arrays.axes.iter_mut() {
+        if let Some(rec) = design_axes.iter().find(|r| r.axis_tag == axis.axis_tag) {
+            axis.axis_name_id = rec.axis_name_id;
+        }
+    }
+
+    // ---- Drop the old STAT / old fvar-axis name records that nothing
+    // references any more: fvar axes, instance subfamily and PostScript
+    // names, STAT axis and value names, 0..=25 (the elided fallback 2
+    // among them).
+    let mut keep: HashSet<u16> = (0..=25u16).collect();
+    keep.extend(fvar.axis_instance_arrays.axes.iter().map(|a| a.axis_name_id.to_u16()));
+    for inst in &fvar.axis_instance_arrays.instances {
+        keep.insert(inst.subfamily_name_id.to_u16());
+        keep.extend(inst.post_script_name_id.map(|id| id.to_u16()));
+    }
+    keep.extend(design_axes.iter().map(|r| r.axis_name_id.to_u16()));
+    keep.extend(axis_values.iter().map(|v| value_name_id(v).to_u16()));
+    name.name_record.retain(|r| {
+        let id = r.name_id.to_u16();
+        keep.contains(&id) || !old_ids.contains(&id)
+    });
+
     let stat = w_stat::Stat::new(design_axes, axis_values, NameId::new(2));
     let mut stat_bytes = write_fonts::dump_table(&stat).map_err(|e| err(format!("STAT: {e}")))?;
     // write-fonts always emits STAT 1.2; fontTools buildStatTable emits
@@ -206,6 +252,7 @@ pub(crate) fn regen_stat(font_bytes: Vec<u8>) -> Result<Vec<u8>, JsError> {
     });
 
     let mut replacements = HashMap::new();
+    replacements.insert(TAG_FVAR, dump_replacement(&fvar, "fvar")?);
     replacements.insert(TAG_NAME, dump_replacement(&name, "name")?);
     replacements.insert(TAG_STAT, stat_bytes);
     // repack drops avar when it is not among the replacements (the
@@ -330,5 +377,14 @@ fn axis_value(
     match linked {
         Some(lv) => w_stat::AxisValue::format_3(axis_index, flags, name_id, value, Fixed::from_f64(lv)),
         None => w_stat::AxisValue::format_1(axis_index, flags, name_id, value),
+    }
+}
+
+fn value_name_id(value: &w_stat::AxisValue) -> NameId {
+    match value {
+        w_stat::AxisValue::Format1(v) => v.value_name_id,
+        w_stat::AxisValue::Format2(v) => v.value_name_id,
+        w_stat::AxisValue::Format3(v) => v.value_name_id,
+        w_stat::AxisValue::Format4(v) => v.value_name_id,
     }
 }

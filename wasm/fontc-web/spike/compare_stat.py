@@ -2,16 +2,18 @@
 """Structural comparison of a regen_stat candidate against the
 axisregistry.build_stat oracle, for the single-font/no-siblings case.
 
-The oracle is computed in-process: INPUT is loaded with fontTools and
-`axisregistry.build_stat(ttFont, [])` run on it. CANDIDATE must match
-the oracle's STAT structure exactly (byte equality is not expected):
+The oracle is computed in-process: INPUT is loaded with fontTools,
+`axisregistry.build_stat(ttFont, [])` run on it, then the studio's
+every-fvar-axis rule (share_axis_names below, the same rule stat.rs
+implements). CANDIDATE must match the oracle's STAT structure exactly
+(byte equality is not expected):
 
   - STAT version and ElidedFallbackNameID
   - axis records (tag, nameID, ordering), in order
   - axis value records (axisIndex, format, flags, nameID,
     value/linked/nominal/range), in order
   - the full name table (STAT regen deletes and re-adds records)
-  - fvar (untouched by the regen)
+  - fvar axes (repointed at the STAT names) and instance coordinates
 
 Usage: compare_stat.py INPUT.ttf CANDIDATE.ttf
 Exits non-zero on any mismatch.
@@ -20,9 +22,51 @@ import io
 import sys
 
 from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables import otTables as ot
 from axisregistry import build_stat
 
 failures = []
+
+
+def share_axis_names(font):
+    """The studio rule on top of build_stat: every fvar axis has a STAT
+    axis record and the two tables share one name ID per axis. An axis
+    with a record (GF registry) has its fvar record repointed at the
+    STAT name, and its old fvar name record is dropped when nothing
+    references it any more (ID >= 256 only). Every other fvar axis gets
+    a record under fvar's own name ID with no value records, appended
+    after the existing ones — slnt first, then fvar order."""
+    stat = font["STAT"].table
+    fvar = font["fvar"]
+    axes = stat.DesignAxisRecord.Axis
+    by_tag = {a.AxisTag: a for a in axes}
+    old_ids = set()
+    for axis in fvar.axes:
+        rec = by_tag.get(axis.axisTag)
+        if rec is None:
+            continue
+        if axis.axisNameID >= 256:
+            old_ids.add(axis.axisNameID)
+        axis.axisNameID = rec.AxisNameID
+    missing = [a for a in fvar.axes if a.axisTag not in by_tag]
+    for axis in sorted(missing, key=lambda a: a.axisTag != "slnt"):
+        rec = ot.AxisRecord()
+        rec.AxisTag = axis.axisTag
+        rec.AxisNameID = axis.axisNameID
+        rec.AxisOrdering = len(axes)
+        axes.append(rec)
+    stat.DesignAxisCount = len(axes)
+    values = stat.AxisValueArray.AxisValue if stat.AxisValueCount else []
+    keep = set(range(26))
+    keep |= {a.axisNameID for a in fvar.axes}
+    keep |= {i.subfamilyNameID for i in fvar.instances}
+    keep |= {i.postscriptNameID for i in fvar.instances}
+    keep |= {a.AxisNameID for a in axes}
+    keep |= {v.ValueNameID for v in values}
+    font["name"].names = [
+        n for n in font["name"].names
+        if n.nameID in keep or n.nameID not in old_ids
+    ]
 
 
 def check(label, cond, detail=""):
@@ -82,6 +126,7 @@ def main():
     oracle = TTFont(input_path)
     _, oracle_inst = fvar_struct(oracle)
     build_stat(oracle, [])
+    share_axis_names(oracle)
     candidate = TTFont(candidate_path)
 
     o_stat, c_stat = stat_struct(oracle), stat_struct(candidate)
@@ -105,12 +150,18 @@ def main():
 
     o_axes, _ = fvar_struct(oracle)
     c_axes, c_inst = fvar_struct(candidate)
-    check("fvar axes unchanged (tag/min/default/max/nameID)",
+    check("fvar axes match (tag/min/default/max/nameID)",
           o_axes == c_axes,
           f"\n  oracle={o_axes}\n  rust  ={c_axes}")
     check("fvar instance coordinates unchanged",
           oracle_inst == c_inst,
           f"\n  oracle={oracle_inst}\n  rust  ={c_inst}")
+    # OpenType STAT: an axis record for every fvar axis, under the same
+    # name ID (fontbakery STAT_axis_record_for_each_axis).
+    c_stat_ids = {tag: name_id for tag, name_id, _ in (c_stat[2] if c_stat else [])}
+    check("every fvar axis has a STAT axis record under fvar's name ID",
+          all(c_stat_ids.get(tag) == name_id for tag, _, _, _, name_id in c_axes),
+          f"\n  fvar={[(a[0], a[4]) for a in c_axes]}\n  STAT={c_stat_ids}")
 
     # both fonts re-save + reload cleanly (validity smoke test)
     for font, label in ((oracle, "oracle"), (candidate, "rust")):
