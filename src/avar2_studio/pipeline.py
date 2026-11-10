@@ -330,7 +330,75 @@ def _apply_transform_chain(vf_path):
             errors.append(f"{transform.spec.name}: {e}")
     if errors:
         state.LAST_TRANSFORM_ERROR = "; ".join(errors)
-    return _repair_avar_axis_count(_stamp_control_instance_values(out))
+    return _repair_avar_axis_count(
+        _complete_stat_axis_records(_stamp_control_instance_values(out)))
+
+
+def _complete_stat_axis_records(vf_path):
+    """Give every fvar axis a STAT design-axis record, named as fvar names it.
+
+    OpenType STAT: "there must be an axis record for every axis defined in
+    the 'fvar' table, and it must use the same name ID used in the 'fvar'
+    table". The STAT step (3) runs before avar2 adds the user axes (4) and
+    before a transform adds SPAC, so on Crispy 9 of 12 axes had no record
+    (Fontbakery STAT_axis_record_for_each_axis: FAIL) and the three that did
+    were named twice — "Weight" in STAT, the raw tag in fvar. Runs after the
+    chain, when the axis set is final. Where STAT already names an axis,
+    fvar takes that ID and the orphaned raw-tag name goes; where it does
+    not, the new record takes fvar's own name and carries no axis values.
+    New records follow the existing ones in ordering — slnt first (a slant
+    name ends a style name), then fvar order. A complete table is left
+    byte-identical; a font without STAT or fvar is left alone.
+    """
+    if vf_path is None:
+        return vf_path
+    from fontTools.ttLib import TTFont
+    from fontTools.ttLib.tables import otTables
+
+    path = Path(vf_path)
+    font = TTFont(str(path))
+    if "fvar" not in font or "STAT" not in font:
+        font.close()
+        return vf_path
+    fvar, name, stat = font["fvar"], font["name"], font["STAT"].table
+    records = list(stat.DesignAxisRecord.Axis) if stat.DesignAxisRecord else []
+    by_tag = {r.AxisTag: r for r in records}
+    retired = []
+    for axis in fvar.axes:
+        record = by_tag.get(axis.axisTag)
+        if record is not None and axis.axisNameID != record.AxisNameID:
+            retired.append(axis.axisNameID)
+            axis.axisNameID = record.AxisNameID
+    missing = [a for a in fvar.axes if a.axisTag not in by_tag]
+    missing.sort(key=lambda a: a.axisTag != "slnt")        # stable: fvar order after slnt
+    ordering = max((r.AxisOrdering for r in records), default=-1) + 1
+    for axis in missing:
+        record = otTables.AxisRecord()
+        record.AxisTag = axis.axisTag
+        record.AxisNameID = axis.axisNameID
+        record.AxisOrdering = ordering
+        ordering += 1
+        records.append(record)
+    if not missing and not retired:
+        font.close()
+        return vf_path
+    if stat.DesignAxisRecord is None:
+        stat.DesignAxisRecord = otTables.AxisRecordArray()
+    stat.DesignAxisRecord.Axis = records
+    stat.DesignAxisCount = len(records)
+    used = {a.axisNameID for a in fvar.axes} | {r.AxisNameID for r in records}
+    for inst in fvar.instances:
+        used.update((inst.subfamilyNameID, inst.postscriptNameID))
+    used.update(v.ValueNameID for v in
+                (stat.AxisValueArray.AxisValue if stat.AxisValueArray else []))
+    used.add(getattr(stat, "ElidedFallbackNameID", None))
+    for name_id in retired:
+        if name_id >= 256 and name_id not in used:
+            name.removeNames(nameID=name_id)
+    font.save(str(path))
+    log.info("STAT: %d axis record(s) added, %d fvar axis name(s) unified",
+             len(missing), len(retired))
+    return vf_path
 
 
 def _repair_avar_axis_count(vf_path):

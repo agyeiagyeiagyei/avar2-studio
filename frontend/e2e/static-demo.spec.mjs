@@ -613,6 +613,12 @@ ok(stat && stat.elidedFallbackNameID === 2,
   `elidedFallbackNameID = 2 (Regular), got ${stat?.elidedFallbackNameID}`);
 ok(stat && stat.axes.every(a => optMeta.axes.some(f => f.tag === a.tag)),
   'every STAT axis record matches an fvar axis');
+// OpenType STAT: an axis record for every fvar axis, under the same name
+// ID (fontbakery STAT_axis_record_for_each_axis).
+ok(stat && optMeta.axes.every(a => statTags.includes(a.tag)),
+  `every fvar axis has a STAT axis record (fvar ${optMeta.axes.map(a => a.tag)})`);
+ok(stat && optMeta.axes.every(a => stat.axes.find(s => s.tag === a.tag)?.nameID === a.nameID),
+  `STAT axis name IDs equal the fvar axis name IDs (${optMeta.axes.map(a => `${a.tag}:${a.nameID}`)})`);
 ok(stat && stat.values.every(v =>
   [1, 2, 3, 4].includes(v.format) &&
   (v.format === 4 ? v.values.every(r => r.axisIndex < stat.axes.length)

@@ -1,8 +1,8 @@
 STATE: awaiting user (ship gates)
-ROUND: 49
-HEAD: db7277e (main); 758869d (github-pages); ROUND 49's fix on branch export-dialog-sources
-VERIFIED_HEAD: db7277e
-NEXT: (set by the verifier as coordinator.) R1–R4 are done; ROUND 48 fixed what B12 found first and is merged; ROUND 49 fixes the export dialog's sources format on a branch, waiting for the user's merge (LOG.md). Waiting on the user only, per COMPLETION_PROTOCOL.md §6: the rest of B12 on the real Crispy (B5, B6, B7), the version tag, and the Crispy production font. Anything B12 finds is fixed forward on a new branch from `main`.
+ROUND: 50
+HEAD: cb48ec5 (main); 87b25e5 (github-pages); ROUND 50's fix on branch stat-axis-records
+VERIFIED_HEAD: cb48ec5
+NEXT: (set by the verifier as coordinator.) R1–R4 are done; ROUNDs 48 and 49 fixed what B12 found and are merged; ROUND 50 gives every fvar axis a STAT record in both builds, on a branch, waiting for the user's push and merge (LOG.md). Named instances: none until production, per the user. Waiting on the user only, per COMPLETION_PROTOCOL.md §6: the rest of B12 on the real Crispy (B5, B6, B7), the version tag, and the Crispy production font. Anything B12 finds is fixed forward on a new branch from `main`.
 - (7) DONE — ROUND 34's grid cost measured and decided with the user: no grid, today's 9-master model stays; numbers in LOG.md.
 - (8) DONE — E2l end to end (backend report, dialog warning, sources-note gating, DB tests, e2e copy spec, live check).
 - (9) DONE — verifier ROUND 33 follow-ups (skip report, multi-component transforms, 4 fixture tests) and the mean-based SPAC gates; evidence in ROUND 36.

@@ -292,7 +292,11 @@ ORIGINAL_PATH          the designer's file. Studio authoring does not
    - a transform that raises or returns a missing path is skipped and
      recorded in `LAST_TRANSFORM_ERROR`; the chain keeps the last good font.
 5. `_stamp_control_instance_values` — per-instance control-axis values
-   onto matching fvar instances (decision 0008).
+   onto matching fvar instances (decision 0008); then, with the axis set
+   final, `_complete_stat_axis_records` (a STAT design-axis record for
+   every fvar axis, one name ID shared by both tables — the STAT step ran
+   before avar2 and SPAC added theirs) and `_repair_avar_axis_count`
+   (avar's raw axis count follows fvar).
 6. Promote; queue the WOFF2 compress job (decision 0002).
 
 If the avar2 build fails, `_run_build` falls back to a plain
